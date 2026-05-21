@@ -38,6 +38,7 @@ export interface Database {
           trial_days: number;
           hierarchy_level: number;
           status: "active" | "inactive";
+          stripe_price_id: string | null;
           features: Json;
           created_at: string;
           updated_at: string;
@@ -53,6 +54,7 @@ export interface Database {
           trial_days?: number;
           hierarchy_level?: number;
           status?: "active" | "inactive";
+          stripe_price_id?: string | null;
           features?: Json;
           created_at?: string;
           updated_at?: string;
@@ -65,7 +67,7 @@ export interface Database {
           user_id: string;
           plan_id: string;
           legacy_pms_subscription_id: string | null;
-          status: "active" | "canceled" | "expired" | "pending" | "abandoned";
+          status: "active" | "overdue" | "canceled" | "expired" | "pending";
           starts_at: string | null;
           current_period_end: string | null;
           trial_ends_at: string | null;
@@ -73,6 +75,12 @@ export interface Database {
           gateway: string | null;
           gateway_customer_id: string | null;
           gateway_subscription_id: string | null;
+          stripe_customer_id: string | null;
+          stripe_subscription_id: string | null;
+          stripe_price_id: string | null;
+          next_billing_at: string | null;
+          canceled_at: string | null;
+          last_webhook_event: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -81,7 +89,7 @@ export interface Database {
           user_id: string;
           plan_id: string;
           legacy_pms_subscription_id?: string | null;
-          status?: "active" | "canceled" | "expired" | "pending" | "abandoned";
+          status?: "active" | "overdue" | "canceled" | "expired" | "pending";
           starts_at?: string | null;
           current_period_end?: string | null;
           trial_ends_at?: string | null;
@@ -89,10 +97,21 @@ export interface Database {
           gateway?: string | null;
           gateway_customer_id?: string | null;
           gateway_subscription_id?: string | null;
+          stripe_customer_id?: string | null;
+          stripe_subscription_id?: string | null;
+          stripe_price_id?: string | null;
+          next_billing_at?: string | null;
+          canceled_at?: string | null;
+          last_webhook_event?: string | null;
           created_at?: string;
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["subscriptions"]["Insert"]>;
+      };
+      billing_events: {
+        Row: { id: string; provider: string; event_type: string; payload: Json; processed: boolean; created_at: string; };
+        Insert: { id?: string; provider: string; event_type: string; payload: Json; processed?: boolean; created_at?: string; };
+        Update: Partial<Database["public"]["Tables"]["billing_events"]["Insert"]>;
       };
       audio_access_logs: {
         Row: {
