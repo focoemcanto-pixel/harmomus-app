@@ -2,9 +2,11 @@ create extension if not exists "pgcrypto";
 
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
+  email text,
   full_name text,
   avatar_url text,
-  role text not null default 'user' check (role in ('admin', 'user')),
+  role text not null default 'member' check (role in ('admin', 'member')),
+  legacy_pms_member_id text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -13,20 +15,50 @@ create table if not exists public.plans (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   slug text not null unique,
+  legacy_pms_plan_id text,
   description text,
   price_cents integer not null default 0,
-  active boolean not null default true,
-  created_at timestamptz not null default now()
+  currency text not null default 'BRL',
+  trial_days integer not null default 0,
+  hierarchy_level integer not null default 0,
+  status text not null default 'active' check (status in ('active', 'inactive')),
+  features jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
 create table if not exists public.subscriptions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
   plan_id uuid not null references public.plans(id) on delete restrict,
-  status text not null default 'trialing' check (status in ('active', 'trialing', 'past_due', 'canceled')),
+  legacy_pms_subscription_id text,
+  status text not null default 'pending' check (status in ('active', 'canceled', 'expired', 'pending', 'abandoned')),
+  starts_at timestamptz,
   current_period_end timestamptz,
-  created_at timestamptz not null default now()
+  trial_ends_at timestamptz,
+  auto_renew boolean not null default true,
+  gateway text,
+  gateway_customer_id text,
+  gateway_subscription_id text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
+
+insert into public.plans (name, slug, legacy_pms_plan_id, description, price_cents, currency, trial_days, hierarchy_level, status, features)
+values
+  ('Free', 'free', null, 'Plano gratuito para iniciar no Harmomus Studio.', 0, 'BRL', 0, 0, 'active', '["biblioteca_basica"]'::jsonb),
+  ('Plus', 'plus', null, 'Plano intermediário com recursos avançados.', 1990, 'BRL', 0, 1, 'active', '["biblioteca_plus", "playlists_ilimitadas"]'::jsonb),
+  ('Premium', 'premium', null, 'Plano completo com experiência premium.', 3900, 'BRL', 7, 2, 'active', '["biblioteca_total", "suporte_prioritario", "early_access"]'::jsonb)
+on conflict (slug) do update
+set
+  name = excluded.name,
+  description = excluded.description,
+  price_cents = excluded.price_cents,
+  trial_days = excluded.trial_days,
+  hierarchy_level = excluded.hierarchy_level,
+  status = excluded.status,
+  features = excluded.features,
+  updated_at = now();
 
 create table if not exists public.categories (
   id uuid primary key default gen_random_uuid(),
