@@ -16,6 +16,21 @@ export interface CurrentUserAccessContext {
   isAdmin: boolean;
 }
 
+function normalizeRole(role: unknown) {
+  return String(role ?? "").trim().toLowerCase();
+}
+
+async function findProfileForUser(supabase: Awaited<ReturnType<typeof createClient>>, user: { id: string; email?: string | null }) {
+  const { data: profileById } = await (supabase as any).from("profiles").select("*").eq("id", user.id).maybeSingle();
+  if (profileById) return profileById as Profile;
+
+  const email = user.email?.trim().toLowerCase();
+  if (!email) return null;
+
+  const { data: profileByEmail } = await (supabase as any).from("profiles").select("*").ilike("email", email).maybeSingle();
+  return (profileByEmail as Profile | null) ?? null;
+}
+
 export async function getCurrentUser() {
   const supabase = await createClient();
   const { data } = await supabase.auth.getUser();
@@ -26,8 +41,7 @@ export async function getCurrentProfile() {
   const supabase = await createClient();
   const { data } = await supabase.auth.getUser();
   if (!data.user) return null;
-  const { data: profile } = await (supabase as any).from("profiles").select("*").eq("id", data.user.id).maybeSingle();
-  return (profile as Profile | null) ?? null;
+  return await findProfileForUser(supabase, data.user);
 }
 
 export async function getCurrentUserPlan() {
@@ -47,10 +61,10 @@ export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessCo
     return { effectiveSlug: "guest", profile: null, plan: null, subscription: null, hierarchyLevel: 0, isGuest: true, isAdmin: false };
   }
 
-  const [{ data: profile }, { data: plans }, { data: subscription }] = await Promise.all([
-    (supabase as any).from("profiles").select("*").eq("id", data.user.id).maybeSingle(),
+  const [{ data: plans }, { data: subscription }, profile] = await Promise.all([
     (supabase as any).from("plans").select("*"),
     (supabase as any).from("subscriptions").select("*").eq("user_id", data.user.id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    findProfileForUser(supabase, data.user),
   ]);
 
   const plan = (plans ?? []).find((p: Plan) => p.id === subscription?.plan_id) ?? null;
@@ -61,11 +75,11 @@ export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessCo
 
   return {
     effectiveSlug,
-    profile: (profile as Profile | null) ?? null,
+    profile,
     plan,
     subscription: (subscription as Subscription | null) ?? null,
     hierarchyLevel,
     isGuest: false,
-    isAdmin: profile?.role === "admin",
+    isAdmin: normalizeRole(profile?.role) === "admin",
   };
 }
