@@ -72,7 +72,7 @@ export async function getKitFormOptions(): Promise<{ categories: Category[]; pla
   const supabase = (await createClient()) as any;
   const [{ data: categories, error: categoriesError }, { data: plans, error: plansError }] = await Promise.all([
     supabase.from("categories").select("*").order("name"),
-    supabase.from("plans").select("*").eq("active", true).order("price_cents"),
+    supabase.from("plans").select("*").eq("status", "active").order("price_cents"),
   ]);
   if (categoriesError) throw new Error(`Falha ao buscar categorias: ${categoriesError.message}`);
   if (plansError) throw new Error(`Falha ao buscar planos: ${plansError.message}`);
