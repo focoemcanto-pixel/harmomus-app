@@ -17,7 +17,7 @@ export function CreatePlaylistForm({ initialKits, initialSelectedKit }: { initia
 
   async function onCreate() {
     setLoading(true);
-    const res = await fetch('/criar-playlist', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, kitIds: selected.map((k)=>k.id) })});
+    const res = await fetch('/api/playlists', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, kitIds: selected.map((k)=>k.id) })});
     const data = await res.json();
     setLoading(false);
     if (!res.ok) { alert(data.error ?? 'Erro ao criar playlist'); return; }
