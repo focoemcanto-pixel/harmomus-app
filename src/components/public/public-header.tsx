@@ -7,7 +7,13 @@ export function PublicHeader() {
         <Link href="/" className="text-lg font-semibold tracking-wide text-white">
           Harmomus
         </Link>
-        <div className="flex items-center gap-2">
+        <nav className="flex items-center gap-2">
+          <Link
+            href="/todos-os-kits"
+            className="rounded-lg border border-white/20 px-4 py-2 text-sm text-zinc-200 transition hover:border-cyan-300/40 hover:text-white"
+          >
+            Todos os Kits
+          </Link>
           <button
             type="button"
             className="rounded-lg border border-white/20 px-4 py-2 text-sm text-zinc-200 transition hover:border-gold-400/50 hover:text-white"
@@ -20,7 +26,7 @@ export function PublicHeader() {
           >
             Assinar
           </button>
-        </div>
+        </nav>
       </div>
     </header>
   );

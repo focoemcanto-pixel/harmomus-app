@@ -17,6 +17,12 @@ export default function HomePage() {
           >
             Ir para biblioteca
           </Link>
+          <Link
+            href="/todos-os-kits"
+            className="rounded-lg border border-cyan-400/40 bg-cyan-500/10 px-6 py-3 text-sm font-medium text-cyan-200 transition hover:bg-cyan-500/20"
+          >
+            Ver todos os kits
+          </Link>
           <Link href="/admin" className="rounded-lg border border-white/20 px-6 py-3 text-sm text-zinc-200 transition hover:text-white">
             Painel Harmomus
           </Link>
