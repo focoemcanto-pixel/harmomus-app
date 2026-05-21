@@ -26,7 +26,7 @@ export interface PublicKit {
   coverUrl: string | null;
   description: string | null;
   lyrics: string | null;
-  category: { id: string; name: string; slug: string } | null;
+  category: { id: string; name: string; slug: string; description: string | null; cover_url: string | null } | null;
   requiredPlan: { id: string; name: string; slug: string } | null;
   tones: PublicKitToneGroup[];
 }
@@ -88,7 +88,7 @@ function mapKit(
     coverUrl: kit.cover_url,
     description: kit.description,
     lyrics: kit.lyrics,
-    category: category ? { id: category.id, name: category.name, slug: category.slug } : null,
+    category: category ? { id: category.id, name: category.name, slug: category.slug, description: category.description, cover_url: (category as any).cover_url ?? null } : null,
     requiredPlan: requiredPlan ? { id: requiredPlan.id, name: requiredPlan.name, slug: requiredPlan.slug } : null,
     tones: Array.from(tonesMap.values()).sort((a, b) => a.tone.localeCompare(b.tone, "pt-BR")),
   };
