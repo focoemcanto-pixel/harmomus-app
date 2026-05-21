@@ -14,13 +14,14 @@ function slugifySegment(value: string): string {
     .replace(/(^-|-$)+/g, "");
 }
 
-export function generateFilePath(slug: string, context: "kit-cover" | "category-cover" | "banner" = "kit-cover"): string {
+export function generateFilePath(slug: string, context: "kit-cover" | "category-cover" | "banner" | "profile-avatar" = "kit-cover"): string {
   const safeSlug = slugifySegment(slug);
 
   if (!safeSlug) {
     throw new Error("Slug inválido para gerar caminho de upload.");
   }
 
+  if (context === "profile-avatar") return `images/profiles/${safeSlug}/avatar.webp`;
   const folder = context === "category-cover" ? "categories" : context === "banner" ? "banners" : "kits";
   return `images/${folder}/${safeSlug}/cover.webp`;
 }
@@ -42,7 +43,7 @@ export async function uploadKitCoverToR2({
 }: {
   file: File;
   slug: string;
-  context?: "kit-cover" | "category-cover" | "banner";
+  context?: "kit-cover" | "category-cover" | "banner" | "profile-avatar";
 }): Promise<{ key: string; url: string }> {
   if (!r2BucketName) {
     throw new Error("R2_BUCKET_NAME não configurado.");

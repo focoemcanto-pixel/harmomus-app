@@ -1,3 +1,4 @@
+import { PublicAppShell } from "@/components/public/public-app-shell";
 import Link from "next/link";
 
 import { getPublishedKits } from "@/lib/data/public-kits";
@@ -22,7 +23,7 @@ export default async function BibliotecaPage({ searchParams }: { searchParams: P
   const artists = Array.from(new Set(kits.map((k) => k.artist))).sort();
   const plans = Array.from(new Map(kits.filter((k) => k.requiredPlan).map((k) => [k.requiredPlan!.slug, k.requiredPlan!])).values());
 
-  return <main className="min-h-screen bg-background p-4 md:p-8">
+  return <PublicAppShell><main className="min-h-screen bg-background p-4 md:p-8">
     <div className="mx-auto max-w-6xl">
       <header className="mb-6 rounded-2xl border border-white/10 bg-surface/80 p-5"><h1 className="text-2xl text-white">Biblioteca Pública</h1></header>
       <form className="mb-6 grid gap-3 rounded-xl border border-white/10 bg-surface p-4 md:grid-cols-4">
@@ -39,5 +40,5 @@ export default async function BibliotecaPage({ searchParams }: { searchParams: P
         </Link>)}
       </section>
     </div>
-  </main>;
+  </main></PublicAppShell>;
 }
