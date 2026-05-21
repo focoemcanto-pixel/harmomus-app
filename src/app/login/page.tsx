@@ -7,8 +7,27 @@ export default function LoginPage() {
     const email = String(formData.get("email") ?? "");
     const password = String(formData.get("password") ?? "");
     const supabase = await createClient();
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) redirect(`/login?error=${encodeURIComponent("Credenciais inválidas. Tente novamente.")}`);
+
+    const { error, data } = await supabase.auth.signInWithPassword({ email, password });
+
+    if (error) {
+      redirect(`/login?error=${encodeURIComponent("Credenciais inválidas. Tente novamente.")}`);
+    }
+
+    const user = data.user;
+
+    if (user?.email) {
+      const { data: profile } = await (supabase as any)
+        .from("profiles")
+        .select("role")
+        .ilike("email", user.email.trim().toLowerCase())
+        .maybeSingle();
+
+      if (String(profile?.role ?? "").trim().toLowerCase() === "admin") {
+        redirect('/admin');
+      }
+    }
+
     redirect('/biblioteca');
   }
 
