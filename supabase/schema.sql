@@ -137,3 +137,16 @@ create table if not exists public.kit_access_logs (
 
 create index if not exists idx_kit_access_logs_user_accessed_at on public.kit_access_logs(user_id, accessed_at desc);
 create index if not exists idx_kit_access_logs_user_kit_accessed_at on public.kit_access_logs(user_id, kit_id, accessed_at desc);
+
+create table if not exists public.audio_access_logs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references public.profiles(id) on delete set null,
+  kit_id uuid not null references public.kits(id) on delete cascade,
+  audio_file_id uuid not null references public.kit_audio_files(id) on delete cascade,
+  status text not null check (status in ('allowed', 'denied')),
+  reason text not null,
+  accessed_at timestamptz not null default now()
+);
+
+create index if not exists idx_audio_access_logs_accessed_at on public.audio_access_logs(accessed_at desc);
+create index if not exists idx_audio_access_logs_user_accessed_at on public.audio_access_logs(user_id, accessed_at desc);
