@@ -11,6 +11,8 @@ export interface Database {
           role: "admin" | "member";
           email: string | null;
           legacy_pms_member_id: string | null;
+          migrated_from_pms: boolean;
+          migration_completed_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -21,6 +23,8 @@ export interface Database {
           role?: "admin" | "member";
           email?: string | null;
           legacy_pms_member_id?: string | null;
+          migrated_from_pms?: boolean;
+          migration_completed_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -81,6 +85,9 @@ export interface Database {
           next_billing_at: string | null;
           canceled_at: string | null;
           last_webhook_event: string | null;
+          migrated_from_pms: boolean;
+          original_gateway: string | null;
+          imported_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -103,10 +110,18 @@ export interface Database {
           next_billing_at?: string | null;
           canceled_at?: string | null;
           last_webhook_event?: string | null;
+          migrated_from_pms?: boolean;
+          original_gateway?: string | null;
+          imported_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["subscriptions"]["Insert"]>;
+      };
+      migration_logs: {
+        Row: { id: string; email: string; status: "importado" | "conflito" | "invalido" | "sincronizado" | "erro"; details: Json; created_at: string; };
+        Insert: { id?: string; email: string; status: "importado" | "conflito" | "invalido" | "sincronizado" | "erro"; details?: Json; created_at?: string; };
+        Update: Partial<Database["public"]["Tables"]["migration_logs"]["Insert"]>;
       };
       billing_events: {
         Row: { id: string; provider: string; event_type: string; payload: Json; processed: boolean; created_at: string; };
