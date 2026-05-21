@@ -94,6 +94,28 @@ export interface Database {
         };
         Update: Partial<Database["public"]["Tables"]["subscriptions"]["Insert"]>;
       };
+      audio_access_logs: {
+        Row: {
+          id: string;
+          user_id: string | null;
+          kit_id: string;
+          audio_file_id: string;
+          status: string;
+          reason: string;
+          accessed_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string | null;
+          kit_id: string;
+          audio_file_id: string;
+          status: string;
+          reason: string;
+          accessed_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["audio_access_logs"]["Insert"]>;
+      };
+
       categories: {
         Row: {
           id: string;

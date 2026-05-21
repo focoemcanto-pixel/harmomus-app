@@ -9,7 +9,8 @@ export interface PublicKitAudioFile {
   tone: string;
   voice: VoiceType;
   name: string;
-  publicUrl: string;
+  audioFileId: string;
+  streamUrl: string;
   fileType: string;
 }
 
@@ -72,7 +73,8 @@ function mapKit(
       tone: file.tone,
       voice,
       name: file.name,
-      publicUrl: file.public_url,
+      audioFileId: file.id,
+      streamUrl: `/api/audio/${file.id}`,
       fileType: file.file_type,
     };
   }

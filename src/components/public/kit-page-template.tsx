@@ -45,7 +45,7 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
                 setSelectedTone(tone);
               }} />
               <VoiceSelector selectedVoice={selectedVoice} onSelectVoice={setSelectedVoice} />
-              <HarmomusPlayer src={selectedFile?.publicUrl ?? null} title={`Tom ${selectedTone} • Voz ${selectedVoice}`} canPlay={accessContext.play.allowed} onBlocked={() => {
+              <HarmomusPlayer src={selectedFile?.streamUrl ?? null} title={`Tom ${selectedTone} • Voz ${selectedVoice}`} canPlay={accessContext.play.allowed} onBlocked={() => {
                 if (accessContext.play.reason === "guest") setLoginOpen(true);
                 else {
                   setUpgradeMessage(accessContext.play.reason === "free_limit" ? "Você atingiu o limite de 5 kits em 24h no plano free." : "Seu plano atual não atende ao kit.");

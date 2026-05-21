@@ -17,10 +17,12 @@ export function HarmomusPlayer({ src, title, canPlay, onBlocked }: HarmomusPlaye
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
   const [loop, setLoop] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setIsPlaying(false);
     setCurrentTime(0);
+    setErrorMessage(null);
   }, [src]);
 
   const formatTime = useMemo(
@@ -37,8 +39,13 @@ export function HarmomusPlayer({ src, title, canPlay, onBlocked }: HarmomusPlaye
       document.querySelectorAll("audio[data-harmomus='player']").forEach((other) => {
         if (other !== audio) (other as HTMLAudioElement).pause();
       });
-      await audio.play();
-      setIsPlaying(true);
+      try {
+        await audio.play();
+        setErrorMessage(null);
+        setIsPlaying(true);
+      } catch {
+        setErrorMessage("Não foi possível reproduzir este áudio agora.");
+      }
     } else {
       audio.pause();
       setIsPlaying(false);
@@ -55,6 +62,7 @@ export function HarmomusPlayer({ src, title, canPlay, onBlocked }: HarmomusPlaye
         onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
         onPause={() => setIsPlaying(false)}
         onPlay={() => setIsPlaying(true)}
+        onError={() => setErrorMessage("Áudio indisponível ou acesso negado.")}
         loop={loop}
         className="hidden"
       />
@@ -68,6 +76,7 @@ export function HarmomusPlayer({ src, title, canPlay, onBlocked }: HarmomusPlaye
       </div>
       <input type="range" min={0} max={duration || 0} value={currentTime} onChange={(e) => { const next = Number(e.target.value); setCurrentTime(next); if (audioRef.current) audioRef.current.currentTime = next; }} className="mt-3 w-full" />
       <div className="mt-1 flex justify-between text-xs text-muted"><span>{formatTime(currentTime)}</span><span>{formatTime(duration)}</span></div>
+      {errorMessage ? <p className="mt-2 text-xs text-amber-300">{errorMessage}</p> : null}
     </div>
   );
 }
