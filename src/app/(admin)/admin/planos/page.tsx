@@ -24,6 +24,7 @@ export default async function AdminPlanosPage() {
       hierarchy_level: Number(formData.get("hierarchy_level") ?? 0),
       status: String(formData.get("status") ?? "active") as "active" | "inactive",
       features,
+      stripe_price_id: String(formData.get("stripe_price_id") ?? "").trim() || null,
     });
     revalidatePath("/admin/planos");
   }
@@ -48,6 +49,7 @@ export default async function AdminPlanosPage() {
           <input name="hierarchy_level" type="number" placeholder="Nível hierárquico" className="rounded-lg border border-border bg-background px-3 py-2" required />
           <input name="description" placeholder="Descrição" className="rounded-lg border border-border bg-background px-3 py-2 md:col-span-2" />
           <input name="features" placeholder='Features JSON (ex: ["suporte"])' className="rounded-lg border border-border bg-background px-3 py-2" defaultValue='[]' />
+          <input name="stripe_price_id" placeholder="Stripe Price ID (price_...)" className="rounded-lg border border-border bg-background px-3 py-2" />
           <select name="status" className="rounded-lg border border-border bg-background px-3 py-2">
             <option value="active">Ativo</option><option value="inactive">Inativo</option>
           </select>
@@ -57,12 +59,13 @@ export default async function AdminPlanosPage() {
 
       <div className="rounded-xl border border-border bg-surface shadow-premium overflow-x-auto">
         <table className="w-full min-w-[900px] text-sm">
-          <thead className="text-left text-muted"><tr><th className="p-4">Plano</th><th>Preço</th><th>Nível</th><th>Trial</th><th>Status</th><th>Recursos</th><th></th></tr></thead>
+          <thead className="text-left text-muted"><tr><th className="p-4">Plano</th><th>Preço</th><th>Stripe Price</th><th>Nível</th><th>Trial</th><th>Status</th><th>Recursos</th><th></th></tr></thead>
           <tbody>
             {plans.map((plan) => (
               <tr key={plan.id} className="border-t border-border/70">
                 <td className="p-4"><p className="font-medium">{plan.name}</p><p className="text-xs text-muted">{plan.slug}</p></td>
                 <td>R$ {(plan.price_cents / 100).toFixed(2)}</td>
+                <td>{plan.stripe_price_id ?? "-"}</td>
                 <td>{plan.hierarchy_level}</td>
                 <td>{plan.trial_days} dias</td>
                 <td><span className={`rounded-full px-3 py-1 text-xs ${plan.status === "active" ? "bg-emerald-500/20 text-emerald-300" : "bg-zinc-500/30 text-zinc-300"}`}>{plan.status}</span></td>

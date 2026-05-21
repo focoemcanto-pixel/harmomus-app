@@ -23,6 +23,7 @@ create table if not exists public.plans (
   hierarchy_level integer not null default 0,
   status text not null default 'active' check (status in ('active', 'inactive')),
   features jsonb not null default '[]'::jsonb,
+  stripe_price_id text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -32,14 +33,20 @@ create table if not exists public.subscriptions (
   user_id uuid not null references public.profiles(id) on delete cascade,
   plan_id uuid not null references public.plans(id) on delete restrict,
   legacy_pms_subscription_id text,
-  status text not null default 'pending' check (status in ('active', 'canceled', 'expired', 'pending', 'abandoned')),
+  status text not null default 'pending' check (status in ('active', 'overdue', 'canceled', 'expired', 'pending')),
   starts_at timestamptz,
   current_period_end timestamptz,
   trial_ends_at timestamptz,
   auto_renew boolean not null default true,
-  gateway text,
+  gateway text not null default 'stripe',
   gateway_customer_id text,
   gateway_subscription_id text,
+  stripe_customer_id text,
+  stripe_subscription_id text,
+  stripe_price_id text,
+  next_billing_at timestamptz,
+  canceled_at timestamptz,
+  last_webhook_event text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -150,3 +157,15 @@ create table if not exists public.audio_access_logs (
 
 create index if not exists idx_audio_access_logs_accessed_at on public.audio_access_logs(accessed_at desc);
 create index if not exists idx_audio_access_logs_user_accessed_at on public.audio_access_logs(user_id, accessed_at desc);
+
+
+create table if not exists public.billing_events (
+  id uuid primary key default gen_random_uuid(),
+  provider text not null,
+  event_type text not null,
+  payload jsonb not null,
+  processed boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_billing_events_provider_created_at on public.billing_events(provider, created_at desc);
