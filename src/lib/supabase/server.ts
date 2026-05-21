@@ -15,7 +15,13 @@ export async function createClient() {
           return cookieStore.getAll();
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options));
+          try {
+            cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options));
+          } catch {
+            // Next.js only allows cookie mutation in Server Actions or Route Handlers.
+            // Supabase may try to refresh auth cookies while rendering Server Components;
+            // in that context we keep the request read-only instead of crashing the page.
+          }
         },
       },
     },
