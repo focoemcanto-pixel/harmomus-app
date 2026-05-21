@@ -113,6 +113,30 @@ export interface Database {
         Insert: { id?: string; provider: string; event_type: string; payload: Json; processed?: boolean; created_at?: string; };
         Update: Partial<Database["public"]["Tables"]["billing_events"]["Insert"]>;
       };
+
+      migration_logs: {
+        Row: {
+          id: string;
+          migration_name: string;
+          source: string;
+          status: "pending" | "running" | "success" | "error";
+          details: string | null;
+          payload: Json | null;
+          executed_at: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          migration_name: string;
+          source?: string;
+          status: "pending" | "running" | "success" | "error";
+          details?: string | null;
+          payload?: Json | null;
+          executed_at?: string;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["migration_logs"]["Insert"]>;
+      };
       audio_access_logs: {
         Row: {
           id: string;
