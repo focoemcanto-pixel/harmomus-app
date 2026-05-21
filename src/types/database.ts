@@ -112,6 +112,7 @@ export interface Database {
           artist: string;
           category_id: string | null;
           description: string | null;
+          lyrics: string | null;
           cover_url: string | null;
           r2_folder: string | null;
           required_plan: string | null;
@@ -126,6 +127,7 @@ export interface Database {
           artist: string;
           category_id?: string | null;
           description?: string | null;
+          lyrics?: string | null;
           cover_url?: string | null;
           r2_folder?: string | null;
           required_plan?: string | null;

@@ -43,6 +43,7 @@ create table if not exists public.kits (
   artist text not null,
   category_id uuid references public.categories(id) on delete set null,
   description text,
+  lyrics text,
   cover_url text,
   r2_folder text,
   required_plan uuid references public.plans(id) on delete set null,
