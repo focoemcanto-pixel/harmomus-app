@@ -53,7 +53,8 @@ create table if not exists public.subscriptions (
   original_gateway text,
   imported_at timestamptz,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  unique (user_id)
 );
 
 create table if not exists public.migration_logs (
@@ -113,10 +114,6 @@ create table if not exists public.kits (
   updated_at timestamptz not null default now()
 );
 
-create index if not exists idx_subscriptions_user_status on public.subscriptions(user_id, status);
-create index if not exists idx_kits_category_published on public.kits(category_id, published);
-
-
 create table if not exists public.kit_audio_files (
   id uuid primary key default gen_random_uuid(),
   kit_id uuid not null references public.kits(id) on delete cascade,
@@ -128,10 +125,6 @@ create table if not exists public.kit_audio_files (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-
-create index if not exists idx_kit_audio_files_kit_tone on public.kit_audio_files(kit_id, tone);
-
-
 
 create table if not exists public.playlists (
   id uuid primary key default gen_random_uuid(),
@@ -152,19 +145,12 @@ create table if not exists public.playlist_items (
   unique (playlist_id, kit_id)
 );
 
-create index if not exists idx_playlists_slug_public on public.playlists(slug, is_public);
-create index if not exists idx_playlist_items_playlist_position on public.playlist_items(playlist_id, position);
-
-
 create table if not exists public.kit_access_logs (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
   kit_id uuid not null references public.kits(id) on delete cascade,
   accessed_at timestamptz not null default now()
 );
-
-create index if not exists idx_kit_access_logs_user_accessed_at on public.kit_access_logs(user_id, accessed_at desc);
-create index if not exists idx_kit_access_logs_user_kit_accessed_at on public.kit_access_logs(user_id, kit_id, accessed_at desc);
 
 create table if not exists public.audio_access_logs (
   id uuid primary key default gen_random_uuid(),
@@ -176,10 +162,6 @@ create table if not exists public.audio_access_logs (
   accessed_at timestamptz not null default now()
 );
 
-create index if not exists idx_audio_access_logs_accessed_at on public.audio_access_logs(accessed_at desc);
-create index if not exists idx_audio_access_logs_user_accessed_at on public.audio_access_logs(user_id, accessed_at desc);
-
-
 create table if not exists public.billing_events (
   id uuid primary key default gen_random_uuid(),
   provider text not null,
@@ -189,4 +171,25 @@ create table if not exists public.billing_events (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.migration_logs (
+  id uuid primary key default gen_random_uuid(),
+  migration_name text not null,
+  source text not null default 'legacy_pms',
+  status text not null check (status in ('pending', 'running', 'success', 'error')),
+  details text,
+  payload jsonb,
+  executed_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_subscriptions_user_status on public.subscriptions(user_id, status);
+create index if not exists idx_kits_category_published on public.kits(category_id, published);
+create index if not exists idx_kit_audio_files_kit_tone on public.kit_audio_files(kit_id, tone);
+create index if not exists idx_playlists_slug_public on public.playlists(slug, is_public);
+create index if not exists idx_playlist_items_playlist_position on public.playlist_items(playlist_id, position);
+create index if not exists idx_kit_access_logs_user_accessed_at on public.kit_access_logs(user_id, accessed_at desc);
+create index if not exists idx_kit_access_logs_user_kit_accessed_at on public.kit_access_logs(user_id, kit_id, accessed_at desc);
+create index if not exists idx_audio_access_logs_accessed_at on public.audio_access_logs(accessed_at desc);
+create index if not exists idx_audio_access_logs_user_accessed_at on public.audio_access_logs(user_id, accessed_at desc);
 create index if not exists idx_billing_events_provider_created_at on public.billing_events(provider, created_at desc);
+create index if not exists idx_migration_logs_name_executed_at on public.migration_logs(migration_name, executed_at desc);
