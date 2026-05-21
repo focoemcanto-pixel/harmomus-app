@@ -1,3 +1,4 @@
+import { PublicAppShell } from "@/components/public/public-app-shell";
 import { notFound } from "next/navigation";
 
 import { KitPageTemplate } from "@/components/public/kit-page-template";
@@ -13,5 +14,5 @@ export default async function BibliotecaKitPage({ params }: { params: Promise<{ 
   const current = await getCurrentUserAccessContext();
   const accessContext = await resolveKitAccess(current, kit);
 
-  return <KitPageTemplate kit={kit} accessContext={{ ...current, ...accessContext }} />;
+  return <PublicAppShell><KitPageTemplate kit={kit} accessContext={{ ...current, ...accessContext }} /></PublicAppShell>;
 }

@@ -7,7 +7,7 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const file = formData.get("file");
     const slug = String(formData.get("slug") ?? "").trim();
-    const context = (String(formData.get("context") ?? "kit-cover") as "kit-cover" | "category-cover" | "banner");
+    const context = (String(formData.get("context") ?? "kit-cover") as "kit-cover" | "category-cover" | "banner" | "profile-avatar");
 
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "Arquivo inválido." }, { status: 400 });
