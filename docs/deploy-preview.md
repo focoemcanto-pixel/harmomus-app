@@ -1,27 +1,28 @@
-# Deploy Preview — Harmomus
+# Deploy Preview — Harmomus (Cloudflare + OpenNext)
 
-## 1) Supabase (projeto + schema)
-1. Crie um projeto no Supabase.
-2. Em **Project Settings → API**, copie:
-   - `NEXT_PUBLIC_SUPABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-3. No SQL Editor, execute todo o conteúdo de `supabase/schema.sql`.
-4. Verifique se as tabelas abaixo existem em `public`:
-   - `profiles`, `plans`, `subscriptions`, `categories`, `kits`, `kit_audio_files`
-   - `playlists`, `playlist_items`, `kit_access_logs`, `audio_access_logs`
-   - `billing_events`, `migration_logs`
-5. Garanta que o usuário autenticado tenha registro em `profiles` (via fluxo de login).
+## 1) Dependências e setup
+1. Instale as dependências:
+   ```bash
+   npm install
+   ```
+2. Gere o build OpenNext local de preview:
+   ```bash
+   npm run preview
+   ```
 
-## 2) Cloudflare (Pages/Workers Preview)
-1. Conecte o repositório no Cloudflare Pages.
-2. Configure build:
-   - Install command: `npm install`
-   - Build command: `npm run build`
-   - Output conforme preset Next.js do Cloudflare.
-3. Adicione todas as envs (Preview e Production) listadas abaixo.
-4. Faça deploy de preview pelo branch de trabalho.
+> `npm run preview` executa `opennextjs-cloudflare build && wrangler dev`.
+
+## 2) Arquivos de deploy Cloudflare
+Este projeto usa:
+- `wrangler.jsonc` com `main` em `.open-next/worker.js`.
+- `compatibility_flags: ["nodejs_compat"]` para compatibilidade com:
+  - Next.js App Router
+  - API Routes
+  - Stripe webhook signature (HMAC em runtime Node compat)
+  - Streaming de áudio em `/api/audio/[id]`
 
 ## 3) Variáveis de ambiente obrigatórias
+Defina no Cloudflare (Preview e Production):
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `R2_ACCOUNT_ID`
@@ -34,40 +35,27 @@
 - `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`
 - `NEXT_PUBLIC_APP_URL`
 
-## 4) Criar usuário admin
-1. Faça signup/login normalmente para criar o usuário no `auth.users`.
-2. No Supabase SQL Editor, execute:
-
-```sql
-update public.profiles
-set role = 'admin', updated_at = now()
-where email = 'seu-email@dominio.com';
+## 4) Comandos corretos
+### Preview local (Cloudflare Worker local)
+```bash
+npm run preview
 ```
 
-## 5) Rodar schema localmente/remotamente
-- Fonte única: `supabase/schema.sql`.
-- Rode no SQL Editor do Supabase (ou pipeline de migrations), sempre em ambiente alvo de preview antes do teste.
+### Deploy
+```bash
+npm run deploy
+```
 
-## 6) Rotas para validar preview
-- Público:
-  - `/`
-  - `/todos-os-kits`
-  - `/biblioteca`
-  - `/categoria/[slug]`
-- Auth/Assinatura:
-  - `/login`
-  - `/assinar`
-  - `/assinatura`
-  - `/checkout/sucesso`
-  - `/checkout/cancelado`
-- Admin:
-  - `/admin`
-  - `/admin/planos`
-  - `/admin/membros`
-- APIs críticas:
-  - `POST /api/billing/checkout`
-  - `POST /api/billing/portal`
-  - `POST /api/billing/cancel`
-  - `POST /api/billing/change-plan`
-  - `POST /api/webhooks/stripe`
-  - `GET /api/audio/[id]`
+## 5) Compatibilidade validada no código
+- App Router: estrutura `src/app/**`.
+- API routes: `src/app/api/**/route.ts`.
+- Supabase SSR no servidor: `src/lib/supabase/server.ts`.
+- Stripe webhook: `src/app/api/webhooks/stripe/route.ts` com runtime Node.
+- Streaming de áudio: `src/app/api/audio/[id]/route.ts` (Range + stream para Web Stream).
+
+## 6) Verificações após deploy
+Validar ao menos:
+- `POST /api/webhooks/stripe`
+- `GET /api/audio/[id]` (incluindo requisições com header `Range`)
+- Fluxos de checkout/portal/cancelamento
+- Login e páginas protegidas por plano (Supabase)
