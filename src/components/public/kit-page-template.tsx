@@ -6,6 +6,7 @@ import { AccessCounter } from "@/components/public/access-counter";
 import { HarmomusPlayer } from "@/components/public/harmomus-player";
 import { ToneSelector } from "@/components/public/tone-selector";
 import { UpgradeModal } from "@/components/public/upgrade-modal";
+import { KitActionsMenu } from "@/components/public/kit-actions-menu";
 import { VoiceSelector } from "@/components/public/voice-selector";
 import type { PublicKit, UserTier, VoiceType } from "@/lib/data/public-kits";
 
@@ -38,6 +39,7 @@ export function KitPageTemplate({ kit }: KitPageTemplateProps) {
         <div className="grid gap-6 md:grid-cols-[280px_1fr]">
           <img src={kit.coverUrl ?? "https://placehold.co/600x600/101114/f4f4f5?text=Harmomus"} alt={kit.name} className="aspect-square w-full rounded-xl border border-white/10 object-cover" />
           <div>
+            <div className="mb-2 flex justify-end"><KitActionsMenu kitName={kit.name} categorySlug={kit.category?.slug} /></div>
             <p className="text-xs uppercase tracking-wider text-gold-300">{kit.category?.name ?? "Sem categoria"}</p>
             <h1 className="mt-2 text-3xl font-semibold text-white">{kit.name}</h1>
             <p className="mt-1 text-zinc-300">{kit.artist}</p>

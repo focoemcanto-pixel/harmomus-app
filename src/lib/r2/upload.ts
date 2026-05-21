@@ -14,14 +14,15 @@ function slugifySegment(value: string): string {
     .replace(/(^-|-$)+/g, "");
 }
 
-export function generateFilePath(slug: string): string {
+export function generateFilePath(slug: string, context: "kit-cover" | "category-cover" | "banner" = "kit-cover"): string {
   const safeSlug = slugifySegment(slug);
 
   if (!safeSlug) {
     throw new Error("Slug inválido para gerar caminho de upload.");
   }
 
-  return `images/kits/${safeSlug}/cover.webp`;
+  const folder = context === "category-cover" ? "categories" : context === "banner" ? "banners" : "kits";
+  return `images/${folder}/${safeSlug}/cover.webp`;
 }
 
 export function validateImageFile(file: File): void {
@@ -37,9 +38,11 @@ export function validateImageFile(file: File): void {
 export async function uploadKitCoverToR2({
   file,
   slug,
+  context = "kit-cover",
 }: {
   file: File;
   slug: string;
+  context?: "kit-cover" | "category-cover" | "banner";
 }): Promise<{ key: string; url: string }> {
   if (!r2BucketName) {
     throw new Error("R2_BUCKET_NAME não configurado.");
@@ -47,7 +50,7 @@ export async function uploadKitCoverToR2({
 
   validateImageFile(file);
 
-  const key = generateFilePath(slug);
+  const key = generateFilePath(slug, context);
   const body = Buffer.from(await file.arrayBuffer());
 
   // TODO: aplicar compressão/conversão automática para webp antes do upload.
