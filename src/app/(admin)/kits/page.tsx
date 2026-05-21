@@ -30,7 +30,7 @@ export default async function KitsPage() {
           <table className="min-w-full divide-y divide-border text-sm">
             <thead className="bg-surface-muted text-left text-muted">
               <tr>
-                <th className="px-4 py-3">Capa</th><th className="px-4 py-3">Nome</th><th className="px-4 py-3">Artista</th><th className="px-4 py-3">Categoria</th><th className="px-4 py-3">Plano</th><th className="px-4 py-3">Pasta R2</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Criado em</th><th className="px-4 py-3">Ações</th>
+                <th className="px-4 py-3">Capa</th><th className="px-4 py-3">Nome</th><th className="px-4 py-3">Artista</th><th className="px-4 py-3">Categoria</th><th className="px-4 py-3">Plano</th><th className="px-4 py-3">Pasta R2</th><th className="px-4 py-3">Áudios</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Criado em</th><th className="px-4 py-3">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -42,6 +42,7 @@ export default async function KitsPage() {
                   <td className="px-4 py-3 text-muted">{kit.category_name ?? "Sem categoria"}</td>
                   <td className="px-4 py-3 text-muted">{kit.required_plan ?? "Todos"}</td>
                   <td className="px-4 py-3 text-muted">{kit.r2_folder ?? "-"}</td>
+                  <td className="px-4 py-3 text-muted">{kit.tone_count} tons • {kit.file_count} arquivos</td>
                   <td className="px-4 py-3"><span className="rounded-full border border-border px-2 py-1 text-xs">{kit.published ? "Publicado" : "Rascunho"}</span></td>
                   <td className="px-4 py-3 text-muted">{new Date(kit.created_at).toLocaleDateString("pt-BR")}</td>
                   <td className="px-4 py-3">

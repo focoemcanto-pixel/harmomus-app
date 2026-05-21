@@ -79,6 +79,31 @@ export interface Database {
         };
         Update: Partial<Database["public"]["Tables"]["categories"]["Insert"]>;
       };
+      kit_audio_files: {
+        Row: {
+          id: string;
+          kit_id: string;
+          tone: string;
+          name: string;
+          r2_key: string;
+          public_url: string;
+          file_type: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          kit_id: string;
+          tone: string;
+          name: string;
+          r2_key: string;
+          public_url: string;
+          file_type: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["kit_audio_files"]["Insert"]>;
+      };
       kits: {
         Row: {
           id: string;
