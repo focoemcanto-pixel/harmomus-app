@@ -7,6 +7,8 @@ create table if not exists public.profiles (
   avatar_url text,
   role text not null default 'member' check (role in ('admin', 'member')),
   legacy_pms_member_id text,
+  migrated_from_pms boolean not null default false,
+  migration_completed_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -47,9 +49,28 @@ create table if not exists public.subscriptions (
   next_billing_at timestamptz,
   canceled_at timestamptz,
   last_webhook_event text,
+  migrated_from_pms boolean not null default false,
+  original_gateway text,
+  imported_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+create table if not exists public.migration_logs (
+  id uuid primary key default gen_random_uuid(),
+  email text not null,
+  status text not null check (status in ('importado', 'conflito', 'invalido', 'sincronizado', 'erro')),
+  details jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create unique index if not exists idx_subscriptions_unique_stripe_subscription_id
+  on public.subscriptions(stripe_subscription_id)
+  where stripe_subscription_id is not null;
+
+create unique index if not exists idx_subscriptions_unique_gateway_subscription_id
+  on public.subscriptions(gateway_subscription_id)
+  where gateway_subscription_id is not null;
 
 insert into public.plans (name, slug, legacy_pms_plan_id, description, price_cents, currency, trial_days, hierarchy_level, status, features)
 values
