@@ -7,6 +7,7 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const file = formData.get("file");
     const slug = String(formData.get("slug") ?? "").trim();
+    const context = (String(formData.get("context") ?? "kit-cover") as "kit-cover" | "category-cover" | "banner");
 
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "Arquivo inválido." }, { status: 400 });
@@ -16,7 +17,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Slug é obrigatório para upload." }, { status: 400 });
     }
 
-    const uploaded = await uploadKitCoverToR2({ file, slug });
+    const uploaded = await uploadKitCoverToR2({ file, slug, context });
 
     return NextResponse.json({
       success: true,

@@ -33,6 +33,7 @@ create table if not exists public.categories (
   name text not null,
   slug text not null unique,
   description text,
+  cover_url text,
   created_at timestamptz not null default now()
 );
 
