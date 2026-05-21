@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
+import { KitAudioSyncCard } from "@/components/admin/kit-audio-sync-card";
 import { KitForm } from "@/components/admin/kit-form";
 import { getKitById, getKitFormOptions, updateKit } from "@/lib/data/kits";
 
@@ -35,5 +36,10 @@ export default async function EditarKitPage({ params }: { params: Promise<{ id: 
     redirect("/admin/kits");
   }
 
-  return <KitForm mode="edit" categories={categories} plans={plans} initialData={kit} action={updateKitAction} />;
+  return (
+    <div className="space-y-6">
+      <KitForm mode="edit" categories={categories} plans={plans} initialData={kit} action={updateKitAction} />
+      <KitAudioSyncCard kitId={kit.id} />
+    </div>
+  );
 }

@@ -53,3 +53,18 @@ create table if not exists public.kits (
 
 create index if not exists idx_subscriptions_user_status on public.subscriptions(user_id, status);
 create index if not exists idx_kits_category_published on public.kits(category_id, published);
+
+
+create table if not exists public.kit_audio_files (
+  id uuid primary key default gen_random_uuid(),
+  kit_id uuid not null references public.kits(id) on delete cascade,
+  tone text not null,
+  name text not null,
+  r2_key text not null,
+  public_url text not null,
+  file_type text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_kit_audio_files_kit_tone on public.kit_audio_files(kit_id, tone);
