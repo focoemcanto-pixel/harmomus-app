@@ -3,16 +3,14 @@
 interface ToneSelectorProps {
   tones: string[];
   selectedTone: string;
-  lockedToneSet: Set<string>;
   onSelectTone: (tone: string) => void;
 }
 
-export function ToneSelector({ tones, selectedTone, lockedToneSet, onSelectTone }: ToneSelectorProps) {
+export function ToneSelector({ tones, selectedTone, onSelectTone }: ToneSelectorProps) {
   return (
     <div className="flex flex-wrap gap-2">
       {tones.map((tone) => {
         const selected = tone === selectedTone;
-        const locked = lockedToneSet.has(tone);
         return (
           <button
             key={tone}
@@ -24,7 +22,7 @@ export function ToneSelector({ tones, selectedTone, lockedToneSet, onSelectTone 
                 : "border-white/20 bg-white/5 text-white hover:border-gold-400/50"
             }`}
           >
-            {tone} {locked ? "🔒" : ""}
+            {tone}
           </button>
         );
       })}

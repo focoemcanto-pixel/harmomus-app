@@ -177,6 +177,21 @@ export interface Database {
         };
         Update: Partial<Database["public"]["Tables"]["playlist_items"]["Insert"]>;
       };
+      kit_access_logs: {
+        Row: {
+          id: string;
+          user_id: string;
+          kit_id: string;
+          accessed_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          kit_id: string;
+          accessed_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["kit_access_logs"]["Insert"]>;
+      };
       kits: {
         Row: {
           id: string;

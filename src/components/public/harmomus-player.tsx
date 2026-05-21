@@ -6,9 +6,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 interface HarmomusPlayerProps {
   src: string | null;
   title: string;
+  canPlay: boolean;
+  onBlocked: () => void;
 }
 
-export function HarmomusPlayer({ src, title }: HarmomusPlayerProps) {
+export function HarmomusPlayer({ src, title, canPlay, onBlocked }: HarmomusPlayerProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -28,6 +30,7 @@ export function HarmomusPlayer({ src, title }: HarmomusPlayerProps) {
 
   const togglePlay = async () => {
     const audio = audioRef.current;
+    if (!canPlay) { onBlocked(); return; }
     if (!audio || !src) return;
 
     if (audio.paused) {

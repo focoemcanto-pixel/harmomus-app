@@ -126,3 +126,14 @@ create table if not exists public.playlist_items (
 
 create index if not exists idx_playlists_slug_public on public.playlists(slug, is_public);
 create index if not exists idx_playlist_items_playlist_position on public.playlist_items(playlist_id, position);
+
+
+create table if not exists public.kit_access_logs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  kit_id uuid not null references public.kits(id) on delete cascade,
+  accessed_at timestamptz not null default now()
+);
+
+create index if not exists idx_kit_access_logs_user_accessed_at on public.kit_access_logs(user_id, accessed_at desc);
+create index if not exists idx_kit_access_logs_user_kit_accessed_at on public.kit_access_logs(user_id, kit_id, accessed_at desc);
