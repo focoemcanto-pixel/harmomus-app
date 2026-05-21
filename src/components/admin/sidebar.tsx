@@ -1,15 +1,15 @@
 import Link from "next/link";
-import { BarChart3, CreditCard, LayoutDashboard, Library, Settings, Tags, Users, Waves } from "lucide-react";
+import { CreditCard, LayoutDashboard, Library, Settings, Tags, Users, Waves, Database } from "lucide-react";
 
 const items = [
   { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
-  { label: "Kits Vocais", href: "/kits", icon: Waves },
-  { label: "Categorias", href: "/categorias", icon: Tags },
+  { label: "Kits Vocais", href: "/admin/kits", icon: Waves },
+  { label: "Categorias", href: "/admin/categorias", icon: Tags },
   { label: "Planos", href: "/admin/planos", icon: Library },
   { label: "Membros", href: "/admin/membros", icon: Users },
-  { label: "Assinaturas", href: "/assinaturas", icon: CreditCard },
-  { label: "Analytics", href: "/analytics", icon: BarChart3 },
-  { label: "Configurações", href: "/configuracoes", icon: Settings },
+  { label: "Billing", href: "/admin/billing", icon: CreditCard },
+  { label: "Migração", href: "/admin/migracao", icon: Database },
+  { label: "Configurações", href: "/admin/configuracoes", icon: Settings },
 ];
 
 export function Sidebar() {
