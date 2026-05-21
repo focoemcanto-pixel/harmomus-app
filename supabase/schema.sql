@@ -70,3 +70,27 @@ create table if not exists public.kit_audio_files (
 );
 
 create index if not exists idx_kit_audio_files_kit_tone on public.kit_audio_files(kit_id, tone);
+
+
+
+create table if not exists public.playlists (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  slug text not null unique,
+  user_id uuid references public.profiles(id) on delete set null,
+  is_public boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.playlist_items (
+  id uuid primary key default gen_random_uuid(),
+  playlist_id uuid not null references public.playlists(id) on delete cascade,
+  kit_id uuid not null references public.kits(id) on delete cascade,
+  position integer not null,
+  created_at timestamptz not null default now(),
+  unique (playlist_id, kit_id)
+);
+
+create index if not exists idx_playlists_slug_public on public.playlists(slug, is_public);
+create index if not exists idx_playlist_items_playlist_position on public.playlist_items(playlist_id, position);

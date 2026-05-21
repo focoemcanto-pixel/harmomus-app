@@ -106,6 +106,45 @@ export interface Database {
         };
         Update: Partial<Database["public"]["Tables"]["kit_audio_files"]["Insert"]>;
       };
+
+      playlists: {
+        Row: {
+          id: string;
+          name: string;
+          slug: string;
+          user_id: string | null;
+          is_public: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          slug: string;
+          user_id?: string | null;
+          is_public?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["playlists"]["Insert"]>;
+      };
+      playlist_items: {
+        Row: {
+          id: string;
+          playlist_id: string;
+          kit_id: string;
+          position: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          playlist_id: string;
+          kit_id: string;
+          position: number;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["playlist_items"]["Insert"]>;
+      };
       kits: {
         Row: {
           id: string;
