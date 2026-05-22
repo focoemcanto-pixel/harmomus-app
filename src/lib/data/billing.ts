@@ -1,10 +1,11 @@
 import { createClient } from "@/lib/supabase/server";
 import { createCheckoutSession, createCustomerPortalSession, getOrCreateCustomer, updateSubscription } from "@/lib/stripe/client";
 
-function getAppUrl() {
-  const base = process.env.NEXT_PUBLIC_APP_URL;
-  if (!base) throw new Error("Configuração ausente: NEXT_PUBLIC_APP_URL.");
-  return base;
+function resolveAppUrl(fallbackOrigin?: string | null) {
+  const envBase = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  if (envBase) return envBase.replace(/\/$/, "");
+  if (fallbackOrigin) return fallbackOrigin.replace(/\/$/, "");
+  throw new Error("Configuração ausente: NEXT_PUBLIC_APP_URL.");
 }
 
 function assertStripeReady() {
@@ -19,7 +20,7 @@ function assertPlanPrice(plan: { slug: string; stripe_price_id: string | null })
   }
 }
 
-export async function startStripeCheckout(userId: string, email: string, planId: string) {
+export async function startStripeCheckout(userId: string, email: string, planId: string, fallbackOrigin?: string | null) {
   assertStripeReady();
   const supabase = (await createClient()) as any;
   const { data: plan } = await supabase.from("plans").select("*").eq("id", planId).single();
@@ -49,7 +50,7 @@ export async function startStripeCheckout(userId: string, email: string, planId:
     { onConflict: "user_id" },
   );
 
-  const base = getAppUrl();
+  const base = resolveAppUrl(fallbackOrigin);
 
   return createCheckoutSession({
     customerId,
@@ -60,7 +61,7 @@ export async function startStripeCheckout(userId: string, email: string, planId:
   });
 }
 
-export async function createPortal(userId: string, email: string) {
+export async function createPortal(userId: string, email: string, fallbackOrigin?: string | null) {
   assertStripeReady();
   const supabase = (await createClient()) as any;
   const { data: sub } = await supabase.from("subscriptions").select("*").eq("user_id", userId).order("created_at", { ascending: false }).limit(1).maybeSingle();
@@ -85,7 +86,7 @@ export async function createPortal(userId: string, email: string) {
     );
   }
 
-  return createCustomerPortalSession(customerId, `${getAppUrl()}/assinatura`);
+  return createCustomerPortalSession(customerId, `${resolveAppUrl(fallbackOrigin)}/assinatura`);
 }
 
 export async function changeSubscriptionPlan(userId: string, planId: string) {

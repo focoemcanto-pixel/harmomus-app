@@ -12,7 +12,7 @@ export function SubscribeButton({ planSlug, label, className }: SubscribeButtonP
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const onClick = () => {
+  const onClick = async () => {
     setLoading(true);
     setError(null);
 
@@ -22,9 +22,20 @@ export function SubscribeButton({ planSlug, label, className }: SubscribeButtonP
     }
 
     try {
-      window.location.href = `/api/billing/checkout?plan=${encodeURIComponent(planSlug)}`;
+      const response = await fetch(`/api/billing/checkout?plan=${encodeURIComponent(planSlug)}`, { method: "GET", redirect: "manual" });
+      if (response.type === "opaqueredirect") return;
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get("location");
+        if (location) {
+          window.location.href = location;
+          return;
+        }
+      }
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || "Não foi possível iniciar o checkout agora. Tente novamente.");
     } catch {
       setError("Não foi possível iniciar o checkout agora. Tente novamente.");
+    } finally {
       setLoading(false);
     }
   };
