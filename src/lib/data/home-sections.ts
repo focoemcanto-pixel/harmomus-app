@@ -4,8 +4,17 @@ import type { Database } from "@/types/database";
 export type HomeSection = Database["public"]["Tables"]["home_sections"]["Row"];
 
 function isMissingTableError(error: unknown) {
-  const maybeError = error as { code?: string; message?: string } | null;
-  return maybeError?.code === "42P01" || (maybeError?.message?.toLowerCase().includes("home_sections") && maybeError.message.toLowerCase().includes("does not exist"));
+  const maybeError = error as { code?: string; message?: string; details?: string } | null;
+  const message = `${maybeError?.message ?? ""} ${maybeError?.details ?? ""}`.toLowerCase();
+
+  return (
+    maybeError?.code === "42P01" ||
+    maybeError?.code === "PGRST205" ||
+    (message.includes("home_sections") &&
+      (message.includes("does not exist") ||
+        message.includes("schema cache") ||
+        message.includes("could not find the table")))
+  );
 }
 
 export async function getAdminHomeSections(): Promise<HomeSection[]> {
