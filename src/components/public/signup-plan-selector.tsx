@@ -1,0 +1,128 @@
+"use client";
+
+import { useMemo, useState } from "react";
+
+type PlanSlug = "free" | "plus" | "premium";
+
+type PlanConfig = {
+  slug: PlanSlug;
+  label: string;
+  price: string;
+  cta: string;
+  features: string[];
+};
+
+const PLAN_CONFIGS: PlanConfig[] = [
+  {
+    slug: "free",
+    label: "Free",
+    price: "Grátis",
+    cta: "Criar conta grátis",
+    features: [
+      "✅ 5 acessos diários a kits",
+      "✅ Apenas tom original",
+      "✅ Player limitado",
+      "✅ Criação de playlists",
+      "✅ Comunidade aberta",
+      "❌ Troca de tonalidade",
+      "❌ Solicitação de novos kits",
+      "❌ Prioridade na confecção",
+      "❌ Receber kits antecipadamente",
+      "❌ Grupo exclusivo",
+      "❌ Solicitação de novos tons",
+    ],
+  },
+  {
+    slug: "plus",
+    label: "Plus",
+    price: "R$19/mês",
+    cta: "Criar conta e assinar Plus",
+    features: [
+      "✅ Acesso ilimitado aos kits",
+      "✅ Player completo",
+      "✅ Apenas tom original",
+      "✅ Catálogo completo",
+      "✅ Criação de playlists",
+      "✅ Comunidade aberta",
+      "✅ Sugestões de conteúdos",
+      "❌ Solicitação de novos kits",
+      "❌ Prioridade na confecção",
+      "❌ Receber kits antecipadamente",
+      "❌ Grupo exclusivo",
+      "❌ Solicitação de novos tons",
+    ],
+  },
+  {
+    slug: "premium",
+    label: "Premium",
+    price: "R$39/mês + 7 dias grátis",
+    cta: "Criar conta e testar Premium grátis por 7 dias",
+    features: [
+      "✅ Acesso ilimitado aos kits",
+      "✅ Todos os tons disponíveis",
+      "✅ Troca de tonalidade",
+      "✅ Catálogo completo",
+      "✅ Criação de playlists",
+      "✅ Solicitação de novos kits",
+      "✅ Prioridade na confecção",
+      "✅ Receber kits antecipadamente",
+      "✅ Comunidade Harmomus + grupo Premium para pedidos",
+      "✅ Solicitação de novos tons",
+      "✅ Conteúdos extras",
+      "✅ Votações internas",
+      "✅ Selo Premium Harmomus",
+    ],
+  },
+];
+
+export function SignupPlanSelector({ initialPlan }: { initialPlan: PlanSlug }) {
+  const [selectedPlan, setSelectedPlan] = useState<PlanSlug>(initialPlan);
+
+  const currentPlan = useMemo(
+    () => PLAN_CONFIGS.find((plan) => plan.slug === selectedPlan) ?? PLAN_CONFIGS[0],
+    [selectedPlan],
+  );
+
+  return (
+    <>
+      <input type="hidden" name="plan" value={selectedPlan} />
+
+      <div className="md:col-span-2 mt-2">
+        <h2 className="text-lg font-semibold text-white">Escolha seu plano</h2>
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {PLAN_CONFIGS.map((plan) => {
+            const isSelected = selectedPlan === plan.slug;
+            return (
+              <button
+                key={plan.slug}
+                type="button"
+                onClick={() => setSelectedPlan(plan.slug)}
+                className={`rounded-2xl border p-4 text-left transition-all duration-300 ${
+                  isSelected
+                    ? "border-cyan-300 bg-cyan-400/15 shadow-[0_0_25px_rgba(34,211,238,0.25)]"
+                    : "border-white/20 bg-white/[0.03] hover:border-white/40"
+                }`}
+              >
+                <p className="text-sm text-zinc-300">{plan.label}</p>
+                <p className="mt-1 text-sm font-semibold text-white">{plan.price}</p>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="mt-4 rounded-2xl border border-white/15 bg-black/35 p-4 transition-all duration-300">
+          <p className="text-base font-semibold text-white">{currentPlan.label}</p>
+          <ul className="mt-3 space-y-2 text-sm text-zinc-200">
+            {currentPlan.features.map((feature) => (
+              <li key={`${currentPlan.slug}-${feature}`}>{feature}</li>
+            ))}
+          </ul>
+        </div>
+      </div>
+
+      <button className="h-12 w-full rounded-2xl border border-cyan-300/50 bg-gradient-to-r from-cyan-400 to-violet-500 font-semibold text-slate-950 shadow-[0_18px_50px_rgba(34,211,238,0.25)] transition hover:brightness-110 md:col-span-2">
+        {currentPlan.cta}
+      </button>
+    </>
+  );
+}
