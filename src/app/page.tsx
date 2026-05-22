@@ -139,9 +139,10 @@ export default async function HomePage() {
             <div>
               <div className="flex flex-wrap gap-2">
                 {[
-                  "Streaming Vocal Premium",
-                  `${kits.length}+ kits publicados`,
-                  `${categories.length}+ artistas`,
+                  "Kits vocais em todos os tons",
+                  "Preparação para ministério de louvor",
+                  "Harmonia vocal premium",
+                  "Ensaios com excelência",
                 ].map((badge) => (
                   <span key={badge} className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[11px] uppercase tracking-[0.16em] text-cyan-100 backdrop-blur">
                     {badge}
@@ -150,17 +151,17 @@ export default async function HomePage() {
               </div>
 
               <h1 className="mt-5 text-4xl font-semibold leading-tight text-white md:text-6xl">
-                O streaming vocal que transforma sua equipe em uma experiência cinematográfica.
+                Prepare sua voz. Honre seu chamado.
               </h1>
               <p className="mt-4 max-w-2xl text-base text-zinc-200 md:text-lg">
-                Descubra kits com estética de álbum, mix de vozes e profundidade musical para preparar ensaios com excelência. Harmomus é a Netflix da divisão vocal com alma de worship.
+                Kits vocais completos em todos os tons e vozes para preparar seu ministério com excelência, segurança e unidade vocal.
               </p>
               <div className="mt-7 flex flex-wrap gap-3">
                 <Link href="/todos-os-kits" className="rounded-xl bg-gradient-to-r from-cyan-300 to-blue-400 px-6 py-3 text-sm font-bold text-slate-950 shadow-[0_12px_40px_rgba(56,189,248,0.45)] transition hover:scale-[1.02]">
-                  Explorar todos os kits
+                  Explorar kits
                 </Link>
                 <Link href="/assinar" className="rounded-xl border border-white/30 bg-white/10 px-6 py-3 text-sm font-medium text-white backdrop-blur transition hover:bg-white/20">
-                  Teste grátis por 7 dias
+                  Testar grátis por 7 dias
                 </Link>
               </div>
             </div>
