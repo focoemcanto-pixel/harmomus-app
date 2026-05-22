@@ -22,7 +22,8 @@ export function generateFilePath(slug: string, context: "kit-cover" | "category-
   }
 
   if (context === "profile-avatar") return `avatars/${safeSlug}/avatar.jpg`;
-  const folder = context === "category-cover" ? "categories" : context === "banner" ? "banners" : "kits";
+  if (context === "banner") return `images/home-banners/${safeSlug}/banner.webp`;
+  const folder = context === "category-cover" ? "categories" : "kits";
   return `images/${folder}/${safeSlug}/cover.webp`;
 }
 

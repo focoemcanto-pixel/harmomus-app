@@ -193,3 +193,35 @@ create index if not exists idx_audio_access_logs_accessed_at on public.audio_acc
 create index if not exists idx_audio_access_logs_user_accessed_at on public.audio_access_logs(user_id, accessed_at desc);
 create index if not exists idx_billing_events_provider_created_at on public.billing_events(provider, created_at desc);
 create index if not exists idx_migration_logs_name_executed_at on public.migration_logs(migration_name, executed_at desc);
+
+create table if not exists public.home_banners (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  subtitle text,
+  image_url text not null,
+  mobile_image_url text,
+  button_label text,
+  button_href text,
+  type text not null default 'campanha',
+  is_active boolean not null default true,
+  sort_order integer not null default 0,
+  starts_at timestamptz,
+  ends_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_home_banners_active_order on public.home_banners(is_active, sort_order);
+
+alter table public.home_banners enable row level security;
+
+drop policy if exists "Public can read active home banners" on public.home_banners;
+create policy "Public can read active home banners" on public.home_banners
+for select
+using (is_active = true and (starts_at is null or starts_at <= now()) and (ends_at is null or ends_at >= now()));
+
+drop policy if exists "Admins can manage home banners" on public.home_banners;
+create policy "Admins can manage home banners" on public.home_banners
+for all
+using (coalesce((select role::text from public.profiles where id = auth.uid()), '') = 'admin')
+with check (coalesce((select role::text from public.profiles where id = auth.uid()), '') = 'admin');

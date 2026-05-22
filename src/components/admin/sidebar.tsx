@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { CreditCard, LayoutDashboard, Library, Settings, Tags, Users, Waves, Database } from "lucide-react";
+import { CreditCard, LayoutDashboard, Library, Settings, Tags, Users, Waves, Database, PanelTop } from "lucide-react";
 
 const items = [
   { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
   { label: "Kits Vocais", href: "/admin/kits", icon: Waves },
   { label: "Categorias", href: "/admin/categorias", icon: Tags },
+  { label: "Banners Home", href: "/admin/banners", icon: PanelTop },
   { label: "Planos", href: "/admin/planos", icon: Library },
   { label: "Membros", href: "/admin/membros", icon: Users },
   { label: "Billing", href: "/admin/billing", icon: CreditCard },
