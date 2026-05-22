@@ -1,8 +1,8 @@
 import Link from "next/link";
 
 import { PublicAppShell } from "@/components/public/public-app-shell";
-import { getPlans } from "@/lib/data/plans";
 import { getPublishedKits } from "@/lib/data/public-kits";
+import { OFFICIAL_PLANS } from "@/lib/data/official-plans";
 
 export const revalidate = 300;
 
@@ -37,16 +37,11 @@ const VOICE_SECTIONS = [
 ];
 
 export default async function HomePage() {
-  const [kits, plans] = await Promise.all([getPublishedKits(), getPlans().catch(() => [])]);
+  const kits = await getPublishedKits();
 
   const latestKits = kits.slice(0, 12);
-  const categories = Array.from(
-    new Map(
-      kits
-        .filter((kit) => kit.category)
-        .map((kit) => [kit.category!.slug, kit.category!]),
-    ).values(),
-  );
+  const categories = Array.from(new Map(kits.filter((kit) => kit.category).map((kit) => [kit.category!.slug, kit.category!])).values());
+  const featuredCategories = categories.slice(0, 6);
 
   const categoryKitCount = kits.reduce<Record<string, number>>((acc, kit) => {
     if (kit.category?.slug) {
@@ -55,79 +50,6 @@ export default async function HomePage() {
     return acc;
   }, {});
 
-  const planBySlug = new Map(plans.map((plan) => [plan.slug.toLowerCase(), plan]));
-
-  const fallbackPlans = [
-    {
-      slug: "free",
-      name: "Free",
-      description: "Ideal para começar no Harmomus.",
-      price: "Grátis",
-      cta: "Começar grátis",
-      offer: null,
-      popular: false,
-      benefits: [
-        { label: "5 acessos diários a kits", included: true },
-        { label: "Apenas tom original", included: true },
-        { label: "Player limitado", included: true },
-        { label: "Criação de playlists", included: true },
-        { label: "Comunidade aberta", included: true },
-        { label: "Troca de tonalidade", included: false },
-        { label: "Solicitação de novos kits", included: false },
-        { label: "Prioridade na confecção", included: false },
-        { label: "Receber kits antecipadamente", included: false },
-        { label: "Grupo exclusivo", included: false },
-        { label: "Solicitação de novos tons", included: false },
-      ],
-    },
-    {
-      slug: "plus",
-      name: "Plus",
-      description: "Mais recursos para evolução contínua.",
-      price: "R$19/mês",
-      cta: "Assinar Plus",
-      offer: null,
-      popular: false,
-      benefits: [
-        { label: "Acesso ilimitado aos kits", included: true },
-        { label: "Player completo", included: true },
-        { label: "Apenas tom original", included: true },
-        { label: "Catálogo completo", included: true },
-        { label: "Criação de playlists", included: true },
-        { label: "Comunidade aberta", included: true },
-        { label: "Sugestões de conteúdos", included: true },
-        { label: "Solicitação de novos kits", included: false },
-        { label: "Prioridade na confecção", included: false },
-        { label: "Receber kits antecipadamente", included: false },
-        { label: "Grupo exclusivo", included: false },
-        { label: "Solicitação de novos tons", included: false },
-      ],
-    },
-    {
-      slug: "premium",
-      name: "Premium",
-      description: "A experiência completa para ministérios.",
-      price: "R$39/mês",
-      cta: "Experimentar grátis por 7 dias",
-      offer: "7 dias grátis",
-      popular: true,
-      benefits: [
-        { label: "Acesso ilimitado aos kits", included: true },
-        { label: "Todos os tons disponíveis", included: true },
-        { label: "Troca de tonalidade", included: true },
-        { label: "Catálogo completo", included: true },
-        { label: "Criação de playlists", included: true },
-        { label: "Solicitação de novos kits", included: true },
-        { label: "Prioridade na confecção", included: true },
-        { label: "Receber kits antecipadamente", included: true },
-        { label: "Comunidade Harmomus + grupo Premium para pedidos", included: true },
-        { label: "Solicitação de novos tons", included: true },
-        { label: "Conteúdos extras", included: true },
-        { label: "Votações internas", included: true },
-        { label: "Selo Premium Harmomus", included: true },
-      ],
-    },
-  ];
 
   return (
     <PublicAppShell>
@@ -222,35 +144,22 @@ export default async function HomePage() {
         </section>
 
         <section className="space-y-4">
-          <h2 className="text-2xl font-semibold text-white md:text-3xl">Artistas & Categorias</h2>
+          <div className="flex items-end justify-between">
+            <h2 className="text-2xl font-semibold text-white md:text-3xl">Artistas & Categorias</h2>
+            <Link href="/categorias" className="text-sm text-cyan-200 hover:text-cyan-100">Acessar categorias</Link>
+          </div>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {categories.length ? categories.map((category) => (
-              <Link key={category.id} href={`/categoria/${category.slug}`} className="group relative overflow-hidden rounded-2xl border border-white/15 bg-gradient-to-br from-[#101827] to-[#23123e] p-6 shadow-[0_18px_48px_rgba(76,29,149,0.24)] transition hover:-translate-y-1">
-                <div className="pointer-events-none absolute -right-10 -top-10 h-28 w-28 rounded-full bg-cyan-400/20 blur-2xl" />
-                <p className="text-xs uppercase tracking-[0.2em] text-cyan-200">Artista/Banda</p>
-                <h3 className="mt-2 text-2xl font-semibold text-white">{category.name}</h3>
-                <p className="mt-2 line-clamp-2 text-sm text-zinc-200">{category.description ?? "Coleção completa de kits desta categoria para sua equipe vocal."}</p>
-                <div className="mt-5 flex items-center justify-between text-sm">
-                  <span className="rounded-full border border-cyan-300/30 bg-cyan-500/10 px-3 py-1 text-cyan-100">{categoryKitCount[category.slug] ?? 0} kits</span>
-                  <span className="text-white/90 transition group-hover:text-cyan-100">Abrir catálogo →</span>
+            {featuredCategories.length ? featuredCategories.map((category) => (
+              <Link key={category.id} href={`/categoria/${category.slug}`} className="group overflow-hidden rounded-2xl border border-white/15 bg-gradient-to-br from-[#101827] to-[#23123e] shadow-[0_18px_48px_rgba(76,29,149,0.24)] transition hover:-translate-y-1">
+                {category.cover_url ? <img src={category.cover_url} alt={category.name} className="h-40 w-full object-cover transition duration-500 group-hover:scale-105" /> : <div className="flex h-40 items-center justify-center bg-gradient-to-br from-fuchsia-900/60 via-indigo-900/60 to-cyan-900/60 text-4xl font-bold text-white/90">{category.name.slice(0,1)}</div>}
+                <div className="p-6">
+                  <h3 className="text-2xl font-semibold text-white">{category.name}</h3>
+                  <p className="mt-2 text-sm text-zinc-200">{categoryKitCount[category.slug] ?? 0} kits publicados</p>
+                  <span className="mt-5 inline-flex text-sm text-cyan-100">Ver kits →</span>
                 </div>
               </Link>
             )) : <div className="rounded-2xl border border-white/10 p-6 text-zinc-300">Nenhuma categoria com kit publicado.</div>}
           </div>
-        </section>
-
-        <section className="grid gap-4 md:grid-cols-4">
-          {[
-            { label: "Kits vocais", value: kits.length },
-            { label: "Artistas/Categorias", value: categories.length },
-            { label: "Planos", value: Math.max(plans.length, fallbackPlans.length) },
-            { label: "Disponibilidade", value: "24/7" },
-          ].map((stat) => (
-            <article key={stat.label} className="rounded-2xl border border-white/15 bg-white/[0.04] p-5 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]">
-              <p className="text-3xl font-bold text-white">{stat.value}</p>
-              <p className="mt-1 text-xs uppercase tracking-[0.16em] text-cyan-200">{stat.label}</p>
-            </article>
-          ))}
         </section>
 
         <section className="grid gap-4 lg:grid-cols-2">
@@ -301,21 +210,20 @@ export default async function HomePage() {
         <section className="space-y-4">
           <h2 className="text-2xl font-semibold text-white md:text-3xl">Planos</h2>
           <div className="grid gap-4 xl:grid-cols-3">
-            {fallbackPlans.map((defaultPlan) => {
-              const plan = planBySlug.get(defaultPlan.slug);
-              const isPopular = defaultPlan.popular;
+            {OFFICIAL_PLANS.map((plan) => {
+              const isPopular = plan.popular;
 
               return (
-                <article key={defaultPlan.slug} className={`relative rounded-3xl border p-6 ${isPopular ? "border-fuchsia-300/70 bg-gradient-to-b from-fuchsia-500/20 via-[#181329] to-[#0b1020] shadow-[0_20px_60px_rgba(217,70,239,0.3)]" : "border-white/15 bg-white/[0.04]"}`}>
+                <article key={plan.slug} className={`relative rounded-3xl border p-6 ${isPopular ? "border-fuchsia-300/70 bg-gradient-to-b from-fuchsia-500/20 via-[#181329] to-[#0b1020] shadow-[0_20px_60px_rgba(217,70,239,0.3)]" : "border-white/15 bg-white/[0.04]"}`}>
                   {isPopular ? <span className="absolute -top-3 right-6 rounded-full bg-fuchsia-500 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.15em] text-white">Mais Popular</span> : null}
-                  <p className="text-xs uppercase tracking-[0.18em] text-cyan-200">{defaultPlan.slug}</p>
-                  <h3 className="mt-2 text-3xl font-semibold text-white">{plan?.name ?? defaultPlan.name}</h3>
-                  <p className="mt-1 text-zinc-200">{plan?.description ?? defaultPlan.description}</p>
-                  <p className="mt-4 text-3xl font-bold text-white">{defaultPlan.price}</p>
-                  <p className="text-xs text-cyan-100">{defaultPlan.offer ? `Oferta: ${defaultPlan.offer}` : "Sem fidelidade"}</p>
+                  <p className="text-xs uppercase tracking-[0.18em] text-cyan-200">{plan.slug}</p>
+                  <h3 className="mt-2 text-3xl font-semibold text-white">{plan.name}</h3>
+                  <p className="mt-1 text-zinc-200">{plan.description}</p>
+                  <p className="mt-4 text-3xl font-bold text-white">{plan.price}</p>
+                  <p className="text-xs text-cyan-100">{plan.offer ? `Oferta: ${plan.offer}` : "Sem fidelidade"}</p>
 
                   <ul className="mt-5 space-y-2">
-                    {defaultPlan.benefits.map((benefit) => (
+                    {plan.features.map((benefit) => (
                       <li key={benefit.label} className="flex items-center gap-2 text-sm text-zinc-100">
                         <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-xs ${benefit.included ? "bg-emerald-500/25 text-emerald-300" : "bg-red-500/20 text-red-300"}`}>
                           {benefit.included ? "✓" : "✕"}
@@ -325,8 +233,8 @@ export default async function HomePage() {
                     ))}
                   </ul>
 
-                  <Link href={`/assinar?plan=${defaultPlan.slug}`} className={`mt-6 inline-flex w-full justify-center rounded-xl px-4 py-3 text-sm font-semibold transition ${isPopular ? "bg-gradient-to-r from-cyan-300 to-fuchsia-300 text-slate-950 hover:opacity-90" : "border border-white/30 bg-white/10 text-white hover:bg-white/20"}`}>
-                    {defaultPlan.cta}
+                  <Link href={`/assinar?plan=${plan.slug}`} className={`mt-6 inline-flex w-full justify-center rounded-xl px-4 py-3 text-sm font-semibold transition ${isPopular ? "bg-gradient-to-r from-cyan-300 to-fuchsia-300 text-slate-950 hover:opacity-90" : "border border-white/30 bg-white/10 text-white hover:bg-white/20"}`}>
+                    {plan.cta}
                   </Link>
                 </article>
               );
@@ -337,11 +245,12 @@ export default async function HomePage() {
         <section className="rounded-3xl border border-cyan-300/30 bg-gradient-to-r from-cyan-900/40 via-indigo-900/35 to-fuchsia-900/30 p-7">
           <p className="text-xs uppercase tracking-[0.2em] text-cyan-200">Curso complementar</p>
           <h2 className="mt-2 text-3xl font-semibold text-white">Foco em Harmonia</h2>
-          <p className="mt-3 max-w-2xl text-zinc-100">Módulos editoriais, exercícios práticos e visão harmônica aplicada ao culto para você cantar com clareza técnica, sensibilidade e liberdade criativa.</p>
+          <p className="mt-3 max-w-2xl text-zinc-100">Desenvolva percepção harmônica, afinação e independência vocal para dividir vozes com segurança no ministério.</p>
           <ul className="mt-4 grid gap-2 text-sm text-zinc-100 md:grid-cols-3">
-            <li>✓ Módulos progressivos e objetivos</li>
-            <li>✓ Aplicação para ensaio real</li>
-            <li>✓ Certificado + comunidade</li>
+            <li>✓ Identificação de terças</li>
+            <li>✓ Percepção & afinação</li>
+            <li>✓ Divisão vocal prática</li>
+            <li>✓ Aplicação em ensaio real</li>
           </ul>
           <Link href={HARMONY_COURSE_URL} className="mt-5 inline-flex rounded-xl bg-white px-6 py-3 text-sm font-bold text-slate-900">Conhecer o Curso</Link>
         </section>
