@@ -3,6 +3,7 @@ export interface KitAudioFile {
   key: string;
   url: string;
   tone: string;
+  voice: "todos" | "soprano" | "contralto" | "tenor";
   fileType: string;
 }
 

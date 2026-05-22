@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { revalidatePath } from "next/cache";
 
 import { PageHeader } from "@/components/admin/page-header";
 import { deleteKit, getKits } from "@/lib/data/kits";
@@ -11,6 +12,9 @@ export default async function KitsPage() {
     const id = String(formData.get("id") ?? "");
     if (!id) return;
     await deleteKit(id);
+    revalidatePath("/admin/kits");
+    revalidatePath("/biblioteca");
+    revalidatePath("/todos-os-kits");
   }
 
   return (

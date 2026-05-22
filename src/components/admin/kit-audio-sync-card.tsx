@@ -9,6 +9,8 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [tones, setTones] = useState<KitAudioToneGroup[]>([]);
 
+  const VOICE_ORDER = ["todos", "soprano", "contralto", "tenor"] as const;
+
   async function syncAudios() {
     setLoading(true);
     setError(null);
@@ -50,14 +52,26 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
         {tones.map((toneGroup) => (
           <article key={toneGroup.tone} className="rounded-lg border border-border bg-surface-muted p-4">
             <h3 className="mb-2 text-sm font-semibold text-gold-300">Tom {toneGroup.tone}</h3>
-            <ul className="space-y-2">
-              {toneGroup.files.map((file) => (
-                <li key={file.key} className="flex items-center justify-between rounded-md border border-border/60 px-3 py-2 text-xs">
-                  <span className="font-medium text-foreground">{file.name}</span>
-                  <span className="text-muted">.{file.fileType}</span>
-                </li>
-              ))}
-            </ul>
+            <p className="mb-3 text-xs text-muted">{toneGroup.files.length} arquivo(s)</p>
+            <div className="space-y-3">
+              {VOICE_ORDER.map((voice) => {
+                const voiceFiles = toneGroup.files.filter((file) => file.voice === voice);
+                if (voiceFiles.length === 0) return null;
+                return (
+                  <section key={`${toneGroup.tone}-${voice}`}>
+                    <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">{voice}</h4>
+                    <ul className="space-y-2">
+                      {voiceFiles.map((file) => (
+                        <li key={file.key} className="flex items-center justify-between rounded-md border border-border/60 px-3 py-2 text-xs">
+                          <span className="font-medium text-foreground">{file.name}</span>
+                          <span className="text-muted">.{file.fileType}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                );
+              })}
+            </div>
           </article>
         ))}
       </div>

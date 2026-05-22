@@ -3,6 +3,14 @@ import { ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { r2BucketName, r2Client } from "@/lib/r2/client";
 import type { KitAudioFile, KitAudioToneGroup } from "@/types/kit-audio";
 
+const VOICES = ["todos", "soprano", "contralto", "tenor"] as const;
+type Voice = (typeof VOICES)[number];
+
+function normalizeVoice(value: string): Voice {
+  const normalized = value.trim().toLowerCase();
+  return (VOICES as readonly string[]).includes(normalized) ? (normalized as Voice) : "todos";
+}
+
 function buildPublicUrl(key: string) {
   const publicBase = process.env.R2_PUBLIC_URL_BASE?.trim();
   if (publicBase) return `${publicBase.replace(/\/$/, "")}/${key}`;
@@ -33,10 +41,13 @@ export async function listKitAudioFiles(r2Folder: string): Promise<{ tones: KitA
     if (!key || key.endsWith("/")) continue;
 
     const relativePath = key.slice(prefix.length);
-    const parts = relativePath.split("/");
+    const parts = relativePath.split("/").filter(Boolean);
     if (parts.length < 2) continue;
 
     const tone = parts[0]?.trim();
+    const maybeVoice = parts[1] ?? "";
+    const hasVoiceFolder = (VOICES as readonly string[]).includes(maybeVoice.trim().toLowerCase());
+    const voice = hasVoiceFolder ? normalizeVoice(maybeVoice) : "todos";
     const filename = parts[parts.length - 1]?.trim();
     if (!tone || !filename) continue;
 
@@ -46,6 +57,7 @@ export async function listKitAudioFiles(r2Folder: string): Promise<{ tones: KitA
 
     const file: KitAudioFile = {
       tone,
+      voice,
       name,
       key,
       url: buildPublicUrl(key),
