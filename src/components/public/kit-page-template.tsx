@@ -21,7 +21,12 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
   const [selectedVoice, setSelectedVoice] = useState<VoiceType>("todos");
   const [loginOpen, setLoginOpen] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
-  const [upgradeMessage, setUpgradeMessage] = useState("Faça upgrade para continuar.");
+  const [upgradeConfig, setUpgradeConfig] = useState({
+    title: "Upgrade necessário",
+    message: "Faça upgrade para continuar.",
+    ctaLabel: "Assinar Premium",
+    ctaHref: "/assinar?plan=premium",
+  });
 
   const currentTone = kit.tones.find((t) => t.tone === selectedTone) ?? kit.tones[0];
   const selectedFile = currentTone?.voices[selectedVoice] ?? currentTone?.voices.todos ?? null;
@@ -38,7 +43,12 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
             <div className="mt-5 space-y-3">
               <ToneSelector tones={kit.tones.map((tone) => tone.tone)} selectedTone={selectedTone} onSelectTone={(tone) => {
                 if (!accessContext.tone.allowed && tone !== kit.tones[0]?.tone) {
-                  setUpgradeMessage("Troca de tom liberada apenas para Premium nesta V1.");
+                  setUpgradeConfig({
+                    title: "Troca de tom é um recurso Premium.",
+                    message: "Experimente todos os tons, todas as vozes e acesso completo aos kits.",
+                    ctaLabel: "Experimentar Premium grátis por 7 dias",
+                    ctaHref: "/assinar?plan=premium",
+                  });
                   setUpgradeOpen(true);
                   return;
                 }
@@ -48,7 +58,23 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
               <HarmomusPlayer src={selectedFile?.streamUrl ?? null} title={`Tom ${selectedTone} • Voz ${selectedVoice}`} canPlay={accessContext.play.allowed} onBlocked={() => {
                 if (accessContext.play.reason === "guest") setLoginOpen(true);
                 else {
-                  setUpgradeMessage(accessContext.play.reason === "free_limit" ? "Você atingiu o limite de 5 kits em 24h no plano free." : "Seu plano atual não atende ao kit.");
+                  if (accessContext.play.reason === "free_limit") {
+                    setUpgradeConfig({
+                      title: "Você atingiu seu limite gratuito de hoje.",
+                      message: "Assine o Premium e continue estudando sem interrupções.",
+                      ctaLabel: "Liberar acesso com Premium",
+                      ctaHref: "/assinar?plan=premium",
+                    });
+                  } else {
+                    const requiredPlan = accessContext.play.requiredPlan ?? "premium";
+                    const planLabel = requiredPlan === "plus" ? "Plus" : "Premium";
+                    setUpgradeConfig({
+                      title: `Este kit requer plano ${planLabel}.`,
+                      message: "Faça upgrade para desbloquear este conteúdo agora.",
+                      ctaLabel: `Assinar ${planLabel}` ,
+                      ctaHref: `/assinar?plan=${requiredPlan}` ,
+                    });
+                  }
                   setUpgradeOpen(true);
                 }
               }} />
@@ -66,7 +92,14 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
         </section>
       ) : null}
       <LoginRequiredModal open={loginOpen} onClose={() => setLoginOpen(false)} />
-      <UpgradeRequiredModal open={upgradeOpen} message={upgradeMessage} onClose={() => setUpgradeOpen(false)} />
+      <UpgradeRequiredModal
+        open={upgradeOpen}
+        title={upgradeConfig.title}
+        message={upgradeConfig.message}
+        ctaLabel={upgradeConfig.ctaLabel}
+        ctaHref={upgradeConfig.ctaHref}
+        onClose={() => setUpgradeOpen(false)}
+      />
     </main>
   );
 }
