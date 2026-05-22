@@ -1,13 +1,32 @@
 "use client";
 
-export function UpgradeRequiredModal({ open, message, onClose }: { open: boolean; message: string; onClose: () => void }) {
+import Link from "next/link";
+
+interface UpgradeRequiredModalProps {
+  open: boolean;
+  title: string;
+  message: string;
+  ctaLabel: string;
+  ctaHref: string;
+  onClose: () => void;
+}
+
+export function UpgradeRequiredModal({ open, title, message, ctaLabel, ctaHref, onClose }: UpgradeRequiredModalProps) {
   if (!open) return null;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-      <div className="w-full max-w-md rounded-2xl border border-gold-400/30 bg-surface p-6">
-        <h3 className="text-xl font-semibold text-white">Upgrade necessário</h3>
-        <p className="mt-2 text-sm text-zinc-300">{message}</p>
-        <button onClick={onClose} className="mt-5 rounded-lg border border-gold-400/50 px-4 py-2 text-gold-300">Entendi</button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-2xl border border-cyan-400/30 bg-gradient-to-br from-[#101629] to-[#090d1a] p-6 shadow-[0_20px_70px_rgba(6,182,212,0.2)]">
+        <h3 className="text-xl font-semibold text-white">{title}</h3>
+        <p className="mt-2 text-sm leading-relaxed text-zinc-200">{message}</p>
+        <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+          <Link href={ctaHref} className="inline-flex flex-1 items-center justify-center rounded-lg bg-gradient-to-r from-emerald-400 to-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:brightness-105">
+            {ctaLabel}
+          </Link>
+          <button onClick={onClose} className="rounded-lg border border-white/20 px-4 py-2 text-sm text-zinc-200 transition hover:bg-white/5">
+            Agora não
+          </button>
+        </div>
       </div>
     </div>
   );

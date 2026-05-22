@@ -13,7 +13,12 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
   const [debounced, setDebounced] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
-  const [upgradeMessage, setUpgradeMessage] = useState("Faça upgrade para continuar.");
+  const [upgradeConfig, setUpgradeConfig] = useState({
+    title: "Upgrade necessário",
+    message: "Faça upgrade para continuar.",
+    ctaLabel: "Assinar Premium",
+    ctaHref: "/assinar?plan=premium",
+  });
   const menuRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLDivElement>(null);
 
@@ -40,7 +45,13 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
     const allowedPlus = context.effectiveSlug === "plus" || context.effectiveSlug === "premium";
     const allowedPremium = context.effectiveSlug === "premium";
     if ((type === "plus" && !allowedPlus) || (type === "premium" && !allowedPremium)) {
-      setUpgradeMessage(type === "plus" ? "Minhas Playlists requer plano Plus ou Premium." : "Esta área requer plano Premium.");
+      const isPlus = type === "plus";
+      setUpgradeConfig({
+        title: isPlus ? "Este recurso requer plano Plus ou Premium." : "Este recurso requer plano Premium.",
+        message: isPlus ? "Faça upgrade para desbloquear suas playlists privadas." : "Desbloqueie o acesso premium completo agora.",
+        ctaLabel: isPlus ? "Assinar Plus" : "Assinar Premium",
+        ctaHref: isPlus ? "/assinar?plan=plus" : "/assinar?plan=premium",
+      });
       setUpgradeOpen(true);
       return false;
     }
@@ -71,7 +82,14 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
           </>}
         </div> : null}
       </div>
-      <UpgradeRequiredModal open={upgradeOpen} message={upgradeMessage} onClose={() => setUpgradeOpen(false)} />
+      <UpgradeRequiredModal
+        open={upgradeOpen}
+        title={upgradeConfig.title}
+        message={upgradeConfig.message}
+        ctaLabel={upgradeConfig.ctaLabel}
+        ctaHref={upgradeConfig.ctaHref}
+        onClose={() => setUpgradeOpen(false)}
+      />
     </>
   );
 }
