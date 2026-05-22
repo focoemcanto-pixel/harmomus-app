@@ -24,6 +24,24 @@ function safeRedirect(raw: string) {
   return raw;
 }
 
+function HarmomusAuthLogo() {
+  return (
+    <div className="mx-auto mb-7 flex items-center justify-center gap-3">
+      <div className="relative h-12 w-12 rounded-2xl border border-white/10 bg-white/[0.03] shadow-[0_0_34px_rgba(129,140,248,0.25)]">
+        <svg viewBox="0 0 64 64" className="h-full w-full overflow-visible p-2" aria-hidden="true">
+          <path d="M10 43 C20 30, 23 18, 30 8" stroke="#f8fbff" strokeWidth="5" strokeLinecap="round" fill="none" />
+          <path d="M18 49 C28 37, 34 25, 44 15" stroke="#a8b1ff" strokeWidth="5" strokeLinecap="round" fill="none" />
+          <path d="M27 53 C37 42, 43 33, 55 26" stroke="#6d5df6" strokeWidth="5" strokeLinecap="round" fill="none" />
+          <circle cx="50" cy="13" r="5" fill="#f8fbff" />
+        </svg>
+      </div>
+      <div className="text-left">
+        <p className="text-3xl font-semibold tracking-tight text-white">Harmo<span className="bg-gradient-to-r from-indigo-200 to-violet-500 bg-clip-text text-transparent">mus</span></p>
+      </div>
+    </div>
+  );
+}
+
 export default async function CadastroPage({ searchParams }: { searchParams: Promise<{ plan?: string; redirect?: string; error?: string }> }) {
   const params = await searchParams;
   const selectedPlan = (PLAN_OPTIONS.includes((params.plan ?? "").toLowerCase() as PlanSlug) ? (params.plan ?? "free").toLowerCase() : "free") as PlanSlug;
@@ -65,5 +83,29 @@ export default async function CadastroPage({ searchParams }: { searchParams: Pro
     redirect(`/api/billing/checkout?plan=${encodeURIComponent(plan)}`);
   }
 
-  return <PublicAppShell><section className="px-4 pb-10"><div className="mx-auto w-full max-w-xl rounded-3xl border border-white/15 bg-white/5 p-6 shadow-[0_0_80px_rgba(119,78,255,0.25)] backdrop-blur-2xl md:p-8"><div className="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-2xl border border-cyan-400/60 bg-gradient-to-br from-cyan-400/20 to-violet-500/20 text-lg font-bold tracking-wide">H</div><p className="text-center text-sm text-zinc-300">Prepare sua voz. Honre seu chamado.</p><h1 className="mt-2 text-center text-3xl font-semibold text-white">Criar conta grátis</h1><form action={signUp} className="mt-6 grid gap-4 md:grid-cols-2"><input type="hidden" name="redirect" value={redirectPath} /><div className="md:col-span-2"><label className="mb-2 block text-sm text-zinc-200">Nome</label><input name="full_name" required className="h-11 w-full rounded-xl border border-white/20 bg-black/30 px-3 text-white" /></div><div><label className="mb-2 block text-sm text-zinc-200">Nome de usuário</label><input name="username" required className="h-11 w-full rounded-xl border border-white/20 bg-black/30 px-3 text-white" /></div><div><label className="mb-2 block text-sm text-zinc-200">E-mail</label><input name="email" type="email" required className="h-11 w-full rounded-xl border border-white/20 bg-black/30 px-3 text-white" /></div><div><label className="mb-2 block text-sm text-zinc-200">Telefone / WhatsApp</label><input name="phone" required placeholder="(11) 99999-9999" className="h-11 w-full rounded-xl border border-white/20 bg-black/30 px-3 text-white" /></div><div><label className="mb-2 block text-sm text-zinc-200">Plano desejado</label><select name="plan" defaultValue={selectedPlan} className="h-11 w-full rounded-xl border border-white/20 bg-black/40 px-3 text-white"><option value="free">Free</option><option value="plus">Plus</option><option value="premium">Premium</option></select></div><div><label className="mb-2 block text-sm text-zinc-200">Senha</label><input name="password" type="password" required className="h-11 w-full rounded-xl border border-white/20 bg-black/30 px-3 text-white" /></div><div><label className="mb-2 block text-sm text-zinc-200">Confirmar senha</label><input name="confirm_password" type="password" required className="h-11 w-full rounded-xl border border-white/20 bg-black/30 px-3 text-white" /></div>{error ? <p className="md:col-span-2 rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">{error}</p> : null}<button className="md:col-span-2 h-11 w-full rounded-xl border border-violet-300/50 bg-gradient-to-r from-cyan-500/30 to-violet-500/30 font-medium text-white">Continuar</button></form><p className="mt-5 text-center text-sm text-zinc-300">Já tem conta? <Link href="/login" className="text-cyan-200 hover:text-cyan-100">Entrar</Link></p></div></section></PublicAppShell>;
+  return (
+    <PublicAppShell>
+      <section className="px-4 pb-10 pt-10 md:pt-2">
+        <div className="mx-auto w-full max-w-xl rounded-[2rem] border border-white/15 bg-gradient-to-b from-white/[0.08] to-white/[0.03] p-6 shadow-[0_0_90px_rgba(119,78,255,0.25)] backdrop-blur-2xl md:p-8">
+          <HarmomusAuthLogo />
+          <p className="text-center text-sm text-zinc-300">Prepare sua voz. Honre seu chamado.</p>
+          <h1 className="mt-2 text-center text-3xl font-semibold text-white md:text-4xl">Criar conta grátis</h1>
+
+          <form action={signUp} className="mt-7 grid gap-4 md:grid-cols-2">
+            <input type="hidden" name="redirect" value={redirectPath} />
+            <div className="md:col-span-2"><label className="mb-2 block text-sm text-zinc-200">Nome</label><input name="full_name" required className="h-12 w-full rounded-2xl border border-white/20 bg-black/30 px-4 text-white outline-none ring-cyan-300/40 transition focus:ring" /></div>
+            <div><label className="mb-2 block text-sm text-zinc-200">Nome de usuário</label><input name="username" required className="h-12 w-full rounded-2xl border border-white/20 bg-black/30 px-4 text-white outline-none ring-cyan-300/40 transition focus:ring" /></div>
+            <div><label className="mb-2 block text-sm text-zinc-200">E-mail</label><input name="email" type="email" required className="h-12 w-full rounded-2xl border border-white/20 bg-black/30 px-4 text-white outline-none ring-cyan-300/40 transition focus:ring" /></div>
+            <div><label className="mb-2 block text-sm text-zinc-200">Telefone / WhatsApp</label><input name="phone" required placeholder="(11) 99999-9999" className="h-12 w-full rounded-2xl border border-white/20 bg-black/30 px-4 text-white outline-none ring-cyan-300/40 transition focus:ring" /></div>
+            <div><label className="mb-2 block text-sm text-zinc-200">Plano desejado</label><select name="plan" defaultValue={selectedPlan} className="h-12 w-full rounded-2xl border border-white/20 bg-black/40 px-4 text-white outline-none ring-cyan-300/40 transition focus:ring"><option value="free">Free</option><option value="plus">Plus</option><option value="premium">Premium</option></select></div>
+            <div><label className="mb-2 block text-sm text-zinc-200">Senha</label><input name="password" type="password" required className="h-12 w-full rounded-2xl border border-white/20 bg-black/30 px-4 text-white outline-none ring-cyan-300/40 transition focus:ring" /></div>
+            <div><label className="mb-2 block text-sm text-zinc-200">Confirmar senha</label><input name="confirm_password" type="password" required className="h-12 w-full rounded-2xl border border-white/20 bg-black/30 px-4 text-white outline-none ring-cyan-300/40 transition focus:ring" /></div>
+            {error ? <p className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200 md:col-span-2">{error}</p> : null}
+            <button className="h-12 w-full rounded-2xl border border-cyan-300/50 bg-gradient-to-r from-cyan-400 to-violet-500 font-semibold text-slate-950 shadow-[0_18px_50px_rgba(34,211,238,0.25)] transition hover:brightness-110 md:col-span-2">Continuar</button>
+          </form>
+          <p className="mt-5 text-center text-sm text-zinc-300">Já tem conta? <Link href="/login" className="text-cyan-200 hover:text-cyan-100">Entrar</Link></p>
+        </div>
+      </section>
+    </PublicAppShell>
+  );
 }
