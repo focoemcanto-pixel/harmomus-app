@@ -36,10 +36,8 @@ export function HomeHeroCarousel({ banners }: { banners: BannerSlide[] }) {
           </div>
         </div>
       ))}
-      <div className="relative z-10 flex min-h-[340px] items-end justify-between p-4">
-        <button onClick={() => setIndex((index - 1 + slides.length) % slides.length)} className="rounded-full border border-white/40 bg-black/35 px-3 py-1 text-white">←</button>
+      <div className="relative z-10 flex min-h-[340px] items-end justify-center p-4">
         <div className="flex gap-2">{slides.map((slide, dot) => <button key={slide.id} onClick={() => setIndex(dot)} className={`h-2 w-2 rounded-full ${dot === index ? "bg-white" : "bg-white/40"}`} />)}</div>
-        <button onClick={() => setIndex((index + 1) % slides.length)} className="rounded-full border border-white/40 bg-black/35 px-3 py-1 text-white">→</button>
       </div>
     </div>
   );

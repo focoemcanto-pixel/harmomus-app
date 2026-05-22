@@ -62,19 +62,6 @@ export default async function HomePage() {
           <div className="pointer-events-none absolute -right-24 bottom-0 h-72 w-72 rounded-full bg-purple-500/30 blur-3xl" />
           <div className="relative grid gap-8 lg:grid-cols-[1.1fr_1fr]">
             <div>
-              <div className="flex flex-wrap gap-2">
-                {[
-                  "Kits vocais em todos os tons",
-                  "Preparação para ministério de louvor",
-                  "Harmonia vocal premium",
-                  "Ensaios com excelência",
-                ].map((badge) => (
-                  <span key={badge} className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[11px] uppercase tracking-[0.16em] text-cyan-100 backdrop-blur">
-                    {badge}
-                  </span>
-                ))}
-              </div>
-
               <h1 className="mt-5 text-4xl font-semibold leading-tight text-white md:text-6xl">
                 Prepare sua voz. Honre seu chamado.
               </h1>

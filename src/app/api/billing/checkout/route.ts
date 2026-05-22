@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { startStripeCheckout } from "@/lib/data/billing";
 import { getPlans } from "@/lib/data/plans";
@@ -17,24 +18,49 @@ function loginRedirectUrl(req: Request, planSlug: string) {
   return new URL(`/login?redirect=${encodeURIComponent(redirectPath)}`, req.url);
 }
 
+function toErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  return "Não foi possível iniciar o checkout agora. Tente novamente.";
+}
+
 export async function POST(req: Request) {
-  const form = await req.formData();
-  const planParam = String(form.get("plan") ?? form.get("plan_id") ?? "");
-  const planId = await resolvePlanId(planParam);
-  if (!planId) return NextResponse.json({ error: "Plano inválido." }, { status: 400 });
-  const user = await getCurrentUser();
-  if (!user?.email) return NextResponse.redirect(loginRedirectUrl(req, planParam), { status: 303 });
-  const session = await startStripeCheckout(user.id, user.email, planId);
-  return NextResponse.redirect(session.url!, { status: 303 });
+  try {
+    const form = await req.formData();
+    const planParam = String(form.get("plan") ?? form.get("plan_id") ?? "");
+    const planId = await resolvePlanId(planParam);
+    if (!planId) return NextResponse.json({ error: "Plano inválido." }, { status: 400 });
+
+    const user = await getCurrentUser();
+    if (!user?.email) return NextResponse.redirect(loginRedirectUrl(req, planParam), { status: 303 });
+
+    const session = await startStripeCheckout(user.id, user.email, planId);
+    return NextResponse.redirect(session.url, { status: 303 });
+  } catch (error) {
+    return NextResponse.json({ error: toErrorMessage(error) }, { status: 500 });
+  }
 }
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  const planParam = String(url.searchParams.get("plan") ?? "");
-  const planId = await resolvePlanId(planParam);
-  if (!planId) return NextResponse.redirect(new URL("/assinar", req.url), { status: 303 });
-  const user = await getCurrentUser();
-  if (!user?.email) return NextResponse.redirect(loginRedirectUrl(req, planParam), { status: 303 });
-  const session = await startStripeCheckout(user.id, user.email, planId);
-  return NextResponse.redirect(session.url!, { status: 303 });
+
+  try {
+    const planParam = String(url.searchParams.get("plan") ?? "");
+    const planId = await resolvePlanId(planParam);
+    if (!planId) {
+      const redirect = new URL("/assinar", req.url);
+      redirect.searchParams.set("error", "Plano inválido");
+      return NextResponse.redirect(redirect, { status: 303 });
+    }
+
+    const user = await getCurrentUser();
+    if (!user?.email) return NextResponse.redirect(loginRedirectUrl(req, planParam), { status: 303 });
+
+    const session = await startStripeCheckout(user.id, user.email, planId);
+    return NextResponse.redirect(session.url, { status: 303 });
+  } catch (error) {
+    url.pathname = "/assinar";
+    url.search = "";
+    url.searchParams.set("error", toErrorMessage(error));
+    return NextResponse.redirect(url, { status: 303 });
+  }
 }
