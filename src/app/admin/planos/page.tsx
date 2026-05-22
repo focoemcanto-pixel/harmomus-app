@@ -33,6 +33,7 @@ export default async function AdminPlanosPage() {
       <label className="text-xs flex items-center gap-2"><input type="checkbox" name="trial_enabled" defaultChecked={plan.trial_days > 0} /> Trial ativo</label>
       <input name="trial_days" type="number" defaultValue={plan.trial_days} className="w-full rounded border border-border bg-background px-3 py-2" />
       <input name="stripe_price_id" defaultValue={plan.stripe_price_id ?? ""} className="w-full rounded border border-border bg-background px-3 py-2" placeholder="Stripe Price ID" />
+      {["plus","premium"].includes(plan.slug) && !plan.stripe_price_id ? <p className="text-xs text-amber-300">Plano pago sem Stripe Price ID.</p> : null}
       <input name="hierarchy_level" type="number" defaultValue={plan.hierarchy_level} className="w-full rounded border border-border bg-background px-3 py-2" />
       <select name="status" defaultValue={plan.status} className="w-full rounded border border-border bg-background px-3 py-2"><option value="active">active</option><option value="inactive">inactive</option></select>
       <textarea name="features_json" rows={4} defaultValue={JSON.stringify(plan.features ?? [], null, 2)} className="w-full rounded border border-border bg-background px-3 py-2" />

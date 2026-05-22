@@ -16,6 +16,8 @@ export async function POST(req: Request) {
     const portal = await createPortal(user.id, user.email, new URL(req.url).origin);
     return NextResponse.redirect(portal.url, { status: 303 });
   } catch (error) {
-    return NextResponse.json({ error: toErrorMessage(error) }, { status: 500 });
+    const redirect = new URL("/assinatura", req.url);
+    redirect.searchParams.set("error", toErrorMessage(error));
+    return NextResponse.redirect(redirect, { status: 303 });
   }
 }
