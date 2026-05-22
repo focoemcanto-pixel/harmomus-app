@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { SubscribeButton } from "@/components/public/subscribe-button";
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { getPlans } from "@/lib/data/plans";
@@ -13,9 +14,9 @@ export default async function AssinarPage({ searchParams }: { searchParams?: Pro
 
   return (
     <PublicAppShell>
-      <main className="min-h-screen bg-[radial-gradient(circle_at_top,#34184f_0%,#0a0b14_36%,#04050a_100%)] px-4 py-8 text-white md:px-8 md:py-10">
+      <main className="relative z-10 min-h-screen overflow-x-hidden bg-[#04050a] px-4 pb-10 pt-24 text-white md:px-8 md:pt-28">
         <section className="mx-auto w-full max-w-7xl">
-          <div className="rounded-3xl border border-white/15 bg-gradient-to-br from-white/10 to-transparent p-6 shadow-[0_25px_90px_rgba(168,85,247,0.23)] md:p-10">
+          <div className="rounded-3xl border border-white/15 bg-gradient-to-br from-[#171327] to-[#0b0d18] p-6 shadow-[0_25px_90px_rgba(168,85,247,0.23)] md:p-10">
             <p className="text-xs uppercase tracking-[0.22em] text-cyan-200">Assinatura Harmomus</p>
             <h1 className="mt-3 text-3xl font-semibold md:text-5xl">Escolha o plano ideal para o seu momento vocal.</h1>
             <p className="mt-4 max-w-3xl text-sm text-zinc-200 md:text-base">Do acesso gratuito até a experiência premium completa, com todos os tons, pedidos e prioridade de conteúdo para seu ministério.</p>
@@ -47,10 +48,13 @@ export default async function AssinarPage({ searchParams }: { searchParams?: Pro
                     ))}
                   </ul>
 
-                  <form action="/api/billing/checkout" method="post" className="mt-6">
-                    <input type="hidden" name="plan_id" value={plan.id} />
-                    <button className={`w-full rounded-xl px-4 py-3 text-sm font-semibold transition ${popular ? "bg-gradient-to-r from-cyan-300 to-fuchsia-300 text-slate-950 hover:opacity-90" : "border border-white/30 bg-white/10 hover:bg-white/20"}`}>{content.cta}</button>
-                  </form>
+                  <div className="mt-6">
+                    <SubscribeButton
+                      planSlug={slug as "free" | "plus" | "premium"}
+                      label={content.cta}
+                      className={`w-full rounded-xl px-4 py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-80 ${popular ? "bg-gradient-to-r from-cyan-300 to-fuchsia-300 text-slate-950 hover:opacity-90" : "border border-white/30 bg-white/10 hover:bg-white/20"}`}
+                    />
+                  </div>
                 </article>
               );
             })}

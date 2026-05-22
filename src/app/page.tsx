@@ -5,6 +5,7 @@ import { getPublishedKits } from "@/lib/data/public-kits";
 import { getPublicHomeBanners } from "@/lib/data/home-banners";
 import { HomeHeroCarousel } from "@/components/public/home-hero-carousel";
 import { OFFICIAL_PLANS } from "@/lib/data/official-plans";
+import { SubscribeButton } from "@/components/public/subscribe-button";
 
 export const revalidate = 300;
 
@@ -84,9 +85,7 @@ export default async function HomePage() {
                 <Link href="/todos-os-kits" className="rounded-xl bg-gradient-to-r from-cyan-300 to-blue-400 px-6 py-3 text-sm font-bold text-slate-950 shadow-[0_12px_40px_rgba(56,189,248,0.45)] transition hover:scale-[1.02]">
                   Explorar kits
                 </Link>
-                <Link href="/assinar" className="rounded-xl border border-white/30 bg-white/10 px-6 py-3 text-sm font-medium text-white backdrop-blur transition hover:bg-white/20">
-                  Testar grátis por 7 dias
-                </Link>
+                <SubscribeButton planSlug="premium" label="Experimentar grátis por 7 dias" className="rounded-xl border border-white/30 bg-white/10 px-6 py-3 text-sm font-medium text-white backdrop-blur transition hover:bg-white/20 disabled:opacity-80" />
               </div>
             </div>
 
@@ -220,9 +219,13 @@ export default async function HomePage() {
                     ))}
                   </ul>
 
-                  <Link href={`/assinar?plan=${plan.slug}`} className={`mt-6 inline-flex w-full justify-center rounded-xl px-4 py-3 text-sm font-semibold transition ${isPopular ? "bg-gradient-to-r from-cyan-300 to-fuchsia-300 text-slate-950 hover:opacity-90" : "border border-white/30 bg-white/10 text-white hover:bg-white/20"}`}>
-                    {plan.cta}
-                  </Link>
+                  <div className="mt-6">
+                    <SubscribeButton
+                      planSlug={plan.slug as "free" | "plus" | "premium"}
+                      label={plan.cta}
+                      className={`w-full rounded-xl px-4 py-3 text-sm font-semibold transition disabled:opacity-80 ${isPopular ? "bg-gradient-to-r from-cyan-300 to-fuchsia-300 text-slate-950 hover:opacity-90" : "border border-white/30 bg-white/10 text-white hover:bg-white/20"}`}
+                    />
+                  </div>
                 </article>
               );
             })}
