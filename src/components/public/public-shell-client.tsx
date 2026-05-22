@@ -21,7 +21,8 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
     ctaHref: "/assinar?plan=premium",
   });
   const menuRef = useRef<HTMLDivElement>(null);
-  const searchRef = useRef<HTMLDivElement>(null);
+  const searchDesktopRef = useRef<HTMLDivElement>(null);
+  const searchMobileRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(query.toLowerCase().trim()), 180);
@@ -31,7 +32,9 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
   useEffect(() => {
     function onClickOutside(ev: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(ev.target as Node)) setMenuOpen(false);
-      if (searchRef.current && !searchRef.current.contains(ev.target as Node)) setQuery("");
+      const clickedDesktop = searchDesktopRef.current?.contains(ev.target as Node) ?? false;
+      const clickedMobile = searchMobileRef.current?.contains(ev.target as Node) ?? false;
+      if (!clickedDesktop && !clickedMobile) setQuery("");
     }
     document.addEventListener("mousedown", onClickOutside);
     return () => document.removeEventListener("mousedown", onClickOutside);
@@ -71,7 +74,13 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
 
   return (
     <>
-      <div className="relative mx-1 hidden flex-1 md:block" ref={searchRef}>
+      <div className="w-full md:hidden" ref={searchMobileRef}>
+        <div className="relative">
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar kits, artista ou categoria" className="h-10 w-full rounded-xl border border-white/15 bg-white/5 px-3 text-sm text-white outline-none ring-cyan-300/40 transition placeholder:text-zinc-400 focus:ring" />
+          {results.length > 0 ? <div className="absolute left-0 right-0 top-11 z-50 rounded-xl border border-white/10 bg-[#0d1220] p-2 shadow-premium">{results.map((item) => <Link key={item.id} href={`/biblioteca/${item.slug}`} onClick={() => setQuery("")} className="block rounded-lg px-3 py-2 hover:bg-white/5"><p className="text-sm text-white">{item.name}</p><p className="text-xs text-zinc-300">{item.artist} • {item.category}</p></Link>)}</div> : null}
+        </div>
+      </div>
+      <div className="relative mx-1 hidden flex-1 md:block" ref={searchDesktopRef}>
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar kits, artista ou categoria" className="h-11 w-full rounded-xl border border-white/15 bg-white/5 px-4 text-sm outline-none ring-cyan-300/40 transition focus:ring" />
         {results.length > 0 ? <div className="absolute left-0 right-0 top-12 z-50 rounded-xl border border-white/10 bg-[#0d1220] p-2 shadow-premium">{results.map((item) => <Link key={item.id} href={`/biblioteca/${item.slug}`} onClick={() => setQuery("")} className="block rounded-lg px-3 py-2 hover:bg-white/5"><p className="text-sm text-white">{item.name}</p><p className="text-xs text-zinc-300">{item.artist} • {item.category}</p></Link>)}</div> : null}
       </div>
