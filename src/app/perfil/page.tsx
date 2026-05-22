@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { ProfilePageClient } from "@/components/public/profile-page-client";
+import { PublicAppShell } from "@/components/public/public-app-shell";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
 
@@ -19,7 +20,7 @@ export default async function PerfilPage() {
     (supabase as any).from("kit_access_logs").select("id", { count: "exact", head: true }).eq("user_id", userId),
   ]);
 
-  return <ProfilePageClient
+  return <PublicAppShell><ProfilePageClient
     userId={userId}
     initialName={context.profile?.full_name ?? "Sem nome"}
     email={context.profile?.email ?? "Sem e-mail"}
@@ -28,5 +29,5 @@ export default async function PerfilPage() {
     planName={context.plan?.name ?? "Free"}
     subscriptionStatus={context.subscription?.status ?? "inactive"}
     stats={{ playlists: playlists ?? 0, favorites: 0, history: history ?? 0, kitsToday: kitsToday ?? 0 }}
-  />;
+  /></PublicAppShell>;
 }
