@@ -1,4 +1,21 @@
 import { NextResponse } from "next/server";
+
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { createPortal } from "@/lib/data/billing";
-export async function POST(req: Request){const user=await getCurrentUser(); if(!user) return NextResponse.redirect(new URL('/login',req.url)); const portal=await createPortal(user.id); return NextResponse.redirect(portal.url);} 
+
+function toErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  return "Não foi possível abrir o portal da assinatura agora.";
+}
+
+export async function POST(req: Request) {
+  try {
+    const user = await getCurrentUser();
+    if (!user?.email) return NextResponse.redirect(new URL("/login?redirect=%2Fassinatura", req.url), { status: 303 });
+
+    const portal = await createPortal(user.id, user.email);
+    return NextResponse.redirect(portal.url, { status: 303 });
+  } catch (error) {
+    return NextResponse.json({ error: toErrorMessage(error) }, { status: 500 });
+  }
+}
