@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { PublicAppShell } from "@/components/public/public-app-shell";
+import { SignupPlanSelector } from "@/components/public/signup-plan-selector";
 import { createClient } from "@/lib/supabase/server";
 
 const PLAN_OPTIONS = ["free", "plus", "premium"] as const;
@@ -85,11 +86,11 @@ export default async function CadastroPage({ searchParams }: { searchParams: Pro
 
   return (
     <PublicAppShell>
-      <section className="px-4 pb-10 pt-10 md:pt-2">
+      <section className="px-4 pb-10 pt-16 md:pt-8">
         <div className="mx-auto w-full max-w-xl rounded-[2rem] border border-white/15 bg-gradient-to-b from-white/[0.08] to-white/[0.03] p-6 shadow-[0_0_90px_rgba(119,78,255,0.25)] backdrop-blur-2xl md:p-8">
           <HarmomusAuthLogo />
-          <p className="text-center text-sm text-zinc-300">Prepare sua voz. Honre seu chamado.</p>
-          <h1 className="mt-2 text-center text-3xl font-semibold text-white md:text-4xl">Criar conta grátis</h1>
+          <h1 className="mt-2 text-center text-3xl font-semibold text-white md:text-4xl">Crie sua conta</h1>
+          <p className="mt-2 text-center text-sm text-zinc-300">Prepare sua voz. Honre seu chamado.</p>
 
           <form action={signUp} className="mt-7 grid gap-4 md:grid-cols-2">
             <input type="hidden" name="redirect" value={redirectPath} />
@@ -97,11 +98,10 @@ export default async function CadastroPage({ searchParams }: { searchParams: Pro
             <div><label className="mb-2 block text-sm text-zinc-200">Nome de usuário</label><input name="username" required className="h-12 w-full rounded-2xl border border-white/20 bg-black/30 px-4 text-white outline-none ring-cyan-300/40 transition focus:ring" /></div>
             <div><label className="mb-2 block text-sm text-zinc-200">E-mail</label><input name="email" type="email" required className="h-12 w-full rounded-2xl border border-white/20 bg-black/30 px-4 text-white outline-none ring-cyan-300/40 transition focus:ring" /></div>
             <div><label className="mb-2 block text-sm text-zinc-200">Telefone / WhatsApp</label><input name="phone" required placeholder="(11) 99999-9999" className="h-12 w-full rounded-2xl border border-white/20 bg-black/30 px-4 text-white outline-none ring-cyan-300/40 transition focus:ring" /></div>
-            <div><label className="mb-2 block text-sm text-zinc-200">Plano desejado</label><select name="plan" defaultValue={selectedPlan} className="h-12 w-full rounded-2xl border border-white/20 bg-black/40 px-4 text-white outline-none ring-cyan-300/40 transition focus:ring"><option value="free">Free</option><option value="plus">Plus</option><option value="premium">Premium</option></select></div>
-            <div><label className="mb-2 block text-sm text-zinc-200">Senha</label><input name="password" type="password" required className="h-12 w-full rounded-2xl border border-white/20 bg-black/30 px-4 text-white outline-none ring-cyan-300/40 transition focus:ring" /></div>
+                        <div><label className="mb-2 block text-sm text-zinc-200">Senha</label><input name="password" type="password" required className="h-12 w-full rounded-2xl border border-white/20 bg-black/30 px-4 text-white outline-none ring-cyan-300/40 transition focus:ring" /></div>
             <div><label className="mb-2 block text-sm text-zinc-200">Confirmar senha</label><input name="confirm_password" type="password" required className="h-12 w-full rounded-2xl border border-white/20 bg-black/30 px-4 text-white outline-none ring-cyan-300/40 transition focus:ring" /></div>
             {error ? <p className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200 md:col-span-2">{error}</p> : null}
-            <button className="h-12 w-full rounded-2xl border border-cyan-300/50 bg-gradient-to-r from-cyan-400 to-violet-500 font-semibold text-slate-950 shadow-[0_18px_50px_rgba(34,211,238,0.25)] transition hover:brightness-110 md:col-span-2">Continuar</button>
+                        <SignupPlanSelector initialPlan={selectedPlan} />
           </form>
           <p className="mt-5 text-center text-sm text-zinc-300">Já tem conta? <Link href="/login" className="text-cyan-200 hover:text-cyan-100">Entrar</Link></p>
         </div>
