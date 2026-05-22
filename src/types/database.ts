@@ -151,6 +151,42 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["audio_access_logs"]["Insert"]>;
       };
 
+
+      home_banners: {
+        Row: {
+          id: string;
+          title: string;
+          subtitle: string;
+          image_url: string;
+          mobile_image_url: string | null;
+          button_label: string;
+          button_href: string;
+          type: string;
+          is_active: boolean;
+          sort_order: number;
+          starts_at: string | null;
+          ends_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          title: string;
+          subtitle?: string;
+          image_url: string;
+          mobile_image_url?: string | null;
+          button_label?: string;
+          button_href?: string;
+          type?: string;
+          is_active?: boolean;
+          sort_order?: number;
+          starts_at?: string | null;
+          ends_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["home_banners"]["Insert"]>;
+      };
       categories: {
         Row: {
           id: string;
