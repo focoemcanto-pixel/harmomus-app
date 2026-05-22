@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import { SubscribeButton } from "@/components/public/subscribe-button";
 import { PublicAppShell } from "@/components/public/public-app-shell";
@@ -11,6 +12,10 @@ export default async function AssinarPage({ searchParams }: { searchParams?: Pro
   const [plans, user, params] = await Promise.all([getPlans(), getCurrentUser(), searchParams]);
   const selectedPlan = typeof params?.plan === "string" ? params.plan.toLowerCase() : "premium";
   const visiblePlans = plans.filter((p) => ["free", "plus", "premium"].includes(p.slug) && p.status === "active");
+
+  if (!user) {
+    redirect(`/cadastro?plan=${encodeURIComponent(selectedPlan)}&redirect=${encodeURIComponent(`/assinar?plan=${selectedPlan}`)}`);
+  }
 
   return (
     <PublicAppShell>
@@ -59,8 +64,6 @@ export default async function AssinarPage({ searchParams }: { searchParams?: Pro
               );
             })}
           </div>
-
-          {!user ? <p className="mt-4 text-center text-xs text-zinc-400">Ao assinar, você será redirecionado para login antes do checkout.</p> : null}
           <div className="mt-8 text-center">
             <Link href="/todos-os-kits" className="text-sm text-cyan-200 hover:text-cyan-100">Ou volte para explorar todos os kits</Link>
           </div>

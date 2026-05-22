@@ -89,8 +89,8 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
         <button onClick={() => setMenuOpen((v) => !v)} className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-white/20 bg-white/5 text-xs font-semibold">{liveAvatar ? <img src={liveAvatar} alt="avatar" className="h-full w-full object-cover" /> : (context.profile?.full_name ?? context.profile?.email ?? "U").slice(0, 1).toUpperCase()}</button>
         {menuOpen ? <div className="absolute right-0 top-11 z-50 min-w-52 rounded-xl border border-white/10 bg-[#0d1220] p-2">
           {context.isGuest ? <>
-            <Link href="/login" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Entrar</Link>
-            <Link href="/assinatura" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Assinar</Link>
+            <Link href="/login" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Login</Link>
+            <Link href="/cadastro" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Cadastre-se</Link>
           </> : <>
             <Link href="/perfil" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Perfil</Link>
             <Link href="/assinatura" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Assinatura</Link>
