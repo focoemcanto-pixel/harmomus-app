@@ -33,7 +33,7 @@ export async function POST(req: Request) {
     const user = await getCurrentUser();
     if (!user?.email) return NextResponse.redirect(loginRedirectUrl(req, planParam), { status: 303 });
 
-    const session = await startStripeCheckout(user.id, user.email, planId);
+    const session = await startStripeCheckout(user.id, user.email, planId, new URL(req.url).origin);
     return NextResponse.redirect(session.url, { status: 303 });
   } catch (error) {
     return NextResponse.json({ error: toErrorMessage(error) }, { status: 500 });
@@ -55,7 +55,7 @@ export async function GET(req: Request) {
     const user = await getCurrentUser();
     if (!user?.email) return NextResponse.redirect(loginRedirectUrl(req, planParam), { status: 303 });
 
-    const session = await startStripeCheckout(user.id, user.email, planId);
+    const session = await startStripeCheckout(user.id, user.email, planId, new URL(req.url).origin);
     return NextResponse.redirect(session.url, { status: 303 });
   } catch (error) {
     url.pathname = "/assinar";

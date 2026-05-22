@@ -13,7 +13,7 @@ export async function POST(req: Request) {
     const user = await getCurrentUser();
     if (!user?.email) return NextResponse.redirect(new URL("/login?redirect=%2Fassinatura", req.url), { status: 303 });
 
-    const portal = await createPortal(user.id, user.email);
+    const portal = await createPortal(user.id, user.email, new URL(req.url).origin);
     return NextResponse.redirect(portal.url, { status: 303 });
   } catch (error) {
     return NextResponse.json({ error: toErrorMessage(error) }, { status: 500 });

@@ -33,10 +33,10 @@ const TESTIMONIALS = [
 const HARMONY_COURSE_URL = "/comunidade";
 
 const VOICE_SECTIONS = [
-  { title: "Soprano", description: "Linhas com brilho, extensão e firmeza para conduzir melodias com segurança." },
-  { title: "Contralto", description: "Camadas que preenchem o centro harmônico com textura e sustentação." },
+  { title: "Barítono", description: "Camada masculina de apoio com equilíbrio entre grave e brilho no médio." },
   { title: "Tenor", description: "Ataque definido no médio/agudo para trazer energia e presença nas entradas." },
-  { title: "Baixo", description: "Base sólida para ancorar acordes e fortalecer a unidade vocal." },
+  { title: "Contralto", description: "Camadas que preenchem o centro harmônico com textura e sustentação." },
+  { title: "Soprano", description: "Linhas com brilho, extensão e firmeza para conduzir melodias com segurança." },
 ];
 
 export default async function HomePage() {

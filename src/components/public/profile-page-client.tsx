@@ -82,8 +82,9 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
       const res = await fetch("/api/profile/avatar", { method: "POST", body: form });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Falha ao salvar avatar");
-      setAvatar(data.url);
-      window.localStorage.setItem("harmomus-avatar-url", data.url);
+      const versionedUrl = `${data.url}${data.url.includes("?") ? "&" : "?"}v=${Date.now()}`;
+      setAvatar(versionedUrl);
+      window.localStorage.setItem("harmomus-avatar-url", versionedUrl);
       window.dispatchEvent(new Event("harmomus:avatar-updated"));
       setOpen(false);
       setImageSrc(null);
