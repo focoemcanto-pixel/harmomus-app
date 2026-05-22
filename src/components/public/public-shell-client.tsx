@@ -49,8 +49,8 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
       setUpgradeConfig({
         title: isPlus ? "Este recurso requer plano Plus ou Premium." : "Este recurso requer plano Premium.",
         message: isPlus ? "Faça upgrade para desbloquear suas playlists privadas." : "Desbloqueie o acesso premium completo agora.",
-        ctaLabel: isPlus ? "Assinar Plus" : "Assinar Premium",
-        ctaHref: isPlus ? "/assinar?plan=plus" : "/assinar?plan=premium",
+        ctaLabel: "Assinar Premium",
+        ctaHref: "/assinar?plan=premium",
       });
       setUpgradeOpen(true);
       return false;

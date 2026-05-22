@@ -61,40 +61,70 @@ export default async function HomePage() {
     {
       slug: "free",
       name: "Free",
-      description: "Entrada para conhecer o Harmomus.",
-      price: "R$0",
+      description: "Ideal para começar no Harmomus.",
+      price: "Grátis",
+      cta: "Começar grátis",
+      offer: null,
       popular: false,
       benefits: [
-        { label: "Acesso limitado ao catálogo", included: true },
-        { label: "Playlists básicas", included: true },
-        { label: "Downloads completos", included: false },
-        { label: "Suporte prioritário", included: false },
+        { label: "5 acessos diários a kits", included: true },
+        { label: "Apenas tom original", included: true },
+        { label: "Player limitado", included: true },
+        { label: "Criação de playlists", included: true },
+        { label: "Comunidade aberta", included: true },
+        { label: "Troca de tonalidade", included: false },
+        { label: "Solicitação de novos kits", included: false },
+        { label: "Prioridade na confecção", included: false },
+        { label: "Receber kits antecipadamente", included: false },
+        { label: "Grupo exclusivo", included: false },
+        { label: "Solicitação de novos tons", included: false },
       ],
     },
     {
       slug: "plus",
       name: "Plus",
-      description: "Evolua seu estudo vocal semanal.",
-      price: "R$49/mês",
+      description: "Mais recursos para evolução contínua.",
+      price: "R$19/mês",
+      cta: "Assinar Plus",
+      offer: null,
       popular: false,
       benefits: [
-        { label: "Catálogo expandido", included: true },
-        { label: "Playlists ilimitadas", included: true },
-        { label: "Novos lançamentos antecipados", included: true },
-        { label: "Acesso ao curso completo", included: false },
+        { label: "Acesso ilimitado aos kits", included: true },
+        { label: "Player completo", included: true },
+        { label: "Apenas tom original", included: true },
+        { label: "Catálogo completo", included: true },
+        { label: "Criação de playlists", included: true },
+        { label: "Comunidade aberta", included: true },
+        { label: "Sugestões de conteúdos", included: true },
+        { label: "Solicitação de novos kits", included: false },
+        { label: "Prioridade na confecção", included: false },
+        { label: "Receber kits antecipadamente", included: false },
+        { label: "Grupo exclusivo", included: false },
+        { label: "Solicitação de novos tons", included: false },
       ],
     },
     {
       slug: "premium",
       name: "Premium",
-      description: "Experiência total para ministros e equipes.",
-      price: "R$89/mês",
+      description: "A experiência completa para ministérios.",
+      price: "R$39/mês",
+      cta: "Experimentar grátis por 7 dias",
+      offer: "7 dias grátis",
       popular: true,
       benefits: [
-        { label: "Todo o catálogo Harmomus", included: true },
-        { label: "Todas as vozes e tons", included: true },
-        { label: "Curso Foco em Harmonia", included: true },
-        { label: "Suporte VIP + comunidade", included: true },
+        { label: "Acesso ilimitado aos kits", included: true },
+        { label: "Todos os tons disponíveis", included: true },
+        { label: "Troca de tonalidade", included: true },
+        { label: "Catálogo completo", included: true },
+        { label: "Criação de playlists", included: true },
+        { label: "Solicitação de novos kits", included: true },
+        { label: "Prioridade na confecção", included: true },
+        { label: "Receber kits antecipadamente", included: true },
+        { label: "Comunidade Harmomus + grupo Premium para pedidos", included: true },
+        { label: "Solicitação de novos tons", included: true },
+        { label: "Conteúdos extras", included: true },
+        { label: "Votações internas", included: true },
+        { label: "Selo Premium Harmomus", included: true },
       ],
     },
   ];
@@ -281,7 +311,7 @@ export default async function HomePage() {
                   <h3 className="mt-2 text-3xl font-semibold text-white">{plan?.name ?? defaultPlan.name}</h3>
                   <p className="mt-1 text-zinc-200">{plan?.description ?? defaultPlan.description}</p>
                   <p className="mt-4 text-3xl font-bold text-white">{defaultPlan.price}</p>
-                  <p className="text-xs text-cyan-100">Teste grátis de 7 dias</p>
+                  <p className="text-xs text-cyan-100">{defaultPlan.offer ? `Oferta: ${defaultPlan.offer}` : "Sem fidelidade"}</p>
 
                   <ul className="mt-5 space-y-2">
                     {defaultPlan.benefits.map((benefit) => (
@@ -294,8 +324,8 @@ export default async function HomePage() {
                     ))}
                   </ul>
 
-                  <Link href="/assinar" className={`mt-6 inline-flex w-full justify-center rounded-xl px-4 py-3 text-sm font-semibold transition ${isPopular ? "bg-gradient-to-r from-cyan-300 to-fuchsia-300 text-slate-950 hover:opacity-90" : "border border-white/30 bg-white/10 text-white hover:bg-white/20"}`}>
-                    Assinar {plan?.name ?? defaultPlan.name}
+                  <Link href={`/assinar?plan=${defaultPlan.slug}`} className={`mt-6 inline-flex w-full justify-center rounded-xl px-4 py-3 text-sm font-semibold transition ${isPopular ? "bg-gradient-to-r from-cyan-300 to-fuchsia-300 text-slate-950 hover:opacity-90" : "border border-white/30 bg-white/10 text-white hover:bg-white/20"}`}>
+                    {defaultPlan.cta}
                   </Link>
                 </article>
               );
