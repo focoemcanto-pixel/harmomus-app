@@ -8,6 +8,7 @@ import type { Category, Kit, Plan } from "@/lib/data/kits";
 interface KitFormProps {
   mode: "create" | "edit";
   categories: Category[];
+  artistCategories: Category[];
   plans: Plan[];
   initialData?: Kit | null;
   action: (formData: FormData) => Promise<void>;
@@ -42,7 +43,7 @@ function SubmitButton({ mode }: { mode: "create" | "edit" }) {
   );
 }
 
-export function KitForm({ mode, categories, plans, initialData, action }: KitFormProps) {
+export function KitForm({ mode, categories, artistCategories, plans, initialData, action }: KitFormProps) {
   const [name, setName] = useState(initialData?.name ?? "");
   const [slug, setSlug] = useState(initialData?.slug ?? "");
   const [slugTouched, setSlugTouched] = useState(Boolean(initialData?.slug));
@@ -241,11 +242,15 @@ export function KitForm({ mode, categories, plans, initialData, action }: KitFor
 
         <label className="space-y-2 text-sm">
           <span className="text-muted">Artista *</span>
-          <input required name="artist" defaultValue={initialData?.artist ?? ""} className="w-full rounded-lg border border-border bg-surface-muted px-3 py-2" />
+          <>
+          <input list="artist-suggestions" required name="artist" defaultValue={initialData?.artist ?? ""} className="w-full rounded-lg border border-border bg-surface-muted px-3 py-2" />
+          <datalist id="artist-suggestions">{artistCategories.map((category) => <option key={category.id} value={category.name} />)}</datalist>
+          <p className="text-xs text-amber-300">Novo artista será criado automaticamente.</p>
+          </>
         </label>
 
         <label className="space-y-2 text-sm">
-          <span className="text-muted">Categoria</span>
+          <span className="text-muted">Categoria (opcional/avançado)</span>
           <select name="category_id" defaultValue={initialData?.category_id ?? ""} className="w-full rounded-lg border border-border bg-surface-muted px-3 py-2">
             <option value="">Sem categoria</option>
             {categories.map((category) => (

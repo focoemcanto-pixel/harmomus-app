@@ -3,11 +3,11 @@ import { revalidatePath } from "next/cache";
 
 import { KitAudioSyncCard } from "@/components/admin/kit-audio-sync-card";
 import { KitForm } from "@/components/admin/kit-form";
-import { getKitById, getKitFormOptions, updateKit } from "@/lib/data/kits";
+import { ensureArtistCategory, getArtistCategories, getKitById, getKitFormOptions, updateKit } from "@/lib/data/kits";
 
 export default async function EditarKitPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [kit, { categories, plans }] = await Promise.all([getKitById(id), getKitFormOptions()]);
+  const [kit, { categories, plans }, artistCategories] = await Promise.all([getKitById(id), getKitFormOptions(), getArtistCategories()]);
   if (!kit) notFound();
 
   async function updateKitAction(formData: FormData) {
@@ -19,6 +19,8 @@ export default async function EditarKitPage({ params }: { params: Promise<{ id: 
 
     if (!name || !slug || !artist) throw new Error("Preencha nome, slug e artista para continuar.");
 
+    const artistCategory = await ensureArtistCategory(artist);
+
     await updateKit(id, {
       name,
       slug,
@@ -27,7 +29,7 @@ export default async function EditarKitPage({ params }: { params: Promise<{ id: 
       lyrics: String(formData.get("lyrics") ?? "").trim() || null,
       cover_url: String(formData.get("cover_url") ?? "").trim() || null,
       r2_folder: String(formData.get("r2_folder") ?? "").trim() || null,
-      category_id: String(formData.get("category_id") ?? "") || null,
+      category_id: String(formData.get("category_id") ?? "") || artistCategory.id,
       required_plan: String(formData.get("required_plan") ?? "") || null,
       published: formData.get("published") === "on",
     });
@@ -42,7 +44,7 @@ export default async function EditarKitPage({ params }: { params: Promise<{ id: 
 
   return (
     <div className="space-y-6">
-      <KitForm mode="edit" categories={categories} plans={plans} initialData={kit} action={updateKitAction} />
+      <KitForm mode="edit" categories={categories} artistCategories={artistCategories} plans={plans} initialData={kit} action={updateKitAction} />
       <KitAudioSyncCard kitId={kit.id} />
     </div>
   );
