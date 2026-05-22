@@ -6,6 +6,7 @@ const items = [
   { label: "Kits Vocais", href: "/admin/kits", icon: Waves },
   { label: "Categorias", href: "/admin/categorias", icon: Tags },
   { label: "Banners Home", href: "/admin/banners", icon: PanelTop },
+  { label: "Blocos Home", href: "/admin/home-sections", icon: PanelTop },
   { label: "Planos", href: "/admin/planos", icon: Library },
   { label: "Membros", href: "/admin/membros", icon: Users },
   { label: "Billing", href: "/admin/billing", icon: CreditCard },
