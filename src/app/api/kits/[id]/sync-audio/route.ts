@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { getKitById, saveKitAudioSync } from "@/lib/data/kits";
-import { listKitAudioFiles } from "@/lib/r2/list-audio-files";
+import { listKitAudioFilesWithFallbacks } from "@/lib/r2/list-audio-files";
 
 export async function POST(_: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -22,7 +22,11 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
       return NextResponse.json({ error: "Este kit não possui pasta R2 configurada." }, { status: 400 });
     }
 
-    const syncData = await listKitAudioFiles(kit.r2_folder);
+    const syncData = await listKitAudioFilesWithFallbacks({
+      r2Folder: kit.r2_folder,
+      slug: kit.slug,
+      kitName: kit.name,
+    });
     await saveKitAudioSync(kit.id, syncData.tones);
 
     return NextResponse.json({
@@ -30,6 +34,8 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
       kitId: kit.id,
       r2Folder: kit.r2_folder,
       tones: syncData.tones,
+      usedPrefix: syncData.usedPrefix,
+      attemptedPrefixes: syncData.attemptedPrefixes,
       totals: {
         tones: syncData.tones.length,
         files: syncData.tones.reduce((sum, tone) => sum + tone.files.length, 0),

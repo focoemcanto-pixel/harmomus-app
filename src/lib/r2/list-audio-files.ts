@@ -22,11 +22,22 @@ function buildPublicUrl(key: string) {
 }
 
 export async function listKitAudioFiles(r2Folder: string): Promise<{ tones: KitAudioToneGroup[] }> {
-  const normalizedFolder = r2Folder.trim().replace(/^\/+|\/+$/g, "");
-  if (!normalizedFolder) return { tones: [] };
+  return listKitAudioFilesWithFallbacks({ r2Folder });
+}
 
-  const prefix = `audio/${normalizedFolder}/`;
+function normalizeText(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
+function uniqueCandidates(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim().replace(/^\/+|\/+$/g, "")).filter(Boolean)));
+}
+
+async function listByPrefix(prefix: string): Promise<KitAudioToneGroup[]> {
   const response = await r2Client.send(
     new ListObjectsV2Command({
       Bucket: r2BucketName,
@@ -55,25 +66,47 @@ export async function listKitAudioFiles(r2Folder: string): Promise<{ tones: KitA
     const name = dotIndex > 0 ? filename.slice(0, dotIndex) : filename;
     const fileType = dotIndex > 0 ? filename.slice(dotIndex + 1).toLowerCase() : "unknown";
 
-    const file: KitAudioFile = {
-      tone,
-      voice,
-      name,
-      key,
-      url: buildPublicUrl(key),
-      fileType,
-    };
+    const file: KitAudioFile = { tone, voice, name, key, url: buildPublicUrl(key), fileType };
 
     if (!groups.has(tone)) groups.set(tone, []);
     groups.get(tone)?.push(file);
   }
 
-  const tones: KitAudioToneGroup[] = Array.from(groups.entries())
+  return Array.from(groups.entries())
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([tone, files]) => ({
       tone,
       files: files.sort((a, b) => a.name.localeCompare(b.name)),
     }));
+}
 
-  return { tones };
+export async function listKitAudioFilesWithFallbacks(input: {
+  r2Folder: string;
+  slug?: string | null;
+  kitName?: string | null;
+}): Promise<{ tones: KitAudioToneGroup[]; usedPrefix: string | null; attemptedPrefixes: string[] }> {
+  const normalizedFolder = input.r2Folder.trim().replace(/^\/+|\/+$/g, "");
+  if (!normalizedFolder) return { tones: [], usedPrefix: null, attemptedPrefixes: [] };
+
+  const folderCandidates = uniqueCandidates([
+    normalizedFolder,
+    input.slug ?? "",
+    input.kitName ?? "",
+    normalizeText(input.kitName ?? ""),
+  ]);
+
+  const prefixes = uniqueCandidates([
+    `audio/${normalizedFolder}/`,
+    `${normalizedFolder}/`,
+    ...folderCandidates.flatMap((candidate) => [`${candidate}/`, `audio/${candidate}/`]),
+  ]);
+
+  for (const prefix of prefixes) {
+    const tones = await listByPrefix(prefix);
+    if (tones.length > 0) {
+      return { tones, usedPrefix: prefix, attemptedPrefixes: prefixes };
+    }
+  }
+
+  return { tones: [], usedPrefix: null, attemptedPrefixes: prefixes };
 }
