@@ -85,6 +85,26 @@ export async function getKitFormOptions(): Promise<{ categories: Category[]; pla
 }
 
 
+
+export async function getArtistCategories(): Promise<Category[]> {
+  const supabase = (await createClient()) as any;
+  const { data, error } = await supabase.from("categories").select("*").order("name");
+  if (error) throw new Error(`Falha ao buscar artistas: ${error.message}`);
+  return (data ?? []) as Category[];
+}
+
+export async function ensureArtistCategory(artistName: string): Promise<Category> {
+  const name = artistName.trim();
+  if (!name) throw new Error("Artista é obrigatório.");
+  const slug = name.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "").replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)+/g, "");
+  const supabase = (await createClient()) as any;
+  const { data: existing } = await supabase.from("categories").select("*").eq("slug", slug).maybeSingle();
+  if (existing) return existing as Category;
+  const { data, error } = await supabase.from("categories").insert({ name, slug }).select("*").single();
+  if (error) throw new Error(`Falha ao criar categoria automática: ${error.message}`);
+  return data as Category;
+}
+
 export async function saveKitAudioSync(kitId: string, tones: KitAudioToneGroup[]): Promise<void> {
   const supabase = (await createClient()) as any;
 
