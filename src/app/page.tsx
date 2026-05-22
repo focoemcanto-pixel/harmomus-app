@@ -2,6 +2,8 @@ import Link from "next/link";
 
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { getPublishedKits } from "@/lib/data/public-kits";
+import { getPublicHomeBanners } from "@/lib/data/home-banners";
+import { HomeHeroCarousel } from "@/components/public/home-hero-carousel";
 import { OFFICIAL_PLANS } from "@/lib/data/official-plans";
 
 export const revalidate = 300;
@@ -37,7 +39,7 @@ const VOICE_SECTIONS = [
 ];
 
 export default async function HomePage() {
-  const kits = await getPublishedKits();
+  const [kits, homeBanners] = await Promise.all([getPublishedKits(), getPublicHomeBanners()]);
 
   const latestKits = kits.slice(0, 12);
   const categories = Array.from(new Map(kits.filter((kit) => kit.category).map((kit) => [kit.category!.slug, kit.category!])).values());
@@ -89,30 +91,15 @@ export default async function HomePage() {
             </div>
 
             <div className="relative">
-              <div className="absolute -top-6 -left-4 h-28 w-28 rounded-3xl border border-white/15 bg-white/10 p-3 backdrop-blur-xl">
-                <p className="text-[10px] uppercase tracking-[0.18em] text-zinc-200">Now Playing</p>
-                <p className="mt-2 text-xs text-white">Ensaio de domingo</p>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                {latestKits.slice(0, 6).map((kit, index) => (
-                  <Link
-                    key={kit.id}
-                    href={`/biblioteca/${kit.slug}`}
-                    className={`group overflow-hidden rounded-2xl border border-white/20 bg-white/10 shadow-[0_14px_35px_rgba(0,0,0,0.45)] backdrop-blur-lg transition hover:-translate-y-1 hover:border-cyan-200/70 ${index === 0 ? "col-span-2" : ""}`}
-                  >
-                    {kit.coverUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={kit.coverUrl} alt={kit.name} className="aspect-square w-full object-cover transition duration-500 group-hover:scale-105" />
-                    ) : (
-                      <div className="aspect-square w-full bg-gradient-to-br from-zinc-700 to-zinc-950" />
-                    )}
-                    <div className="bg-gradient-to-t from-black/85 to-black/20 p-3">
-                      <p className="truncate text-sm font-semibold text-white">{kit.name}</p>
-                      <p className="truncate text-xs text-zinc-200">{kit.artist}</p>
-                    </div>
-                  </Link>
-                ))}
-              </div>
+              <HomeHeroCarousel banners={homeBanners.length ? homeBanners : latestKits.slice(0, 1).map((kit, index) => ({
+                id: `fallback-${index}`,
+                title: kit.name,
+                subtitle: kit.artist,
+                button_label: "Ver kit",
+                button_href: `/biblioteca/${kit.slug}`,
+                image_url: kit.coverUrl ?? "",
+                mobile_image_url: null,
+              }))} />
             </div>
           </div>
         </section>

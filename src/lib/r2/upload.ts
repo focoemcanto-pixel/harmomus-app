@@ -21,8 +21,9 @@ export function generateFilePath(slug: string, context: "kit-cover" | "category-
     throw new Error("Slug inválido para gerar caminho de upload.");
   }
 
-  if (context === "profile-avatar") return `avatars/${safeSlug}/avatar.webp`;
-  const folder = context === "category-cover" ? "categories" : context === "banner" ? "banners" : "kits";
+  if (context === "profile-avatar") return `avatars/${safeSlug}/avatar.jpg`;
+  if (context === "banner") return `images/home-banners/${safeSlug}/banner.webp`;
+  const folder = context === "category-cover" ? "categories" : "kits";
   return `images/${folder}/${safeSlug}/cover.webp`;
 }
 
