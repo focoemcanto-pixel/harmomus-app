@@ -1,10 +1,32 @@
 import { redirect } from "next/navigation";
 
+import { ProfilePageClient } from "@/components/public/profile-page-client";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
+import { createClient } from "@/lib/supabase/server";
 
 export default async function PerfilPage() {
   const context = await getCurrentUserAccessContext();
-  if (context.isGuest) redirect('/login');
+  if (context.isGuest) redirect("/login");
 
-  return <main className="min-h-screen bg-background p-6 text-white"><section className="mx-auto max-w-3xl rounded-2xl border border-white/10 bg-surface/70 p-6"><h1 className="text-2xl font-semibold">Perfil</h1><p className="mt-3 text-zinc-300">TODO: conteúdo completo do perfil.</p><div className="mt-6 flex items-center gap-4"><div className="h-16 w-16 rounded-full border border-white/15 bg-black/30" /><div><p>{context.profile?.full_name ?? 'Sem nome'}</p><p className="text-sm text-zinc-400">{context.profile?.email ?? 'Sem e-mail'}</p></div></div><button className="mt-5 rounded-lg border border-gold-400/40 px-4 py-2 text-sm">Alterar foto</button></section></main>;
+  const supabase = await createClient();
+  const userId = context.profile?.id ?? "";
+  const today = new Date();
+  const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())).toISOString();
+
+  const [{ count: playlists }, { count: kitsToday }, { count: history }] = await Promise.all([
+    (supabase as any).from("playlists").select("id", { count: "exact", head: true }).eq("user_id", userId),
+    (supabase as any).from("kit_access_logs").select("id", { count: "exact", head: true }).eq("user_id", userId).gte("accessed_at", start),
+    (supabase as any).from("kit_access_logs").select("id", { count: "exact", head: true }).eq("user_id", userId),
+  ]);
+
+  return <ProfilePageClient
+    userId={userId}
+    initialName={context.profile?.full_name ?? "Sem nome"}
+    email={context.profile?.email ?? "Sem e-mail"}
+    username={(context.profile?.email ?? "user").split("@")[0]}
+    avatarUrl={context.profile?.avatar_url ?? null}
+    planName={context.plan?.name ?? "Free"}
+    subscriptionStatus={context.subscription?.status ?? "inactive"}
+    stats={{ playlists: playlists ?? 0, favorites: 0, history: history ?? 0, kitsToday: kitsToday ?? 0 }}
+  />;
 }

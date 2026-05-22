@@ -66,7 +66,7 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
       </div>
       <Link href="/todos-os-kits" className="rounded-lg border border-white/20 px-3 py-2 text-xs text-zinc-100 md:text-sm">Todos os Kits</Link>
       <div className="relative" ref={menuRef}>
-        <button onClick={() => setMenuOpen((v) => !v)} className="flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-white/5 text-xs font-semibold">{(context.profile?.full_name ?? context.profile?.email ?? "U").slice(0, 1).toUpperCase()}</button>
+        <button onClick={() => setMenuOpen((v) => !v)} className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-white/20 bg-white/5 text-xs font-semibold">{context.profile?.avatar_url ? <img src={context.profile.avatar_url} alt="avatar" className="h-full w-full object-cover" /> : (context.profile?.full_name ?? context.profile?.email ?? "U").slice(0, 1).toUpperCase()}</button>
         {menuOpen ? <div className="absolute right-0 top-11 z-50 min-w-52 rounded-xl border border-white/10 bg-[#0d1220] p-2">
           {context.isGuest ? <>
             <Link href="/login" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Entrar</Link>
