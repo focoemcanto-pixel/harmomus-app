@@ -74,9 +74,9 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
 
   return (
     <>
-      <div className="w-full md:hidden" ref={searchMobileRef}>
+      <div className="min-w-0 flex-1 md:hidden" ref={searchMobileRef}>
         <div className="relative">
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar kits, artista ou categoria" className="h-10 w-full rounded-xl border border-white/15 bg-white/5 px-3 text-sm text-white outline-none ring-cyan-300/40 transition placeholder:text-zinc-400 focus:ring" />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar kits" className="h-8 w-full rounded-lg border border-white/15 bg-white/5 px-2 text-xs text-white outline-none ring-cyan-300/40 transition placeholder:text-zinc-400 focus:ring" />
           {results.length > 0 ? <div className="absolute left-0 right-0 top-11 z-50 rounded-xl border border-white/10 bg-[#0d1220] p-2 shadow-premium">{results.map((item) => <Link key={item.id} href={`/biblioteca/${item.slug}`} onClick={() => setQuery("")} className="block rounded-lg px-3 py-2 hover:bg-white/5"><p className="text-sm text-white">{item.name}</p><p className="text-xs text-zinc-300">{item.artist} • {item.category}</p></Link>)}</div> : null}
         </div>
       </div>
@@ -84,9 +84,9 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar kits, artista ou categoria" className="h-11 w-full rounded-xl border border-white/15 bg-white/5 px-4 text-sm outline-none ring-cyan-300/40 transition focus:ring" />
         {results.length > 0 ? <div className="absolute left-0 right-0 top-12 z-50 rounded-xl border border-white/10 bg-[#0d1220] p-2 shadow-premium">{results.map((item) => <Link key={item.id} href={`/biblioteca/${item.slug}`} onClick={() => setQuery("")} className="block rounded-lg px-3 py-2 hover:bg-white/5"><p className="text-sm text-white">{item.name}</p><p className="text-xs text-zinc-300">{item.artist} • {item.category}</p></Link>)}</div> : null}
       </div>
-      <Link href="/todos-os-kits" className="rounded-lg border border-white/20 px-3 py-2 text-xs text-zinc-100 md:text-sm">Todos os Kits</Link>
+      <Link href="/todos-os-kits" className="whitespace-nowrap rounded-md border border-white/20 px-2 py-1.5 text-[11px] text-zinc-100 md:rounded-lg md:px-3 md:py-2 md:text-sm">Todos os Kits</Link>
       <div className="relative" ref={menuRef}>
-        <button onClick={() => setMenuOpen((v) => !v)} className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-white/20 bg-white/5 text-xs font-semibold">{liveAvatar ? <img src={liveAvatar} alt="avatar" className="h-full w-full object-cover" /> : (context.profile?.full_name ?? context.profile?.email ?? "U").slice(0, 1).toUpperCase()}</button>
+        <button onClick={() => setMenuOpen((v) => !v)} className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border border-white/20 bg-white/5 text-xs font-semibold md:h-9 md:w-9">{liveAvatar ? <img src={liveAvatar} alt="avatar" className="h-full w-full object-cover" /> : (context.profile?.full_name ?? context.profile?.email ?? "U").slice(0, 1).toUpperCase()}</button>
         {menuOpen ? <div className="absolute right-0 top-11 z-50 min-w-52 rounded-xl border border-white/10 bg-[#0d1220] p-2">
           {context.isGuest ? <>
             <Link href="/login" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Login</Link>

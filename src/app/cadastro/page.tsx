@@ -87,7 +87,7 @@ export default async function CadastroPage({ searchParams }: { searchParams: Pro
   return (
     <PublicAppShell>
       <section className="px-4 pb-10 pt-16 md:pt-8">
-        <div className="mx-auto w-full max-w-xl rounded-[2rem] border border-white/15 bg-gradient-to-b from-white/[0.08] to-white/[0.03] p-6 shadow-[0_0_90px_rgba(119,78,255,0.25)] backdrop-blur-2xl md:p-8">
+        <div className="mx-auto w-full max-w-2xl rounded-[2rem] border border-white/15 bg-gradient-to-b from-white/[0.08] to-white/[0.03] p-6 shadow-[0_0_90px_rgba(119,78,255,0.25)] backdrop-blur-2xl md:p-8">
           <HarmomusAuthLogo />
           <h1 className="mt-2 text-center text-3xl font-semibold text-white md:text-4xl">Crie sua conta</h1>
           <p className="mt-2 text-center text-sm text-zinc-300">Prepare sua voz. Honre seu chamado.</p>

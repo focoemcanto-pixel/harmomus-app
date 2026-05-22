@@ -36,7 +36,7 @@ export async function POST(req: Request) {
     const session = await startStripeCheckout(user.id, user.email, planId, new URL(req.url).origin);
     return NextResponse.redirect(session.url, { status: 303 });
   } catch (error) {
-    return NextResponse.json({ error: toErrorMessage(error) }, { status: 500 });
+    return NextResponse.json({ error: toErrorMessage(error) }, { status: 400 });
   }
 }
 

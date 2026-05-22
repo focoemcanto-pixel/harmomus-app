@@ -13,8 +13,8 @@ const STATUS_LABELS: Record<string, string> = {
   pending: "Pendente",
 };
 
-export default async function AssinaturaPage() {
-  const context = await getCurrentUserAccessContext();
+export default async function AssinaturaPage({ searchParams }: { searchParams?: Promise<{ error?: string }> }) {
+  const [context, params] = await Promise.all([getCurrentUserAccessContext(), searchParams]);
   if (context.isGuest) redirect("/login");
 
   const plans = await getPlans();
@@ -43,6 +43,8 @@ export default async function AssinaturaPage() {
               <p className="mt-2 text-xl font-semibold">{nextBillingDate}</p>
             </div>
           </div>
+
+          {params?.error ? <p className="mt-4 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">{params.error}</p> : null}
 
           <div className="mt-6 flex flex-wrap gap-3">
             <form action="/api/billing/portal" method="post">

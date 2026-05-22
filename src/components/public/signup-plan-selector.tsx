@@ -89,7 +89,7 @@ export function SignupPlanSelector({ initialPlan }: { initialPlan: PlanSlug }) {
 
       <div className="md:col-span-2 mt-2">
         <h2 className="text-lg font-semibold text-white">Escolha seu plano</h2>
-        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="mt-3 grid grid-cols-3 gap-2">
           {PLAN_CONFIGS.map((plan) => {
             const isSelected = selectedPlan === plan.slug;
             return (
@@ -97,14 +97,14 @@ export function SignupPlanSelector({ initialPlan }: { initialPlan: PlanSlug }) {
                 key={plan.slug}
                 type="button"
                 onClick={() => setSelectedPlan(plan.slug)}
-                className={`rounded-2xl border p-4 text-left transition-all duration-300 ${
+                className={`rounded-xl border p-3 text-left transition-all duration-300 ${
                   isSelected
                     ? "border-cyan-300 bg-cyan-400/15 shadow-[0_0_25px_rgba(34,211,238,0.25)]"
                     : "border-white/20 bg-white/[0.03] hover:border-white/40"
                 }`}
               >
-                <p className="text-sm text-zinc-300">{plan.label}</p>
-                <p className="mt-1 text-sm font-semibold text-white">{plan.price}</p>
+                <p className="text-xs text-zinc-300">{plan.label}</p>
+                <p className="mt-1 text-xs font-semibold text-white">{plan.price}</p>
               </button>
             );
           })}
