@@ -71,8 +71,8 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
                     setUpgradeConfig({
                       title: `Este kit requer plano ${planLabel}.`,
                       message: "Faça upgrade para desbloquear este conteúdo agora.",
-                      ctaLabel: `Assinar ${planLabel}` ,
-                      ctaHref: `/assinar?plan=${requiredPlan}` ,
+                      ctaLabel: "Assinar Premium",
+                      ctaHref: "/assinar?plan=premium",
                     });
                   }
                   setUpgradeOpen(true);
