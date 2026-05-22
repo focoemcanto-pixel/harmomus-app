@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { type ChangeEvent, type PointerEvent, useMemo, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 
 import type { Category, Kit, Plan } from "@/lib/data/kits";
@@ -14,6 +14,10 @@ interface KitFormProps {
 }
 
 type UploadStatus = "idle" | "uploading" | "success" | "error";
+type CropState = { x: number; y: number; zoom: number };
+
+const MAX_FILE_SIZE = 5 * 1024 * 1024;
+const CROP_SIZE = 512;
 
 function slugify(value: string) {
   return value
@@ -46,14 +50,28 @@ export function KitForm({ mode, categories, plans, initialData, action }: KitFor
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>("idle");
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [isCropModalOpen, setIsCropModalOpen] = useState(false);
+  const [sourceImageUrl, setSourceImageUrl] = useState<string | null>(null);
+  const [cropState, setCropState] = useState<CropState>({ x: 0, y: 0, zoom: 1 });
+  const [sourceImageElement, setSourceImageElement] = useState<HTMLImageElement | null>(null);
+  const [isDraggingCrop, setIsDraggingCrop] = useState(false);
+  const [showCoverAsCircle, setShowCoverAsCircle] = useState(false);
+  const dragStartRef = useRef<{ clientX: number; clientY: number; startX: number; startY: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const cropAreaRef = useRef<HTMLDivElement | null>(null);
 
-  const preview = useMemo(() => coverUrl.trim() || "https://placehold.co/800x500/101114/f4f4f5?text=Sem+capa", [coverUrl]);
+  const preview = useMemo(() => coverUrl.trim() || "https://placehold.co/800x800/101114/f4f4f5?text=Sem+capa", [coverUrl]);
 
   const uploadLabel =
     uploadStatus === "uploading" ? "Enviando capa..." : uploadStatus === "success" ? "Upload concluído" : "Selecionar imagem";
 
   async function performUpload(file: File) {
+    if (file.size > MAX_FILE_SIZE) {
+      setUploadStatus("error");
+      setUploadError("A imagem deve ter no máximo 5MB.");
+      return;
+    }
+
     if (!slug.trim()) {
       setUploadStatus("error");
       setUploadError("Preencha o slug antes de enviar a capa.");
@@ -81,6 +99,110 @@ export function KitForm({ mode, categories, plans, initialData, action }: KitFor
       setUploadStatus("error");
       setUploadError(error instanceof Error ? error.message : "Erro inesperado no upload.");
     }
+  }
+
+  async function openCropper(file: File) {
+    if (file.size > MAX_FILE_SIZE) {
+      setUploadStatus("error");
+      setUploadError("A imagem deve ter no máximo 5MB.");
+      return;
+    }
+
+    setUploadStatus("idle");
+    setUploadError(null);
+
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      setSourceImageElement(image);
+      setSourceImageUrl(objectUrl);
+      setCropState({ x: 0, y: 0, zoom: 1 });
+      setIsCropModalOpen(true);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      setUploadStatus("error");
+      setUploadError("Não foi possível abrir esta imagem.");
+    };
+    image.src = objectUrl;
+  }
+
+  function closeCropper() {
+    setIsCropModalOpen(false);
+    if (sourceImageUrl) URL.revokeObjectURL(sourceImageUrl);
+    setSourceImageUrl(null);
+    setSourceImageElement(null);
+    setIsDraggingCrop(false);
+    dragStartRef.current = null;
+  }
+
+  async function applyCrop() {
+    if (!sourceImageElement) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = CROP_SIZE;
+    canvas.height = CROP_SIZE;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      setUploadStatus("error");
+      setUploadError("Seu navegador não suporta edição desta imagem.");
+      return;
+    }
+
+    const minDimension = Math.min(sourceImageElement.naturalWidth, sourceImageElement.naturalHeight);
+    const cropWidth = minDimension / cropState.zoom;
+    const cropHeight = minDimension / cropState.zoom;
+    const offsetX = ((cropState.x / 100) * cropWidth) / 2;
+    const offsetY = ((cropState.y / 100) * cropHeight) / 2;
+    const centerX = sourceImageElement.naturalWidth / 2 + offsetX;
+    const centerY = sourceImageElement.naturalHeight / 2 + offsetY;
+    const sx = Math.max(0, Math.min(sourceImageElement.naturalWidth - cropWidth, centerX - cropWidth / 2));
+    const sy = Math.max(0, Math.min(sourceImageElement.naturalHeight - cropHeight, centerY - cropHeight / 2));
+
+    context.drawImage(sourceImageElement, sx, sy, cropWidth, cropHeight, 0, 0, CROP_SIZE, CROP_SIZE);
+
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob((value) => resolve(value), "image/webp", 0.92));
+    if (!blob) {
+      setUploadStatus("error");
+      setUploadError("Não foi possível gerar a capa recortada.");
+      return;
+    }
+
+    const croppedFile = new File([blob], "cover.webp", { type: "image/webp" });
+    closeCropper();
+    await performUpload(croppedFile);
+  }
+
+  function onCropPointerDown(event: PointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragStartRef.current = { clientX: event.clientX, clientY: event.clientY, startX: cropState.x, startY: cropState.y };
+    setIsDraggingCrop(true);
+  }
+
+  function onCropPointerMove(event: PointerEvent<HTMLDivElement>) {
+    if (!isDraggingCrop || !dragStartRef.current) return;
+    const deltaX = event.clientX - dragStartRef.current.clientX;
+    const deltaY = event.clientY - dragStartRef.current.clientY;
+    const areaWidth = cropAreaRef.current?.clientWidth ?? 1;
+    const areaHeight = cropAreaRef.current?.clientHeight ?? 1;
+    const maxOffset = Math.max(0, ((cropState.zoom - 1) * 100) / cropState.zoom);
+    const nextX = dragStartRef.current.startX + (deltaX / areaWidth) * 100;
+    const nextY = dragStartRef.current.startY + (deltaY / areaHeight) * 100;
+    setCropState((previous) => ({ ...previous, x: Math.max(-maxOffset, Math.min(maxOffset, nextX)), y: Math.max(-maxOffset, Math.min(maxOffset, nextY)) }));
+  }
+
+  function onCropPointerUp(event: PointerEvent<HTMLDivElement>) {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    setIsDraggingCrop(false);
+    dragStartRef.current = null;
+  }
+
+  function onSelectFile(event: ChangeEvent<HTMLInputElement>) {
+    const selectedFile = event.target.files?.[0];
+    event.target.value = "";
+    if (selectedFile) void openCropper(selectedFile);
   }
 
   return (
@@ -154,14 +276,14 @@ export function KitForm({ mode, categories, plans, initialData, action }: KitFor
               event.preventDefault();
               setIsDragOver(false);
               const droppedFile = event.dataTransfer.files?.[0];
-              if (droppedFile) void performUpload(droppedFile);
+              if (droppedFile) void openCropper(droppedFile);
             }}
             className={`rounded-xl border border-dashed p-6 text-center transition ${
               isDragOver ? "border-gold-400 bg-gold-500/10" : "border-border bg-surface-muted"
             }`}
           >
             <p className="text-sm text-muted">Arraste e solte sua imagem aqui</p>
-            <p className="mt-1 text-xs text-muted">Apenas imagens, até 5MB.</p>
+            <p className="mt-1 text-xs text-muted">Apenas imagens, até 5MB. Recorte 1:1 antes do upload.</p>
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
@@ -175,15 +297,21 @@ export function KitForm({ mode, categories, plans, initialData, action }: KitFor
               type="file"
               accept="image/*"
               className="hidden"
-              onChange={(event) => {
-                const selectedFile = event.target.files?.[0];
-                if (selectedFile) void performUpload(selectedFile);
-              }}
+              onChange={onSelectFile}
             />
           </div>
           {uploadStatus === "success" ? <p className="text-xs text-emerald-400">Imagem enviada com sucesso.</p> : null}
           {uploadStatus === "error" && uploadError ? <p className="text-xs text-red-400">{uploadError}</p> : null}
-          <img src={preview} alt="Preview da capa" className="mt-2 h-44 w-full rounded-lg border border-border object-cover" />
+          <div className="mt-3 flex items-center gap-3">
+            <img src={preview} alt="Preview da capa" className={`aspect-square w-full max-w-64 border border-border object-cover shadow-lg ${showCoverAsCircle ? "rounded-full" : "rounded-2xl"}`} />
+            <button
+              type="button"
+              onClick={() => setShowCoverAsCircle((value) => !value)}
+              className="rounded-lg border border-border bg-surface-muted px-3 py-2 text-xs text-muted hover:text-foreground"
+            >
+              {showCoverAsCircle ? "Preview quadrado" : "Preview circular"}
+            </button>
+          </div>
         </div>
 
         <label className="space-y-2 text-sm">
@@ -208,6 +336,52 @@ export function KitForm({ mode, categories, plans, initialData, action }: KitFor
       </div>
 
       <SubmitButton mode={mode} />
+
+      {isCropModalOpen && sourceImageUrl ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="w-full max-w-2xl rounded-2xl border border-zinc-800 bg-zinc-950 p-5 shadow-2xl">
+            <h3 className="text-base font-semibold text-zinc-100">Recortar capa do kit</h3>
+            <p className="mt-1 text-xs text-zinc-400">Ajuste zoom e posição para gerar uma capa quadrada premium (1:1).</p>
+            <div
+              ref={cropAreaRef}
+              onPointerDown={onCropPointerDown}
+              onPointerMove={onCropPointerMove}
+              onPointerUp={onCropPointerUp}
+              onPointerCancel={onCropPointerUp}
+              className="relative mt-4 aspect-square w-full overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-900 touch-none"
+            >
+              <img
+                src={sourceImageUrl}
+                alt="Prévia de recorte"
+                draggable={false}
+                className="h-full w-full select-none object-cover"
+                style={{ transform: `translate(${cropState.x}%, ${cropState.y}%) scale(${cropState.zoom})`, transformOrigin: "center", cursor: isDraggingCrop ? "grabbing" : "grab" }}
+              />
+              <div className="pointer-events-none absolute inset-0 rounded-2xl ring-2 ring-gold-400/80" />
+            </div>
+            <label className="mt-4 block text-xs text-zinc-400">
+              Zoom
+              <input
+                type="range"
+                min={1}
+                max={3}
+                step={0.01}
+                value={cropState.zoom}
+                onChange={(event) => setCropState((previous) => ({ ...previous, zoom: Number(event.target.value) }))}
+                className="mt-2 w-full accent-gold-400"
+              />
+            </label>
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={closeCropper} className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-900">
+                Cancelar
+              </button>
+              <button type="button" onClick={() => void applyCrop()} className="rounded-lg border border-gold-500/40 bg-gold-500/10 px-4 py-2 text-sm font-medium text-gold-300 hover:bg-gold-500/20">
+                Aplicar corte
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </form>
   );
 }
