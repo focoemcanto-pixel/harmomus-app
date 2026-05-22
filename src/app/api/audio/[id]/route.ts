@@ -62,7 +62,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return new Response("Kit não encontrado.", { status: 404 });
   }
 
-  const requiredPlan = (plans ?? []).find((p: any) => p.id === kit.required_plan) ?? null;
+  const requiredPlan = (plans ?? []).find((p: any) => p.slug === kit.required_plan) ?? null;
 
   const access = await resolveKitAccess(context, {
     id: kit.id,

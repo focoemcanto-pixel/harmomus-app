@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { revalidatePath } from "next/cache";
 
 import { PageHeader } from "@/components/admin/page-header";
 import { deleteKit, getKits } from "@/lib/data/kits";
@@ -11,6 +12,9 @@ export default async function KitsPage() {
     const id = String(formData.get("id") ?? "");
     if (!id) return;
     await deleteKit(id);
+    revalidatePath("/admin/kits");
+    revalidatePath("/biblioteca");
+    revalidatePath("/todos-os-kits");
   }
 
   return (
@@ -40,7 +44,7 @@ export default async function KitsPage() {
                   <td className="px-4 py-3 font-medium">{kit.name}</td>
                   <td className="px-4 py-3 text-muted">{kit.artist}</td>
                   <td className="px-4 py-3 text-muted">{kit.category_name ?? "Sem categoria"}</td>
-                  <td className="px-4 py-3 text-muted">{kit.required_plan ?? "Todos"}</td>
+                  <td className="px-4 py-3 text-muted">{kit.plan_name ?? "Todos"}</td>
                   <td className="px-4 py-3 text-muted">{kit.r2_folder ?? "-"}</td>
                   <td className="px-4 py-3 text-muted">{kit.tone_count} tons • {kit.file_count} arquivos</td>
                   <td className="px-4 py-3"><span className="rounded-full border border-border px-2 py-1 text-xs">{kit.published ? "Publicado" : "Rascunho"}</span></td>
@@ -48,6 +52,7 @@ export default async function KitsPage() {
                   <td className="px-4 py-3">
                     <div className="flex gap-2">
                       <Link href={`/admin/kits/${kit.id}/editar`} className="rounded-md border border-border px-2 py-1 text-xs text-foreground">Editar</Link>
+                      <Link href={`/biblioteca/${kit.slug}`} className="rounded-md border border-border px-2 py-1 text-xs text-foreground">Ver público</Link>
                       <form action={handleDelete}><input type="hidden" name="id" value={kit.id} /><button className="rounded-md border border-red-500/50 px-2 py-1 text-xs text-red-300">Excluir</button></form>
                     </div>
                   </td>

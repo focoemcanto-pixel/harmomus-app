@@ -136,6 +136,10 @@ export function KitForm({ mode, categories, plans, initialData, action }: KitFor
           <span className="text-muted">Descrição</span>
           <textarea name="description" defaultValue={initialData?.description ?? ""} rows={4} className="w-full rounded-lg border border-border bg-surface-muted px-3 py-2" />
         </label>
+        <label className="space-y-2 text-sm md:col-span-2">
+          <span className="text-muted">Letra</span>
+          <textarea name="lyrics" defaultValue={initialData?.lyrics ?? ""} rows={8} className="w-full rounded-lg border border-border bg-surface-muted px-3 py-2" />
+        </label>
 
         <div className="space-y-2 text-sm md:col-span-2">
           <span className="text-muted">Capa do kit</span>
