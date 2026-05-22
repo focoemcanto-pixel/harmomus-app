@@ -24,6 +24,7 @@ export default async function EditarKitPage({ params }: { params: Promise<{ id: 
       slug,
       artist,
       description: String(formData.get("description") ?? "").trim() || null,
+      lyrics: String(formData.get("lyrics") ?? "").trim() || null,
       cover_url: String(formData.get("cover_url") ?? "").trim() || null,
       r2_folder: String(formData.get("r2_folder") ?? "").trim() || null,
       category_id: String(formData.get("category_id") ?? "") || null,
@@ -33,6 +34,9 @@ export default async function EditarKitPage({ params }: { params: Promise<{ id: 
 
     revalidatePath("/admin/kits");
     revalidatePath(`/admin/kits/${id}/editar`);
+    revalidatePath("/biblioteca");
+    revalidatePath("/todos-os-kits");
+    revalidatePath(`/biblioteca/${slug}`);
     redirect("/admin/kits");
   }
 

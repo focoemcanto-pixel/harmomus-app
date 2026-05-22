@@ -1,9 +1,15 @@
 import { NextResponse } from "next/server";
 
+import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { uploadKitCoverToR2 } from "@/lib/r2/upload";
 
 export async function POST(request: Request) {
   try {
+    const current = await getCurrentUserAccessContext();
+    if (!current.isAdmin) {
+      return NextResponse.json({ error: "Acesso negado." }, { status: 403 });
+    }
+
     const formData = await request.formData();
     const file = formData.get("file");
     const slug = String(formData.get("slug") ?? "").trim();

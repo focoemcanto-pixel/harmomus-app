@@ -8,21 +8,25 @@ export type Kit = Database["public"]["Tables"]["kits"]["Row"];
 
 export interface KitListItem extends Kit {
   category_name: string | null;
+  plan_name: string | null;
   tone_count: number;
   file_count: number;
 }
 
 export async function getKits(): Promise<KitListItem[]> {
   const supabase = (await createClient()) as any;
-  const [{ data: kits, error: kitsError }, { data: categories, error: categoriesError }, { data: audioFiles, error: audioFilesError }] = await Promise.all([
+  const [{ data: kits, error: kitsError }, { data: categories, error: categoriesError }, { data: plans, error: plansError }, { data: audioFiles, error: audioFilesError }] = await Promise.all([
     supabase.from("kits").select("*").order("created_at", { ascending: false }),
     supabase.from("categories").select("id,name"),
+    supabase.from("plans").select("slug,name"),
     supabase.from("kit_audio_files").select("kit_id,tone"),
   ]);
   if (kitsError) throw new Error(`Falha ao buscar kits: ${kitsError.message}`);
   if (categoriesError) throw new Error(`Falha ao buscar categorias: ${categoriesError.message}`);
+  if (plansError) throw new Error(`Falha ao buscar planos: ${plansError.message}`);
   if (audioFilesError) throw new Error(`Falha ao buscar áudios sincronizados: ${audioFilesError.message}`);
   const categoriesMap = new Map(((categories ?? []) as { id: string; name: string }[]).map((c) => [c.id, c.name]));
+  const plansMap = new Map(((plans ?? []) as { slug: string; name: string }[]).map((p) => [p.slug, p.name]));
   const audioStats = new Map<string, { tones: Set<string>; count: number }>();
   for (const row of (audioFiles ?? []) as { kit_id: string; tone: string }[]) {
     if (!audioStats.has(row.kit_id)) audioStats.set(row.kit_id, { tones: new Set(), count: 0 });
@@ -35,6 +39,7 @@ export async function getKits(): Promise<KitListItem[]> {
     return {
       ...kit,
       category_name: kit.category_id ? categoriesMap.get(kit.category_id) ?? null : null,
+      plan_name: kit.required_plan ? plansMap.get(kit.required_plan) ?? kit.required_plan : null,
       tone_count: stats?.tones.size ?? 0,
       file_count: stats?.count ?? 0,
     };

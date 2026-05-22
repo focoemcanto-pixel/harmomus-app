@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
 
+import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { getKitById, saveKitAudioSync } from "@/lib/data/kits";
 import { listKitAudioFiles } from "@/lib/r2/list-audio-files";
 
 export async function POST(_: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const current = await getCurrentUserAccessContext();
+    if (!current.isAdmin) {
+      return NextResponse.json({ error: "Acesso negado." }, { status: 403 });
+    }
+
     const { id } = await params;
     const kit = await getKitById(id);
 

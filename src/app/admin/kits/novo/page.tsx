@@ -21,6 +21,7 @@ export default async function NovoKitPage() {
       slug,
       artist,
       description: String(formData.get("description") ?? "").trim() || null,
+      lyrics: String(formData.get("lyrics") ?? "").trim() || null,
       cover_url: String(formData.get("cover_url") ?? "").trim() || null,
       r2_folder: String(formData.get("r2_folder") ?? "").trim() || null,
       category_id: String(formData.get("category_id") ?? "") || null,
@@ -29,6 +30,8 @@ export default async function NovoKitPage() {
     });
 
     revalidatePath("/admin/kits");
+    revalidatePath("/biblioteca");
+    revalidatePath("/todos-os-kits");
     redirect("/admin/kits");
   }
 
