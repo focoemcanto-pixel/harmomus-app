@@ -8,6 +8,7 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tones, setTones] = useState<KitAudioToneGroup[]>([]);
+  const [usedPrefix, setUsedPrefix] = useState<string | null>(null);
 
   const VOICE_ORDER = ["todos", "soprano", "contralto", "tenor"] as const;
 
@@ -19,9 +20,11 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error ?? "Não foi possível sincronizar os áudios.");
       setTones((data?.tones ?? []) as KitAudioToneGroup[]);
+      setUsedPrefix(typeof data?.usedPrefix === "string" ? data.usedPrefix : null);
     } catch (syncError) {
       setError(syncError instanceof Error ? syncError.message : "Erro inesperado na sincronização.");
       setTones([]);
+      setUsedPrefix(null);
     } finally {
       setLoading(false);
     }
@@ -45,6 +48,8 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
       </div>
 
       {error ? <p className="mb-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</p> : null}
+
+      {usedPrefix ? <p className="mb-3 text-xs text-muted">Prefixo usado na sincronização: <span className="font-mono text-foreground">{usedPrefix}</span></p> : null}
 
       {tones.length === 0 && !loading ? <p className="text-sm text-muted">Nenhum áudio encontrado ainda para este kit.</p> : null}
 
