@@ -225,3 +225,44 @@ create policy "Admins can manage home banners" on public.home_banners
 for all
 using (coalesce((select role::text from public.profiles where id = auth.uid()), '') = 'admin')
 with check (coalesce((select role::text from public.profiles where id = auth.uid()), '') = 'admin');
+
+
+create table if not exists public.home_sections (
+  id uuid primary key default gen_random_uuid(),
+  type text not null,
+  title text not null,
+  subtitle text,
+  image_url text,
+  button_text text,
+  button_link text,
+  active boolean not null default true,
+  order_index integer not null default 0,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_home_sections_active_order on public.home_sections(active, order_index);
+
+alter table public.home_sections enable row level security;
+
+drop policy if exists "Public can read active home sections" on public.home_sections;
+create policy "Public can read active home sections" on public.home_sections
+for select
+using (active = true);
+
+drop policy if exists "Admins can manage home sections" on public.home_sections;
+create policy "Admins can manage home sections" on public.home_sections
+for all
+using (coalesce((select role::text from public.profiles where id = auth.uid()), '') = 'admin')
+with check (coalesce((select role::text from public.profiles where id = auth.uid()), '') = 'admin');
+
+insert into public.home_sections (type, title, subtitle, button_text, button_link, active, order_index)
+values (
+  'curso complementar',
+  'Foco em Harmonia',
+  'Aprenda divisão vocal na prática e desenvolva segurança para cantar em equipe no ministério de louvor.',
+  'Conhecer o curso',
+  'https://harmonia.focoemcanto.com',
+  true,
+  1
+)
+on conflict do nothing;

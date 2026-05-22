@@ -4,6 +4,7 @@ import { PublicAppShell } from "@/components/public/public-app-shell";
 import { getPublishedKits } from "@/lib/data/public-kits";
 import { getPublicHomeBanners } from "@/lib/data/home-banners";
 import { HomeHeroCarousel } from "@/components/public/home-hero-carousel";
+import { getPublicHomeSections } from "@/lib/data/home-sections";
 import { OFFICIAL_PLANS } from "@/lib/data/official-plans";
 import { SubscribeButton } from "@/components/public/subscribe-button";
 
@@ -30,7 +31,7 @@ const TESTIMONIALS = [
   },
 ];
 
-const HARMONY_COURSE_URL = "/comunidade";
+const HARMONY_COURSE_URL = "https://harmonia.focoemcanto.com";
 
 const VOICE_SECTIONS = [
   { title: "Barítono", description: "Camada masculina de apoio com equilíbrio entre grave e brilho no médio." },
@@ -40,7 +41,7 @@ const VOICE_SECTIONS = [
 ];
 
 export default async function HomePage() {
-  const [kits, homeBanners] = await Promise.all([getPublishedKits(), getPublicHomeBanners()]);
+  const [kits, homeBanners, homeSections] = await Promise.all([getPublishedKits(), getPublicHomeBanners(), getPublicHomeSections()]);
 
   const latestKits = kits.slice(0, 12);
   const categories = Array.from(new Map(kits.filter((kit) => kit.category).map((kit) => [kit.category!.slug, kit.category!])).values());
@@ -219,18 +220,20 @@ export default async function HomePage() {
           </div>
         </section>
 
-        <section className="rounded-3xl border border-cyan-300/30 bg-gradient-to-r from-cyan-900/40 via-indigo-900/35 to-fuchsia-900/30 p-7">
-          <p className="text-xs uppercase tracking-[0.2em] text-cyan-200">Curso complementar</p>
-          <h2 className="mt-2 text-3xl font-semibold text-white">Foco em Harmonia</h2>
-          <p className="mt-3 max-w-2xl text-zinc-100">Desenvolva percepção harmônica, afinação e independência vocal para dividir vozes com segurança no ministério.</p>
-          <ul className="mt-4 grid gap-2 text-sm text-zinc-100 md:grid-cols-3">
-            <li>✓ Identificação de terças</li>
-            <li>✓ Percepção & afinação</li>
-            <li>✓ Divisão vocal prática</li>
-            <li>✓ Aplicação em ensaio real</li>
-          </ul>
-          <Link href={HARMONY_COURSE_URL} className="mt-5 inline-flex rounded-xl bg-white px-6 py-3 text-sm font-bold text-slate-900">Conhecer o Curso</Link>
-        </section>
+        {homeSections.filter((section) => section.active).map((section) => (
+          <section key={section.id} className="group relative overflow-hidden rounded-3xl border border-fuchsia-300/30 bg-gradient-to-r from-[#0b1224] via-[#1a1030] to-[#2b0f2c] p-6 md:p-8 shadow-[0_25px_80px_rgba(168,85,247,0.25)]">
+            <div className="pointer-events-none absolute -top-16 right-12 h-40 w-40 rounded-full bg-fuchsia-500/20 blur-3xl" />
+            <div className="grid items-center gap-6 md:grid-cols-[1.1fr_1fr]">
+              <div>
+                <p className="text-xs uppercase tracking-[0.2em] text-cyan-200">{section.type}</p>
+                <h2 className="mt-2 text-3xl font-semibold text-white">{section.title}</h2>
+                <p className="mt-3 max-w-2xl text-zinc-100">{section.subtitle}</p>
+                <Link href={section.button_link || HARMONY_COURSE_URL} target="_blank" className="mt-5 inline-flex rounded-xl bg-white px-6 py-3 text-sm font-bold text-slate-900">{section.button_text || "Conhecer o curso"}</Link>
+              </div>
+              {section.image_url ? <img src={section.image_url} alt={section.title} className="w-full rounded-2xl border border-white/20 object-contain shadow-[0_0_40px_rgba(34,211,238,0.18)]" /> : null}
+            </div>
+          </section>
+        ))}
 
         <footer className="rounded-3xl border border-white/10 bg-black/30 p-6">
           <div className="grid gap-6 md:grid-cols-4">

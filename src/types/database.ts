@@ -187,6 +187,35 @@ export interface Database {
         };
         Update: Partial<Database["public"]["Tables"]["home_banners"]["Insert"]>;
       };
+
+      home_sections: {
+        Row: {
+          id: string;
+          type: string;
+          title: string;
+          subtitle: string | null;
+          image_url: string | null;
+          button_text: string | null;
+          button_link: string | null;
+          active: boolean;
+          order_index: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          type: string;
+          title: string;
+          subtitle?: string | null;
+          image_url?: string | null;
+          button_text?: string | null;
+          button_link?: string | null;
+          active?: boolean;
+          order_index?: number;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["home_sections"]["Insert"]>;
+      };
+
       categories: {
         Row: {
           id: string;
