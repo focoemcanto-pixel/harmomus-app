@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getCheckoutSession } from "@/lib/stripe/client";
 import { createClient } from "@/lib/supabase/server";
 import { mapStripeStatus } from "@/lib/stripe/status";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 
 const WHATSAPP_PREMIUM_URL = "https://chat.whatsapp.com/FNU6Xl5t6qD0VfGA2EQ0IW?mode=gi_t";
 
@@ -55,8 +56,8 @@ async function syncCheckoutSession(sessionId?: string) {
       .maybeSingle();
 
     const result = existing?.id
-      ? await (supabase as any).from("subscriptions").update(payload).eq("id", existing.id)
-      : await (supabase as any).from("subscriptions").insert(payload);
+      ? await (supabaseAdmin as any).from("subscriptions").update(payload).eq("id", existing.id)
+      : await (supabaseAdmin as any).from("subscriptions").insert(payload);
 
     if (result.error) return { synced: false, planSlug, error: result.error.message };
     return { synced: true, planSlug, error: null };
