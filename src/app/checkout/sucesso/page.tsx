@@ -55,7 +55,6 @@ async function syncCheckoutSession(sessionId?: string) {
         stripe_price_id: priceId,
         current_period_end: currentPeriodEnd,
         trial_ends_at: trialEndsAt,
-        next_billing_at: currentPeriodEnd,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id" },
