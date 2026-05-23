@@ -81,10 +81,10 @@ export default async function HomePage() {
                 Kits vocais completos em todos os tons e vozes para preparar seu ministério com excelência, segurança e unidade vocal.
               </p>
 
-              <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+              <div className="mt-7 flex flex-col items-start gap-3 sm:flex-row sm:flex-wrap">
                 <Link
                   href="/todos-os-kits"
-                  className="rounded-xl bg-gradient-to-r from-cyan-300 to-blue-400 px-6 py-3 text-center text-sm font-bold text-slate-950 shadow-[0_12px_40px_rgba(56,189,248,0.45)] transition hover:scale-[1.02]"
+                  className="inline-flex w-fit min-w-[150px] items-center justify-center rounded-xl bg-gradient-to-r from-cyan-300 to-blue-400 px-6 py-3 text-center text-sm font-bold text-slate-950 shadow-[0_12px_40px_rgba(56,189,248,0.45)] transition hover:scale-[1.02]"
                 >
                   Explorar kits
                 </Link>
@@ -92,7 +92,7 @@ export default async function HomePage() {
                 <SubscribeButton
                   planSlug="premium"
                   label="Experimentar grátis por 7 dias"
-                  className="rounded-xl border border-white/30 bg-white/10 px-6 py-3 text-sm font-medium text-white backdrop-blur transition hover:bg-white/20 disabled:opacity-80"
+                  className="inline-flex w-fit min-w-[280px] items-center justify-center rounded-xl border border-white/30 bg-white/10 px-6 py-3 text-sm font-medium text-white backdrop-blur transition hover:bg-white/20 disabled:opacity-80"
                 />
               </div>
             </div>
