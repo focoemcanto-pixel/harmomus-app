@@ -38,18 +38,27 @@ async function syncCheckoutSession(sessionId?: string) {
 
     const status = mapStripeStatus(subscription?.status ?? "active");
 
-    const { error } = await (supabase as any).from("subscriptions").upsert(
-      {
-        user_id: user.id,
-        plan_id: plan.id,
-        status,
-        gateway: "stripe",
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "user_id" },
-    );
+    const payload = {
+      user_id: user.id,
+      plan_id: plan.id,
+      status,
+      gateway: "stripe",
+      updated_at: new Date().toISOString(),
+    };
 
-    if (error) return { synced: false, planSlug, error: error.message };
+    const { data: existing } = await (supabase as any)
+      .from("subscriptions")
+      .select("id")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const result = existing?.id
+      ? await (supabase as any).from("subscriptions").update(payload).eq("id", existing.id)
+      : await (supabase as any).from("subscriptions").insert(payload);
+
+    if (result.error) return { synced: false, planSlug, error: result.error.message };
     return { synced: true, planSlug, error: null };
   } catch (error) {
     return { synced: false, planSlug: null, error: error instanceof Error ? error.message : "Erro desconhecido." };
