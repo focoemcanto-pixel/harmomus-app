@@ -149,8 +149,16 @@ export async function getMemberById(id: string): Promise<MemberListItem | null> 
 
 export async function updateMemberSubscription(userId: string, payload: Database["public"]["Tables"]["subscriptions"]["Update"]): Promise<void> {
   const supabase = createSupabaseAdminClient() as any;
-  const { error } = await supabase.from("subscriptions").update({ ...payload, updated_at: new Date().toISOString() }).eq("user_id", userId);
-  if (error) throw new Error(`Falha ao atualizar assinatura: ${error.message}`);
+  const { data: existing } = await supabase.from("subscriptions").select("id").eq("user_id", userId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+
+  if (existing?.id) {
+    const { error } = await supabase.from("subscriptions").update({ ...payload, updated_at: new Date().toISOString() }).eq("id", existing.id);
+    if (error) throw new Error(`Falha ao atualizar assinatura: ${error.message}`);
+    return;
+  }
+
+  const { error } = await supabase.from("subscriptions").insert({ user_id: userId, ...payload, updated_at: new Date().toISOString() });
+  if (error) throw new Error(`Falha ao criar assinatura: ${error.message}`);
 }
 
 export async function cancelMemberSubscription(userId: string): Promise<void> {
@@ -159,4 +167,18 @@ export async function cancelMemberSubscription(userId: string): Promise<void> {
 
 export async function reactivateMemberSubscription(userId: string): Promise<void> {
   await updateMemberSubscription(userId, { status: "active", auto_renew: true });
+}
+
+export async function deleteMember(userId: string): Promise<void> {
+  const supabase = createSupabaseAdminClient() as any;
+  const safeDeletes = [
+    supabase.from("subscriptions").delete().eq("user_id", userId),
+    supabase.from("playlist_items").delete().eq("user_id", userId),
+    supabase.from("playlists").delete().eq("user_id", userId),
+    supabase.from("profiles").delete().eq("id", userId),
+  ];
+
+  await Promise.allSettled(safeDeletes);
+  const { error } = await supabase.auth.admin.deleteUser(userId);
+  if (error) throw new Error(`Falha ao excluir usuário Auth: ${error.message}`);
 }
