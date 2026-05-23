@@ -61,6 +61,13 @@ export async function createCheckoutSession(input: { customerId: string; priceId
   return stripe<{ url: string }>("/checkout/sessions", form);
 }
 
+export async function getCheckoutSession(sessionId: string) {
+  const query = new URLSearchParams({
+    "expand[]": "subscription",
+  });
+  return stripe<any>(`/checkout/sessions/${encodeURIComponent(sessionId)}?${query.toString()}`, undefined, "GET");
+}
+
 export async function createCustomerPortalSession(customerId: string, returnUrl: string) {
   return stripe<{ url: string }>("/billing_portal/sessions", new URLSearchParams({ customer: customerId, return_url: returnUrl }));
 }
@@ -70,7 +77,7 @@ export async function cancelSubscription(subscriptionId: string) {
 }
 
 export async function getSubscription(subscriptionId: string) {
-  return stripe(`/subscriptions/${subscriptionId}`, undefined, "GET");
+  return stripe<any>(`/subscriptions/${encodeURIComponent(subscriptionId)}`, undefined, "GET");
 }
 
 export async function updateSubscription(subscriptionId: string, priceId: string) {
