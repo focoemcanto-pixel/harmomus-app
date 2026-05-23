@@ -4,6 +4,33 @@ import { redirect } from "next/navigation";
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { getCurrentUserPlaylists } from "@/lib/data/playlists";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+
+async function deletePlaylist(formData: FormData) {
+  "use server";
+
+  const playlistId = String(formData.get("playlistId") ?? "");
+  if (!playlistId) return;
+
+  const context = await getCurrentUserAccessContext();
+  if (context.isGuest || !context.profile?.id) return;
+
+  const supabase = createSupabaseAdminClient() as any;
+
+  const { data: playlist } = await supabase
+    .from("playlists")
+    .select("id")
+    .eq("id", playlistId)
+    .eq("user_id", context.profile.id)
+    .maybeSingle();
+
+  if (!playlist) return;
+
+  await supabase.from("playlist_items").delete().eq("playlist_id", playlistId);
+  await supabase.from("playlists").delete().eq("id", playlistId);
+
+  redirect("/minhas-playlists");
+}
 
 export default async function MinhasPlaylistsPage() {
   const context = await getCurrentUserAccessContext();
@@ -53,51 +80,52 @@ export default async function MinhasPlaylistsPage() {
           ) : (
             <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
               {playlists.map((playlist) => (
-                <Link
+                <div
                   key={playlist.id}
-                  href={`/playlist/${playlist.slug}`}
                   className="group overflow-hidden rounded-3xl border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] transition hover:border-cyan-400/30 hover:bg-white/[0.08]"
                 >
-                  <div className="relative aspect-[16/9] overflow-hidden border-b border-white/5 bg-black/30">
-                    {playlist.covers.length > 0 ? (
-                      <div className="grid h-full w-full grid-cols-2 grid-rows-2 gap-[1px] bg-white/5">
-                        {playlist.covers.map((cover) => (
-                          <div key={cover.id} className="relative overflow-hidden bg-black/30">
-                            {cover.cover_url ? (
-                              <img
-                                src={cover.cover_url}
-                                alt={cover.name}
-                                className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
-                              />
-                            ) : (
-                              <div className="flex h-full w-full items-center justify-center bg-white/5 text-xs text-zinc-500">
-                                Sem capa
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-zinc-500">
-                        Playlist vazia
-                      </div>
-                    )}
+                  <Link href={`/playlist/${playlist.slug}`}>
+                    <div className="relative aspect-[16/9] overflow-hidden border-b border-white/5 bg-black/30">
+                      {playlist.covers.length > 0 ? (
+                        <div className="grid h-full w-full grid-cols-2 grid-rows-2 gap-[1px] bg-white/5">
+                          {playlist.covers.map((cover) => (
+                            <div key={cover.id} className="relative overflow-hidden bg-black/30">
+                              {cover.cover_url ? (
+                                <img
+                                  src={cover.cover_url}
+                                  alt={cover.name}
+                                  className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+                                />
+                              ) : (
+                                <div className="flex h-full w-full items-center justify-center bg-white/5 text-xs text-zinc-500">
+                                  Sem capa
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="flex h-full items-center justify-center text-zinc-500">
+                          Playlist vazia
+                        </div>
+                      )}
 
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent" />
 
-                    <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between gap-3">
-                      <div>
-                        <p className="text-xs uppercase tracking-[0.2em] text-zinc-300">
-                          {playlist.isPublic ? "Playlist pública" : "Playlist privada"}
-                        </p>
-                        <h2 className="mt-1 text-2xl font-semibold leading-tight">{playlist.name}</h2>
-                      </div>
+                      <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between gap-3">
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.2em] text-zinc-300">
+                            {playlist.isPublic ? "Playlist pública" : "Playlist privada"}
+                          </p>
+                          <h2 className="mt-1 text-2xl font-semibold leading-tight">{playlist.name}</h2>
+                        </div>
 
-                      <div className="rounded-full border border-white/10 bg-black/40 px-3 py-1 text-sm text-zinc-100 backdrop-blur">
-                        {playlist.kitCount} kits
+                        <div className="rounded-full border border-white/10 bg-black/40 px-3 py-1 text-sm text-zinc-100 backdrop-blur">
+                          {playlist.kitCount} kits
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  </Link>
 
                   <div className="space-y-3 p-5">
                     <div className="space-y-1">
@@ -120,12 +148,27 @@ export default async function MinhasPlaylistsPage() {
                         }).format(new Date(playlist.createdAt))}
                       </span>
 
-                      <span className="text-cyan-200 transition group-hover:translate-x-1">
-                        Abrir playlist →
-                      </span>
+                      <div className="flex items-center gap-3">
+                        <Link
+                          href={`/playlist/${playlist.slug}`}
+                          className="text-cyan-200 transition hover:text-cyan-100"
+                        >
+                          Abrir playlist →
+                        </Link>
+
+                        <form action={deletePlaylist}>
+                          <input type="hidden" name="playlistId" value={playlist.id} />
+                          <button
+                            type="submit"
+                            className="rounded-lg border border-red-500/20 bg-red-500/10 px-2 py-1 text-[11px] font-medium text-red-300 transition hover:bg-red-500/20"
+                          >
+                            Excluir
+                          </button>
+                        </form>
+                      </div>
                     </div>
                   </div>
-                </Link>
+                </div>
               ))}
             </div>
           )}
