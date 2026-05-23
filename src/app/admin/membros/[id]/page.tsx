@@ -1,134 +1,155 @@
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+
 import { PageHeader } from "@/components/admin/page-header";
-import { cancelMemberSubscription, getMemberById, reactivateMemberSubscription, updateMemberSubscription } from "@/lib/data/members";
+import { cancelMemberSubscription, deleteMember, getMemberById, reactivateMemberSubscription, updateMemberSubscription } from "@/lib/data/members";
 import { getPlans } from "@/lib/data/plans";
-import { createClient } from "@/lib/supabase/server";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 const STATUS_OPTIONS = ["active", "trialing", "pending", "canceled", "inactive"] as const;
 
-type UiWarnings = {
-  member?: string;
-  billing?: string;
-  subscription?: string;
-  history?: string;
-  stripe?: string;
-};
+function formatDate(value?: string | null) {
+  if (!value) return "-";
+  try {
+    return new Date(value).toLocaleString("pt-BR");
+  } catch {
+    return "-";
+  }
+}
+
+function getMetadataValue(profile: any, key: string) {
+  return profile?.user_metadata?.[key] ?? profile?.raw_user_meta_data?.[key] ?? null;
+}
 
 export default async function MemberDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const warnings: UiWarnings = {};
 
   const [memberResult, plansResult] = await Promise.allSettled([getMemberById(id), getPlans()]);
-
-  let member = null as Awaited<ReturnType<typeof getMemberById>>;
-  if (memberResult.status === "fulfilled") {
-    member = memberResult.value;
-  } else {
-    warnings.member = "Não foi possível carregar os dados do membro agora.";
-  }
-
+  const member = memberResult.status === "fulfilled" ? memberResult.value : null;
   const plans = plansResult.status === "fulfilled" ? plansResult.value : [];
-  if (plansResult.status === "rejected") {
-    warnings.subscription = "Não foi possível carregar os planos para edição.";
-  }
 
-  const supabase = (await createClient()) as any;
-
-  let billingProfile: any = null;
-  try {
-    const { data, error } = await supabase
-      .from("subscriptions")
-      .select("stripe_customer_id, gateway_customer_id, gateway, stripe_subscription_id")
-      .eq("user_id", id)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (error) throw error;
-    billingProfile = data ?? null;
-  } catch {
-    warnings.billing = "Não foi possível carregar billing profile.";
-  }
-
-  let subscriptionRecord: any = member?.subscription ?? null;
-  try {
-    if (!subscriptionRecord) {
-      const { data, error } = await supabase
-        .from("subscriptions")
-        .select("*")
-        .eq("user_id", id)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (error) throw error;
-      subscriptionRecord = data ?? null;
-    }
-  } catch {
-    warnings.subscription = "Não foi possível carregar a assinatura.";
-    subscriptionRecord = null;
-  }
-
-  let subscriptionHistoryLabel = "Sem histórico disponível.";
-  try {
-    const { data, error } = await supabase
-      .from("subscriptions")
-      .select("updated_at")
-      .eq("user_id", id)
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (error) throw error;
-    if (data?.updated_at) {
-      subscriptionHistoryLabel = `Última atualização em ${new Date(data.updated_at).toLocaleString("pt-BR")}.`;
-    }
-  } catch {
-    warnings.history = "Não foi possível carregar o histórico de assinatura.";
-  }
-
-  const stripeCustomerId = billingProfile?.stripe_customer_id ?? subscriptionRecord?.stripe_customer_id ?? null;
-  const stripeSubscriptionId = billingProfile?.stripe_subscription_id ?? subscriptionRecord?.stripe_subscription_id ?? null;
-  if (!stripeCustomerId && !stripeSubscriptionId) {
-    warnings.stripe = "Dados do Stripe indisponíveis para este membro.";
-  }
-
-  const profile = member?.profile;
-  const planId = subscriptionRecord?.plan_id ?? "";
-  const status = subscriptionRecord?.status ?? "inactive";
+  const profile: any = member?.profile ?? null;
+  const subscription: any = member?.subscription ?? null;
+  const currentPlanId = subscription?.plan_id ?? "";
+  const currentStatus = subscription?.status ?? "inactive";
+  const username = getMetadataValue(profile, "username") ?? "-";
+  const phone = getMetadataValue(profile, "phone") ?? "-";
 
   async function save(formData: FormData) {
     "use server";
-    const userId = String(formData.get("user_id"));
-    await updateMemberSubscription(userId, { plan_id: String(formData.get("plan_id")), status: String(formData.get("status")) as any });
+    const userId = String(formData.get("user_id") ?? "");
+    const planId = String(formData.get("plan_id") ?? "");
+    const status = String(formData.get("status") ?? "inactive") as any;
+    await updateMemberSubscription(userId, { plan_id: planId || null, status });
     revalidatePath(`/admin/membros/${userId}`);
     revalidatePath("/admin/membros");
   }
+
   async function cancel(formData: FormData) {
     "use server";
-    const userId = String(formData.get("user_id"));
+    const userId = String(formData.get("user_id") ?? "");
     await cancelMemberSubscription(userId);
     revalidatePath(`/admin/membros/${userId}`);
-  }
-  async function reactivate(formData: FormData) {
-    "use server";
-    const userId = String(formData.get("user_id"));
-    await reactivateMemberSubscription(userId);
-    revalidatePath(`/admin/membros/${userId}`);
+    revalidatePath("/admin/membros");
   }
 
-  return <section className="space-y-6"><PageHeader title="Detalhe do Membro" description="Gerencie plano, status e ações administrativas." />
-    {Object.values(warnings).filter(Boolean).length ? <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-200 space-y-1">
-      {Object.values(warnings).filter(Boolean).map((warning)=><p key={warning}>{warning}</p>)}
-    </div> : null}
-    <div className="grid gap-4 md:grid-cols-2"><div className="rounded-xl border border-border bg-surface p-6 shadow-premium space-y-2">
-      <p><strong>Nome:</strong> {profile?.full_name ?? "-"}</p><p><strong>Email:</strong> {profile?.email ?? "-"}</p><p><strong>Username:</strong> {profile?.legacy_pms_member_id ?? "-"}</p><p><strong>Telefone:</strong> -</p><p><strong>Avatar:</strong> {profile?.avatar_url ?? "-"}</p><p><strong>Cadastro:</strong> {profile?.created_at ? new Date(profile.created_at).toLocaleString("pt-BR") : "-"}</p>
-      <p><strong>Plano atual:</strong> {member?.plan?.name ?? "Free"}</p><p><strong>Status:</strong> {status}</p><p><strong>Stripe customer:</strong> {stripeCustomerId ?? "null"}</p><p><strong>Subscription:</strong> {stripeSubscriptionId ?? "null"}</p>
-    </div>
-      <form action={save} className="rounded-xl border border-border bg-surface p-6 shadow-premium space-y-3"><input type="hidden" name="user_id" value={profile?.id ?? id} />
-        <label className="block text-sm">Plano<select name="plan_id" defaultValue={planId} className="mt-1 w-full rounded border border-border bg-background px-3 py-2"><option value="">Free</option>{plans.map((p:any)=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
-        <label className="block text-sm">Status<select name="status" defaultValue={status} className="mt-1 w-full rounded border border-border bg-background px-3 py-2">{STATUS_OPTIONS.map((s)=><option key={s}>{s}</option>)}</select></label>
-        {!subscriptionRecord ? <div className="rounded border border-blue-500/40 bg-blue-500/10 p-3 text-sm text-blue-200">Usuário sem assinatura ativa</div> : null}
-        <button className="rounded bg-gold-500/20 px-4 py-2 text-gold-300">Salvar promoção/downgrade</button>
-        <div className="flex gap-2"><button formAction={cancel} onClick={(e)=>{ if(!confirm('Confirmar cancelamento?')) e.preventDefault(); }} className="rounded border border-red-500/50 px-3 py-2 text-red-300">Cancelar</button>
-          <button formAction={reactivate} onClick={(e)=>{ if(!confirm('Confirmar reativação?')) e.preventDefault(); }} className="rounded border border-emerald-500/50 px-3 py-2 text-emerald-300">Reativar</button></div>
-        <div className="text-xs text-muted rounded border border-border bg-background p-3">Histórico: {subscriptionHistoryLabel}</div>
-      </form></div></section>;
+  async function reactivate(formData: FormData) {
+    "use server";
+    const userId = String(formData.get("user_id") ?? "");
+    await reactivateMemberSubscription(userId);
+    revalidatePath(`/admin/membros/${userId}`);
+    revalidatePath("/admin/membros");
+  }
+
+  async function remove(formData: FormData) {
+    "use server";
+    const userId = String(formData.get("user_id") ?? "");
+    await deleteMember(userId);
+    revalidatePath("/admin/membros");
+    redirect("/admin/membros");
+  }
+
+  if (!member || !profile) {
+    return (
+      <section className="space-y-6">
+        <PageHeader title="Membro não encontrado" description="Não foi possível carregar este membro." />
+        <a href="/admin/membros" className="inline-flex rounded-xl border border-border px-4 py-2 text-sm text-muted hover:text-white">Voltar para membros</a>
+      </section>
+    );
+  }
+
+  return (
+    <section className="space-y-6">
+      <PageHeader title="Detalhe do Membro" description="Gerencie plano, status, assinatura e ações administrativas." />
+
+      <div className="rounded-2xl border border-border bg-surface p-6 shadow-premium">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.2em] text-gold-300">Membro</p>
+            <h2 className="mt-2 text-2xl font-semibold text-white">{profile.full_name ?? "Sem nome"}</h2>
+            <p className="text-sm text-muted">{profile.email ?? "Sem e-mail"}</p>
+          </div>
+          <a href="/admin/membros" className="rounded-xl border border-border px-4 py-2 text-sm text-muted hover:text-white">Voltar</a>
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
+        <div className="rounded-2xl border border-border bg-surface p-6 shadow-premium">
+          <h3 className="text-lg font-semibold text-white">Dados do perfil</h3>
+          <div className="mt-4 grid gap-3 text-sm text-muted md:grid-cols-2">
+            <p><strong className="text-white">Nome:</strong> {profile.full_name ?? "-"}</p>
+            <p><strong className="text-white">E-mail:</strong> {profile.email ?? "-"}</p>
+            <p><strong className="text-white">Username:</strong> {username}</p>
+            <p><strong className="text-white">Telefone:</strong> {phone}</p>
+            <p><strong className="text-white">Cadastro:</strong> {formatDate(profile.created_at)}</p>
+            <p><strong className="text-white">Atualizado:</strong> {formatDate(profile.updated_at)}</p>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-border bg-surface p-6 shadow-premium">
+          <h3 className="text-lg font-semibold text-white">Assinatura</h3>
+          <div className="mt-4 grid gap-3 text-sm text-muted md:grid-cols-2">
+            <p><strong className="text-white">Plano atual:</strong> {member.plan?.name ?? "Free"}</p>
+            <p><strong className="text-white">Status:</strong> {currentStatus}</p>
+            <p><strong className="text-white">Gateway:</strong> {subscription?.gateway ?? "-"}</p>
+            <p><strong className="text-white">Stripe Customer:</strong> {subscription?.stripe_customer_id ?? "-"}</p>
+            <p><strong className="text-white">Stripe Sub:</strong> {subscription?.stripe_subscription_id ?? "-"}</p>
+            <p><strong className="text-white">Próx. cobrança:</strong> {formatDate(subscription?.next_billing_at ?? subscription?.current_period_end)}</p>
+          </div>
+        </div>
+      </div>
+
+      <form action={save} className="rounded-2xl border border-border bg-surface p-6 shadow-premium">
+        <input type="hidden" name="user_id" value={profile.id ?? id} />
+        <h3 className="text-lg font-semibold text-white">Alterar plano/status</h3>
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <label className="text-sm text-muted">Plano
+            <select name="plan_id" defaultValue={currentPlanId} className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3 text-white">
+              <option value="">Free</option>
+              {plans.map((plan: any) => <option key={plan.id} value={plan.id}>{plan.name}</option>)}
+            </select>
+          </label>
+          <label className="text-sm text-muted">Status
+            <select name="status" defaultValue={currentStatus} className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3 text-white">
+              {STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status}</option>)}
+            </select>
+          </label>
+        </div>
+        <div className="mt-5 flex flex-wrap gap-3">
+          <button className="rounded-xl bg-gold-500/20 px-5 py-3 text-sm font-semibold text-gold-300 hover:bg-gold-500/30">Salvar alteração</button>
+          <button formAction={cancel} className="rounded-xl border border-red-500/50 px-5 py-3 text-sm font-semibold text-red-300 hover:bg-red-500/10">Cancelar assinatura</button>
+          <button formAction={reactivate} className="rounded-xl border border-emerald-500/50 px-5 py-3 text-sm font-semibold text-emerald-300 hover:bg-emerald-500/10">Reativar assinatura</button>
+        </div>
+      </form>
+
+      <form action={remove} className="rounded-2xl border border-red-500/40 bg-red-500/5 p-6 shadow-premium">
+        <input type="hidden" name="user_id" value={profile.id ?? id} />
+        <h3 className="text-lg font-semibold text-red-200">Excluir membro</h3>
+        <p className="mt-2 text-sm text-red-100/80">Remove o usuário do Auth, perfil, assinatura e playlists vinculadas. Use apenas para cadastros de teste ou duplicados.</p>
+        <button className="mt-4 rounded-xl border border-red-400/70 px-5 py-3 text-sm font-semibold text-red-200 hover:bg-red-500/10">Excluir definitivamente</button>
+      </form>
+    </section>
+  );
 }
