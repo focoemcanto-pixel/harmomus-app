@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
-import { createClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { uploadKitCoverToR2 } from "@/lib/r2/upload";
 
 export async function POST(request: Request) {
@@ -14,8 +14,13 @@ export async function POST(request: Request) {
     if (!(file instanceof File)) return NextResponse.json({ error: "Arquivo inválido" }, { status: 400 });
 
     const uploaded = await uploadKitCoverToR2({ file, slug: context.profile.id, context: "profile-avatar" });
-    const supabase = await createClient();
-    await (supabase as any).from("profiles").update({ avatar_url: uploaded.url, updated_at: new Date().toISOString() }).eq("id", context.profile.id);
+    const supabaseAdmin = createSupabaseAdminClient();
+    const { error } = await (supabaseAdmin as any)
+      .from("profiles")
+      .update({ avatar_url: uploaded.url, updated_at: new Date().toISOString() })
+      .eq("id", context.profile.id);
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
     return NextResponse.json({ success: true, url: uploaded.url });
   } catch (error) {
