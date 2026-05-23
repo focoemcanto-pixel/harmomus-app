@@ -56,7 +56,6 @@ async function syncCheckoutSession(sessionId?: string) {
         current_period_end: currentPeriodEnd,
         trial_ends_at: trialEndsAt,
         next_billing_at: currentPeriodEnd,
-        last_webhook_event: "checkout.success.session_sync",
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id" },
