@@ -24,20 +24,12 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
   const [menuOpen, setMenuOpen] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [liveAvatar, setLiveAvatar] = useState(context.isGuest ? null : context.profile?.avatar_url ?? null);
-  const [upgradeConfig, setUpgradeConfig] = useState({
-    title: "Upgrade necessário",
-    message: "Faça upgrade para continuar.",
-    ctaLabel: "Assinar Premium",
-    ctaHref: "/assinar?plan=premium",
-  });
+  const [upgradeConfig, setUpgradeConfig] = useState({ title: "Upgrade necessário", message: "Faça upgrade para continuar.", ctaLabel: "Assinar Premium", ctaHref: "/assinar?plan=premium" });
   const menuRef = useRef<HTMLDivElement>(null);
   const searchDesktopRef = useRef<HTMLDivElement>(null);
   const searchMobileRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(query.toLowerCase().trim()), 180);
-    return () => clearTimeout(t);
-  }, [query]);
+  useEffect(() => { const t = setTimeout(() => setDebounced(query.toLowerCase().trim()), 180); return () => clearTimeout(t); }, [query]);
 
   useEffect(() => {
     function onClickOutside(ev: MouseEvent) {
@@ -51,19 +43,10 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
   }, []);
 
   useEffect(() => {
-    if (context.isGuest) {
-      setLiveAvatar(null);
-      window.localStorage.removeItem("harmomus-avatar-url");
-      return;
-    }
-
+    if (context.isGuest) { setLiveAvatar(null); window.localStorage.removeItem("harmomus-avatar-url"); return; }
     const stored = window.localStorage.getItem("harmomus-avatar-url");
     setLiveAvatar(stored || context.profile?.avatar_url || null);
-
-    function onAvatarUpdate() {
-      const next = window.localStorage.getItem("harmomus-avatar-url");
-      setLiveAvatar(next || context.profile?.avatar_url || null);
-    }
+    function onAvatarUpdate() { const next = window.localStorage.getItem("harmomus-avatar-url"); setLiveAvatar(next || context.profile?.avatar_url || null); }
     window.addEventListener("harmomus:avatar-updated", onAvatarUpdate as EventListener);
     return () => window.removeEventListener("harmomus:avatar-updated", onAvatarUpdate as EventListener);
   }, [context.isGuest, context.profile?.avatar_url]);
@@ -78,12 +61,7 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
     const allowedPremium = context.effectiveSlug === "premium";
     if ((type === "plus" && !allowedPlus) || (type === "premium" && !allowedPremium)) {
       const isPlus = type === "plus";
-      setUpgradeConfig({
-        title: isPlus ? "Este recurso requer plano Plus ou Premium." : "Este recurso requer plano Premium.",
-        message: isPlus ? "Faça upgrade para desbloquear suas playlists privadas." : "Desbloqueie o acesso premium completo agora.",
-        ctaLabel: "Assinar Premium",
-        ctaHref: "/assinar?plan=premium",
-      });
+      setUpgradeConfig({ title: isPlus ? "Este recurso requer plano Plus ou Premium." : "Este recurso requer plano Premium.", message: isPlus ? "Faça upgrade para desbloquear suas playlists privadas." : "Desbloqueie o acesso premium completo agora.", ctaLabel: "Assinar Premium", ctaHref: "/assinar?plan=premium" });
       setUpgradeOpen(true);
       return false;
     }
@@ -105,16 +83,13 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar kits, artista ou categoria" className="h-11 w-full rounded-xl border border-white/15 bg-white/5 px-4 text-sm outline-none ring-cyan-300/40 transition focus:ring" />
         {results.length > 0 ? <div className="absolute left-0 right-0 top-12 z-50 rounded-xl border border-white/10 bg-[#0d1220] p-2 shadow-premium">{results.map((item) => <Link key={item.id} href={`/biblioteca/${item.slug}`} onClick={() => setQuery("")} className="block rounded-lg px-3 py-2 hover:bg-white/5"><p className="text-sm text-white">{item.name}</p><p className="text-xs text-zinc-300">{item.artist} • {item.category}</p></Link>)}</div> : null}
       </div>
-      <Link href="/todos-os-kits" className="whitespace-nowrap rounded-md border border-white/20 px-2 py-1.5 text-[11px] text-zinc-100 md:rounded-lg md:px-3 md:py-2 md:text-sm">Todos os Kits</Link>
+      <Link href="/todos-os-kits" className="hidden whitespace-nowrap rounded-lg border border-white/20 px-3 py-2 text-sm text-zinc-100 md:inline-flex">Todos os Kits</Link>
       <div className="relative" ref={menuRef}>
         <button onClick={() => setMenuOpen((v) => !v)} className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border border-white/20 bg-white/5 text-xs font-semibold md:h-9 md:w-9">
           {showAvatar ? <img src={liveAvatar!} alt="avatar" className="h-full w-full object-cover" /> : context.isGuest ? <UserSilhouetteIcon /> : fallbackInitial}
         </button>
         {menuOpen ? <div className="absolute right-0 top-11 z-50 min-w-52 rounded-xl border border-white/10 bg-[#0d1220] p-2">
-          {context.isGuest ? <>
-            <Link href="/login" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Login</Link>
-            <Link href="/cadastro" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Cadastre-se</Link>
-          </> : <>
+          {context.isGuest ? <><Link href="/login" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Login</Link><Link href="/cadastro" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Cadastre-se</Link></> : <>
             <Link href="/perfil" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Perfil</Link>
             <Link href="/assinatura" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Assinatura</Link>
             <Link href="/minhas-playlists" onClick={(e) => { if (!onProtectedClick("plus")) e.preventDefault(); }} className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Minhas Playlists</Link>
@@ -124,14 +99,7 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
           </>}
         </div> : null}
       </div>
-      <UpgradeRequiredModal
-        open={upgradeOpen}
-        title={upgradeConfig.title}
-        message={upgradeConfig.message}
-        ctaLabel={upgradeConfig.ctaLabel}
-        ctaHref={upgradeConfig.ctaHref}
-        onClose={() => setUpgradeOpen(false)}
-      />
+      <UpgradeRequiredModal open={upgradeOpen} title={upgradeConfig.title} message={upgradeConfig.message} ctaLabel={upgradeConfig.ctaLabel} ctaHref={upgradeConfig.ctaHref} onClose={() => setUpgradeOpen(false)} />
     </>
   );
 }
