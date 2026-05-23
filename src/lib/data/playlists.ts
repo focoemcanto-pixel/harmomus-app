@@ -29,6 +29,16 @@ export interface PublicPlaylist {
   kits: PlaylistKitSummary[];
 }
 
+export interface UserPlaylistSummary {
+  id: string;
+  name: string;
+  slug: string;
+  isPublic: boolean;
+  createdAt: string;
+  kitCount: number;
+  covers: { id: string; name: string; artist: string; cover_url: string | null }[];
+}
+
 function toSlug(value: string): string {
   return value.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9\s-]/g, "").trim().replace(/\s+/g, "-").replace(/-+/g, "-").slice(0, 60) || "playlist";
 }
@@ -43,6 +53,58 @@ async function generateUniqueSlug(baseName: string): Promise<string> {
     slug = `${base}-${Math.random().toString(36).slice(2, 6)}`;
   }
   return `${base}-${Date.now().toString(36).slice(-4)}`;
+}
+
+export async function getCurrentUserPlaylists(): Promise<UserPlaylistSummary[]> {
+  const authClient = await createClient();
+  const { data: auth } = await authClient.auth.getUser();
+  const user = auth.user;
+  if (!user) return [];
+
+  const supabase = createSupabaseAdminClient() as any;
+  const { data: playlists, error } = await supabase
+    .from("playlists")
+    .select("id, name, slug, is_public, created_at")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error(error.message);
+  if (!playlists?.length) return [];
+
+  const playlistIds = playlists.map((playlist: any) => playlist.id);
+  const { data: items, error: itemsError } = await supabase
+    .from("playlist_items")
+    .select("playlist_id, position, kits!inner(id, name, artist, cover_url, published)")
+    .in("playlist_id", playlistIds)
+    .order("position", { ascending: true });
+
+  if (itemsError) throw new Error(itemsError.message);
+
+  const itemsByPlaylist = new Map<string, any[]>();
+  for (const item of items ?? []) {
+    if (!item.kits?.published) continue;
+    const current = itemsByPlaylist.get(item.playlist_id) ?? [];
+    current.push(item);
+    itemsByPlaylist.set(item.playlist_id, current);
+  }
+
+  return playlists.map((playlist: any) => {
+    const playlistItems = itemsByPlaylist.get(playlist.id) ?? [];
+    return {
+      id: playlist.id,
+      name: playlist.name,
+      slug: playlist.slug,
+      isPublic: Boolean(playlist.is_public),
+      createdAt: playlist.created_at,
+      kitCount: playlistItems.length,
+      covers: playlistItems.slice(0, 4).map((item: any) => ({
+        id: item.kits.id,
+        name: item.kits.name,
+        artist: item.kits.artist,
+        cover_url: item.kits.cover_url,
+      })),
+    };
+  });
 }
 
 export async function searchPublishedKits(query: string) {
