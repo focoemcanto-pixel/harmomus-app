@@ -3,6 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 
 const MAX_KITS = 20;
 
+export type PlaylistTrackVoice = "todos" | "tenor" | "contralto" | "soprano" | "baritono";
+
 export interface PlaylistKitSummary {
   id: string;
   slug: string;
@@ -13,7 +15,7 @@ export interface PlaylistKitSummary {
   tracks: {
     id: string;
     tone: string;
-    voice: "todos" | "tenor" | "contralto" | "soprano";
+    voice: PlaylistTrackVoice;
     name: string;
     streamUrl: string;
     fileType: string;
@@ -80,16 +82,12 @@ export async function getPlaylistBySlug(slug: string): Promise<PublicPlaylist | 
     : { data: [], error: null };
   if (audioFilesError) throw new Error(audioFilesError.message);
 
-  const normalizeVoice = (value: string): "todos" | "tenor" | "contralto" | "soprano" => {
-    const normalized = value
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase()
-      .trim();
-
+  const normalizeVoice = (value: string): PlaylistTrackVoice => {
+    const normalized = value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
     if (normalized.includes("soprano")) return "soprano";
     if (normalized.includes("contralto")) return "contralto";
     if (normalized.includes("tenor")) return "tenor";
+    if (normalized.includes("baritono")) return "baritono";
     return "todos";
   };
 
