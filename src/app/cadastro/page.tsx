@@ -38,9 +38,9 @@ function errorUrl(input: { plan: string; redirectTo: string; message: string; fi
 }
 function mapSupabaseError(message: string): { message: string; field: Field } {
   const lower = message.toLowerCase();
-  if (lower.includes("already") || lower.includes("registered") || lower.includes("exists")) return { message: "Este e-mail já possui cadastro. Tente entrar ou recuperar a senha.", field: "email" };
+  if (lower.includes("already") || lower.includes("registered") || lower.includes("exists") || lower.includes("duplicate")) return { message: "Este e-mail já possui cadastro. Tente entrar ou recuperar a senha.", field: "email" };
   if (lower.includes("password") || lower.includes("senha")) return { message: "A senha precisa ter pelo menos 6 caracteres e ser mais segura.", field: "password" };
-  if (lower.includes("email")) return { message: "Confira o e-mail informado e tente novamente.", field: "email" };
+  if (lower.includes("email")) return { message: `Confira o e-mail informado e tente novamente. Detalhe: ${message}`, field: "email" };
   return { message: message || "Não foi possível criar a conta.", field: "form" };
 }
 function inputClass(name: Field, field: Field) {
@@ -90,17 +90,33 @@ export default async function CadastroPage({ searchParams }: { searchParams: Pro
 
     const supabase = await createClient();
     const supabaseAdmin = createSupabaseAdminClient();
+
     const { data: existingUsername } = await (supabaseAdmin as any).from("profiles").select("id").eq("username", username).maybeSingle();
     if (existingUsername) fail("Nome de usuário já está em uso.", "username");
 
-    const { data, error: signUpError } = await supabase.auth.signUp({ email, password, options: { data: { full_name: fullName, username, phone, plan_slug: plan } } });
-    if (signUpError || !data.user) {
-      const mapped = mapSupabaseError(signUpError?.message ?? "Não foi possível criar a conta.");
+    const { data: createdUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { full_name: fullName, username, phone, plan_slug: plan },
+    });
+
+    if (createError || !createdUser.user) {
+      const mapped = mapSupabaseError(createError?.message ?? "Não foi possível criar a conta.");
       fail(mapped.message, mapped.field);
     }
 
-    const { error: profileError } = await (supabaseAdmin as any).from("profiles").upsert({ id: data.user.id, email, full_name: fullName, username, phone, role: "user", plan_slug: plan, updated_at: new Date().toISOString() }, { onConflict: "id" });
+    const { error: profileError } = await (supabaseAdmin as any).from("profiles").upsert(
+      { id: createdUser.user.id, email, full_name: fullName, username, phone, role: "user", plan_slug: plan, updated_at: new Date().toISOString() },
+      { onConflict: "id" },
+    );
     if (profileError) fail(`Conta criada, mas houve erro ao salvar perfil: ${profileError.message}`, "form");
+
+    const { error: loginError } = await supabase.auth.signInWithPassword({ email, password });
+    if (loginError) {
+      const mapped = mapSupabaseError(loginError.message);
+      fail(`Conta criada, mas não foi possível iniciar sessão automaticamente. ${mapped.message}`, mapped.field);
+    }
 
     if (plan === "free") redirect(redirectTo || "/perfil");
     redirect(`/api/billing/checkout?plan=${encodeURIComponent(plan)}`);
