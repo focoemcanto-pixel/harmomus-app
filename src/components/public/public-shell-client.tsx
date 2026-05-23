@@ -8,6 +8,8 @@ import type { CurrentUserAccessContext } from "@/lib/auth/current-user";
 
 interface SearchItem { id: string; slug: string; name: string; artist: string; category: string; searchText: string }
 
+const COMMUNITY_WHATSAPP_URL = "https://chat.whatsapp.com/JOjA61Zsoj54nnLnJ0ziq5?mode=gi_t";
+
 function UserSilhouetteIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 text-zinc-100">
@@ -116,8 +118,7 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
             <Link href="/perfil" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Perfil</Link>
             <Link href="/assinatura" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Assinatura</Link>
             <Link href="/minhas-playlists" onClick={(e) => { if (!onProtectedClick("plus")) e.preventDefault(); }} className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Minhas Playlists</Link>
-            <Link href="/comunidade" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Comunidade Harmomus</Link>
-            <Link href="/premium-vip" onClick={(e) => { if (!onProtectedClick("premium")) e.preventDefault(); }} className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Premium VIP</Link>
+            <a href={COMMUNITY_WHATSAPP_URL} target="_blank" rel="noopener noreferrer" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Comunidade Harmomus</a>
             <Link href="/area-premium" onClick={(e) => { if (!onProtectedClick("premium")) e.preventDefault(); }} className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Área Premium</Link>
             <Link href="/logout" className="block rounded-lg px-3 py-2 text-sm text-rose-300 hover:bg-white/5">Sair</Link>
           </>}
