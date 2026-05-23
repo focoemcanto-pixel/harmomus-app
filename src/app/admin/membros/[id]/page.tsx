@@ -42,7 +42,7 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
     const userId = String(formData.get("user_id") ?? "");
     const planId = String(formData.get("plan_id") ?? "");
     const status = String(formData.get("status") ?? "inactive") as any;
-    await updateMemberSubscription(userId, { plan_id: planId || null, status });
+    await updateMemberSubscription(userId, { plan_id: planId || undefined, status });
     revalidatePath(`/admin/membros/${userId}`);
     revalidatePath("/admin/membros");
   }
