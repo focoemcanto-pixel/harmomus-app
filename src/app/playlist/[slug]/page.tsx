@@ -1,7 +1,7 @@
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { notFound } from "next/navigation";
 
-import { PlaylistPageTemplate } from "@/components/public/playlist-page-template";
+import { PlaylistPlayerClient } from "@/components/public/playlist-player-client";
 import { getPlaylistBySlug } from "@/lib/data/playlists";
 
 export default async function PlaylistPublicPage({ params }: { params: Promise<{ slug: string }> }) {
@@ -9,5 +9,5 @@ export default async function PlaylistPublicPage({ params }: { params: Promise<{
   const playlist = await getPlaylistBySlug(slug);
   if (!playlist) notFound();
 
-  return <PublicAppShell><PlaylistPageTemplate playlist={playlist} /></PublicAppShell>;
+  return <PublicAppShell><PlaylistPlayerClient playlist={playlist} /></PublicAppShell>;
 }

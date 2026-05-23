@@ -10,6 +10,14 @@ export interface PlaylistKitSummary {
   artist: string;
   cover_url: string | null;
   category: { name: string; slug: string } | null;
+  tracks: {
+    id: string;
+    tone: string;
+    voice: "todos" | "tenor" | "contralto" | "soprano";
+    name: string;
+    streamUrl: string;
+    fileType: string;
+  }[];
 }
 
 export interface PublicPlaylist {
@@ -66,11 +74,52 @@ export async function getPlaylistBySlug(slug: string): Promise<PublicPlaylist | 
     : { data: [] };
   const cmap = new Map((categories ?? []).map((c: any) => [c.id, c]));
 
+  const kitIds = (items ?? []).map((i: any) => i.kits.id);
+  const { data: audioFiles, error: audioFilesError } = kitIds.length
+    ? await supabase.from("kit_audio_files").select("id, kit_id, tone, name, file_type").in("kit_id", kitIds)
+    : { data: [], error: null };
+  if (audioFilesError) throw new Error(audioFilesError.message);
+
+  const normalizeVoice = (value: string): "todos" | "tenor" | "contralto" | "soprano" => {
+    const normalized = value
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim();
+
+    if (normalized.includes("soprano")) return "soprano";
+    if (normalized.includes("contralto")) return "contralto";
+    if (normalized.includes("tenor")) return "tenor";
+    return "todos";
+  };
+
+  const filesByKitId = new Map<string, any[]>();
+  for (const file of audioFiles ?? []) {
+    const list = filesByKitId.get(file.kit_id) ?? [];
+    list.push(file);
+    filesByKitId.set(file.kit_id, list);
+  }
+
   return {
     id: playlist.id,
     name: playlist.name,
     slug: playlist.slug,
-    kits: (items ?? []).filter((i: any) => i.kits.published).map((i: any) => ({ ...i.kits, category: i.kits.category_id ? cmap.get(i.kits.category_id) ?? null : null })),
+    kits: (items ?? [])
+      .filter((i: any) => i.kits.published)
+      .map((i: any) => ({
+        ...i.kits,
+        category: i.kits.category_id ? cmap.get(i.kits.category_id) ?? null : null,
+        tracks: (filesByKitId.get(i.kits.id) ?? [])
+          .sort((a, b) => `${a.tone}-${a.name}`.localeCompare(`${b.tone}-${b.name}`, "pt-BR"))
+          .map((file) => ({
+            id: file.id,
+            tone: file.tone,
+            voice: normalizeVoice(file.name),
+            name: file.name,
+            streamUrl: `/api/audio/${file.id}`,
+            fileType: file.file_type,
+          })),
+      })),
   };
 }
 
