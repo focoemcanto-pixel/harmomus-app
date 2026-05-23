@@ -4,7 +4,7 @@ import { Crown, Headphones, MessageCircle, Music2, Send, Sparkles, Star, Trophy,
 
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
-import { getGlobalTopKits, getRecommendedKits, getUserRecentActivities, getUserTopKits, type RecentActivity, type TopKit } from "@/lib/data/premium-analytics";
+import { getGlobalTopKits, getRecommendedKits, getUserRecentActivities, getUserTopKits, type TopKit } from "@/lib/data/premium-analytics";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -28,7 +28,7 @@ export default async function AreaPremiumPage() {
   if (context.isGuest) redirect("/login");
   if (context.effectiveSlug !== "premium") redirect("/assinatura");
 
-  const userId = context.user?.id ?? context.profile?.id ?? "";
+  const userId = context.profile?.id ?? "";
   const [topYou, topSite, recommendedKits, activities] = await Promise.all([
     userId ? getUserTopKits(userId, 5).catch(() => []) : Promise.resolve([]),
     getGlobalTopKits(5).catch(() => []),
