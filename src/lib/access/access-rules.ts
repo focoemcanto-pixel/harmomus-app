@@ -1,47 +1,52 @@
 import { createClient } from "@/lib/supabase/server";
 import type { PublicKit } from "@/lib/data/public-kits";
-import type { Database } from "@/types/database";
 import type { CurrentUserAccessContext } from "@/lib/auth/current-user";
 
-const FREE_LIMIT = 5;
+const FREE_LIMIT = 3;
 
 export interface FreeAccessStats {
-  uniqueKitCount24h: number;
+  accessCountToday: number;
   remaining: number;
-  alreadyAccessedInWindow: boolean;
   limit: number;
+  nextResetAt: string;
+}
+
+function getTodayWindow() {
+  const now = new Date();
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  const nextReset = new Date(start);
+  nextReset.setDate(nextReset.getDate() + 1);
+  return { start: start.toISOString(), nextResetAt: nextReset.toISOString() };
 }
 
 export function canViewKit() {
   return true;
 }
 
-export async function getFreeAccessStats(userId: string, kitId?: string): Promise<FreeAccessStats> {
+export async function getFreeAccessStats(userId: string): Promise<FreeAccessStats> {
   const supabase = await createClient();
-  const from = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { start, nextResetAt } = getTodayWindow();
 
-  const { data } = await (supabase as any)
+  const { count } = await (supabase as any)
     .from("kit_access_logs")
-    .select("kit_id, accessed_at")
+    .select("id", { count: "exact", head: true })
     .eq("user_id", userId)
-    .gte("accessed_at", from)
-    .order("accessed_at", { ascending: false });
+    .gte("accessed_at", start);
 
-  const uniqueIds = new Set((data ?? []).map((item: any) => item.kit_id));
-  const alreadyAccessedInWindow = kitId ? uniqueIds.has(kitId) : false;
-  const uniqueKitCount24h = uniqueIds.size;
-  const remaining = Math.max(0, FREE_LIMIT - uniqueKitCount24h);
+  const accessCountToday = count ?? 0;
+  const remaining = Math.max(0, FREE_LIMIT - accessCountToday);
 
-  return { uniqueKitCount24h, remaining, alreadyAccessedInWindow, limit: FREE_LIMIT };
+  return { accessCountToday, remaining, limit: FREE_LIMIT, nextResetAt };
 }
 
 export async function registerKitAccess(userId: string, kitId: string): Promise<FreeAccessStats> {
-  const stats = await getFreeAccessStats(userId, kitId);
-  if (!stats.alreadyAccessedInWindow && stats.uniqueKitCount24h < FREE_LIMIT) {
-    const supabase = await createClient();
-    await (supabase as any).from("kit_access_logs").insert({ user_id: userId, kit_id: kitId });
-  }
-  return getFreeAccessStats(userId, kitId);
+  const stats = await getFreeAccessStats(userId);
+  if (stats.accessCountToday >= FREE_LIMIT) return stats;
+
+  const supabase = await createClient();
+  await (supabase as any).from("kit_access_logs").insert({ user_id: userId, kit_id: kitId });
+  return getFreeAccessStats(userId);
 }
 
 export async function canPlayAudio(context: CurrentUserAccessContext, kit: PublicKit) {
@@ -51,8 +56,8 @@ export async function canPlayAudio(context: CurrentUserAccessContext, kit: Publi
   if (context.hierarchyLevel < requiredLevel) return { allowed: false, reason: "plan_hierarchy" as const };
 
   if (context.effectiveSlug === "free" && context.profile) {
-    const stats = await getFreeAccessStats(context.profile.id, kit.id);
-    if (!stats.alreadyAccessedInWindow && stats.uniqueKitCount24h >= FREE_LIMIT) return { allowed: false, reason: "free_limit" as const, stats };
+    const stats = await getFreeAccessStats(context.profile.id);
+    if (stats.accessCountToday >= FREE_LIMIT) return { allowed: false, reason: "free_limit" as const, stats };
     return { allowed: true, reason: "ok" as const, stats };
   }
 
