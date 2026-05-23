@@ -73,16 +73,16 @@ export function HomeHeroCarousel({ banners, latestKits = [] }: { banners: Banner
       node: (
         <div className="relative h-full w-full overflow-hidden bg-[radial-gradient(circle_at_85%_15%,rgba(250,204,21,0.22),transparent_32%),radial-gradient(circle_at_15%_80%,rgba(34,211,238,0.18),transparent_35%),linear-gradient(135deg,#100816,#111827_55%,#271006)] p-5 text-white md:p-6">
           <div className="max-w-lg">
-            <p className="text-xs font-bold uppercase tracking-[0.22em] text-yellow-200">Harmomus Premium</p>
-            <h3 className="mt-2 text-2xl font-black leading-tight md:text-3xl">Desbloqueie todos os tons e recursos</h3>
-            <p className="mt-2 text-sm text-zinc-200">Navegue sem limite diário, crie playlists, peça novos tons e acesse a experiência completa.</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-yellow-200 md:text-xs md:tracking-[0.22em]">Harmomus Premium</p>
+            <h3 className="mt-2 text-[26px] font-black leading-[1.1] md:text-3xl">Desbloqueie todos os tons e recursos</h3>
+            <p className="mt-2 text-sm leading-relaxed text-zinc-200">Navegue sem limite diário, crie playlists, peça novos tons e acesse a experiência completa.</p>
             <div className="mt-4 grid gap-2 text-xs text-zinc-100 sm:grid-cols-2">
               <span className="rounded-xl bg-white/10 px-3 py-2">✓ Todos os tons</span>
               <span className="rounded-xl bg-white/10 px-3 py-2">✓ Acesso ilimitado</span>
               <span className="rounded-xl bg-white/10 px-3 py-2">✓ Solicitar novo tom</span>
-              <span className="rounded-xl bg-white/10 px-3 py-2">✓ Playlists premium</span>
+              <span className="hidden rounded-xl bg-white/10 px-3 py-2 sm:block">✓ Playlists premium</span>
             </div>
-            <Link href="/assinar?plan=premium" className="mt-5 inline-flex rounded-xl bg-gradient-to-r from-yellow-200 to-cyan-200 px-5 py-3 text-sm font-black text-slate-950 shadow-[0_18px_50px_rgba(250,204,21,0.25)] transition hover:scale-[1.02]">Tornar-se Premium</Link>
+            <Link href="/assinar?plan=premium" className="mt-4 inline-flex rounded-xl bg-gradient-to-r from-yellow-200 to-cyan-200 px-4 py-2.5 text-xs font-black text-slate-950 shadow-[0_18px_50px_rgba(250,204,21,0.25)] transition hover:scale-[1.02] md:mt-5 md:px-5 md:py-3 md:text-sm">Tornar-se Premium</Link>
           </div>
         </div>
       ),
@@ -92,7 +92,7 @@ export function HomeHeroCarousel({ banners, latestKits = [] }: { banners: Banner
   if (!slides.length) return null;
 
   return (
-    <div className="relative h-[300px] w-full overflow-hidden rounded-3xl border border-white/20 bg-black/30 md:h-[340px]" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
+    <div className="relative h-[360px] w-full overflow-hidden rounded-3xl border border-white/20 bg-black/30 md:h-[340px]" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
       <div className="flex h-full w-full flex-nowrap transition-transform duration-700 ease-out" style={{ transform: `translateX(-${index * 100}%)` }}>
         {slides.map((slide) => (
           <div key={slide.id} className="h-full w-full flex-none shrink-0 basis-full overflow-hidden">
