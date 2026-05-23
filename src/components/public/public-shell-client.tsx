@@ -13,7 +13,7 @@ const COMMUNITY_WHATSAPP_URL = "https://chat.whatsapp.com/JOjA61Zsoj54nnLnJ0ziq5
 function UserSilhouetteIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 text-zinc-100">
-      <path fill="currentColor" d="M12 12c2.76 0 5-2.24 5-5s-2.24-5-5-5 2.24-5 5 2.24 5 5 5Zm0 2c-3.87 0-8 2.03-8 5v1c0 .55.45 1 1 1h14c.55 0 1-.45 1-1v-1c0-2.97-4.13-5-8-5Z" />
+      <path fill="currentColor" d="M12 12c2.76 0 5-2.24 5-5s-2.24-5-5-5 2.24-5 5 2.24 5 5 5 5Zm0 2c-3.87 0-8 2.03-8 5v1c0 .55.45 1 1 1h14c.55 0 1-.45 1-1v-1c0-2.97-4.13-5-8-5Z" />
     </svg>
   );
 }
@@ -73,9 +73,9 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
 
   return (
     <>
-      <div className="min-w-0 flex-1 md:hidden" ref={searchMobileRef}>
+      <div className="min-w-0 max-w-[58vw] flex-1 md:hidden" ref={searchMobileRef}>
         <div className="relative">
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar kits" className="h-8 w-full rounded-lg border border-white/15 bg-white/5 px-2 text-xs text-white outline-none ring-cyan-300/40 transition placeholder:text-zinc-400 focus:ring" />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar kits" className="h-8 w-full rounded-lg border border-white/15 bg-white/5 px-3 text-xs text-white outline-none ring-cyan-300/40 transition placeholder:text-zinc-400 focus:ring" />
           {results.length > 0 ? <div className="absolute left-0 right-0 top-11 z-50 rounded-xl border border-white/10 bg-[#0d1220] p-2 shadow-premium">{results.map((item) => <Link key={item.id} href={`/biblioteca/${item.slug}`} onClick={() => setQuery("")} className="block rounded-lg px-3 py-2 hover:bg-white/5"><p className="text-sm text-white">{item.name}</p><p className="text-xs text-zinc-300">{item.artist} • {item.category}</p></Link>)}</div> : null}
         </div>
       </div>
