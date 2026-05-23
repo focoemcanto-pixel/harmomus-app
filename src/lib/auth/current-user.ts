@@ -54,6 +54,14 @@ export async function getCurrentUserPlan() {
   };
 }
 
+function isSubscriptionUsable(subscription: Subscription | null | undefined) {
+  if (!subscription) return false;
+  const status = String(subscription.status ?? "").toLowerCase();
+  if (!["active", "trialing"].includes(status)) return false;
+  const periodEnd = subscription.current_period_end ? new Date(subscription.current_period_end).getTime() : Number.POSITIVE_INFINITY;
+  return periodEnd > Date.now();
+}
+
 export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessContext> {
   const supabase = await createClient();
   const { data } = await supabase.auth.getUser();
@@ -67,9 +75,9 @@ export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessCo
     findProfileForUser(supabase, data.user),
   ]);
 
-  const plan = (plans ?? []).find((p: Plan) => p.id === subscription?.plan_id) ?? null;
-  const periodEnd = subscription?.current_period_end ? new Date(subscription.current_period_end).getTime() : Number.POSITIVE_INFINITY;
-  const active = Boolean(subscription && subscription.status === "active" && periodEnd > Date.now());
+  const typedSubscription = (subscription as Subscription | null) ?? null;
+  const plan = (plans ?? []).find((p: Plan) => p.id === typedSubscription?.plan_id) ?? null;
+  const active = isSubscriptionUsable(typedSubscription);
   const effectiveSlug: EffectivePlanSlug = active ? ((plan?.slug as EffectivePlanSlug | undefined) ?? "free") : "free";
   const hierarchyLevel = plan?.hierarchy_level ?? (effectiveSlug === "premium" ? 3 : effectiveSlug === "plus" ? 2 : 1);
 
@@ -77,7 +85,7 @@ export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessCo
     effectiveSlug,
     profile,
     plan,
-    subscription: (subscription as Subscription | null) ?? null,
+    subscription: typedSubscription,
     hierarchyLevel,
     isGuest: false,
     isAdmin: normalizeRole(profile?.role) === "admin",
