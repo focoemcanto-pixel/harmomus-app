@@ -31,7 +31,7 @@ export async function getGlobalTopKits(limit = 10): Promise<TopKit[]> {
   if (error) throw new Error(error.message);
 
   return (kits ?? [])
-    .map((kit: any) => ({ ...kit, plays: counts.get(kit.id) ?? 0 }))
+    .map((kit: any): TopKit => ({ ...kit, plays: counts.get(kit.id) ?? 0 }))
     .sort((a: TopKit, b: TopKit) => b.plays - a.plays)
     .slice(0, limit);
 }
@@ -48,7 +48,7 @@ export async function getUserTopKits(userId: string, limit = 5): Promise<TopKit[
   if (error) throw new Error(error.message);
 
   return (kits ?? [])
-    .map((kit: any) => ({ ...kit, plays: counts.get(kit.id) ?? 0 }))
+    .map((kit: any): TopKit => ({ ...kit, plays: counts.get(kit.id) ?? 0 }))
     .sort((a: TopKit, b: TopKit) => b.plays - a.plays)
     .slice(0, limit);
 }
@@ -63,7 +63,7 @@ export async function getRecommendedKits(userId: string, limit = 6): Promise<Top
     .order("accessed_at", { ascending: false })
     .limit(30);
 
-  const listenedIds = new Set((recentLogs ?? []).map((row: any) => row.kit_id));
+  const listenedIds = new Set<string>((recentLogs ?? []).map((row: any) => row.kit_id).filter(Boolean));
   const categoryIds = Array.from(new Set((recentLogs ?? []).map((row: any) => row.kits?.category_id).filter(Boolean)));
 
   let query = supabase.from("kits").select("id, slug, name, artist, cover_url").eq("published", true).limit(limit * 2);
@@ -71,11 +71,14 @@ export async function getRecommendedKits(userId: string, limit = 6): Promise<Top
   const { data, error } = await query.order("created_at", { ascending: false });
   if (error) throw new Error(error.message);
 
-  let recommended = (data ?? []).filter((kit: any) => !listenedIds.has(kit.id)).map((kit: any) => ({ ...kit, plays: 0 }));
+  let recommended: TopKit[] = (data ?? [])
+    .filter((kit: any) => !listenedIds.has(kit.id))
+    .map((kit: any): TopKit => ({ ...kit, plays: 0 }));
 
   if (recommended.length < limit) {
     const top = await getGlobalTopKits(limit * 2);
-    recommended = [...recommended, ...top.filter((kit) => !listenedIds.has(kit.id) && !recommended.some((item) => item.id === kit.id))];
+    const missing = top.filter((kit: TopKit) => !listenedIds.has(kit.id) && !recommended.some((item: TopKit) => item.id === kit.id));
+    recommended = [...recommended, ...missing];
   }
 
   return recommended.slice(0, limit);
@@ -92,7 +95,7 @@ export async function getUserRecentActivities(userId: string, limit = 10): Promi
     .limit(limit);
   if (error) throw new Error(error.message);
 
-  return (data ?? []).map((row: any) => ({
+  return (data ?? []).map((row: any): RecentActivity => ({
     id: row.id,
     created_at: row.accessed_at,
     kit_slug: row.kits?.slug ?? null,
