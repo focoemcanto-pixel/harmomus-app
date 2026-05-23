@@ -17,10 +17,6 @@ function getPlanSlugFromPrice(priceId: string | null) {
   return null;
 }
 
-function toIso(seconds?: number | null) {
-  return seconds ? new Date(seconds * 1000).toISOString() : null;
-}
-
 async function syncCheckoutSession(sessionId?: string) {
   if (!sessionId) return { synced: false, planSlug: null, error: "Sessão não informada." };
 
@@ -41,8 +37,6 @@ async function syncCheckoutSession(sessionId?: string) {
     if (!plan?.id) return { synced: false, planSlug, error: `Plano ${planSlug} não encontrado no banco.` };
 
     const status = mapStripeStatus(subscription?.status ?? "active");
-    const currentPeriodEnd = toIso(subscription?.current_period_end);
-    const trialEndsAt = toIso(subscription?.trial_end);
 
     const { error } = await (supabase as any).from("subscriptions").upsert(
       {
@@ -50,11 +44,6 @@ async function syncCheckoutSession(sessionId?: string) {
         plan_id: plan.id,
         status,
         gateway: "stripe",
-        stripe_customer_id: typeof session.customer === "string" ? session.customer : session.customer?.id ?? null,
-        stripe_subscription_id: subscription?.id ?? (typeof session.subscription === "string" ? session.subscription : null),
-        stripe_price_id: priceId,
-        current_period_end: currentPeriodEnd,
-        trial_ends_at: trialEndsAt,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id" },
