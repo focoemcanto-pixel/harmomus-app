@@ -17,6 +17,7 @@ function distance(a: TouchPoint, b: TouchPoint) {
 export function ProfilePageClient({ initialName, email, username, planName, subscriptionStatus, avatarUrl, userId, stats }: { initialName: string; email: string; username: string; planName: string; subscriptionStatus: string; avatarUrl: string | null; userId: string; stats: Stats }) {
   const [name, setName] = useState(initialName);
   const [avatar, setAvatar] = useState<string | null>(avatarUrl);
+  const [savingName, setSavingName] = useState(false);
   const [open, setOpen] = useState(false);
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -29,6 +30,32 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
   const pinchRef = useRef<{ distance: number; zoom: number } | null>(null);
 
   const nameInitial = useMemo(() => (name || email || "U").slice(0, 1).toUpperCase(), [name, email]);
+
+  async function saveProfileName() {
+    try {
+      setSavingName(true);
+
+      const response = await fetch("/api/profile", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          full_name: name,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "Erro ao salvar nome.");
+      }
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Erro ao salvar nome.");
+    } finally {
+      setSavingName(false);
+    }
+  }
 
   function resetEditor() {
     setZoom(1);
@@ -137,7 +164,20 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
           <label className="group relative block h-24 w-24 overflow-hidden rounded-full border border-cyan-300/40 bg-black/30 shadow-[0_0_30px_rgba(56,189,248,0.2)]">
             {avatar ? <img src={avatar} className="h-full w-full object-cover" alt="avatar" /> : <span className="flex h-full items-center justify-center text-2xl font-semibold">{nameInitial}</span>}
           </label>
-          <div><input className="rounded-lg bg-white/5 px-3 py-2" value={name} onChange={(e)=>setName(e.target.value)} /><p className="text-zinc-300">@{username}</p><p className="text-zinc-400">{email}</p></div>
+          <div>
+            <div className="flex items-center gap-2">
+              <input className="rounded-lg bg-white/5 px-3 py-2" value={name} onChange={(e)=>setName(e.target.value)} />
+              <button
+                onClick={saveProfileName}
+                disabled={savingName}
+                className="rounded-lg border border-cyan-300/30 bg-cyan-400/10 px-3 py-2 text-sm text-cyan-100 hover:bg-cyan-300/20 disabled:opacity-60"
+              >
+                {savingName ? "Salvando..." : "Salvar"}
+              </button>
+            </div>
+            <p className="mt-2 text-zinc-300">@{username}</p>
+            <p className="text-zinc-400">{email}</p>
+          </div>
         </div>
         <button onClick={() => setOpen(true)} className="rounded-xl border border-white/25 bg-white/10 px-4 py-2 transition hover:bg-white/20">Alterar foto</button>
       </div>
@@ -155,78 +195,6 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
             {imageSrc ? <p className="mt-1 text-xs text-zinc-400">Arraste a foto e use pinça para aproximar.</p> : null}
           </div>
           <button className="rounded-full border border-white/15 px-3 py-1.5 text-sm text-zinc-200" onClick={() => { setOpen(false); endGesture(); }}>Fechar</button>
-        </div>
-
-        {!imageSrc ? <div className="flex min-h-0 flex-1 items-center justify-center p-5">
-          <label
-            onDragOver={(e)=>{e.preventDefault();setDragOver(true);}}
-            onDragLeave={()=>setDragOver(false)}
-            onDrop={(e)=>{e.preventDefault();setDragOver(false);const f=e.dataTransfer.files?.[0];if(f) onPick(f);}}
-            className={`block w-full rounded-3xl border-2 border-dashed p-12 text-center ${dragOver?"border-cyan-300 bg-cyan-400/10":"border-white/20 bg-white/5"}`}
-          >
-            <input type="file" accept="image/*" className="hidden" onChange={(e)=>{const f=e.target.files?.[0];if(f) onPick(f);}} />
-            <span className="text-lg font-medium">Toque para selecionar uma foto</span>
-            <span className="mt-2 block text-sm text-zinc-400">ou arraste uma imagem aqui</span>
-          </label>
-        </div> : <>
-          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 overflow-hidden px-4 py-5">
-            <div
-              className="relative aspect-square w-[min(78vw,320px)] overflow-hidden rounded-full border border-cyan-200/30 bg-black shadow-[0_0_60px_rgba(34,211,238,0.12)] touch-none select-none"
-              onMouseDown={(e)=>startDrag(e.clientX, e.clientY)}
-              onMouseMove={(e)=>moveDrag(e.clientX, e.clientY)}
-              onMouseUp={endGesture}
-              onMouseLeave={endGesture}
-              onWheel={(e)=>{
-                e.preventDefault();
-                setZoom((z) => Math.min(4, Math.max(0.6, z + (e.deltaY < 0 ? 0.08 : -0.08))));
-              }}
-              onTouchStart={(e)=>{
-                if (e.touches.length === 2) {
-                  pinchRef.current = { distance: distance(e.touches[0], e.touches[1]), zoom };
-                  dragRef.current = null;
-                  return;
-                }
-                const t = e.touches[0];
-                if (t) startDrag(t.clientX, t.clientY);
-              }}
-              onTouchMove={(e)=>{
-                e.preventDefault();
-                if (e.touches.length === 2 && pinchRef.current) {
-                  const next = pinchRef.current.zoom * (distance(e.touches[0], e.touches[1]) / pinchRef.current.distance);
-                  setZoom(Math.min(4, Math.max(0.6, next)));
-                  return;
-                }
-                const t = e.touches[0];
-                if (t) moveDrag(t.clientX, t.clientY);
-              }}
-              onTouchEnd={endGesture}
-            >
-              <img
-                src={imageSrc}
-                alt="preview"
-                draggable={false}
-                className="absolute left-1/2 top-1/2 h-full w-full max-w-none object-cover"
-                style={{ transform: `translate(-50%, -50%) translate(${position.x}px, ${position.y}px) scale(${zoom}) rotate(${rotation}deg)` }}
-              />
-              <div className="pointer-events-none absolute inset-0 rounded-full ring-1 ring-white/20" />
-            </div>
-
-            <div className="w-full max-w-sm space-y-4 rounded-2xl border border-white/10 bg-black/25 p-4">
-              <label className="block text-sm text-zinc-300">Zoom
-                <input type="range" min={0.6} max={4} step={0.01} value={zoom} onChange={(e)=>setZoom(Number(e.target.value))} className="mt-2 w-full" />
-              </label>
-              <label className="block text-sm text-zinc-300">Rotação
-                <input type="range" min={-35} max={35} step={1} value={rotation} onChange={(e)=>setRotation(Number(e.target.value))} className="mt-2 w-full" />
-              </label>
-            </div>
-          </div>
-        </>}
-
-        <div className="shrink-0 border-t border-white/10 bg-black/35 px-4 py-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] md:px-6 md:pb-4">
-          <div className="flex gap-3">
-            <button className="h-12 flex-1 rounded-xl border border-white/20 text-sm font-medium" onClick={() => { setOpen(false); endGesture(); }}>Cancelar</button>
-            <button disabled={saving || !imageSrc || uploading} onClick={saveAvatar} className="h-12 flex-[1.35] rounded-xl border border-cyan-300/50 bg-cyan-400/20 text-sm font-semibold text-cyan-100 disabled:opacity-60">{saving ? "Salvando..." : "Salvar foto"}</button>
-          </div>
         </div>
       </div>
     </div> : null}
