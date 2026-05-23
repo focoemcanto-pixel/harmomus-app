@@ -1,3 +1,4 @@
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 const MAX_KITS = 20;
@@ -23,7 +24,7 @@ function toSlug(value: string): string {
 }
 
 async function generateUniqueSlug(baseName: string): Promise<string> {
-  const supabase = (await createClient()) as any;
+  const supabase = createSupabaseAdminClient() as any;
   const base = toSlug(baseName);
   let slug = base;
   for (let i = 0; i < 5; i++) {
@@ -48,7 +49,7 @@ export async function getPublishedKitsForPlaylist() {
 }
 
 export async function getPlaylistBySlug(slug: string): Promise<PublicPlaylist | null> {
-  const supabase = (await createClient()) as any;
+  const supabase = createSupabaseAdminClient() as any;
   const { data: playlist } = await supabase.from("playlists").select("id, name, slug, is_public").eq("slug", slug).maybeSingle();
   if (!playlist || !playlist.is_public) return null;
 
@@ -60,7 +61,9 @@ export async function getPlaylistBySlug(slug: string): Promise<PublicPlaylist | 
   if (error) throw new Error(error.message);
 
   const catIds = Array.from(new Set((items ?? []).map((i: any) => i.kits.category_id).filter(Boolean)));
-  const { data: categories } = await supabase.from("categories").select("id, name, slug").in("id", catIds.length ? catIds : ["00000000-0000-0000-0000-000000000000"]);
+  const { data: categories } = catIds.length
+    ? await supabase.from("categories").select("id, name, slug").in("id", catIds)
+    : { data: [] };
   const cmap = new Map((categories ?? []).map((c: any) => [c.id, c]));
 
   return {
@@ -77,15 +80,20 @@ export async function createPlaylist({ name, kitIds }: { name: string; kitIds: s
   if (uniqueKitIds.length === 0) throw new Error("Selecione ao menos 1 kit.");
   if (uniqueKitIds.length > MAX_KITS) throw new Error("Máximo de 20 kits por playlist.");
 
-  const supabase = (await createClient()) as any;
-  const { data: publishedKits } = await supabase.from("kits").select("id").in("id", uniqueKitIds).eq("published", true);
+  const authClient = await createClient();
+  const { data: auth } = await authClient.auth.getUser();
+  const user = auth.user;
+  if (!user) throw new Error("Faça login para criar sua playlist.");
+
+  const supabase = createSupabaseAdminClient() as any;
+  const { data: publishedKits, error: kitsError } = await supabase.from("kits").select("id").in("id", uniqueKitIds).eq("published", true);
+  if (kitsError) throw new Error(kitsError.message);
   const allowedIds = new Set((publishedKits ?? []).map((k: any) => k.id));
   const filtered = uniqueKitIds.filter((id) => allowedIds.has(id));
   if (!filtered.length) throw new Error("Nenhum kit publicado válido.");
 
   const slug = await generateUniqueSlug(name);
-  // TODO: associar user_id quando autenticação estiver pronta.
-  const { data: playlist, error } = await supabase.from("playlists").insert({ name: name.trim(), slug, user_id: null, is_public: true }).select("id, slug").single();
+  const { data: playlist, error } = await supabase.from("playlists").insert({ name: name.trim(), slug, user_id: user.id, is_public: true }).select("id, slug").single();
   if (error) throw new Error(error.message);
 
   const items = filtered.map((kit_id, idx) => ({ playlist_id: playlist.id, kit_id, position: idx + 1 }));
@@ -95,7 +103,7 @@ export async function createPlaylist({ name, kitIds }: { name: string; kitIds: s
 }
 
 export async function addKitToPlaylist(playlistId: string, kitId: string) {
-  const supabase = (await createClient()) as any;
+  const supabase = createSupabaseAdminClient() as any;
   const { data: kit } = await supabase.from("kits").select("id").eq("id", kitId).eq("published", true).maybeSingle();
   if (!kit) throw new Error("Kit inválido.");
   const { data: existing } = await supabase.from("playlist_items").select("id").eq("playlist_id", playlistId).eq("kit_id", kitId).maybeSingle();
@@ -106,6 +114,6 @@ export async function addKitToPlaylist(playlistId: string, kitId: string) {
 }
 
 export async function removeKitFromPlaylist(playlistId: string, kitId: string) {
-  const supabase = (await createClient()) as any;
+  const supabase = createSupabaseAdminClient() as any;
   await supabase.from("playlist_items").delete().eq("playlist_id", playlistId).eq("kit_id", kitId);
 }
