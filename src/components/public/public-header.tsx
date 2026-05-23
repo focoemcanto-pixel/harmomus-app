@@ -7,19 +7,22 @@ export function PublicHeader() {
         <Link href="/" className="text-lg font-semibold tracking-wide text-white">
           Harmomus
         </Link>
+
         <nav className="flex items-center gap-2">
           <Link
             href="/todos-os-kits"
-            className="rounded-lg border border-white/20 px-4 py-2 text-sm text-zinc-200 transition hover:border-cyan-300/40 hover:text-white"
+            className="hidden rounded-lg border border-white/20 px-4 py-2 text-sm text-zinc-200 transition hover:border-cyan-300/40 hover:text-white md:inline-flex"
           >
             Todos os Kits
           </Link>
+
           <button
             type="button"
             className="rounded-lg border border-white/20 px-4 py-2 text-sm text-zinc-200 transition hover:border-gold-400/50 hover:text-white"
           >
             Entrar
           </button>
+
           <button
             type="button"
             className="rounded-lg border border-gold-500/40 bg-gold-500/10 px-4 py-2 text-sm font-medium text-gold-300 transition hover:bg-gold-500/20"
