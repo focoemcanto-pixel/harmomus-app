@@ -5,11 +5,12 @@ import { useMemo, useRef, useState } from "react";
 
 type Stats = { playlists: number; favorites: number; history: number; kitsToday: number };
 type Point = { x: number; y: number };
+type TouchPoint = { clientX: number; clientY: number };
 
 const AVATAR_SIZE = 720;
 const CROP_SIZE = 320;
 
-function distance(a: Touch, b: Touch) {
+function distance(a: TouchPoint, b: TouchPoint) {
   return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
 }
 
