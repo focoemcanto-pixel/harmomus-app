@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 
-export function HomeHorizontalCarousel({ children }: { children: React.ReactNode }) {
+export function HomeHorizontalCarousel({ children }: { children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
