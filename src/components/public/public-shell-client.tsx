@@ -11,7 +11,7 @@ interface SearchItem { id: string; slug: string; name: string; artist: string; c
 function UserSilhouetteIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 text-zinc-100">
-      <path fill="currentColor" d="M12 12c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5Zm0 2c-3.87 0-8 2.03-8 5v1c0 .55.45 1 1 1h14c.55 0 1-.45 1-1v-1c0-2.97-4.13-5-8-5Z" />
+      <path fill="currentColor" d="M12 12c2.76 0 5-2.24 5-5s-2.24-5-5-5 2.24-5 5 2.24 5 5 5Zm0 2c-3.87 0-8 2.03-8 5v1c0 .55.45 1 1 1h14c.55 0 1-.45 1-1v-1c0-2.97-4.13-5-8-5Z" />
     </svg>
   );
 }
@@ -21,7 +21,7 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
   const [debounced, setDebounced] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
-  const [liveAvatar, setLiveAvatar] = useState(context.profile?.avatar_url ?? null);
+  const [liveAvatar, setLiveAvatar] = useState(context.isGuest ? null : context.profile?.avatar_url ?? null);
   const [upgradeConfig, setUpgradeConfig] = useState({
     title: "Upgrade necessário",
     message: "Faça upgrade para continuar.",
@@ -49,16 +49,22 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
   }, []);
 
   useEffect(() => {
+    if (context.isGuest) {
+      setLiveAvatar(null);
+      window.localStorage.removeItem("harmomus-avatar-url");
+      return;
+    }
+
     const stored = window.localStorage.getItem("harmomus-avatar-url");
-    if (stored) setLiveAvatar(stored);
+    setLiveAvatar(stored || context.profile?.avatar_url || null);
 
     function onAvatarUpdate() {
       const next = window.localStorage.getItem("harmomus-avatar-url");
-      if (next) setLiveAvatar(next);
+      setLiveAvatar(next || context.profile?.avatar_url || null);
     }
     window.addEventListener("harmomus:avatar-updated", onAvatarUpdate as EventListener);
     return () => window.removeEventListener("harmomus:avatar-updated", onAvatarUpdate as EventListener);
-  }, []);
+  }, [context.isGuest, context.profile?.avatar_url]);
 
   const results = useMemo(() => {
     if (!debounced) return [];
@@ -83,6 +89,7 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
   }
 
   const fallbackInitial = (context.profile?.full_name ?? context.profile?.email ?? "U").slice(0, 1).toUpperCase();
+  const showAvatar = !context.isGuest && Boolean(liveAvatar);
 
   return (
     <>
@@ -99,7 +106,7 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
       <Link href="/todos-os-kits" className="whitespace-nowrap rounded-md border border-white/20 px-2 py-1.5 text-[11px] text-zinc-100 md:rounded-lg md:px-3 md:py-2 md:text-sm">Todos os Kits</Link>
       <div className="relative" ref={menuRef}>
         <button onClick={() => setMenuOpen((v) => !v)} className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border border-white/20 bg-white/5 text-xs font-semibold md:h-9 md:w-9">
-          {liveAvatar ? <img src={liveAvatar} alt="avatar" className="h-full w-full object-cover" /> : context.isGuest ? <UserSilhouetteIcon /> : fallbackInitial}
+          {showAvatar ? <img src={liveAvatar!} alt="avatar" className="h-full w-full object-cover" /> : context.isGuest ? <UserSilhouetteIcon /> : fallbackInitial}
         </button>
         {menuOpen ? <div className="absolute right-0 top-11 z-50 min-w-52 rounded-xl border border-white/10 bg-[#0d1220] p-2">
           {context.isGuest ? <>
