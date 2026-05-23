@@ -87,7 +87,7 @@ export default async function CadastroPage({ searchParams }: { searchParams: Pro
     }
 
     const { error: profileError } = await (supabaseAdmin as any).from("profiles").upsert(
-      { id: createdUserId, email, full_name: fullName, username, phone, role: "user", plan_slug: plan, updated_at: new Date().toISOString() },
+      { id: createdUserId, email, full_name: fullName, username, role: "user", plan_slug: plan, updated_at: new Date().toISOString() },
       { onConflict: "id" },
     );
     if (profileError) fail(`Conta criada, mas houve erro ao salvar perfil: ${profileError.message}`, "form");
@@ -98,7 +98,7 @@ export default async function CadastroPage({ searchParams }: { searchParams: Pro
       fail(`Conta criada, mas não foi possível iniciar sessão automaticamente. ${mapped.message}`, mapped.field);
     }
 
-    if (plan === "free") redirect(redirectTo || "/perfil");
+    if (plan === "free") redirect(redirectTo || "/cadastro/sucesso?plan=free");
     redirect(`/api/billing/checkout?plan=${encodeURIComponent(plan)}`);
   }
 
