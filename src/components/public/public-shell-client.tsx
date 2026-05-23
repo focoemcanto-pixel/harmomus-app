@@ -8,6 +8,14 @@ import type { CurrentUserAccessContext } from "@/lib/auth/current-user";
 
 interface SearchItem { id: string; slug: string; name: string; artist: string; category: string; searchText: string }
 
+function UserSilhouetteIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 text-zinc-100">
+      <path fill="currentColor" d="M12 12c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5Zm0 2c-3.87 0-8 2.03-8 5v1c0 .55.45 1 1 1h14c.55 0 1-.45 1-1v-1c0-2.97-4.13-5-8-5Z" />
+    </svg>
+  );
+}
+
 export function PublicShellClient({ context, searchItems }: { context: CurrentUserAccessContext; searchItems: SearchItem[] }) {
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
@@ -40,9 +48,10 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, []);
 
-
-
   useEffect(() => {
+    const stored = window.localStorage.getItem("harmomus-avatar-url");
+    if (stored) setLiveAvatar(stored);
+
     function onAvatarUpdate() {
       const next = window.localStorage.getItem("harmomus-avatar-url");
       if (next) setLiveAvatar(next);
@@ -50,6 +59,7 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
     window.addEventListener("harmomus:avatar-updated", onAvatarUpdate as EventListener);
     return () => window.removeEventListener("harmomus:avatar-updated", onAvatarUpdate as EventListener);
   }, []);
+
   const results = useMemo(() => {
     if (!debounced) return [];
     return searchItems.filter((item) => item.searchText.includes(debounced)).slice(0, 8);
@@ -72,6 +82,8 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
     return true;
   }
 
+  const fallbackInitial = (context.profile?.full_name ?? context.profile?.email ?? "U").slice(0, 1).toUpperCase();
+
   return (
     <>
       <div className="min-w-0 flex-1 md:hidden" ref={searchMobileRef}>
@@ -86,7 +98,9 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
       </div>
       <Link href="/todos-os-kits" className="whitespace-nowrap rounded-md border border-white/20 px-2 py-1.5 text-[11px] text-zinc-100 md:rounded-lg md:px-3 md:py-2 md:text-sm">Todos os Kits</Link>
       <div className="relative" ref={menuRef}>
-        <button onClick={() => setMenuOpen((v) => !v)} className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border border-white/20 bg-white/5 text-xs font-semibold md:h-9 md:w-9">{liveAvatar ? <img src={liveAvatar} alt="avatar" className="h-full w-full object-cover" /> : (context.profile?.full_name ?? context.profile?.email ?? "U").slice(0, 1).toUpperCase()}</button>
+        <button onClick={() => setMenuOpen((v) => !v)} className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border border-white/20 bg-white/5 text-xs font-semibold md:h-9 md:w-9">
+          {liveAvatar ? <img src={liveAvatar} alt="avatar" className="h-full w-full object-cover" /> : context.isGuest ? <UserSilhouetteIcon /> : fallbackInitial}
+        </button>
         {menuOpen ? <div className="absolute right-0 top-11 z-50 min-w-52 rounded-xl border border-white/10 bg-[#0d1220] p-2">
           {context.isGuest ? <>
             <Link href="/login" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Login</Link>
