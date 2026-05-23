@@ -87,7 +87,7 @@ export default async function CadastroPage({ searchParams }: { searchParams: Pro
     }
 
     const { error: profileError } = await (supabaseAdmin as any).from("profiles").upsert(
-      { id: createdUserId, email, full_name: fullName, username, role: "user", plan_slug: plan, updated_at: new Date().toISOString() },
+      { id: createdUserId, email, full_name: fullName, username, role: "user", updated_at: new Date().toISOString() },
       { onConflict: "id" },
     );
     if (profileError) fail(`Conta criada, mas houve erro ao salvar perfil: ${profileError.message}`, "form");
