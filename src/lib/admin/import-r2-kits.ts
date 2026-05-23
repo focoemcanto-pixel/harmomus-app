@@ -102,6 +102,62 @@ async function listAllAudioObjects() {
   return objects;
 }
 
+async function findExistingKit(supabase: any, slug: string, folder: string) {
+  const { data: bySlug, error: slugError } = await supabase
+    .from("kits")
+    .select("id, slug, r2_folder")
+    .eq("slug", slug)
+    .maybeSingle();
+
+  if (slugError) throw new Error(slugError.message);
+  if (bySlug) return bySlug;
+
+  const { data: byFolder, error: folderError } = await supabase
+    .from("kits")
+    .select("id, slug, r2_folder")
+    .eq("r2_folder", folder)
+    .maybeSingle();
+
+  if (folderError) throw new Error(folderError.message);
+  return byFolder ?? null;
+}
+
+async function getOrCreateKit(supabase: any, kitName: string, slug: string, folder: string) {
+  const existing = await findExistingKit(supabase, slug, folder);
+
+  if (existing?.id) {
+    if (existing.r2_folder !== folder) {
+      await supabase.from("kits").update({ r2_folder: folder }).eq("id", existing.id);
+    }
+    return { kitId: existing.id as string, created: false };
+  }
+
+  const { data: created, error: createError } = await supabase
+    .from("kits")
+    .insert({
+      name: kitName,
+      slug,
+      artist: "Artista não informado",
+      r2_folder: folder,
+      published: false,
+    })
+    .select("id")
+    .single();
+
+  if (!createError) return { kitId: created.id as string, created: true };
+
+  const isDuplicate = createError.code === "23505" || String(createError.message ?? "").includes("duplicate key");
+  if (!isDuplicate) throw new Error(createError.message);
+
+  const fallback = await findExistingKit(supabase, slug, folder);
+  if (fallback?.id) {
+    await supabase.from("kits").update({ r2_folder: folder }).eq("id", fallback.id);
+    return { kitId: fallback.id as string, created: false };
+  }
+
+  throw new Error(createError.message);
+}
+
 export async function importR2Kits(): Promise<R2KitImportResult> {
   const result: R2KitImportResult = {
     foldersScanned: 0,
@@ -137,36 +193,10 @@ export async function importR2Kits(): Promise<R2KitImportResult> {
     try {
       const kitName = cleanName(folder);
       const slug = toSlug(kitName);
+      const { kitId, created } = await getOrCreateKit(supabase, kitName, slug, folder);
 
-      const { data: existingKit, error: existingError } = await supabase
-        .from("kits")
-        .select("id, slug, r2_folder")
-        .or(`slug.eq.${slug},r2_folder.eq.${folder}`)
-        .maybeSingle();
-
-      if (existingError) throw new Error(existingError.message);
-
-      let kitId = existingKit?.id as string | undefined;
-
-      if (!kitId) {
-        const { data: created, error: createError } = await supabase
-          .from("kits")
-          .insert({
-            name: kitName,
-            slug,
-            artist: "Artista não informado",
-            r2_folder: folder,
-            published: false,
-          })
-          .select("id")
-          .single();
-
-        if (createError) throw new Error(createError.message);
-        kitId = created.id;
-        result.kitsCreated += 1;
-      } else {
-        result.kitsUpdated += 1;
-      }
+      if (created) result.kitsCreated += 1;
+      else result.kitsUpdated += 1;
 
       const keys = files.map((file) => file.key);
       const { data: existingFiles, error: existingFilesError } = await supabase
