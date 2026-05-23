@@ -24,16 +24,7 @@ function safeRedirect(raw: string) {
   return raw && raw.startsWith("/") ? raw : "";
 }
 function errorUrl(input: { plan: string; redirectTo: string; message: string; field: Field; fullName: string; username: string; email: string; phone: string }) {
-  const params = new URLSearchParams({
-    plan: input.plan,
-    redirect: input.redirectTo,
-    error: input.message,
-    field: input.field,
-    full_name: input.fullName,
-    username: input.username,
-    email: input.email,
-    phone: input.phone,
-  });
+  const params = new URLSearchParams({ plan: input.plan, redirect: input.redirectTo, error: input.message, field: input.field, full_name: input.fullName, username: input.username, email: input.email, phone: input.phone });
   return `/cadastro?${params.toString()}`;
 }
 function mapSupabaseError(message: string): { message: string; field: Field } {
@@ -60,12 +51,7 @@ export default async function CadastroPage({ searchParams }: { searchParams: Pro
   const redirectPath = safeRedirect(String(params.redirect ?? ""));
   const error = params.error ? decodeURIComponent(params.error) : "";
   const field = (["form", "full_name", "username", "email", "phone", "password", "confirm_password"].includes(String(params.field ?? "")) ? String(params.field) : "form") as Field;
-  const defaults = {
-    fullName: String(params.full_name ?? ""),
-    username: String(params.username ?? ""),
-    email: String(params.email ?? ""),
-    phone: String(params.phone ?? ""),
-  };
+  const defaults = { fullName: String(params.full_name ?? ""), username: String(params.username ?? ""), email: String(params.email ?? ""), phone: String(params.phone ?? "") };
 
   async function signUp(formData: FormData) {
     "use server";
@@ -90,23 +76,16 @@ export default async function CadastroPage({ searchParams }: { searchParams: Pro
 
     const supabase = await createClient();
     const supabaseAdmin = createSupabaseAdminClient();
-
     const { data: existingUsername } = await (supabaseAdmin as any).from("profiles").select("id").eq("username", username).maybeSingle();
     if (existingUsername) fail("Nome de usuário já está em uso.", "username");
 
-    const { data: createdUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: { full_name: fullName, username, phone, plan_slug: plan },
-    });
-
-    if (createError || !createdUser.user?.id) {
+    const { data: createdUser, error: createError } = await supabaseAdmin.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { full_name: fullName, username, phone, plan_slug: plan } });
+    const createdUserId = createdUser.user?.id ?? "";
+    if (createError || !createdUserId) {
       const mapped = mapSupabaseError(createError?.message ?? "Não foi possível criar a conta.");
       fail(mapped.message, mapped.field);
     }
 
-    const createdUserId = createdUser.user.id as string;
     const { error: profileError } = await (supabaseAdmin as any).from("profiles").upsert(
       { id: createdUserId, email, full_name: fullName, username, phone, role: "user", plan_slug: plan, updated_at: new Date().toISOString() },
       { onConflict: "id" },
