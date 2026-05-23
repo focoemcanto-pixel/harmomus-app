@@ -4,10 +4,14 @@ import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 
 type Stats = { playlists: number; favorites: number; history: number; kitsToday: number };
-
 type Point = { x: number; y: number };
 
 const AVATAR_SIZE = 720;
+const CROP_SIZE = 320;
+
+function distance(a: Touch, b: Touch) {
+  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+}
 
 export function ProfilePageClient({ initialName, email, username, planName, subscriptionStatus, avatarUrl, userId, stats }: { initialName: string; email: string; username: string; planName: string; subscriptionStatus: string; avatarUrl: string | null; userId: string; stats: Stats }) {
   const [name, setName] = useState(initialName);
@@ -21,6 +25,7 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const dragRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
+  const pinchRef = useRef<{ distance: number; zoom: number } | null>(null);
 
   const nameInitial = useMemo(() => (name || email || "U").slice(0, 1).toUpperCase(), [name, email]);
 
@@ -28,6 +33,8 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
     setZoom(1);
     setRotation(0);
     setPosition({ x: 0, y: 0 });
+    dragRef.current = null;
+    pinchRef.current = null;
   }
 
   async function onPick(file: File) {
@@ -58,14 +65,23 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
 
     ctx.fillStyle = "#090b12";
     ctx.fillRect(0, 0, AVATAR_SIZE, AVATAR_SIZE);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(AVATAR_SIZE / 2, AVATAR_SIZE / 2, AVATAR_SIZE / 2, 0, Math.PI * 2);
+    ctx.clip();
+
     ctx.translate(AVATAR_SIZE / 2, AVATAR_SIZE / 2);
     ctx.rotate((rotation * Math.PI) / 180);
 
-    const scale = Math.max(AVATAR_SIZE / img.width, AVATAR_SIZE / img.height) * zoom;
-    const drawW = img.width * scale;
-    const drawH = img.height * scale;
+    const baseScale = Math.max(CROP_SIZE / img.width, CROP_SIZE / img.height);
+    const exportScale = AVATAR_SIZE / CROP_SIZE;
+    const drawW = img.width * baseScale * zoom * exportScale;
+    const drawH = img.height * baseScale * zoom * exportScale;
+    const drawX = -drawW / 2 + position.x * exportScale;
+    const drawY = -drawH / 2 + position.y * exportScale;
 
-    ctx.drawImage(img, -drawW / 2 + position.x, -drawH / 2 + position.y, drawW, drawH);
+    ctx.drawImage(img, drawX, drawY, drawW, drawH);
+    ctx.restore();
 
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/webp", 0.92));
     if (!blob) throw new Error("Falha ao otimizar a imagem.");
@@ -95,6 +111,23 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
     }
   }
 
+  function startDrag(clientX: number, clientY: number) {
+    dragRef.current = { sx: clientX, sy: clientY, ox: position.x, oy: position.y };
+  }
+
+  function moveDrag(clientX: number, clientY: number) {
+    if (!dragRef.current) return;
+    setPosition({
+      x: dragRef.current.ox + clientX - dragRef.current.sx,
+      y: dragRef.current.oy + clientY - dragRef.current.sy,
+    });
+  }
+
+  function endGesture() {
+    dragRef.current = null;
+    pinchRef.current = null;
+  }
+
   return <main className="bg-gradient-to-b from-[#06070d] to-[#0f1523] p-4 text-white md:p-6">
     <section className="mx-auto max-w-5xl rounded-3xl border border-white/15 bg-white/5 p-6 shadow-2xl backdrop-blur-xl">
       <div className="mb-6"><Link href="/" className="inline-flex rounded-xl border border-cyan-300/30 bg-cyan-400/10 px-4 py-2 text-sm font-medium text-cyan-100 hover:bg-cyan-300/20">← Voltar para Home</Link></div>
@@ -113,40 +146,87 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
       <a href="/logout" className="mt-8 inline-block rounded-lg border border-rose-300/40 px-4 py-2 text-rose-200">Logout</a>
     </section>
 
-    {open ? <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-3 backdrop-blur-md md:p-6">
-      <div className="w-full max-w-5xl rounded-3xl border border-white/15 bg-gradient-to-br from-[#0d1324] to-[#06080f] p-4 shadow-2xl md:p-6">
-        <h3 className="mb-4 text-xl font-semibold">Ajustar foto de perfil</h3>
-        {!imageSrc ? <label onDragOver={(e)=>{e.preventDefault();setDragOver(true);}} onDragLeave={()=>setDragOver(false)} onDrop={(e)=>{e.preventDefault();setDragOver(false);const f=e.dataTransfer.files?.[0];if(f) onPick(f);}} className={`block rounded-2xl border-2 border-dashed p-12 text-center ${dragOver?"border-cyan-300 bg-cyan-400/10":"border-white/20 bg-white/5"}`}><input type="file" accept="image/*" className="hidden" onChange={(e)=>{const f=e.target.files?.[0];if(f) onPick(f);}}/>Arraste uma imagem ou clique para selecionar</label> : <div className="grid gap-6 lg:grid-cols-[1fr_220px]">
+    {open ? <div className="fixed inset-0 z-50 bg-black/90 text-white backdrop-blur-md md:grid md:place-items-center md:p-6">
+      <div className="flex h-[100dvh] w-full flex-col overflow-hidden bg-gradient-to-br from-[#0d1324] to-[#06080f] md:h-auto md:max-h-[92vh] md:max-w-3xl md:rounded-3xl md:border md:border-white/15 md:shadow-2xl">
+        <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-4 py-4 md:px-6">
           <div>
-            <div className="relative mx-auto aspect-square w-full max-w-[560px] overflow-hidden rounded-full border border-white/20 bg-black">
+            <h3 className="text-xl font-semibold">Ajustar foto de perfil</h3>
+            {imageSrc ? <p className="mt-1 text-xs text-zinc-400">Arraste a foto e use pinça para aproximar.</p> : null}
+          </div>
+          <button className="rounded-full border border-white/15 px-3 py-1.5 text-sm text-zinc-200" onClick={() => { setOpen(false); endGesture(); }}>Fechar</button>
+        </div>
+
+        {!imageSrc ? <div className="flex min-h-0 flex-1 items-center justify-center p-5">
+          <label
+            onDragOver={(e)=>{e.preventDefault();setDragOver(true);}}
+            onDragLeave={()=>setDragOver(false)}
+            onDrop={(e)=>{e.preventDefault();setDragOver(false);const f=e.dataTransfer.files?.[0];if(f) onPick(f);}}
+            className={`block w-full rounded-3xl border-2 border-dashed p-12 text-center ${dragOver?"border-cyan-300 bg-cyan-400/10":"border-white/20 bg-white/5"}`}
+          >
+            <input type="file" accept="image/*" className="hidden" onChange={(e)=>{const f=e.target.files?.[0];if(f) onPick(f);}} />
+            <span className="text-lg font-medium">Toque para selecionar uma foto</span>
+            <span className="mt-2 block text-sm text-zinc-400">ou arraste uma imagem aqui</span>
+          </label>
+        </div> : <>
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 overflow-hidden px-4 py-5">
+            <div
+              className="relative aspect-square w-[min(78vw,320px)] overflow-hidden rounded-full border border-cyan-200/30 bg-black shadow-[0_0_60px_rgba(34,211,238,0.12)] touch-none select-none"
+              onMouseDown={(e)=>startDrag(e.clientX, e.clientY)}
+              onMouseMove={(e)=>moveDrag(e.clientX, e.clientY)}
+              onMouseUp={endGesture}
+              onMouseLeave={endGesture}
+              onWheel={(e)=>{
+                e.preventDefault();
+                setZoom((z) => Math.min(4, Math.max(0.6, z + (e.deltaY < 0 ? 0.08 : -0.08))));
+              }}
+              onTouchStart={(e)=>{
+                if (e.touches.length === 2) {
+                  pinchRef.current = { distance: distance(e.touches[0], e.touches[1]), zoom };
+                  dragRef.current = null;
+                  return;
+                }
+                const t = e.touches[0];
+                if (t) startDrag(t.clientX, t.clientY);
+              }}
+              onTouchMove={(e)=>{
+                e.preventDefault();
+                if (e.touches.length === 2 && pinchRef.current) {
+                  const next = pinchRef.current.zoom * (distance(e.touches[0], e.touches[1]) / pinchRef.current.distance);
+                  setZoom(Math.min(4, Math.max(0.6, next)));
+                  return;
+                }
+                const t = e.touches[0];
+                if (t) moveDrag(t.clientX, t.clientY);
+              }}
+              onTouchEnd={endGesture}
+            >
               <img
                 src={imageSrc}
                 alt="preview"
-                onMouseDown={(e)=>{dragRef.current={sx:e.clientX,sy:e.clientY,ox:position.x,oy:position.y};}}
-                onMouseMove={(e)=>{if(!dragRef.current) return; setPosition({ x: dragRef.current.ox + e.clientX - dragRef.current.sx, y: dragRef.current.oy + e.clientY - dragRef.current.sy });}}
-                onMouseUp={()=>{dragRef.current=null;}}
-                onMouseLeave={()=>{dragRef.current=null;}}
-                onTouchStart={(e)=>{const t=e.touches[0];dragRef.current={sx:t.clientX,sy:t.clientY,ox:position.x,oy:position.y};}}
-                onTouchMove={(e)=>{const t=e.touches[0]; if(!dragRef.current) return; setPosition({ x: dragRef.current.ox + t.clientX - dragRef.current.sx, y: dragRef.current.oy + t.clientY - dragRef.current.sy });}}
-                onTouchEnd={()=>{dragRef.current=null;}}
-                className="absolute left-1/2 top-1/2 max-w-none touch-none select-none"
+                draggable={false}
+                className="absolute left-1/2 top-1/2 h-full w-full max-w-none object-cover"
                 style={{ transform: `translate(-50%, -50%) translate(${position.x}px, ${position.y}px) scale(${zoom}) rotate(${rotation}deg)` }}
               />
+              <div className="pointer-events-none absolute inset-0 rounded-full ring-1 ring-white/20" />
             </div>
-            <div className="mt-5 space-y-4">
-              <label className="block text-sm text-zinc-300">Zoom<input type="range" min={1} max={3} step={0.01} value={zoom} onChange={(e)=>setZoom(Number(e.target.value))} className="mt-2 w-full" /></label>
-              <label className="block text-sm text-zinc-300">Rotação<input type="range" min={-180} max={180} step={1} value={rotation} onChange={(e)=>setRotation(Number(e.target.value))} className="mt-2 w-full" /></label>
+
+            <div className="w-full max-w-sm space-y-4 rounded-2xl border border-white/10 bg-black/25 p-4">
+              <label className="block text-sm text-zinc-300">Zoom
+                <input type="range" min={0.6} max={4} step={0.01} value={zoom} onChange={(e)=>setZoom(Number(e.target.value))} className="mt-2 w-full" />
+              </label>
+              <label className="block text-sm text-zinc-300">Rotação
+                <input type="range" min={-35} max={35} step={1} value={rotation} onChange={(e)=>setRotation(Number(e.target.value))} className="mt-2 w-full" />
+              </label>
             </div>
           </div>
-          <aside className="rounded-2xl border border-white/10 bg-white/5 p-4">
-            <p className="text-sm text-zinc-300">Preview final</p>
-            <div className="mt-3 h-40 w-40 overflow-hidden rounded-full border border-cyan-200/40 bg-black">
-              {imageSrc ? <img src={imageSrc} alt="preview final" className="h-full w-full object-cover" style={{ transform: `translate(${position.x * 0.3}px, ${position.y * 0.3}px) scale(${zoom}) rotate(${rotation}deg)` }} /> : null}
-            </div>
-            <p className="mt-3 text-xs text-zinc-400">Imagem será salva otimizada em formato quadrado para avatar.</p>
-          </aside>
-        </div>}
-        <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end"><button className="rounded-xl border border-white/20 px-4 py-3 text-sm" onClick={()=>setOpen(false)}>Cancelar</button><button disabled={saving || !imageSrc || uploading} onClick={saveAvatar} className="rounded-xl border border-cyan-300/50 bg-cyan-400/20 px-5 py-3 text-sm font-semibold text-cyan-100 disabled:opacity-60">{saving?"Salvando foto...":"Salvar foto"}</button></div>
+        </>}
+
+        <div className="shrink-0 border-t border-white/10 bg-black/35 px-4 py-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] md:px-6 md:pb-4">
+          <div className="flex gap-3">
+            <button className="h-12 flex-1 rounded-xl border border-white/20 text-sm font-medium" onClick={() => { setOpen(false); endGesture(); }}>Cancelar</button>
+            <button disabled={saving || !imageSrc || uploading} onClick={saveAvatar} className="h-12 flex-[1.35] rounded-xl border border-cyan-300/50 bg-cyan-400/20 text-sm font-semibold text-cyan-100 disabled:opacity-60">{saving ? "Salvando..." : "Salvar foto"}</button>
+          </div>
+        </div>
       </div>
     </div> : null}
   </main>;
