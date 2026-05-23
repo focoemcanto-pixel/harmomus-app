@@ -129,15 +129,12 @@ export default async function HomePage() {
             <h2 className="text-2xl font-semibold text-white md:text-3xl">Artistas & Categorias</h2>
             <Link href="/categorias" className="text-sm text-cyan-200 hover:text-cyan-100">Acessar categorias</Link>
           </div>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {featuredCategories.length ? featuredCategories.map((category) => (
-              <Link key={category.id} href={`/categoria/${category.slug}`} className="group overflow-hidden rounded-2xl border border-white/15 bg-gradient-to-br from-[#101827] to-[#23123e] shadow-[0_18px_48px_rgba(76,29,149,0.24)] transition hover:-translate-y-1">
-                {category.cover_url ? <img src={category.cover_url} alt={category.name} className="h-40 w-full object-cover transition duration-500 group-hover:scale-105" /> : <div className="flex h-40 items-center justify-center bg-gradient-to-br from-fuchsia-900/60 via-indigo-900/60 to-cyan-900/60 text-4xl font-bold text-white/90">{category.name.slice(0,1)}</div>}
-                <div className="p-6">
-                  <h3 className="text-2xl font-semibold text-white">{category.name}</h3>
-                  <p className="mt-2 text-sm text-zinc-200">{categoryKitCount[category.slug] ?? 0} kits publicados</p>
-                  <span className="mt-5 inline-flex text-sm text-cyan-100">Ver kits →</span>
-                </div>
+              <Link key={category.id} href={`/categoria/${category.slug}`} className="group rounded-2xl border border-white/10 bg-white/[0.04] p-5 transition hover:-translate-y-1 hover:border-cyan-300/50 hover:bg-white/[0.07]">
+                <h3 className="text-xl font-semibold text-white">{category.name}</h3>
+                <p className="mt-2 text-sm text-zinc-300">{categoryKitCount[category.slug] ?? 0} kits publicados</p>
+                <span className="mt-4 inline-flex text-sm text-cyan-100 transition group-hover:translate-x-1">Ver kits →</span>
               </Link>
             )) : <div className="rounded-2xl border border-white/10 p-6 text-zinc-300">Nenhuma categoria com kit publicado.</div>}
           </div>
