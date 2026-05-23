@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { SignupPlanSelector } from "@/components/public/signup-plan-selector";
 import { createClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const PLAN_OPTIONS = ["free", "plus", "premium"] as const;
 type PlanSlug = (typeof PLAN_OPTIONS)[number];
@@ -23,6 +24,18 @@ function maskPhone(value: string) {
 function safeRedirect(raw: string) {
   if (!raw || !raw.startsWith("/")) return "";
   return raw;
+}
+
+function signupErrorUrl(plan: string, redirectTo: string, message: string) {
+  return `/cadastro?plan=${encodeURIComponent(plan)}&redirect=${encodeURIComponent(redirectTo)}&error=${encodeURIComponent(message)}`;
+}
+
+function friendlySignupError(message: string) {
+  const lower = message.toLowerCase();
+  if (lower.includes("already") || lower.includes("registered") || lower.includes("exists")) return "Este e-mail já possui cadastro. Tente entrar ou recuperar a senha.";
+  if (lower.includes("password") || lower.includes("senha")) return "A senha precisa atender aos requisitos mínimos. Tente uma senha maior e mais segura.";
+  if (lower.includes("email")) return "Confira o e-mail informado e tente novamente.";
+  return message || "Não foi possível criar a conta.";
 }
 
 function HarmomusAuthLogo() {
@@ -60,22 +73,36 @@ export default async function CadastroPage({ searchParams }: { searchParams: Pro
     const plan = String(formData.get("plan") ?? "free").toLowerCase() as PlanSlug;
     const redirectTo = safeRedirect(String(formData.get("redirect") ?? ""));
 
-    if (!PLAN_OPTIONS.includes(plan) || !username || password !== confirmPassword) {
-      redirect(`/cadastro?plan=${encodeURIComponent(plan)}&redirect=${encodeURIComponent(redirectTo)}&error=${encodeURIComponent("Confira os dados e tente novamente.")}`);
+    if (!PLAN_OPTIONS.includes(plan) || !full_name || !email || !username || password !== confirmPassword) {
+      redirect(signupErrorUrl(plan, redirectTo, "Confira os dados e tente novamente."));
     }
 
     const supabase = await createClient();
-    const { data: existingUsername } = await (supabase as any).from("profiles").select("id").eq("username", username).maybeSingle();
+    const supabaseAdmin = createSupabaseAdminClient();
+
+    const { data: existingUsername } = await (supabaseAdmin as any).from("profiles").select("id").eq("username", username).maybeSingle();
     if (existingUsername) {
-      redirect(`/cadastro?plan=${encodeURIComponent(plan)}&redirect=${encodeURIComponent(redirectTo)}&error=${encodeURIComponent("Nome de usuário já está em uso.")}`);
+      redirect(signupErrorUrl(plan, redirectTo, "Nome de usuário já está em uso."));
     }
 
-    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({ email, password, options: { data: { full_name, username, phone, plan_slug: plan } } });
+    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { full_name, username, phone, plan_slug: plan } },
+    });
+
     if (signUpError || !signUpData.user) {
-      redirect(`/cadastro?plan=${encodeURIComponent(plan)}&redirect=${encodeURIComponent(redirectTo)}&error=${encodeURIComponent("Não foi possível criar a conta.")}`);
+      redirect(signupErrorUrl(plan, redirectTo, friendlySignupError(signUpError?.message ?? "Não foi possível criar a conta.")));
     }
 
-    await (supabase as any).from("profiles").upsert({ id: signUpData.user.id, email, full_name, username, phone, role: "user", plan_slug: plan }, { onConflict: "id" });
+    const { error: profileError } = await (supabaseAdmin as any).from("profiles").upsert(
+      { id: signUpData.user.id, email, full_name, username, phone, role: "user", plan_slug: plan, updated_at: new Date().toISOString() },
+      { onConflict: "id" },
+    );
+
+    if (profileError) {
+      redirect(signupErrorUrl(plan, redirectTo, `Conta criada, mas houve erro ao salvar perfil: ${profileError.message}`));
+    }
 
     if (plan === "free") {
       redirect(redirectTo || "/perfil");
@@ -98,10 +125,10 @@ export default async function CadastroPage({ searchParams }: { searchParams: Pro
             <div><label className="mb-2 block text-sm text-zinc-200">Nome de usuário</label><input name="username" required className="h-12 w-full rounded-2xl border border-white/20 bg-black/30 px-4 text-white outline-none ring-cyan-300/40 transition focus:ring" /></div>
             <div><label className="mb-2 block text-sm text-zinc-200">E-mail</label><input name="email" type="email" required className="h-12 w-full rounded-2xl border border-white/20 bg-black/30 px-4 text-white outline-none ring-cyan-300/40 transition focus:ring" /></div>
             <div><label className="mb-2 block text-sm text-zinc-200">Telefone / WhatsApp</label><input name="phone" required placeholder="(11) 99999-9999" className="h-12 w-full rounded-2xl border border-white/20 bg-black/30 px-4 text-white outline-none ring-cyan-300/40 transition focus:ring" /></div>
-                        <div><label className="mb-2 block text-sm text-zinc-200">Senha</label><input name="password" type="password" required className="h-12 w-full rounded-2xl border border-white/20 bg-black/30 px-4 text-white outline-none ring-cyan-300/40 transition focus:ring" /></div>
+            <div><label className="mb-2 block text-sm text-zinc-200">Senha</label><input name="password" type="password" required className="h-12 w-full rounded-2xl border border-white/20 bg-black/30 px-4 text-white outline-none ring-cyan-300/40 transition focus:ring" /></div>
             <div><label className="mb-2 block text-sm text-zinc-200">Confirmar senha</label><input name="confirm_password" type="password" required className="h-12 w-full rounded-2xl border border-white/20 bg-black/30 px-4 text-white outline-none ring-cyan-300/40 transition focus:ring" /></div>
             {error ? <p className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200 md:col-span-2">{error}</p> : null}
-                        <SignupPlanSelector initialPlan={selectedPlan} />
+            <SignupPlanSelector initialPlan={selectedPlan} />
           </form>
           <p className="mt-5 text-center text-sm text-zinc-300">Já tem conta? <Link href="/login" className="text-cyan-200 hover:text-cyan-100">Entrar</Link></p>
         </div>
