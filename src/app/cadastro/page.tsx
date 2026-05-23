@@ -76,10 +76,13 @@ export default async function CadastroPage({ searchParams }: { searchParams: Pro
 
     const supabase = await createClient();
     const supabaseAdmin = createSupabaseAdminClient();
-    const { data: existingUsername } = await (supabaseAdmin as any).from("profiles").select("id").eq("username", username).maybeSingle();
-    if (existingUsername) fail("Nome de usuário já está em uso.", "username");
 
-    const { data: createdUser, error: createError } = await supabaseAdmin.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { full_name: fullName, username, phone, plan_slug: plan } });
+    const { data: createdUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { full_name: fullName, username, phone, plan_slug: plan },
+    });
     const createdUserId = createdUser.user?.id ?? "";
     if (createError || !createdUserId) {
       const mapped = mapSupabaseError(createError?.message ?? "Não foi possível criar a conta.");
@@ -87,7 +90,7 @@ export default async function CadastroPage({ searchParams }: { searchParams: Pro
     }
 
     const { error: profileError } = await (supabaseAdmin as any).from("profiles").upsert(
-      { id: createdUserId, email, full_name: fullName, username, role: "user", updated_at: new Date().toISOString() },
+      { id: createdUserId, email, full_name: fullName, role: "user", updated_at: new Date().toISOString() },
       { onConflict: "id" },
     );
     if (profileError) fail(`Conta criada, mas houve erro ao salvar perfil: ${profileError.message}`, "form");
