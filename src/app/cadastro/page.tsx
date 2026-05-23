@@ -101,8 +101,8 @@ export default async function CadastroPage({ searchParams }: { searchParams: Pro
       fail(`Conta criada, mas não foi possível iniciar sessão automaticamente. ${mapped.message}`, mapped.field);
     }
 
-    if (plan === "free") redirect(redirectTo || "/cadastro/sucesso?plan=free");
-    redirect(`/api/billing/checkout?plan=${encodeURIComponent(plan)}`);
+    if (plan === "free") redirect("/cadastro/sucesso?plan=free");
+    redirect(`/api/billing/checkout?plan=${encodeURIComponent(plan)}&welcome=1`);
   }
 
   return (
