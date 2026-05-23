@@ -32,10 +32,8 @@ async function listAllAuthUsers(supabase: any) {
   while (page <= 10) {
     const { data, error } = await supabase.auth.admin.listUsers({ page, perPage });
     if (error) throw new Error(`Falha ao listar usuários Auth: ${error.message}`);
-
     const users = data?.users ?? [];
     allUsers.push(...users);
-
     if (users.length < perPage) break;
     page += 1;
   }
@@ -61,9 +59,7 @@ async function syncMissingProfiles(supabase: any, authUsers: any[], existingProf
   if (!missingProfiles.length) return existingProfiles ?? [];
 
   const { error } = await supabase.from("profiles").upsert(missingProfiles, { onConflict: "id" });
-  if (error) {
-    return existingProfiles ?? [];
-  }
+  if (error) return existingProfiles ?? [];
 
   const { data: refreshedProfiles, error: refreshError } = await supabase.from("profiles").select("*");
   if (refreshError) return existingProfiles ?? [];
@@ -83,10 +79,10 @@ export async function getMembers(filters?: { query?: string; planId?: string; st
   if (plansError) throw new Error(`Falha ao carregar planos: ${plansError.message}`);
 
   const profiles = await syncMissingProfiles(supabase, authUsers, initialProfiles ?? []);
-  const profileMap = new Map<string, Profile>((profiles ?? []).map((profile: any) => [profile.id, profile as Profile]));
+  const profileMap = new Map<string, Profile>((profiles ?? []).map((profile: any) => [String(profile.id), profile as Profile]));
   const seenIds = new Set<string>();
   const mergedProfiles: Profile[] = [
-    ...authUsers.map((user: any) => makeProfileFromAuthUser(user, profileMap.get(user.id))),
+    ...authUsers.map((user: any) => makeProfileFromAuthUser(user, profileMap.get(String(user.id)))),
     ...(profiles ?? []).filter((profile: any) => !authUsers.some((user: any) => user.id === profile.id)),
   ].filter((profile: any) => {
     if (!profile?.id || seenIds.has(profile.id)) return false;
@@ -104,19 +100,24 @@ export async function getMembers(filters?: { query?: string; planId?: string; st
 
   const latestSubByUser = new Map<string, Subscription>();
   for (const sub of subscriptions ?? []) {
-    const current = latestSubByUser.get(sub.user_id);
-    if (!current || new Date(sub.created_at) > new Date(current.created_at)) latestSubByUser.set(sub.user_id, sub as Subscription);
+    const typedSub = sub as Subscription;
+    const current = latestSubByUser.get(typedSub.user_id);
+    if (!current || new Date(typedSub.created_at) > new Date(current.created_at)) {
+      latestSubByUser.set(typedSub.user_id, typedSub);
+    }
   }
-  const planMap = new Map<string, Plan>((plans ?? []).map((plan: any) => [plan.id, plan as Plan]));
 
+  const typedPlans = (plans ?? []) as Plan[];
+  const planMap = new Map<string, Plan>(typedPlans.map((plan) => [plan.id, plan]));
   const query = filters?.query?.trim().toLowerCase() ?? "";
 
-  return mergedProfiles
-    .map((profile): MemberListItem => {
-      const subscription = latestSubByUser.get(profile.id) ?? null;
-      const plan = subscription ? planMap.get(subscription.plan_id) ?? null : null;
-      return { profile, subscription, plan };
-    })
+  const members: MemberListItem[] = mergedProfiles.map((profile): MemberListItem => {
+    const subscription = latestSubByUser.get(profile.id) ?? null;
+    const plan: Plan | null = subscription?.plan_id ? planMap.get(subscription.plan_id) ?? null : null;
+    return { profile, subscription, plan };
+  });
+
+  return members
     .filter((member) => {
       if (!query) return true;
       return `${member.profile.full_name ?? ""} ${member.profile.email ?? ""}`.toLowerCase().includes(query);
@@ -139,9 +140,11 @@ export async function getMemberById(id: string): Promise<MemberListItem | null> 
   if (!profile && !authUser) return null;
 
   const mergedProfile = authUser ? makeProfileFromAuthUser(authUser, profile) : (profile as Profile);
-  const plan = subscription ? ((plans ?? []) as Plan[]).find((item) => item.id === subscription.plan_id) ?? null : null;
+  const typedPlans = (plans ?? []) as Plan[];
+  const typedSubscription = subscription ? (subscription as Subscription) : null;
+  const plan: Plan | null = typedSubscription?.plan_id ? typedPlans.find((item) => item.id === typedSubscription.plan_id) ?? null : null;
 
-  return { profile: mergedProfile, subscription: subscription ?? null, plan };
+  return { profile: mergedProfile, subscription: typedSubscription, plan };
 }
 
 export async function updateMemberSubscription(userId: string, payload: Database["public"]["Tables"]["subscriptions"]["Update"]): Promise<void> {
