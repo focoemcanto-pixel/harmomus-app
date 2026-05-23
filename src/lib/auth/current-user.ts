@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { Database } from "@/types/database";
 
 export type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -58,7 +59,7 @@ function isSubscriptionUsable(subscription: Subscription | null | undefined) {
   if (!subscription) return false;
   const status = String(subscription.status ?? "").toLowerCase();
   if (!["active", "trialing"].includes(status)) return false;
-  const periodEnd = subscription.current_period_end ? new Date(subscription.current_period_end).getTime() : Number.POSITIVE_INFINITY;
+  const periodEnd = (subscription as any).current_period_end ? new Date((subscription as any).current_period_end).getTime() : Number.POSITIVE_INFINITY;
   return periodEnd > Date.now();
 }
 
@@ -69,9 +70,10 @@ export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessCo
     return { effectiveSlug: "guest", profile: null, plan: null, subscription: null, hierarchyLevel: 0, isGuest: true, isAdmin: false };
   }
 
+  const supabaseAdmin = createSupabaseAdminClient();
   const [{ data: plans }, { data: subscription }, profile] = await Promise.all([
-    (supabase as any).from("plans").select("*"),
-    (supabase as any).from("subscriptions").select("*").eq("user_id", data.user.id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    (supabaseAdmin as any).from("plans").select("*"),
+    (supabaseAdmin as any).from("subscriptions").select("*").eq("user_id", data.user.id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
     findProfileForUser(supabase, data.user),
   ]);
 
