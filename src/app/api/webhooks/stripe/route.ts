@@ -20,10 +20,24 @@ function verifySignature(payload: string, signature: string, secret: string) {
   return digestBuffer.length === signatureBuffer.length && timingSafeEqual(digestBuffer, signatureBuffer);
 }
 
+function getPlanSlugFromEnvPrice(stripePriceId: string | null) {
+  if (!stripePriceId) return null;
+  if (stripePriceId === process.env.STRIPE_PLUS_PRICE_ID) return "plus";
+  if (stripePriceId === process.env.STRIPE_PREMIUM_PRICE_ID) return "premium";
+  return null;
+}
+
 async function getPlanByStripePriceId(supabase: any, stripePriceId: string | null) {
   if (!stripePriceId) return null;
+
   const { data } = await supabase.from("plans").select("id, slug").eq("stripe_price_id", stripePriceId).maybeSingle();
-  return data ?? null;
+  if (data?.id) return data;
+
+  const fallbackSlug = getPlanSlugFromEnvPrice(stripePriceId);
+  if (!fallbackSlug) return null;
+
+  const { data: fallbackPlan } = await supabase.from("plans").select("id, slug").eq("slug", fallbackSlug).maybeSingle();
+  return fallbackPlan ?? null;
 }
 
 async function ensureUserIdByCustomerOrEmail(supabase: any, customerId: string | null, email: string | null) {
