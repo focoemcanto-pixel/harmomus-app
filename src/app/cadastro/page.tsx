@@ -101,13 +101,14 @@ export default async function CadastroPage({ searchParams }: { searchParams: Pro
       user_metadata: { full_name: fullName, username, phone, plan_slug: plan },
     });
 
-    if (createError || !createdUser.user) {
+    const user = createdUser.user;
+    if (createError || !user) {
       const mapped = mapSupabaseError(createError?.message ?? "Não foi possível criar a conta.");
       fail(mapped.message, mapped.field);
     }
 
     const { error: profileError } = await (supabaseAdmin as any).from("profiles").upsert(
-      { id: createdUser.user.id, email, full_name: fullName, username, phone, role: "user", plan_slug: plan, updated_at: new Date().toISOString() },
+      { id: user.id, email, full_name: fullName, username, phone, role: "user", plan_slug: plan, updated_at: new Date().toISOString() },
       { onConflict: "id" },
     );
     if (profileError) fail(`Conta criada, mas houve erro ao salvar perfil: ${profileError.message}`, "form");
