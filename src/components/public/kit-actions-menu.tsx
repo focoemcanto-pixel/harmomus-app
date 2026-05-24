@@ -10,18 +10,23 @@ export function KitActionsMenu({
   kitSlug,
   categorySlug,
   planSlug,
+  onPremiumRequired,
 }: {
   kitName: string;
   kitSlug: string;
   categorySlug?: string | null;
   planSlug?: string | null;
+  onPremiumRequired?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const isPremium = planSlug === "premium";
 
-  const requestToneHref = isPremium
-    ? `/area-premium?kit=${encodeURIComponent(kitSlug)}&nome=${encodeURIComponent(kitName)}#solicitar-tom`
-    : "/assinar?plan=premium&reason=novo-tom";
+  const requestToneHref = `/area-premium?kit=${encodeURIComponent(kitSlug)}&nome=${encodeURIComponent(kitName)}#solicitar-tom`;
+
+  function handleBlockedToneRequest() {
+    setOpen(false);
+    onPremiumRequired?.();
+  }
 
   return (
     <div className="relative">
@@ -34,13 +39,23 @@ export function KitActionsMenu({
             Salvar na playlist
           </Link>
 
-          <Link href={requestToneHref} className={`mt-1 block rounded-lg border px-3 py-2 text-sm hover:bg-white/5 ${isPremium ? "border-emerald-400/25 text-emerald-200" : "border-yellow-400/25 bg-yellow-400/10 text-yellow-100"}`}>
-            Solicitar novo tom
-          </Link>
+          {isPremium ? (
+            <Link href={requestToneHref} className="mt-1 block rounded-lg border border-emerald-400/25 px-3 py-2 text-sm text-emerald-200 hover:bg-white/5">
+              Solicitar novo tom
+            </Link>
+          ) : (
+            <button
+              type="button"
+              onClick={handleBlockedToneRequest}
+              className="mt-1 block w-full rounded-lg border border-yellow-400/25 bg-yellow-400/10 px-3 py-2 text-left text-sm text-yellow-100 hover:bg-white/5"
+            >
+              Solicitar novo tom
+            </button>
+          )}
 
           {!isPremium ? (
             <p className="mt-2 rounded-lg bg-yellow-400/10 px-3 py-2 text-xs leading-relaxed text-yellow-100">
-              Recurso Premium: atualize seu plano para pedir novos tons e acessar todos os recursos.
+              Recurso Premium: faça upgrade para pedir novos tons e acessar todos os recursos.
             </p>
           ) : null}
 
