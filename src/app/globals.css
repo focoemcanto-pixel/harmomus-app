@@ -5,9 +5,119 @@
   color-scheme: dark;
 }
 
+html {
+  scroll-behavior: smooth;
+  -webkit-tap-highlight-color: transparent;
+}
+
 body {
   background: #050505;
   color: #f8fafc;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+a,
+[role="button"],
+input,
+select,
+textarea {
+  touch-action: manipulation;
+}
+
+button,
+a,
+[role="button"] {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:not(:disabled),
+a[href],
+[role="button"] {
+  cursor: pointer;
+}
+
+button:disabled,
+[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+a[href],
+button,
+[role="button"] {
+  transition-property: transform, opacity, background-color, border-color, color, box-shadow, filter;
+  transition-duration: 160ms;
+  transition-timing-function: ease-out;
+}
+
+a[href]:active,
+button:not(:disabled):active,
+[role="button"]:active {
+  transform: translateY(1px) scale(0.985);
+  filter: brightness(1.08);
+}
+
+:focus-visible {
+  outline: 2px solid rgba(103, 232, 249, 0.95);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 5px rgba(103, 232, 249, 0.16);
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline-offset: 1px;
+}
+
+::selection {
+  background: rgba(34, 211, 238, 0.35);
+  color: #ffffff;
+}
+
+.harmomus-route-loader {
+  pointer-events: none;
+  position: fixed;
+  inset-inline: 0;
+  top: 0;
+  z-index: 9999;
+  height: 3px;
+  overflow: hidden;
+  background: rgba(34, 211, 238, 0.08);
+}
+
+.harmomus-route-loader::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: -45%;
+  width: 45%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, #67e8f9, #d946ef, transparent);
+  animation: harmomus-route-progress 900ms ease-in-out infinite;
+  box-shadow: 0 0 18px rgba(103, 232, 249, 0.6);
+}
+
+@keyframes harmomus-route-progress {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(330%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  a[href]:active,
+  button:not(:disabled):active,
+  [role="button"]:active {
+    transform: none;
+  }
 }
