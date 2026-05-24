@@ -151,7 +151,6 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["audio_access_logs"]["Insert"]>;
       };
 
-
       home_banners: {
         Row: {
           id: string;
@@ -326,6 +325,10 @@ export interface Database {
           cover_url: string | null;
           r2_folder: string | null;
           required_plan: string | null;
+          original_tone: string | null;
+          default_tone: string | null;
+          allow_pitch_shift: boolean;
+          max_pitch_shift_semitones: number;
           published: boolean;
           created_at: string;
           updated_at: string;
@@ -341,6 +344,10 @@ export interface Database {
           cover_url?: string | null;
           r2_folder?: string | null;
           required_plan?: string | null;
+          original_tone?: string | null;
+          default_tone?: string | null;
+          allow_pitch_shift?: boolean;
+          max_pitch_shift_semitones?: number;
           published?: boolean;
           created_at?: string;
           updated_at?: string;
