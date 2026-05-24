@@ -12,6 +12,8 @@ type BrandingState = {
   ogImageUrl: string;
 };
 
+type CropState = { zoom: number; x: number; y: number };
+
 type GeneratedAsset = {
   key: BrandingAssetKey;
   label: string;
@@ -30,6 +32,14 @@ const ASSETS: GeneratedAsset[] = [
   { key: "hero", label: "Hero/banner", width: 1920, height: 900, field: "heroImageUrl", mimeType: "image/webp", fit: "cover", quality: 0.9 },
   { key: "og", label: "Open Graph", width: 1200, height: 630, field: "ogImageUrl", mimeType: "image/webp", fit: "cover", quality: 0.9 },
 ];
+
+const DEFAULT_CROPS: Record<BrandingAssetKey, CropState> = {
+  logo: { zoom: 1, x: 0, y: 0 },
+  favicon: { zoom: 1, x: 0, y: 0 },
+  login: { zoom: 1, x: 0, y: 0 },
+  hero: { zoom: 1, x: 0, y: 0 },
+  og: { zoom: 1, x: 0, y: 0 },
+};
 
 function loadImage(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -56,7 +66,7 @@ function canvasToBlob(canvas: HTMLCanvasElement, mimeType: string, quality?: num
   });
 }
 
-function drawAsset(image: HTMLImageElement, asset: GeneratedAsset) {
+function drawAsset(image: HTMLImageElement, asset: GeneratedAsset, crop: CropState) {
   const canvas = document.createElement("canvas");
   canvas.width = asset.width;
   canvas.height = asset.height;
@@ -65,14 +75,15 @@ function drawAsset(image: HTMLImageElement, asset: GeneratedAsset) {
 
   ctx.clearRect(0, 0, asset.width, asset.height);
 
-  const scale = asset.fit === "cover"
+  const baseScale = asset.fit === "cover"
     ? Math.max(asset.width / image.width, asset.height / image.height)
     : Math.min(asset.width / image.width, asset.height / image.height);
 
+  const scale = baseScale * crop.zoom;
   const drawWidth = image.width * scale;
   const drawHeight = image.height * scale;
-  const drawX = (asset.width - drawWidth) / 2;
-  const drawY = (asset.height - drawHeight) / 2;
+  const drawX = (asset.width - drawWidth) / 2 + crop.x * asset.width;
+  const drawY = (asset.height - drawHeight) / 2 + crop.y * asset.height;
 
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
@@ -90,22 +101,25 @@ async function uploadGeneratedAsset(asset: GeneratedAsset, blob: Blob) {
   const response = await fetch("/api/admin/branding-upload", { method: "POST", body: form });
   const data = await response.json();
 
-  if (!response.ok) {
-    throw new Error(data?.error || `Falha ao enviar ${asset.label}.`);
-  }
-
+  if (!response.ok) throw new Error(data?.error || `Falha ao enviar ${asset.label}.`);
   return data.url as string;
 }
 
 export function BrandingPipelineManager({ initial }: { initial: BrandingState }) {
   const [values, setValues] = useState<BrandingState>(initial);
+  const [sourceFile, setSourceFile] = useState<File | null>(null);
+  const [sourcePreview, setSourcePreview] = useState<string>("");
+  const [selectedAssetKey, setSelectedAssetKey] = useState<BrandingAssetKey>("hero");
+  const [crops, setCrops] = useState<Record<BrandingAssetKey, CropState>>(DEFAULT_CROPS);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const selectedAsset = ASSETS.find((asset) => asset.key === selectedAssetKey) ?? ASSETS[0];
+  const selectedCrop = crops[selectedAssetKey];
   const previews = useMemo(() => ASSETS.map((asset) => ({ ...asset, url: values[asset.field] })), [values]);
 
-  async function processImage(file: File) {
+  async function generateAssets(file: File, onlyAsset?: GeneratedAsset) {
     try {
       setLoading(true);
       setError(null);
@@ -113,23 +127,37 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
 
       const image = await loadImage(file);
       const nextValues = { ...values };
+      const targets = onlyAsset ? [onlyAsset] : ASSETS;
 
-      for (const asset of ASSETS) {
+      for (const asset of targets) {
         setMessage(`Gerando ${asset.label} (${asset.width}x${asset.height})...`);
-        const canvas = drawAsset(image, asset);
+        const canvas = drawAsset(image, asset, crops[asset.key]);
         const blob = await canvasToBlob(canvas, asset.mimeType, asset.quality);
         setMessage(`Enviando ${asset.label}...`);
         nextValues[asset.field] = await uploadGeneratedAsset(asset, blob);
       }
 
       setValues(nextValues);
-      setMessage("Pipeline concluído. Agora clique em Salvar configurações para gravar tudo.");
+      setMessage(onlyAsset ? `${onlyAsset.label} atualizado. Clique em Salvar configurações.` : "Pipeline concluído. Clique em Salvar configurações para gravar tudo.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao processar identidade visual.");
       setMessage(null);
     } finally {
       setLoading(false);
     }
+  }
+
+  function handleFile(file: File) {
+    setSourceFile(file);
+    setSourcePreview(URL.createObjectURL(file));
+    void generateAssets(file);
+  }
+
+  function updateCrop(partial: Partial<CropState>) {
+    setCrops((current) => ({
+      ...current,
+      [selectedAssetKey]: { ...current[selectedAssetKey], ...partial },
+    }));
   }
 
   return (
@@ -144,7 +172,7 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
         <div>
           <p className="text-xs uppercase tracking-[0.25em] text-gold-300">Pipeline inteligente de identidade</p>
           <p className="mt-1 max-w-2xl text-sm text-muted">
-            Suba uma única imagem em boa qualidade. O Harmomus gera automaticamente logo, favicon, imagem de login, hero/banner e Open Graph nos tamanhos corretos.
+            Suba uma imagem matriz. O Harmomus gera os formatos automaticamente e permite ajustar manualmente zoom e posição antes de reenviar cada versão.
           </p>
         </div>
         <label className="inline-flex cursor-pointer rounded-xl border border-gold-300/30 bg-gold-500/15 px-4 py-2 text-sm font-semibold text-gold-200 hover:bg-gold-500/25">
@@ -157,11 +185,56 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
             onChange={(event) => {
               const file = event.target.files?.[0];
               event.currentTarget.value = "";
-              if (file) void processImage(file);
+              if (file) handleFile(file);
             }}
           />
         </label>
       </div>
+
+      {sourcePreview ? (
+        <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_340px]">
+          <div className="rounded-2xl border border-border bg-black/30 p-4">
+            <div className="mb-3 flex flex-wrap gap-2">
+              {ASSETS.map((asset) => (
+                <button
+                  key={asset.key}
+                  type="button"
+                  onClick={() => setSelectedAssetKey(asset.key)}
+                  className={`rounded-full border px-3 py-1 text-xs ${asset.key === selectedAssetKey ? "border-gold-300 bg-gold-500/20 text-gold-100" : "border-white/10 bg-white/5 text-zinc-300"}`}
+                >
+                  {asset.label}
+                </button>
+              ))}
+            </div>
+            <div className="overflow-hidden rounded-xl border border-white/10 bg-black/40" style={{ aspectRatio: `${selectedAsset.width}/${selectedAsset.height}` }}>
+              <img
+                src={sourcePreview}
+                alt="Prévia de enquadramento"
+                className="h-full w-full object-cover"
+                style={{
+                  transform: `translate(${selectedCrop.x * 100}%, ${selectedCrop.y * 100}%) scale(${selectedCrop.zoom})`,
+                  transformOrigin: "center",
+                }}
+              />
+            </div>
+            <p className="mt-3 text-xs text-muted">Editor visual: {selectedAsset.label} • {selectedAsset.width}x{selectedAsset.height}</p>
+          </div>
+
+          <div className="rounded-2xl border border-border bg-black/30 p-4">
+            <p className="text-sm font-semibold text-white">Ajustar enquadramento</p>
+            <label className="mt-4 block text-xs text-zinc-300">Zoom: {selectedCrop.zoom.toFixed(2)}x</label>
+            <input type="range" min="0.6" max="2.4" step="0.05" value={selectedCrop.zoom} onChange={(e) => updateCrop({ zoom: Number(e.target.value) })} className="mt-2 w-full" />
+            <label className="mt-4 block text-xs text-zinc-300">Horizontal</label>
+            <input type="range" min="-0.5" max="0.5" step="0.01" value={selectedCrop.x} onChange={(e) => updateCrop({ x: Number(e.target.value) })} className="mt-2 w-full" />
+            <label className="mt-4 block text-xs text-zinc-300">Vertical</label>
+            <input type="range" min="-0.5" max="0.5" step="0.01" value={selectedCrop.y} onChange={(e) => updateCrop({ y: Number(e.target.value) })} className="mt-2 w-full" />
+            <div className="mt-5 grid gap-2">
+              <button type="button" disabled={!sourceFile || loading} onClick={() => sourceFile && generateAssets(sourceFile, selectedAsset)} className="rounded-xl bg-gold-500/20 px-4 py-2 text-sm font-semibold text-gold-200 disabled:opacity-50">Regerar este formato</button>
+              <button type="button" disabled={!sourceFile || loading} onClick={() => sourceFile && generateAssets(sourceFile)} className="rounded-xl border border-white/10 px-4 py-2 text-sm text-zinc-200 disabled:opacity-50">Regerar todos</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {message ? <p className="mt-4 rounded-xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100">{message}</p> : null}
       {error ? <p className="mt-4 rounded-xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm text-red-100">{error}</p> : null}
