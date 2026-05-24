@@ -147,10 +147,27 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
     }
   }
 
-  function handleFile(file: File) {
+  function handleMatrixFile(file: File) {
+    if (sourcePreview) URL.revokeObjectURL(sourcePreview);
     setSourceFile(file);
     setSourcePreview(URL.createObjectURL(file));
     void generateAssets(file);
+  }
+
+  async function handleSpecificFile(asset: GeneratedAsset, file: File) {
+    try {
+      setLoading(true);
+      setError(null);
+      setMessage(`Enviando ${asset.label} personalizado...`);
+      const url = await uploadGeneratedAsset(asset, file);
+      setValues((current) => ({ ...current, [asset.field]: url }));
+      setMessage(`${asset.label} enviado. Clique em Salvar configurações para gravar.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao enviar imagem específica.");
+      setMessage(null);
+    } finally {
+      setLoading(false);
+    }
   }
 
   function updateCrop(partial: Partial<CropState>) {
@@ -172,7 +189,7 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
         <div>
           <p className="text-xs uppercase tracking-[0.25em] text-gold-300">Pipeline inteligente de identidade</p>
           <p className="mt-1 max-w-2xl text-sm text-muted">
-            Suba uma imagem matriz. O Harmomus gera os formatos automaticamente e permite ajustar manualmente zoom e posição antes de reenviar cada versão.
+            Suba uma imagem matriz para gerar tudo automaticamente ou envie uma imagem específica para cada formato. O editor abaixo usa a matriz inteira, sem pré-cortar a imagem.
           </p>
         </div>
         <label className="inline-flex cursor-pointer rounded-xl border border-gold-300/30 bg-gold-500/15 px-4 py-2 text-sm font-semibold text-gold-200 hover:bg-gold-500/25">
@@ -185,7 +202,7 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
             onChange={(event) => {
               const file = event.target.files?.[0];
               event.currentTarget.value = "";
-              if (file) handleFile(file);
+              if (file) handleMatrixFile(file);
             }}
           />
         </label>
@@ -206,31 +223,33 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
                 </button>
               ))}
             </div>
-            <div className="overflow-hidden rounded-xl border border-white/10 bg-black/40" style={{ aspectRatio: `${selectedAsset.width}/${selectedAsset.height}` }}>
+            <div className="relative overflow-hidden rounded-xl border border-white/10 bg-[linear-gradient(45deg,#111_25%,transparent_25%),linear-gradient(-45deg,#111_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#111_75%),linear-gradient(-45deg,transparent_75%,#111_75%)] bg-[length:24px_24px] bg-[position:0_0,0_12px,12px_-12px,-12px_0]" style={{ aspectRatio: `${selectedAsset.width}/${selectedAsset.height}` }}>
               <img
                 src={sourcePreview}
                 alt="Prévia de enquadramento"
-                className="h-full w-full object-cover"
+                className="h-full w-full object-contain"
                 style={{
                   transform: `translate(${selectedCrop.x * 100}%, ${selectedCrop.y * 100}%) scale(${selectedCrop.zoom})`,
                   transformOrigin: "center",
                 }}
               />
+              <div className="pointer-events-none absolute inset-0 border-2 border-gold-300/40" />
             </div>
-            <p className="mt-3 text-xs text-muted">Editor visual: {selectedAsset.label} • {selectedAsset.width}x{selectedAsset.height}</p>
+            <p className="mt-3 text-xs text-muted">Editor visual: {selectedAsset.label} • {selectedAsset.width}x{selectedAsset.height}. A prévia mostra a matriz completa para você recuperar laterais e topo/base.</p>
           </div>
 
           <div className="rounded-2xl border border-border bg-black/30 p-4">
             <p className="text-sm font-semibold text-white">Ajustar enquadramento</p>
             <label className="mt-4 block text-xs text-zinc-300">Zoom: {selectedCrop.zoom.toFixed(2)}x</label>
-            <input type="range" min="0.6" max="2.4" step="0.05" value={selectedCrop.zoom} onChange={(e) => updateCrop({ zoom: Number(e.target.value) })} className="mt-2 w-full" />
+            <input type="range" min="0.2" max="3.5" step="0.05" value={selectedCrop.zoom} onChange={(e) => updateCrop({ zoom: Number(e.target.value) })} className="mt-2 w-full" />
             <label className="mt-4 block text-xs text-zinc-300">Horizontal</label>
-            <input type="range" min="-0.5" max="0.5" step="0.01" value={selectedCrop.x} onChange={(e) => updateCrop({ x: Number(e.target.value) })} className="mt-2 w-full" />
+            <input type="range" min="-1" max="1" step="0.01" value={selectedCrop.x} onChange={(e) => updateCrop({ x: Number(e.target.value) })} className="mt-2 w-full" />
             <label className="mt-4 block text-xs text-zinc-300">Vertical</label>
-            <input type="range" min="-0.5" max="0.5" step="0.01" value={selectedCrop.y} onChange={(e) => updateCrop({ y: Number(e.target.value) })} className="mt-2 w-full" />
+            <input type="range" min="-1" max="1" step="0.01" value={selectedCrop.y} onChange={(e) => updateCrop({ y: Number(e.target.value) })} className="mt-2 w-full" />
             <div className="mt-5 grid gap-2">
               <button type="button" disabled={!sourceFile || loading} onClick={() => sourceFile && generateAssets(sourceFile, selectedAsset)} className="rounded-xl bg-gold-500/20 px-4 py-2 text-sm font-semibold text-gold-200 disabled:opacity-50">Regerar este formato</button>
               <button type="button" disabled={!sourceFile || loading} onClick={() => sourceFile && generateAssets(sourceFile)} className="rounded-xl border border-white/10 px-4 py-2 text-sm text-zinc-200 disabled:opacity-50">Regerar todos</button>
+              <button type="button" onClick={() => updateCrop(DEFAULT_CROPS[selectedAssetKey])} className="rounded-xl border border-white/10 px-4 py-2 text-sm text-zinc-200">Resetar enquadramento</button>
             </div>
           </div>
         </div>
@@ -247,6 +266,20 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
             </div>
             <p className="mt-2 text-xs font-semibold text-white">{asset.label}</p>
             <p className="text-[11px] text-muted">{asset.width}x{asset.height}</p>
+            <label className="mt-3 block cursor-pointer rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-center text-[11px] font-semibold text-zinc-200 hover:bg-white/10">
+              Upload específico
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                disabled={loading}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.currentTarget.value = "";
+                  if (file) void handleSpecificFile(asset, file);
+                }}
+              />
+            </label>
           </div>
         ))}
       </div>
