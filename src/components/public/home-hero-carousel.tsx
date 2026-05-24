@@ -29,19 +29,26 @@ export function HomeHeroCarousel({ banners, latestKits = [] }: { banners: Banner
   }, [totalSlides, paused]);
 
   const slides: { id: string; node: ReactNode }[] = [
-    ...bannerSlides.map((slide) => ({
+    ...bannerSlides.map((slide, slideIndex) => ({
       id: slide.id,
       node: (
         <div className="relative h-full w-full overflow-hidden">
           <picture>
             {slide.mobile_image_url ? <source media="(max-width: 768px)" srcSet={slide.mobile_image_url} /> : null}
-            <img src={slide.image_url} alt={slide.title} className="h-full w-full object-cover" />
+            <img
+              src={slide.image_url}
+              alt={slide.title}
+              className="h-full w-full object-cover"
+              loading={slideIndex === 0 ? "eager" : "lazy"}
+              fetchPriority={slideIndex === 0 ? "high" : "auto"}
+              decoding="async"
+            />
           </picture>
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/35 to-transparent" />
           <div className="absolute bottom-0 left-0 right-0 z-20 p-5 text-white md:p-6">
             {slide.title ? <h3 className="line-clamp-2 text-xl font-semibold md:text-2xl">{slide.title}</h3> : null}
             {slide.subtitle ? <p className="mt-2 line-clamp-2 max-w-xl text-sm text-zinc-200">{slide.subtitle}</p> : null}
-            {slide.button_label && slide.button_href ? <Link href={slide.button_href} className="mt-4 inline-flex rounded-lg bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-cyan-100">{slide.button_label}</Link> : null}
+            {slide.button_label && slide.button_href ? <Link href={slide.button_href} prefetch className="mt-4 inline-flex rounded-lg bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-cyan-100">{slide.button_label}</Link> : null}
           </div>
         </div>
       ),
@@ -56,8 +63,16 @@ export function HomeHeroCarousel({ banners, latestKits = [] }: { banners: Banner
           <p className="mt-2 line-clamp-2 max-w-md text-sm text-zinc-300">Passe pelos kits adicionados recentemente e prepare sua equipe com novidades constantes.</p>
           <div className="mt-5 grid grid-cols-5 gap-2">
             {latestKits.slice(0, 5).map((kit) => (
-              <Link key={kit.id} href={`/biblioteca/${kit.slug}`} className="group min-w-0 overflow-hidden rounded-xl border border-white/15 bg-white/10 transition hover:-translate-y-1 hover:border-cyan-200/70">
-                {kit.coverUrl ? <img src={kit.coverUrl} alt={kit.name} className="aspect-square w-full object-cover transition duration-500 group-hover:scale-105" /> : <div className="aspect-square w-full bg-white/10" />}
+              <Link key={kit.id} href={`/biblioteca/${kit.slug}`} prefetch className="group min-w-0 overflow-hidden rounded-xl border border-white/15 bg-white/10 transition hover:-translate-y-1 hover:border-cyan-200/70">
+                {kit.coverUrl ? (
+                  <img
+                    src={kit.coverUrl}
+                    alt={kit.name}
+                    className="aspect-square w-full object-cover transition duration-500 group-hover:scale-105"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                ) : <div className="aspect-square w-full bg-white/10" />}
                 <div className="p-2">
                   <p className="line-clamp-1 text-xs font-bold text-white">{kit.name}</p>
                   <p className="line-clamp-1 text-[10px] text-zinc-300">{kit.artist}</p>
@@ -82,7 +97,7 @@ export function HomeHeroCarousel({ banners, latestKits = [] }: { banners: Banner
               <span className="rounded-xl bg-white/10 px-3 py-2">✓ Solicitar novo tom</span>
               <span className="hidden rounded-xl bg-white/10 px-3 py-2 sm:block">✓ Playlists premium</span>
             </div>
-            <Link href="/assinar?plan=premium" className="mt-4 inline-flex rounded-xl bg-gradient-to-r from-yellow-200 to-cyan-200 px-4 py-2.5 text-xs font-black text-slate-950 shadow-[0_18px_50px_rgba(250,204,21,0.25)] transition hover:scale-[1.02] md:mt-5 md:px-5 md:py-3 md:text-sm">Tornar-se Premium</Link>
+            <Link href="/assinar?plan=premium" prefetch className="mt-4 inline-flex rounded-xl bg-gradient-to-r from-yellow-200 to-cyan-200 px-4 py-2.5 text-xs font-black text-slate-950 shadow-[0_18px_50px_rgba(250,204,21,0.25)] transition hover:scale-[1.02] md:mt-5 md:px-5 md:py-3 md:text-sm">Tornar-se Premium</Link>
           </div>
         </div>
       ),
