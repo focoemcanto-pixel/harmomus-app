@@ -236,8 +236,8 @@ export default async function HomePage() {
               );
             })}
 
-            <article className="relative overflow-hidden rounded-3xl border border-cyan-300/60 bg-[radial-gradient(circle_at_20%_10%,rgba(34,211,238,0.25),transparent_32%),radial-gradient(circle_at_90%_25%,rgba(217,70,239,0.24),transparent_32%),linear-gradient(145deg,#07111f,#140a24_55%,#05070d)] p-6 shadow-[0_24px_80px_rgba(34,211,238,0.22)]">
-              <span className="absolute -top-3 right-6 rounded-full bg-cyan-300 px-3 py-1 text-[10px] font-black uppercase tracking-[0.15em] text-slate-950">Para igrejas</span>
+            <article className="relative overflow-hidden rounded-3xl border border-cyan-300/60 bg-[radial-gradient(circle_at_20%_10%,rgba(34,211,238,0.25),transparent_32%),radial-gradient(circle_at_90%_25%,rgba(217,70,239,0.24),transparent_32%),linear-gradient(145deg,#07111f,#140a24_55%,#05070d)] p-6 pt-12 shadow-[0_24px_80px_rgba(34,211,238,0.22)] sm:pt-6">
+              <span className="absolute right-4 top-4 rounded-full bg-cyan-300 px-3 py-1 text-[10px] font-black uppercase tracking-[0.15em] text-slate-950 shadow-[0_8px_24px_rgba(34,211,238,0.3)]">Para igrejas</span>
               <p className="text-xs uppercase tracking-[0.18em] text-cyan-200">ministerial</p>
               <h3 className="mt-2 text-3xl font-semibold text-white">Plano Ministerial</h3>
               <p className="mt-1 text-zinc-200">Ideal para ministérios de louvor completos.</p>
