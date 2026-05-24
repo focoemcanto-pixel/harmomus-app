@@ -6,7 +6,7 @@ import { PublicAppShell } from "@/components/public/public-app-shell";
 import { PremiumToneRequestForm } from "@/components/public/premium-tone-request-form";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { getGlobalTopKits, getRecommendedKits, getUserRecentActivities, getUserTopKits, type TopKit } from "@/lib/data/premium-analytics";
-import { getPublicKits } from "@/lib/data/public-kits";
+import { getPublishedKits } from "@/lib/data/public-kits";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -44,10 +44,10 @@ export default async function AreaPremiumPage({
     getGlobalTopKits(5).catch(() => []),
     userId ? getRecommendedKits(userId, 6).catch(() => []) : Promise.resolve([]),
     userId ? getUserRecentActivities(userId, 10).catch(() => []) : Promise.resolve([]),
-    getPublicKits({ limit: 500 }).catch(() => []),
+    getPublishedKits().catch(() => []),
   ]);
 
-  const toneRequestKits = allKits.map((kit) => ({
+  const toneRequestKits = allKits.slice(0, 500).map((kit) => ({
     id: kit.id,
     slug: kit.slug,
     name: kit.name,
