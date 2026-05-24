@@ -17,6 +17,8 @@ type GlobalAudioPlayerContextValue = {
   volume: number;
   loop: boolean;
   errorMessage: string | null;
+  preloadedSrc: string | null;
+  preloadTrack: (track: GlobalTrack) => void;
   playTrack: (track: GlobalTrack) => Promise<void>;
   togglePlay: () => Promise<void>;
   seekTo: (seconds: number) => void;
@@ -35,6 +37,7 @@ function formatTime(value: number) {
 
 export function GlobalAudioPlayerProvider({ children }: { children: ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const preloadAudioRef = useRef<HTMLAudioElement | null>(null);
   const [track, setTrack] = useState<GlobalTrack | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -42,6 +45,21 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
   const [volume, setVolume] = useState(1);
   const [loop, setLoop] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [preloadedSrc, setPreloadedSrc] = useState<string | null>(null);
+
+  function preloadTrack(nextTrack: GlobalTrack) {
+    if (!nextTrack.src || track?.src === nextTrack.src || preloadedSrc === nextTrack.src) return;
+    const preloadAudio = preloadAudioRef.current;
+    if (!preloadAudio) return;
+
+    try {
+      preloadAudio.src = nextTrack.src;
+      preloadAudio.load();
+      setPreloadedSrc(nextTrack.src);
+    } catch {
+      setPreloadedSrc(null);
+    }
+  }
 
   async function playTrack(nextTrack: GlobalTrack) {
     const audio = audioRef.current;
@@ -179,6 +197,8 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
     volume,
     loop,
     errorMessage,
+    preloadedSrc,
+    preloadTrack,
     playTrack,
     togglePlay,
     seekTo,
@@ -186,7 +206,7 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
     setVolumeValue,
     setLoopValue,
     closePlayer,
-  }), [track, isPlaying, currentTime, duration, volume, loop, errorMessage]);
+  }), [track, isPlaying, currentTime, duration, volume, loop, errorMessage, preloadedSrc]);
 
   return (
     <GlobalAudioPlayerContext.Provider value={value}>
@@ -202,6 +222,7 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
         onError={() => setErrorMessage("Áudio indisponível ou acesso negado.")}
         className="hidden"
       />
+      <audio ref={preloadAudioRef} preload="auto" className="hidden" aria-hidden="true" />
       <FloatingMiniPlayer />
     </GlobalAudioPlayerContext.Provider>
   );
