@@ -73,7 +73,7 @@ export default async function AssinarPage({ searchParams }: { searchParams?: Pro
               <a href="/api/billing/checkout?plan=ministry_10" className="rounded-xl border border-white/20 bg-white/10 px-4 py-3">Até 10 integrantes — R$397/mês</a>
               <a href="/api/billing/checkout?plan=ministry_20" className="rounded-xl border border-white/20 bg-white/10 px-4 py-3">Até 20 integrantes — R$697/mês</a>
               <a href="/api/billing/checkout?plan=ministry_40" className="rounded-xl border border-white/20 bg-white/10 px-4 py-3">Até 40 integrantes — R$1.297/mês</a>
-              <a href="mailto:suporte@harmomus.com" className="rounded-xl border border-fuchsia-300/40 bg-fuchsia-500/10 px-4 py-3">Acima de 40 — Falar com suporte</a>
+              <a href="mailto:focoemcanto@gmail.com?subject=Plano%20Ministerial%20Harmomus" className="rounded-xl border border-fuchsia-300/40 bg-fuchsia-500/10 px-4 py-3">Acima de 40 — Falar com suporte</a>
             </div>
           </section>
 
