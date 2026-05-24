@@ -84,6 +84,27 @@ export async function updateSubscription(subscriptionId: string, priceId: string
   return stripe(`/subscriptions/${subscriptionId}`, new URLSearchParams({ "items[0][id]": "si_placeholder", "items[0][price]": priceId }));
 }
 
+export async function listCustomerInvoices(customerId: string, limit = 24) {
+  const query = new URLSearchParams({
+    customer: customerId,
+    limit: String(limit),
+  });
+  return stripe<any>(`/invoices?${query.toString()}`, undefined, "GET");
+}
+
+export async function getCustomerPaymentMethods(customerId: string, limit = 3) {
+  const query = new URLSearchParams({
+    customer: customerId,
+    type: "card",
+    limit: String(limit),
+  });
+  return stripe<any>(`/payment_methods?${query.toString()}`, undefined, "GET");
+}
+
+export async function getStripeSubscription(subscriptionId: string) {
+  return stripe<any>(`/subscriptions/${encodeURIComponent(subscriptionId)}`, undefined, "GET");
+}
+
 export function getPriceByPlan(plan: Pick<Plan, "slug" | "stripe_price_id">) {
   return plan.slug === "free" ? null : plan.stripe_price_id;
 }
