@@ -8,6 +8,12 @@ import { ensureArtistCategory, getArtistCategories, getKitById, getKitFormOption
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+function parsePitchShiftLimit(value: FormDataEntryValue | null) {
+  const parsed = Number(value ?? 2);
+  if (!Number.isFinite(parsed)) return 2;
+  return Math.max(1, Math.min(3, Math.round(parsed)));
+}
+
 export default async function EditarKitPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const [kit, { categories, plans }, artistCategories] = await Promise.all([getKitById(id), getKitFormOptions(), getArtistCategories()]);
@@ -19,6 +25,8 @@ export default async function EditarKitPage({ params }: { params: Promise<{ id: 
     const name = String(formData.get("name") ?? "").trim();
     const slug = String(formData.get("slug") ?? "").trim();
     const artist = String(formData.get("artist") ?? "").trim();
+    const originalTone = String(formData.get("original_tone") ?? "").trim();
+    const defaultTone = String(formData.get("default_tone") ?? "").trim();
 
     if (!name || !slug || !artist) throw new Error("Preencha nome, slug e artista para continuar.");
 
@@ -34,6 +42,10 @@ export default async function EditarKitPage({ params }: { params: Promise<{ id: 
       r2_folder: String(formData.get("r2_folder") ?? "").trim() || null,
       category_id: String(formData.get("category_id") ?? "") || artistCategory.id,
       required_plan: String(formData.get("required_plan") ?? "") || null,
+      original_tone: originalTone || null,
+      default_tone: defaultTone || originalTone || null,
+      allow_pitch_shift: formData.has("allow_pitch_shift"),
+      max_pitch_shift_semitones: parsePitchShiftLimit(formData.get("max_pitch_shift_semitones")),
       published: formData.get("published") === "on",
     });
 
