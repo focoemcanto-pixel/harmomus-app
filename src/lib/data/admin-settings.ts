@@ -17,6 +17,7 @@ export interface AdminSettings {
   whatsapp: { supportPhone: string; webhook: string };
 }
 
+const FALLBACK_SECTION_TYPE = "admin_settings_global";
 const DEFAULT_SETTINGS: AdminSettings = {
   branding: {
     appName: "Harmomus",
@@ -68,13 +69,68 @@ function mergeSettings(payload: Partial<AdminSettings> | null | undefined): Admi
   };
 }
 
+function parseFallbackPayload(raw: unknown): Partial<AdminSettings> | null {
+  if (!raw || typeof raw !== "string") return null;
+  try {
+    return JSON.parse(raw) as Partial<AdminSettings>;
+  } catch {
+    return null;
+  }
+}
+
+async function getFallbackSettings(supabase: any): Promise<AdminSettings> {
+  const { data, error } = await supabase
+    .from("home_sections")
+    .select("subtitle")
+    .eq("type", FALLBACK_SECTION_TYPE)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Falha ao carregar configurações fallback", error);
+    return DEFAULT_SETTINGS;
+  }
+
+  return mergeSettings(parseFallbackPayload(data?.subtitle));
+}
+
+async function saveFallbackSettings(supabase: any, payload: AdminSettings): Promise<void> {
+  const serialized = JSON.stringify(payload);
+
+  const { data: existing, error: existingError } = await supabase
+    .from("home_sections")
+    .select("id")
+    .eq("type", FALLBACK_SECTION_TYPE)
+    .maybeSingle();
+
+  if (existingError) throw new Error(`Falha ao localizar configurações fallback: ${existingError.message}`);
+
+  if (existing?.id) {
+    const { error } = await supabase
+      .from("home_sections")
+      .update({ title: "Admin Settings", subtitle: serialized, active: false, order_index: -999 })
+      .eq("id", existing.id);
+    if (error) throw new Error(`Falha ao salvar configurações fallback: ${error.message}`);
+    return;
+  }
+
+  const { error } = await supabase.from("home_sections").insert({
+    type: FALLBACK_SECTION_TYPE,
+    title: "Admin Settings",
+    subtitle: serialized,
+    active: false,
+    order_index: -999,
+  });
+
+  if (error) throw new Error(`Falha ao criar configurações fallback: ${error.message}`);
+}
+
 export async function getAdminSettings(): Promise<AdminSettings> {
   const supabase = createSupabaseAdminClient() as any;
   const { data, error } = await supabase.from("admin_settings").select("payload").eq("key", "global").maybeSingle();
   if (error) {
-    if (isRecoverableSettingsError(error)) return DEFAULT_SETTINGS;
+    if (isRecoverableSettingsError(error)) return getFallbackSettings(supabase);
     console.error("Falha ao carregar configurações", error);
-    return DEFAULT_SETTINGS;
+    return getFallbackSettings(supabase);
   }
   return mergeSettings(data?.payload as Partial<AdminSettings> | null);
 }
@@ -83,6 +139,10 @@ export async function saveAdminSettings(payload: AdminSettings): Promise<void> {
   const supabase = createSupabaseAdminClient() as any;
   const { error } = await supabase.from("admin_settings").upsert({ key: "global", payload, updated_at: new Date().toISOString() }, { onConflict: "key" });
   if (error) {
+    if (isRecoverableSettingsError(error)) {
+      await saveFallbackSettings(supabase, payload);
+      return;
+    }
     throw new Error(`Falha ao salvar configurações: ${error.message}`);
   }
 }
