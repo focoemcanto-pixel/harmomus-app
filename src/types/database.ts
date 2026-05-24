@@ -243,6 +243,12 @@ export interface Database {
           r2_key: string;
           public_url: string;
           file_type: string;
+          min_midi_note: number | null;
+          max_midi_note: number | null;
+          detected_min_midi_note: number | null;
+          detected_max_midi_note: number | null;
+          tessitura_confidence: number | null;
+          tessitura_source: "manual" | "auto" | "hybrid";
           created_at: string;
           updated_at: string;
         };
@@ -254,6 +260,12 @@ export interface Database {
           r2_key: string;
           public_url: string;
           file_type: string;
+          min_midi_note?: number | null;
+          max_midi_note?: number | null;
+          detected_min_midi_note?: number | null;
+          detected_max_midi_note?: number | null;
+          tessitura_confidence?: number | null;
+          tessitura_source?: "manual" | "auto" | "hybrid";
           created_at?: string;
           updated_at?: string;
         };
