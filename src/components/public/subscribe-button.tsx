@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 type SubscribeButtonProps = {
-  planSlug: "free" | "plus" | "premium";
+  planSlug: "free" | "plus" | "premium" | "ministry_10" | "ministry_20" | "ministry_40";
   label: string;
   className?: string;
 };
