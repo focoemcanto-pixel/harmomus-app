@@ -31,13 +31,31 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
   const currentTone = kit.tones.find((t) => t.tone === selectedTone) ?? kit.tones[0];
   const selectedFile = currentTone?.voices[selectedVoice] ?? currentTone?.voices.todos ?? null;
 
+  function openPremiumToneUpgrade() {
+    setUpgradeConfig({
+      title: "Solicitação de novos tons é exclusiva do Premium.",
+      message: "Assine o Premium para solicitar tons personalizados para qualquer kit do Harmomus.",
+      ctaLabel: "Fazer upgrade para Premium",
+      ctaHref: "/assinar?plan=premium",
+    });
+    setUpgradeOpen(true);
+  }
+
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,#1f2840_0%,#06070c_40%)] px-4 py-6 md:px-8 md:py-10">
       <section className="mx-auto max-w-6xl rounded-2xl border border-white/10 bg-surface/80 p-4 shadow-premium backdrop-blur md:p-8">
         <div className="grid gap-8 md:grid-cols-[280px_1fr] md:gap-10">
           <img src={kit.coverUrl ?? "https://placehold.co/600x600/101114/f4f4f5?text=Harmomus"} alt={kit.name} className="aspect-square w-full rounded-xl border border-white/10 object-cover" />
           <div>
-            <div className="mb-2 flex justify-end"><KitActionsMenu kitName={kit.name} kitSlug={kit.slug} categorySlug={kit.category?.slug} /></div>
+            <div className="mb-2 flex justify-end">
+              <KitActionsMenu
+                kitName={kit.name}
+                kitSlug={kit.slug}
+                categorySlug={kit.category?.slug}
+                planSlug={accessContext.effectiveSlug}
+                onPremiumRequired={openPremiumToneUpgrade}
+              />
+            </div>
             <h1 className="mt-2 text-3xl font-semibold text-white">{kit.name}</h1>
             <div className="mt-3"><AccessStatusBadge planSlug={accessContext.effectiveSlug} /></div>
             <div className="mt-5 space-y-3">
