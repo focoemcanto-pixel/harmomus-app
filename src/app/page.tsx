@@ -42,6 +42,15 @@ const VOICE_SECTIONS = [
   { title: "Soprano", description: "Linhas com brilho, extensão e firmeza para conduzir melodias com segurança." },
 ];
 
+const MINISTERIAL_FEATURES = [
+  "Acesso Premium para todo o ministério",
+  "Planos de 10, 20 ou 40 integrantes",
+  "Responsável gerencia convites e membros",
+  "Ideal para equipes de louvor completas",
+  "Todos os tons e nipes disponíveis",
+  "Solicitações centralizadas pelo responsável",
+];
+
 export default async function HomePage() {
   const [kits, homeBanners, homeSections] = await Promise.all([
     getPublishedKits(),
@@ -194,8 +203,14 @@ export default async function HomePage() {
         </section>
 
         <section className="space-y-4">
-          <h2 className="text-2xl font-semibold text-white md:text-3xl">Planos</h2>
-          <div className="grid gap-4 xl:grid-cols-3">
+          <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+            <div>
+              <h2 className="text-2xl font-semibold text-white md:text-3xl">Planos</h2>
+              <p className="mt-1 text-sm text-zinc-300">Escolha entre acesso individual ou um plano completo para o ministério inteiro.</p>
+            </div>
+            <Link href="/assinar?plan=ministry_10" className="text-sm font-semibold text-cyan-200 hover:text-cyan-100">Ver Plano Ministerial →</Link>
+          </div>
+          <div className="grid gap-4 xl:grid-cols-4">
             {OFFICIAL_PLANS.map((plan) => {
               const isPopular = plan.popular;
               return (
@@ -220,6 +235,28 @@ export default async function HomePage() {
                 </article>
               );
             })}
+
+            <article className="relative overflow-hidden rounded-3xl border border-cyan-300/60 bg-[radial-gradient(circle_at_20%_10%,rgba(34,211,238,0.25),transparent_32%),radial-gradient(circle_at_90%_25%,rgba(217,70,239,0.24),transparent_32%),linear-gradient(145deg,#07111f,#140a24_55%,#05070d)] p-6 shadow-[0_24px_80px_rgba(34,211,238,0.22)]">
+              <span className="absolute -top-3 right-6 rounded-full bg-cyan-300 px-3 py-1 text-[10px] font-black uppercase tracking-[0.15em] text-slate-950">Para igrejas</span>
+              <p className="text-xs uppercase tracking-[0.18em] text-cyan-200">ministerial</p>
+              <h3 className="mt-2 text-3xl font-semibold text-white">Plano Ministerial</h3>
+              <p className="mt-1 text-zinc-200">Ideal para ministérios de louvor completos.</p>
+              <p className="mt-4 text-3xl font-bold text-white">A partir de R$397/mês</p>
+              <p className="text-xs text-cyan-100">10, 20 ou 40 integrantes</p>
+              <ul className="mt-5 space-y-2">
+                {MINISTERIAL_FEATURES.map((benefit) => (
+                  <li key={benefit} className="flex items-center gap-2 text-sm text-zinc-100">
+                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/25 text-xs text-emerald-300">✓</span>
+                    {benefit}
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-6">
+                <Link href="/assinar?plan=ministry_10" className="inline-flex w-full items-center justify-center rounded-xl bg-gradient-to-r from-cyan-300 to-fuchsia-300 px-4 py-3 text-sm font-black text-slate-950 shadow-[0_18px_50px_rgba(34,211,238,0.25)] transition hover:brightness-110">
+                  Ver opções ministeriais
+                </Link>
+              </div>
+            </article>
           </div>
         </section>
 
