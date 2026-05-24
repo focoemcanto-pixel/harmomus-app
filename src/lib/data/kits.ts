@@ -4,7 +4,22 @@ import type { KitAudioToneGroup } from "@/types/kit-audio";
 
 export type Category = Database["public"]["Tables"]["categories"]["Row"];
 export type Plan = Database["public"]["Tables"]["plans"]["Row"];
-export type Kit = Database["public"]["Tables"]["kits"]["Row"];
+export type Kit = Database["public"]["Tables"]["kits"]["Row"] & {
+  original_tone?: string | null;
+  default_tone?: string | null;
+  allow_pitch_shift?: boolean | null;
+  max_pitch_shift_semitones?: number | null;
+};
+
+type KitToneMetadata = {
+  original_tone?: string | null;
+  default_tone?: string | null;
+  allow_pitch_shift?: boolean | null;
+  max_pitch_shift_semitones?: number | null;
+};
+
+type KitInsert = Database["public"]["Tables"]["kits"]["Insert"] & KitToneMetadata;
+type KitUpdate = Database["public"]["Tables"]["kits"]["Update"] & KitToneMetadata;
 
 export interface KitListItem extends Kit {
   category_name: string | null;
@@ -53,16 +68,16 @@ export async function getKitById(id: string): Promise<Kit | null> {
   return (data as Kit | null) ?? null;
 }
 
-export async function createKit(data: Database["public"]["Tables"]["kits"]["Insert"]): Promise<Kit> {
+export async function createKit(data: KitInsert): Promise<Kit> {
   const supabase = (await createClient()) as any;
-  const { data: created, error } = await supabase.from("kits").insert(data).select("*").single();
+  const { data: created, error } = await supabase.from("kits").insert(data as any).select("*").single();
   if (error) throw new Error(`Falha ao criar kit: ${error.message}`);
   return created as Kit;
 }
 
-export async function updateKit(id: string, data: Database["public"]["Tables"]["kits"]["Update"]): Promise<Kit> {
+export async function updateKit(id: string, data: KitUpdate): Promise<Kit> {
   const supabase = (await createClient()) as any;
-  const { data: updated, error } = await supabase.from("kits").update(data).eq("id", id).select("*").single();
+  const { data: updated, error } = await supabase.from("kits").update(data as any).eq("id", id).select("*").single();
   if (error) throw new Error(`Falha ao atualizar kit: ${error.message}`);
   return updated as Kit;
 }
