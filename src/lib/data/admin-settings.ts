@@ -1,7 +1,15 @@
-import { createClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export interface AdminSettings {
-  branding: { appName: string; logoUrl: string; faviconUrl: string; primaryColor: string };
+  branding: {
+    appName: string;
+    logoUrl: string;
+    faviconUrl: string;
+    primaryColor: string;
+    loginImageUrl: string;
+    heroImageUrl: string;
+    ogImageUrl: string;
+  };
   urls: { appUrl: string; socialLinks: string; courseLink: string };
   payments: { stripeConfigured: boolean; stripePlusPriceId: string; stripePremiumPriceId: string; mode: "test" | "production" };
   storage: { r2Bucket: string; r2PublicUrl: string; connectionStatus: string };
@@ -10,7 +18,15 @@ export interface AdminSettings {
 }
 
 const DEFAULT_SETTINGS: AdminSettings = {
-  branding: { appName: "Harmomus", logoUrl: "", faviconUrl: "", primaryColor: "#D4AF37" },
+  branding: {
+    appName: "Harmomus",
+    logoUrl: "",
+    faviconUrl: "",
+    primaryColor: "#D4AF37",
+    loginImageUrl: "",
+    heroImageUrl: "",
+    ogImageUrl: "",
+  },
   urls: { appUrl: process.env.NEXT_PUBLIC_APP_URL ?? "", socialLinks: "", courseLink: "https://harmonia.focoemcanto.com" },
   payments: {
     stripeConfigured: Boolean(process.env.STRIPE_SECRET_KEY),
@@ -53,7 +69,7 @@ function mergeSettings(payload: Partial<AdminSettings> | null | undefined): Admi
 }
 
 export async function getAdminSettings(): Promise<AdminSettings> {
-  const supabase = (await createClient()) as any;
+  const supabase = createSupabaseAdminClient() as any;
   const { data, error } = await supabase.from("admin_settings").select("payload").eq("key", "global").maybeSingle();
   if (error) {
     if (isRecoverableSettingsError(error)) return DEFAULT_SETTINGS;
@@ -64,7 +80,7 @@ export async function getAdminSettings(): Promise<AdminSettings> {
 }
 
 export async function saveAdminSettings(payload: AdminSettings): Promise<void> {
-  const supabase = (await createClient()) as any;
+  const supabase = createSupabaseAdminClient() as any;
   const { error } = await supabase.from("admin_settings").upsert({ key: "global", payload, updated_at: new Date().toISOString() }, { onConflict: "key" });
   if (error) {
     if (isRecoverableSettingsError(error)) return;
