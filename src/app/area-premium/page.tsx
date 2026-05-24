@@ -3,8 +3,10 @@ import { redirect } from "next/navigation";
 import { Crown, Headphones, MessageCircle, Music2, Send, Sparkles, Star, Trophy, Wand2 } from "lucide-react";
 
 import { PublicAppShell } from "@/components/public/public-app-shell";
+import { PremiumToneRequestForm } from "@/components/public/premium-tone-request-form";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { getGlobalTopKits, getRecommendedKits, getUserRecentActivities, getUserTopKits, type TopKit } from "@/lib/data/premium-analytics";
+import { getPublicKits } from "@/lib/data/public-kits";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -23,18 +25,34 @@ function formatDate(value?: string | null) {
   }
 }
 
-export default async function AreaPremiumPage() {
+export default async function AreaPremiumPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = (await searchParams) ?? {};
+  const requestedKitSlug = typeof params.kit === "string" ? params.kit : "";
+  const requestedKitName = typeof params.nome === "string" ? decodeURIComponent(params.nome) : "";
+
   const context = await getCurrentUserAccessContext();
   if (context.isGuest) redirect("/login");
   if (context.effectiveSlug !== "premium") redirect("/assinatura");
 
   const userId = context.profile?.id ?? "";
-  const [topYou, topSite, recommendedKits, activities] = await Promise.all([
+  const [topYou, topSite, recommendedKits, activities, allKits] = await Promise.all([
     userId ? getUserTopKits(userId, 5).catch(() => []) : Promise.resolve([]),
     getGlobalTopKits(5).catch(() => []),
     userId ? getRecommendedKits(userId, 6).catch(() => []) : Promise.resolve([]),
     userId ? getUserRecentActivities(userId, 10).catch(() => []) : Promise.resolve([]),
+    getPublicKits({ limit: 500 }).catch(() => []),
   ]);
+
+  const toneRequestKits = allKits.map((kit) => ({
+    id: kit.id,
+    slug: kit.slug,
+    name: kit.name,
+    artist: kit.artist ?? "Kit vocal",
+  }));
 
   const name = firstName(context.profile?.full_name, context.profile?.email);
   const avatar = context.profile?.avatar_url ?? null;
@@ -122,7 +140,7 @@ export default async function AreaPremiumPage() {
 
             <div className="space-y-6">
               <PremiumForm title="Solicitar nova música" icon={<Music2 />} button="Enviar solicitação" fields={["Nome da música *", "Artista original *", "Link de referência", "Observações"]} />
-              <PremiumForm title="Solicitar tom" icon={<Wand2 />} button="Enviar pedido de tom" fields={["Música *", "Tom desejado *", "Voz/nipe", "Observações"]} />
+              <PremiumToneRequestForm kits={toneRequestKits} initialKitSlug={requestedKitSlug} initialKitName={requestedKitName} />
               <PremiumForm title="Enviar feedback" icon={<MessageCircle />} button="Enviar feedback" fields={["Tipo *", "Mensagem *", "Email opcional"]} />
             </div>
           </div>
