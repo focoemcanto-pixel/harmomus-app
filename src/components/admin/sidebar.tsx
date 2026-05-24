@@ -8,6 +8,7 @@ const items = [
   { label: "Banners Home", href: "/admin/banners", icon: PanelTop },
   { label: "Blocos Home", href: "/admin/home-sections", icon: PanelTop },
   { label: "Planos", href: "/admin/planos", icon: Library },
+  { label: "Planos Ministeriais", href: "/admin/planos-ministeriais", icon: Users },
   { label: "Membros", href: "/admin/membros", icon: Users },
   { label: "Analytics", href: "/admin/analytics", icon: BarChart3 },
   { label: "Billing", href: "/admin/billing", icon: CreditCard },
