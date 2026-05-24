@@ -5,6 +5,7 @@ import { Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { PlaylistKitSummary, PlaylistTrackVoice, PublicPlaylist } from "@/lib/data/playlists";
+import { pickInitialTone } from "@/lib/music/tones";
 
 interface PlaylistPlayerClientProps {
   playlist: PublicPlaylist;
@@ -68,7 +69,11 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
   useEffect(() => {
     if (!currentKit) return;
     const tones = getToneOptions(currentKit);
-    const nextTone = tones[0] ?? "";
+    const nextTone = pickInitialTone({
+      availableTones: tones,
+      defaultTone: currentKit.default_tone,
+      originalTone: currentKit.original_tone,
+    });
     const voices = getVoiceOptions(currentKit, nextTone);
     const preferredVoice = voices.includes("todos") ? "todos" : voices[0] ?? "";
     setSelectedTone(nextTone);
@@ -202,6 +207,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
                 </div>
 
                 <p className="mt-4 text-sm text-zinc-300">Áudio selecionado: {currentTrack ? `${currentTrack.tone} • ${voiceLabel(currentTrack.voice)}` : "Indisponível"}</p>
+                <p className="mt-1 text-xs text-zinc-500">Tom original: {currentKit.original_tone ?? "não informado"} • Tom inicial: {currentKit.default_tone ?? currentKit.original_tone ?? "automático"}</p>
               </div>
 
               <div className="mt-6">
