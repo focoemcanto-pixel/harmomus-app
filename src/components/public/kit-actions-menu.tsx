@@ -18,7 +18,9 @@ export function KitActionsMenu({
 }) {
   const [open, setOpen] = useState(false);
   const isPremium = planSlug === "premium";
-  const requestToneHref = isPremium ? `/area-premium#solicitar-tom` : "/assinar?plan=premium&reason=novo-tom";
+  const requestToneHref = isPremium
+    ? `/area-premium?kit=${encodeURIComponent(kitSlug)}&kitName=${encodeURIComponent(kitName)}#solicitar-tom`
+    : "/assinar?plan=premium&reason=novo-tom";
 
   return (
     <div className="relative">
