@@ -6,9 +6,9 @@ export interface AdminSettings {
     logoUrl: string;
     faviconUrl: string;
     primaryColor: string;
-    loginImageUrl: string;
-    heroImageUrl: string;
-    ogImageUrl: string;
+    loginImageUrl?: string;
+    heroImageUrl?: string;
+    ogImageUrl?: string;
   };
   urls: { appUrl: string; socialLinks: string; courseLink: string };
   payments: { stripeConfigured: boolean; stripePlusPriceId: string; stripePremiumPriceId: string; mode: "test" | "production" };
