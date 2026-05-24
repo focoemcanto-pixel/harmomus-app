@@ -5,6 +5,9 @@ import { KitAudioSyncCard } from "@/components/admin/kit-audio-sync-card";
 import { KitForm } from "@/components/admin/kit-form";
 import { ensureArtistCategory, getArtistCategories, getKitById, getKitFormOptions, updateKit } from "@/lib/data/kits";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function EditarKitPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const [kit, { categories, plans }, artistCategories] = await Promise.all([getKitById(id), getKitFormOptions(), getArtistCategories()]);
@@ -34,11 +37,11 @@ export default async function EditarKitPage({ params }: { params: Promise<{ id: 
       published: formData.get("published") === "on",
     });
 
-    revalidatePath("/admin/kits");
-    revalidatePath(`/admin/kits/${id}/editar`);
-    revalidatePath("/biblioteca");
-    revalidatePath("/todos-os-kits");
-    revalidatePath(`/biblioteca/${slug}`);
+    revalidatePath("/admin/kits", "page");
+    revalidatePath(`/admin/kits/${id}/editar`, "page");
+    revalidatePath("/biblioteca", "page");
+    revalidatePath("/todos-os-kits", "page");
+    revalidatePath(`/biblioteca/${slug}`, "page");
     redirect("/admin/kits");
   }
 
