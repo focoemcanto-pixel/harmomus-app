@@ -5,7 +5,7 @@ import { Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { PlaylistKitSummary, PlaylistTrackVoice, PublicPlaylist } from "@/lib/data/playlists";
-import { pickInitialTone } from "@/lib/music/tones";
+import { CHROMATIC_TONES_SHARP, pickInitialTone, resolveToneTrack } from "@/lib/music/tones";
 
 interface PlaylistPlayerClientProps {
   playlist: PublicPlaylist;
@@ -30,8 +30,12 @@ function voiceLabel(voice: PlaylistTrackVoice | string | null) {
   return map[voice] ?? voice;
 }
 
-function getToneOptions(kit: PlaylistKitSummary) {
+function getRealToneOptions(kit: PlaylistKitSummary) {
   return Array.from(new Set(kit.tracks.map((track) => track.tone).filter(Boolean))).sort((a, b) => a.localeCompare(b, "pt-BR"));
+}
+
+function getSelectableToneOptions(kit: PlaylistKitSummary) {
+  return kit.allow_pitch_shift ? [...CHROMATIC_TONES_SHARP] : getRealToneOptions(kit);
 }
 
 function getVoiceOptions(kit: PlaylistKitSummary, tone: string) {
@@ -40,6 +44,10 @@ function getVoiceOptions(kit: PlaylistKitSummary, tone: string) {
 
 function findTrack(kit: PlaylistKitSummary, tone: string, voice: PlaylistTrackVoice | "") {
   return kit.tracks.find((track) => track.tone === tone && track.voice === voice) ?? kit.tracks.find((track) => track.tone === tone) ?? kit.tracks[0] ?? null;
+}
+
+function toneStatusLabel(isReal: boolean) {
+  return isReal ? "gravado" : "Harmomus AI";
 }
 
 export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
@@ -55,9 +63,24 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
   const kits = playlist.kits;
   const currentKit = kits[currentKitIndex] ?? null;
 
-  const toneOptions = useMemo(() => currentKit ? getToneOptions(currentKit) : [], [currentKit]);
-  const voiceOptions = useMemo(() => currentKit ? getVoiceOptions(currentKit, selectedTone) : [], [currentKit, selectedTone]);
-  const currentTrack = useMemo<KitTrack | null>(() => currentKit ? findTrack(currentKit, selectedTone, selectedVoice) : null, [currentKit, selectedTone, selectedVoice]);
+  const realToneOptions = useMemo(() => currentKit ? getRealToneOptions(currentKit) : [], [currentKit]);
+  const toneOptions = useMemo(() => currentKit ? getSelectableToneOptions(currentKit) : [], [currentKit]);
+
+  const toneResolution = useMemo(() => {
+    if (!currentKit || !selectedTone) return null;
+    return resolveToneTrack({
+      tracks: currentKit.tracks,
+      requestedTone: selectedTone,
+      allowPitchShift: currentKit.allow_pitch_shift,
+      maxPitchShiftSemitones: currentKit.max_pitch_shift_semitones,
+      pickTrack: (tracks) => tracks.find((track) => track.voice === selectedVoice) ?? tracks.find((track) => track.voice === "todos") ?? tracks[0] ?? null,
+    });
+  }, [currentKit, selectedTone, selectedVoice]);
+
+  const sourceToneForVoices = toneResolution?.sourceTone ?? selectedTone;
+  const voiceOptions = useMemo(() => currentKit ? getVoiceOptions(currentKit, sourceToneForVoices) : [], [currentKit, sourceToneForVoices]);
+  const currentTrack = toneResolution?.sourceTrack ?? (currentKit ? findTrack(currentKit, selectedTone, selectedVoice) : null);
+  const playableTrack = toneResolution?.isExact ? currentTrack : null;
 
   useEffect(() => {
     setCurrentKitIndex(0);
@@ -68,9 +91,8 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
 
   useEffect(() => {
     if (!currentKit) return;
-    const tones = getToneOptions(currentKit);
     const nextTone = pickInitialTone({
-      availableTones: tones,
+      availableTones: realToneOptions,
       defaultTone: currentKit.default_tone,
       originalTone: currentKit.original_tone,
     });
@@ -80,7 +102,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
     setSelectedVoice(preferredVoice);
     setCurrentTime(0);
     setDuration(0);
-  }, [currentKitIndex, currentKit]);
+  }, [currentKitIndex, currentKit, realToneOptions]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -89,10 +111,10 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
     audio.currentTime = 0;
     setCurrentTime(0);
     setDuration(0);
-    if (currentTrack?.streamUrl && isPlaying) {
+    if (playableTrack?.streamUrl && isPlaying) {
       audio.play().catch(() => setIsPlaying(false));
     }
-  }, [currentTrack?.id]);
+  }, [playableTrack?.id]);
 
   const playKitAt = (index: number) => {
     if (index < 0 || index >= kits.length) return;
@@ -126,7 +148,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
 
   const togglePlay = async () => {
     const audio = audioRef.current;
-    if (!audio || !currentTrack?.streamUrl) return;
+    if (!audio || !playableTrack?.streamUrl) return;
 
     if (audio.paused) {
       try {
@@ -146,11 +168,14 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
     return <main className="min-h-screen bg-[radial-gradient(circle_at_top,#1f2840_0%,#06070c_40%)] p-6 text-white">Playlist vazia.</main>;
   }
 
+  const isSelectedToneReal = realToneOptions.includes(selectedTone);
+  const canPlaySelectedTone = Boolean(playableTrack?.streamUrl);
+
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,#1f2840_0%,#06070c_40%)] p-4 md:p-8">
       <audio
         ref={audioRef}
-        src={currentTrack?.streamUrl ?? undefined}
+        src={playableTrack?.streamUrl ?? undefined}
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
         onEnded={next}
@@ -180,14 +205,23 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
                       value={selectedTone}
                       onChange={(event) => {
                         const tone = event.target.value;
-                        const voices = currentKit ? getVoiceOptions(currentKit, tone) : [];
+                        const previewResolution = currentKit ? resolveToneTrack({
+                          tracks: currentKit.tracks,
+                          requestedTone: tone,
+                          allowPitchShift: currentKit.allow_pitch_shift,
+                          maxPitchShiftSemitones: currentKit.max_pitch_shift_semitones,
+                        }) : null;
+                        const voices = currentKit ? getVoiceOptions(currentKit, previewResolution?.sourceTone ?? tone) : [];
                         setSelectedTone(tone);
                         setSelectedVoice(voices.includes(selectedVoice as PlaylistTrackVoice) ? selectedVoice : voices.includes("todos") ? "todos" : voices[0] ?? "");
                         setIsPlaying(false);
                       }}
                       className="h-11 w-full rounded-xl border border-white/15 bg-black/30 px-3 text-sm text-white outline-none"
                     >
-                      {toneOptions.map((tone) => <option key={tone} value={tone}>{tone}</option>)}
+                      {toneOptions.map((tone) => {
+                        const isReal = realToneOptions.includes(tone);
+                        return <option key={tone} value={tone}>{tone} • {toneStatusLabel(isReal)}</option>;
+                      })}
                     </select>
                   </label>
 
@@ -206,8 +240,18 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
                   </label>
                 </div>
 
-                <p className="mt-4 text-sm text-zinc-300">Áudio selecionado: {currentTrack ? `${currentTrack.tone} • ${voiceLabel(currentTrack.voice)}` : "Indisponível"}</p>
+                <p className="mt-4 text-sm text-zinc-300">Áudio selecionado: {currentTrack ? `${selectedTone} • ${voiceLabel(currentTrack.voice)}` : "Indisponível"}</p>
                 <p className="mt-1 text-xs text-zinc-500">Tom original: {currentKit.original_tone ?? "não informado"} • Tom inicial: {currentKit.default_tone ?? currentKit.original_tone ?? "automático"}</p>
+                {toneResolution?.isPitchShifted ? (
+                  <p className="mt-2 rounded-xl border border-gold-400/20 bg-gold-400/10 px-3 py-2 text-xs text-gold-200">
+                    Tom Harmomus AI preparado: usar {toneResolution.sourceTone} {toneResolution.semitoneShift > 0 ? `+${toneResolution.semitoneShift}` : toneResolution.semitoneShift} semitom(ns). O processamento de áudio será ativado na próxima camada.
+                  </p>
+                ) : null}
+                {!toneResolution?.isAvailable && selectedTone ? (
+                  <p className="mt-2 rounded-xl border border-red-400/20 bg-red-400/10 px-3 py-2 text-xs text-red-200">
+                    Este tom ainda não está disponível para este kit dentro do limite configurado.
+                  </p>
+                ) : null}
               </div>
 
               <div className="mt-6">
@@ -230,13 +274,14 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
 
                 <div className="mt-4 flex flex-wrap items-center gap-3">
                   <button onClick={prev} className="rounded-full border border-white/20 p-3 text-white"><SkipBack size={18} /></button>
-                  <button onClick={togglePlay} disabled={!currentTrack?.streamUrl} className="rounded-full border border-gold-400/50 bg-black/40 p-4 text-white disabled:cursor-not-allowed disabled:opacity-40">
+                  <button onClick={togglePlay} disabled={!canPlaySelectedTone} className="rounded-full border border-gold-400/50 bg-black/40 p-4 text-white disabled:cursor-not-allowed disabled:opacity-40">
                     {isPlaying ? <Pause size={20} /> : <Play size={20} />}
                   </button>
                   <button onClick={next} className="rounded-full border border-white/20 p-3 text-white"><SkipForward size={18} /></button>
                   <button onClick={() => setReplayAtEnd((v) => !v)} className={`rounded-full border px-4 py-2 text-sm ${replayAtEnd ? "border-gold-300 text-gold-300" : "border-white/20 text-zinc-200"}`}>
                     Replay {replayAtEnd ? "ON" : "OFF"}
                   </button>
+                  {!isSelectedToneReal ? <span className="text-xs text-zinc-400">Prévia IA sem playback até ativar o processador.</span> : null}
                   <Link href="/minhas-playlists" className="ml-auto rounded-full border border-white/20 px-4 py-2 text-sm text-zinc-100">
                     Sair da playlist
                   </Link>
