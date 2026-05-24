@@ -83,7 +83,13 @@ export async function saveAdminSettings(payload: AdminSettings): Promise<void> {
   const supabase = createSupabaseAdminClient() as any;
   const { error } = await supabase.from("admin_settings").upsert({ key: "global", payload, updated_at: new Date().toISOString() }, { onConflict: "key" });
   if (error) {
-    if (isRecoverableSettingsError(error)) return;
     throw new Error(`Falha ao salvar configurações: ${error.message}`);
   }
+}
+
+export async function updateBrandingSettings(branding: Partial<AdminSettings["branding"]>): Promise<AdminSettings> {
+  const current = await getAdminSettings();
+  const next = mergeSettings({ ...current, branding: { ...current.branding, ...branding } });
+  await saveAdminSettings(next);
+  return next;
 }
