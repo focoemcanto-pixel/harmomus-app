@@ -9,7 +9,11 @@ async function resolvePlanId(planIdOrSlug: string) {
   const plans = await getPlans();
   const normalized = planIdOrSlug.toLowerCase();
   const matched = plans.find((plan) => plan.id === planIdOrSlug || plan.slug.toLowerCase() === normalized);
-  return matched?.id ?? "";
+  if (matched?.id) return matched.id;
+  const ministryAliases = ["ministry_10","ministry_20","ministry_40"];
+  const ministry = plans.find((plan) => ministryAliases.includes(plan.slug));
+  if (ministryAliases.includes(normalized)) return plans.find((p)=>p.slug===normalized)?.id ?? "";
+  return "";
 }
 
 function loginRedirectUrl(req: Request, planSlug: string) {

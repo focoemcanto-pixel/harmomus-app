@@ -5,6 +5,7 @@ import { Crown, Headphones, MessageCircle, Music2, Send, Sparkles, Star, Trophy,
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { PremiumToneRequestForm } from "@/components/public/premium-tone-request-form";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
+import { canSubmitPremiumRequests } from "@/lib/auth/ministry-access";
 import { getGlobalTopKits, getRecommendedKits, getUserRecentActivities, getUserTopKits, type TopKit } from "@/lib/data/premium-analytics";
 import { getPublishedKits } from "@/lib/data/public-kits";
 
@@ -139,8 +140,8 @@ export default async function AreaPremiumPage({
             </PremiumPanel>
 
             <div className="space-y-6">
-              <PremiumForm title="Solicitar nova música" icon={<Music2 />} button="Enviar solicitação" fields={["Nome da música *", "Artista original *", "Link de referência", "Observações"]} />
-              <PremiumToneRequestForm kits={toneRequestKits} initialKitSlug={requestedKitSlug} initialKitName={requestedKitName} />
+              {canSubmitPremiumRequests(context) ? <PremiumForm title="Solicitar nova música" icon={<Music2 />} button="Enviar solicitação" fields={["Nome da música *", "Artista original *", "Link de referência", "Observações"]} /> : <EmptyState text="No seu ministério, apenas owner/manager podem enviar solicitações premium." />}
+              {canSubmitPremiumRequests(context) ? <PremiumToneRequestForm kits={toneRequestKits} initialKitSlug={requestedKitSlug} initialKitName={requestedKitName} /> : null}
               <PremiumForm title="Enviar feedback" icon={<MessageCircle />} button="Enviar feedback" fields={["Tipo *", "Mensagem *", "Email opcional"]} />
             </div>
           </div>

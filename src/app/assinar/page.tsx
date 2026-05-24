@@ -64,6 +64,19 @@ export default async function AssinarPage({ searchParams }: { searchParams?: Pro
               );
             })}
           </div>
+
+
+          <section className="mt-8 rounded-3xl border border-cyan-300/30 bg-gradient-to-br from-cyan-500/10 to-fuchsia-500/10 p-6">
+            <h2 className="text-2xl font-semibold">Plano Ministerial</h2>
+            <p className="mt-2 text-zinc-200">Ideal para ministérios de louvor que desejam preparar toda a equipe com acesso Premium.</p>
+            <div className="mt-5 grid gap-3 md:grid-cols-2">
+              <a href="/api/billing/checkout?plan=ministry_10" className="rounded-xl border border-white/20 bg-white/10 px-4 py-3">Até 10 integrantes — R$397/mês</a>
+              <a href="/api/billing/checkout?plan=ministry_20" className="rounded-xl border border-white/20 bg-white/10 px-4 py-3">Até 20 integrantes — R$697/mês</a>
+              <a href="/api/billing/checkout?plan=ministry_40" className="rounded-xl border border-white/20 bg-white/10 px-4 py-3">Até 40 integrantes — R$1.297/mês</a>
+              <a href="mailto:suporte@harmomus.com" className="rounded-xl border border-fuchsia-300/40 bg-fuchsia-500/10 px-4 py-3">Acima de 40 — Falar com suporte</a>
+            </div>
+          </section>
+
           <div className="mt-8 text-center">
             <Link href="/todos-os-kits" className="text-sm text-cyan-200 hover:text-cyan-100">Ou volte para explorar todos os kits</Link>
           </div>
