@@ -3,48 +3,88 @@ import { PageHeader } from "@/components/admin/page-header";
 import { getAdminSettings, saveAdminSettings } from "@/lib/data/admin-settings";
 import { uploadKitCoverToR2 } from "@/lib/r2/upload";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function ConfiguracoesPage() {
   const settings = await getAdminSettings();
 
   async function save(formData: FormData) {
     "use server";
+
     let logoUrl = String(formData.get("logoUrl") ?? "").trim();
     const logoFile = formData.get("logoFile");
+
     if (logoFile instanceof File && logoFile.size > 0) {
       const uploaded = await uploadKitCoverToR2({ file: logoFile, slug: "harmomus-logo-oficial", context: "banner" });
       logoUrl = `${uploaded.url}${uploaded.url.includes("?") ? "&" : "?"}v=${Date.now()}`;
     }
+
     await saveAdminSettings({
-      branding: { appName: String(formData.get("appName") ?? ""), logoUrl, faviconUrl: String(formData.get("faviconUrl") ?? ""), primaryColor: String(formData.get("primaryColor") ?? "#D4AF37") },
-      urls: { appUrl: String(formData.get("appUrl") ?? ""), socialLinks: String(formData.get("socialLinks") ?? ""), courseLink: String(formData.get("courseLink") ?? "") },
-      payments: { stripeConfigured: formData.get("stripeConfigured") === "on", stripePlusPriceId: String(formData.get("stripePlusPriceId") ?? ""), stripePremiumPriceId: String(formData.get("stripePremiumPriceId") ?? ""), mode: String(formData.get("mode") ?? "test") as "test" | "production" },
-      storage: { r2Bucket: String(formData.get("r2Bucket") ?? ""), r2PublicUrl: String(formData.get("r2PublicUrl") ?? ""), connectionStatus: String(formData.get("connectionStatus") ?? "pendente") },
-      home: { headline: String(formData.get("headline") ?? ""), subheadline: String(formData.get("subheadline") ?? ""), primaryCta: String(formData.get("primaryCta") ?? ""), secondaryCta: String(formData.get("secondaryCta") ?? "") },
-      whatsapp: { supportPhone: String(formData.get("supportPhone") ?? ""), webhook: String(formData.get("webhook") ?? "") },
+      branding: {
+        appName: String(formData.get("appName") ?? ""),
+        logoUrl,
+        faviconUrl: String(formData.get("faviconUrl") ?? ""),
+        primaryColor: String(formData.get("primaryColor") ?? "#D4AF37"),
+        loginImageUrl: String(formData.get("loginImageUrl") ?? ""),
+        heroImageUrl: String(formData.get("heroImageUrl") ?? ""),
+        ogImageUrl: String(formData.get("ogImageUrl") ?? ""),
+      },
+      urls: {
+        appUrl: String(formData.get("appUrl") ?? ""),
+        socialLinks: String(formData.get("socialLinks") ?? ""),
+        courseLink: String(formData.get("courseLink") ?? ""),
+      },
+      payments: {
+        stripeConfigured: formData.get("stripeConfigured") === "on",
+        stripePlusPriceId: String(formData.get("stripePlusPriceId") ?? ""),
+        stripePremiumPriceId: String(formData.get("stripePremiumPriceId") ?? ""),
+        mode: String(formData.get("mode") ?? "test") as "test" | "production",
+      },
+      storage: {
+        r2Bucket: String(formData.get("r2Bucket") ?? ""),
+        r2PublicUrl: String(formData.get("r2PublicUrl") ?? ""),
+        connectionStatus: String(formData.get("connectionStatus") ?? "pendente"),
+      },
+      home: {
+        headline: String(formData.get("headline") ?? ""),
+        subheadline: String(formData.get("subheadline") ?? ""),
+        primaryCta: String(formData.get("primaryCta") ?? ""),
+        secondaryCta: String(formData.get("secondaryCta") ?? ""),
+      },
+      whatsapp: {
+        supportPhone: String(formData.get("supportPhone") ?? ""),
+        webhook: String(formData.get("webhook") ?? ""),
+      },
     });
-    revalidatePath("/admin/configuracoes");
-    revalidatePath("/");
-    revalidatePath("/login");
-    revalidatePath("/cadastro");
+
+    revalidatePath("/admin/configuracoes", "page");
+    revalidatePath("/", "page");
+    revalidatePath("/login", "page");
+    revalidatePath("/cadastro", "page");
   }
 
   return <section className="space-y-6"><PageHeader title="Configurações" description="Central de branding, URLs, pagamentos, storage e home." />
   <form action={save} className="rounded-xl border border-border bg-surface p-6 shadow-premium grid gap-3 md:grid-cols-2 text-sm">
     <div className="md:col-span-2 rounded-2xl border border-border bg-background/60 p-5">
-      <p className="text-xs uppercase tracking-[0.25em] text-gold-300">Logo oficial</p>
-      <p className="mt-1 text-sm text-muted">Suba a marca oficial do Harmomus. Ela será usada no topo do site, login e cadastro.</p>
+      <p className="text-xs uppercase tracking-[0.25em] text-gold-300">Identidade visual</p>
+      <p className="mt-1 text-sm text-muted">Suba ou cole URLs das imagens do Harmomus. O sistema salva a marca e usa nos pontos principais do site.</p>
       <div className="mt-4 grid gap-4 md:grid-cols-[240px_1fr] md:items-center">
         <div className="flex h-24 items-center justify-center rounded-2xl border border-border bg-black/40 p-4">
           {settings.branding.logoUrl ? <img src={settings.branding.logoUrl} alt="Logo Harmomus" className="max-h-16 max-w-full object-contain" /> : <span className="text-muted">Sem logo</span>}
         </div>
         <div className="space-y-3">
           <input type="file" name="logoFile" accept="image/png,image/jpeg,image/webp" className="block w-full rounded border border-border bg-background px-3 py-2 text-white" />
-          <input name="logoUrl" defaultValue={settings.branding.logoUrl} className="w-full rounded border border-border bg-background px-3 py-2" placeholder="ou cole a URL da logo" />
+          <input name="logoUrl" defaultValue={settings.branding.logoUrl} className="w-full rounded border border-border bg-background px-3 py-2" placeholder="URL da logo oficial" />
         </div>
       </div>
     </div>
+
     <input name="appName" defaultValue={settings.branding.appName} className="rounded border border-border bg-background px-3 py-2" placeholder="Nome do app" />
     <input name="faviconUrl" defaultValue={settings.branding.faviconUrl} className="rounded border border-border bg-background px-3 py-2" placeholder="Favicon URL" />
+    <input name="loginImageUrl" defaultValue={settings.branding.loginImageUrl} className="rounded border border-border bg-background px-3 py-2" placeholder="Imagem login URL" />
+    <input name="heroImageUrl" defaultValue={settings.branding.heroImageUrl} className="rounded border border-border bg-background px-3 py-2" placeholder="Imagem hero/banner URL" />
+    <input name="ogImageUrl" defaultValue={settings.branding.ogImageUrl} className="rounded border border-border bg-background px-3 py-2" placeholder="Imagem Open Graph URL" />
     <input name="primaryColor" defaultValue={settings.branding.primaryColor} className="rounded border border-border bg-background px-3 py-2" placeholder="Cor principal" />
     <input name="appUrl" defaultValue={settings.urls.appUrl} className="rounded border border-border bg-background px-3 py-2" placeholder="NEXT_PUBLIC_APP_URL" />
     <input name="socialLinks" defaultValue={settings.urls.socialLinks} className="rounded border border-border bg-background px-3 py-2" placeholder="Links sociais" />
