@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { getPitchEngine, type PitchPlaybackController } from "@/lib/audio/pitch-engine";
 
 import type { PlaylistKitSummary, PlaylistTrackVoice, PublicPlaylist } from "@/lib/data/playlists";
 import { CHROMATIC_TONES_SHARP, pickInitialTone, resolveToneTrack } from "@/lib/music/tones";
@@ -59,6 +60,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [replayAtEnd, setReplayAtEnd] = useState(false);
+  const pitchControllerRef = useRef<PitchPlaybackController | null>(null);
 
   const kits = playlist.kits;
   const currentKit = kits[currentKitIndex] ?? null;
@@ -80,7 +82,8 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
   const sourceToneForVoices = toneResolution?.sourceTone ?? selectedTone;
   const voiceOptions = useMemo(() => currentKit ? getVoiceOptions(currentKit, sourceToneForVoices) : [], [currentKit, sourceToneForVoices]);
   const currentTrack = toneResolution?.sourceTrack ?? (currentKit ? findTrack(currentKit, selectedTone, selectedVoice) : null);
-  const playableTrack = toneResolution?.isExact ? currentTrack : null;
+  const playableTrack = toneResolution?.isAvailable ? currentTrack : null;
+  const semitoneShift = toneResolution?.isPitchShifted ? toneResolution.semitoneShift : 0;
 
   useEffect(() => {
     setCurrentKitIndex(0);
@@ -107,14 +110,13 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
+    pitchControllerRef.current?.dispose();
+    pitchControllerRef.current = null;
     audio.pause();
     audio.currentTime = 0;
     setCurrentTime(0);
     setDuration(0);
-    if (playableTrack?.streamUrl && isPlaying) {
-      audio.play().catch(() => setIsPlaying(false));
-    }
-  }, [playableTrack?.id]);
+  }, [playableTrack?.id, semitoneShift]);
 
   const playKitAt = (index: number) => {
     if (index < 0 || index >= kits.length) return;
@@ -150,19 +152,53 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
     const audio = audioRef.current;
     if (!audio || !playableTrack?.streamUrl) return;
 
-    if (audio.paused) {
+    if (semitoneShift === 0) {
+      if (audio.paused) {
+        try {
+          await audio.play();
+          setIsPlaying(true);
+        } catch {
+          setIsPlaying(false);
+        }
+        return;
+      }
+      audio.pause();
+      setIsPlaying(false);
+      return;
+    }
+
+    try {
+      if (!pitchControllerRef.current) {
+        const engine = getPitchEngine();
+        pitchControllerRef.current = await engine.createPlayback({ audio, semitoneShift });
+      } else {
+        pitchControllerRef.current.setSemitoneShift(semitoneShift);
+      }
+
+      if (isPlaying) {
+        pitchControllerRef.current.pause();
+        setIsPlaying(false);
+      } else {
+        await pitchControllerRef.current.play();
+        setIsPlaying(true);
+      }
+    } catch (error) {
+      console.error("[PlaylistPlayer] pitch engine failed, falling back to native", error);
       try {
         await audio.play();
         setIsPlaying(true);
       } catch {
         setIsPlaying(false);
       }
-      return;
     }
-
-    audio.pause();
-    setIsPlaying(false);
   };
+  useEffect(() => {
+    return () => {
+      pitchControllerRef.current?.dispose();
+      pitchControllerRef.current = null;
+    };
+  }, []);
+
 
   if (!currentKit) {
     return <main className="min-h-screen bg-[radial-gradient(circle_at_top,#1f2840_0%,#06070c_40%)] p-6 text-white">Playlist vazia.</main>;
@@ -178,7 +214,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
         src={playableTrack?.streamUrl ?? undefined}
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
-        onEnded={next}
+        onEnded={() => { pitchControllerRef.current?.dispose(); pitchControllerRef.current = null; next(); }}
         onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
         onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
         className="hidden"
@@ -281,7 +317,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
                   <button onClick={() => setReplayAtEnd((v) => !v)} className={`rounded-full border px-4 py-2 text-sm ${replayAtEnd ? "border-gold-300 text-gold-300" : "border-white/20 text-zinc-200"}`}>
                     Replay {replayAtEnd ? "ON" : "OFF"}
                   </button>
-                  {!isSelectedToneReal ? <span className="text-xs text-zinc-400">Prévia IA sem playback até ativar o processador.</span> : null}
+                  {!isSelectedToneReal ? <span className="text-xs text-zinc-400">Harmomus AI com pitch shifting em tempo real.</span> : null}
                   <Link href="/minhas-playlists" className="ml-auto rounded-full border border-white/20 px-4 py-2 text-sm text-zinc-100">
                     Sair da playlist
                   </Link>
