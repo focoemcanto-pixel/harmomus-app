@@ -1,7 +1,7 @@
 "use client";
 
 import { Pause, Play, Repeat2, RotateCcw, RotateCw, Volume2, X } from "lucide-react";
-import { createContext, useContext, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 export type GlobalTrack = {
   src: string;
@@ -127,6 +127,48 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
     setDuration(0);
     setErrorMessage(null);
   }
+
+  useEffect(() => {
+    if (!("mediaSession" in navigator) || !track) return;
+
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: track.title,
+      artist: "Harmomus",
+      album: "Kit vocal",
+    });
+
+    navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
+
+    try {
+      navigator.mediaSession.setActionHandler("play", () => {
+        void togglePlay();
+      });
+      navigator.mediaSession.setActionHandler("pause", () => {
+        void togglePlay();
+      });
+      navigator.mediaSession.setActionHandler("seekbackward", () => skipBy(-10));
+      navigator.mediaSession.setActionHandler("seekforward", () => skipBy(10));
+      navigator.mediaSession.setActionHandler("seekto", (details) => {
+        if (typeof details.seekTime === "number") seekTo(details.seekTime);
+      });
+    } catch {
+      // Alguns navegadores não suportam todos os handlers.
+    }
+  }, [track, isPlaying, currentTime, duration]);
+
+  useEffect(() => {
+    if (!("mediaSession" in navigator) || !track || !duration) return;
+
+    try {
+      navigator.mediaSession.setPositionState({
+        duration,
+        playbackRate: 1,
+        position: currentTime,
+      });
+    } catch {
+      // Safari/iOS pode ignorar position state em alguns cenários.
+    }
+  }, [track, currentTime, duration]);
 
   const value = useMemo<GlobalAudioPlayerContextValue>(() => ({
     audioRef,
