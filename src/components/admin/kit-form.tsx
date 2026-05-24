@@ -44,6 +44,13 @@ function SubmitButton({ mode }: { mode: "create" | "edit" }) {
 }
 
 export function KitForm({ mode, categories, artistCategories, plans, initialData, action }: KitFormProps) {
+  const toneInitialData = initialData as (Kit & {
+    original_tone?: string | null;
+    default_tone?: string | null;
+    allow_pitch_shift?: boolean | null;
+    max_pitch_shift_semitones?: number | null;
+  }) | null | undefined;
+
   const [name, setName] = useState(initialData?.name ?? "");
   const [slug, setSlug] = useState(initialData?.slug ?? "");
   const [slugTouched, setSlugTouched] = useState(Boolean(initialData?.slug));
@@ -333,6 +340,60 @@ export function KitForm({ mode, categories, artistCategories, plans, initialData
             ))}
           </select>
         </label>
+
+        <div className="rounded-xl border border-gold-500/20 bg-gold-500/5 p-4 md:col-span-2">
+          <div className="mb-4">
+            <p className="text-sm font-medium text-gold-200">Configuração vocal inteligente</p>
+            <p className="mt-1 text-xs text-muted">Esses campos definem o tom que abre o player e preparam o kit para modulação/tessitura.</p>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="space-y-2 text-sm">
+              <span className="text-muted">Tom original do arranjo</span>
+              <input
+                name="original_tone"
+                defaultValue={toneInitialData?.original_tone ?? ""}
+                placeholder="Ex: C, D#, Bb"
+                className="w-full rounded-lg border border-border bg-surface-muted px-3 py-2"
+              />
+              <p className="text-xs text-muted">Referência oficial do arranjo e da tessitura.</p>
+            </label>
+
+            <label className="space-y-2 text-sm">
+              <span className="text-muted">Tom inicial do player</span>
+              <input
+                name="default_tone"
+                defaultValue={toneInitialData?.default_tone ?? toneInitialData?.original_tone ?? ""}
+                placeholder="Ex: C"
+                className="w-full rounded-lg border border-border bg-surface-muted px-3 py-2"
+              />
+              <p className="text-xs text-muted">No Free, esse é o tom que abre e permanece disponível.</p>
+            </label>
+
+            <label className="flex items-center gap-2 text-sm text-muted">
+              <input
+                name="allow_pitch_shift"
+                type="checkbox"
+                defaultChecked={toneInitialData?.allow_pitch_shift ?? true}
+                className="h-4 w-4 rounded border-border bg-surface-muted"
+              />
+              Permitir modulação inteligente
+            </label>
+
+            <label className="space-y-2 text-sm">
+              <span className="text-muted">Limite de modulação</span>
+              <select
+                name="max_pitch_shift_semitones"
+                defaultValue={String(toneInitialData?.max_pitch_shift_semitones ?? 2)}
+                className="w-full rounded-lg border border-border bg-surface-muted px-3 py-2"
+              >
+                <option value="1">±1 semitom</option>
+                <option value="2">±2 semitons</option>
+                <option value="3">±3 semitons</option>
+              </select>
+            </label>
+          </div>
+        </div>
 
         <label className="flex items-center gap-2 text-sm text-muted md:col-span-2">
           <input name="published" type="checkbox" defaultChecked={initialData?.published ?? false} className="h-4 w-4 rounded border-border bg-surface-muted" />
