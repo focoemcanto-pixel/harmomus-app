@@ -44,20 +44,6 @@ const DEFAULT_SETTINGS: AdminSettings = {
   whatsapp: { supportPhone: "", webhook: "" },
 };
 
-function isRecoverableSettingsError(error: unknown) {
-  const err = error as { code?: string; message?: string; details?: string } | null;
-  const message = `${err?.message ?? ""} ${err?.details ?? ""}`.toLowerCase();
-
-  return (
-    err?.code === "42P01" ||
-    err?.code === "PGRST205" ||
-    (message.includes("admin_settings") &&
-      (message.includes("does not exist") ||
-        message.includes("schema cache") ||
-        message.includes("could not find the table")))
-  );
-}
-
 function mergeSettings(payload: Partial<AdminSettings> | null | undefined): AdminSettings {
   return {
     branding: { ...DEFAULT_SETTINGS.branding, ...(payload?.branding ?? {}) },
@@ -79,71 +65,99 @@ function parseFallbackPayload(raw: unknown): Partial<AdminSettings> | null {
 }
 
 async function getFallbackSettings(supabase: any): Promise<AdminSettings> {
-  const { data, error } = await supabase
-    .from("home_sections")
-    .select("subtitle")
-    .eq("type", FALLBACK_SECTION_TYPE)
-    .maybeSingle();
+  try {
+    const { data, error } = await supabase
+      .from("home_sections")
+      .select("subtitle")
+      .eq("type", FALLBACK_SECTION_TYPE)
+      .limit(1)
+      .maybeSingle();
 
-  if (error) {
-    console.error("Falha ao carregar configurações fallback", error);
+    if (error) {
+      console.error("Falha ao carregar configurações fallback", error);
+      return DEFAULT_SETTINGS;
+    }
+
+    return mergeSettings(parseFallbackPayload(data?.subtitle));
+  } catch (error) {
+    console.error("Erro inesperado ao carregar configurações fallback", error);
     return DEFAULT_SETTINGS;
   }
-
-  return mergeSettings(parseFallbackPayload(data?.subtitle));
 }
 
-async function saveFallbackSettings(supabase: any, payload: AdminSettings): Promise<void> {
-  const serialized = JSON.stringify(payload);
-
-  const { data: existing, error: existingError } = await supabase
-    .from("home_sections")
-    .select("id")
-    .eq("type", FALLBACK_SECTION_TYPE)
-    .maybeSingle();
-
-  if (existingError) throw new Error(`Falha ao localizar configurações fallback: ${existingError.message}`);
-
-  if (existing?.id) {
-    const { error } = await supabase
+async function saveFallbackSettings(supabase: any, payload: AdminSettings): Promise<boolean> {
+  try {
+    const serialized = JSON.stringify(payload);
+    const { data: existing } = await supabase
       .from("home_sections")
-      .update({ title: "Admin Settings", subtitle: serialized, active: false, order_index: -999 })
-      .eq("id", existing.id);
-    if (error) throw new Error(`Falha ao salvar configurações fallback: ${error.message}`);
-    return;
+      .select("id")
+      .eq("type", FALLBACK_SECTION_TYPE)
+      .limit(1)
+      .maybeSingle();
+
+    if (existing?.id) {
+      const { error } = await supabase
+        .from("home_sections")
+        .update({ title: "Admin Settings", subtitle: serialized, active: false, order_index: -999 })
+        .eq("id", existing.id);
+      if (error) {
+        console.error("Falha ao atualizar configurações fallback", error);
+        return false;
+      }
+      return true;
+    }
+
+    const { error } = await supabase.from("home_sections").insert({
+      type: FALLBACK_SECTION_TYPE,
+      title: "Admin Settings",
+      subtitle: serialized,
+      active: false,
+      order_index: -999,
+    });
+
+    if (error) {
+      console.error("Falha ao criar configurações fallback", error);
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Erro inesperado ao salvar configurações fallback", error);
+    return false;
   }
-
-  const { error } = await supabase.from("home_sections").insert({
-    type: FALLBACK_SECTION_TYPE,
-    title: "Admin Settings",
-    subtitle: serialized,
-    active: false,
-    order_index: -999,
-  });
-
-  if (error) throw new Error(`Falha ao criar configurações fallback: ${error.message}`);
 }
 
 export async function getAdminSettings(): Promise<AdminSettings> {
-  const supabase = createSupabaseAdminClient() as any;
-  const { data, error } = await supabase.from("admin_settings").select("payload").eq("key", "global").maybeSingle();
-  if (error) {
-    if (isRecoverableSettingsError(error)) return getFallbackSettings(supabase);
-    console.error("Falha ao carregar configurações", error);
-    return getFallbackSettings(supabase);
+  try {
+    const supabase = createSupabaseAdminClient() as any;
+    const { data, error } = await supabase.from("admin_settings").select("payload").eq("key", "global").maybeSingle();
+
+    if (error) {
+      console.error("Falha ao carregar admin_settings, usando fallback", error);
+      return getFallbackSettings(supabase);
+    }
+
+    return mergeSettings(data?.payload as Partial<AdminSettings> | null);
+  } catch (error) {
+    console.error("Erro inesperado ao carregar configurações", error);
+    return DEFAULT_SETTINGS;
   }
-  return mergeSettings(data?.payload as Partial<AdminSettings> | null);
 }
 
 export async function saveAdminSettings(payload: AdminSettings): Promise<void> {
-  const supabase = createSupabaseAdminClient() as any;
-  const { error } = await supabase.from("admin_settings").upsert({ key: "global", payload, updated_at: new Date().toISOString() }, { onConflict: "key" });
-  if (error) {
-    if (isRecoverableSettingsError(error)) {
-      await saveFallbackSettings(supabase, payload);
-      return;
+  try {
+    const supabase = createSupabaseAdminClient() as any;
+    const { error } = await supabase.from("admin_settings").upsert({ key: "global", payload, updated_at: new Date().toISOString() }, { onConflict: "key" });
+
+    if (!error) return;
+
+    console.error("Falha ao salvar admin_settings, tentando fallback", error);
+    const savedFallback = await saveFallbackSettings(supabase, payload);
+    if (!savedFallback) {
+      console.error("Configurações não foram persistidas, mas a página não será derrubada.");
     }
-    throw new Error(`Falha ao salvar configurações: ${error.message}`);
+  } catch (error) {
+    console.error("Erro inesperado ao salvar configurações", error);
   }
 }
 
