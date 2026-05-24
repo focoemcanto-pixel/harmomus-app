@@ -99,8 +99,6 @@ export async function getKitFormOptions(): Promise<{ categories: Category[]; pla
   return { categories: (categories ?? []) as Category[], plans: (plans ?? []) as Plan[] };
 }
 
-
-
 export async function getArtistCategories(): Promise<Category[]> {
   const supabase = (await createClient()) as any;
   const { data, error } = await supabase.from("categories").select("*").order("name");
@@ -123,22 +121,56 @@ export async function ensureArtistCategory(artistName: string): Promise<Category
 export async function saveKitAudioSync(kitId: string, tones: KitAudioToneGroup[]): Promise<void> {
   const supabase = (await createClient()) as any;
 
-  const rows = tones.flatMap((toneGroup) =>
-    toneGroup.files.map((file) => ({
-      kit_id: kitId,
-      tone: toneGroup.tone,
-      name: file.name,
-      r2_key: file.key,
-      public_url: file.url,
-      file_type: file.fileType,
-    })),
+  const { data: existingFiles } = await supabase
+    .from("kit_audio_files")
+    .select("id,r2_key,min_midi_note,max_midi_note,detected_min_midi_note,detected_max_midi_note,tessitura_confidence,tessitura_source")
+    .eq("kit_id", kitId);
+
+  const existingMap = new Map(
+    ((existingFiles ?? []) as any[]).map((file) => [file.r2_key, file]),
   );
 
-  const { error: deleteError } = await supabase.from("kit_audio_files").delete().eq("kit_id", kitId);
-  if (deleteError) throw new Error(`Falha ao limpar áudios antigos: ${deleteError.message}`);
+  const rows = tones.flatMap((toneGroup) =>
+    toneGroup.files.map((file) => {
+      const existing = existingMap.get(file.key);
+
+      return {
+        id: existing?.id,
+        kit_id: kitId,
+        tone: toneGroup.tone,
+        name: file.name,
+        r2_key: file.key,
+        public_url: file.url,
+        file_type: file.fileType,
+        min_midi_note: existing?.min_midi_note ?? null,
+        max_midi_note: existing?.max_midi_note ?? null,
+        detected_min_midi_note: existing?.detected_min_midi_note ?? null,
+        detected_max_midi_note: existing?.detected_max_midi_note ?? null,
+        tessitura_confidence: existing?.tessitura_confidence ?? null,
+        tessitura_source: existing?.tessitura_source ?? "manual",
+      };
+    }),
+  );
+
+  const { error: deleteError } = await supabase
+    .from("kit_audio_files")
+    .delete()
+    .eq("kit_id", kitId)
+    .not("r2_key", "in", `(${rows.map((row) => `"${row.r2_key}"`).join(",")})`);
+
+  if (deleteError) {
+    throw new Error(`Falha ao limpar áudios removidos: ${deleteError.message}`);
+  }
 
   if (rows.length === 0) return;
 
-  const { error: insertError } = await supabase.from("kit_audio_files").insert(rows);
-  if (insertError) throw new Error(`Falha ao salvar áudios sincronizados: ${insertError.message}`);
+  const { error: upsertError } = await supabase
+    .from("kit_audio_files")
+    .upsert(rows, {
+      onConflict: "id",
+    });
+
+  if (upsertError) {
+    throw new Error(`Falha ao salvar áudios sincronizados: ${upsertError.message}`);
+  }
 }
