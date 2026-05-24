@@ -3,10 +3,11 @@ import { redirect } from "next/navigation";
 
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { SignupPlanSelector } from "@/components/public/signup-plan-selector";
+import { getAdminSettings } from "@/lib/data/admin-settings";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
-const PLAN_OPTIONS = ["free", "plus", "premium"] as const;
+const PLAN_OPTIONS = ["free", "plus", "premium", "ministry_10"] as const;
 type PlanSlug = (typeof PLAN_OPTIONS)[number];
 type Field = "form" | "full_name" | "username" | "email" | "phone" | "password" | "confirm_password";
 
@@ -41,12 +42,27 @@ function inputClass(name: Field, field: Field) {
 function FieldError({ name, field, error }: { name: Field; field: Field; error: string }) {
   return name === field && error ? <p className="mt-2 text-xs font-medium text-rose-200">{error}</p> : null;
 }
-function HarmomusAuthLogo() {
-  return <div className="mx-auto mb-7 flex items-center justify-center gap-3"><div className="grid h-12 w-12 place-items-center rounded-2xl border border-white/10 bg-white/[0.03] text-xl font-bold text-white shadow-[0_0_34px_rgba(129,140,248,0.25)]">H</div><p className="text-3xl font-semibold tracking-tight text-white">Harmo<span className="bg-gradient-to-r from-indigo-200 to-violet-500 bg-clip-text text-transparent">mus</span></p></div>;
+function HarmomusAuthLogo({ logoUrl, appName }: { logoUrl: string; appName: string }) {
+  return (
+    <div className="mx-auto mb-7 flex items-center justify-center gap-3">
+      {logoUrl ? (
+        <img src={logoUrl} alt={appName} className="max-h-16 w-auto object-contain" />
+      ) : (
+        <>
+          <div className="grid h-12 w-12 place-items-center rounded-2xl border border-white/10 bg-white/[0.03] text-xl font-bold text-white shadow-[0_0_34px_rgba(129,140,248,0.25)]">H</div>
+          <p className="text-3xl font-semibold tracking-tight text-white">Harmo<span className="bg-gradient-to-r from-indigo-200 to-violet-500 bg-clip-text text-transparent">mus</span></p>
+        </>
+      )}
+    </div>
+  );
 }
 
 export default async function CadastroPage({ searchParams }: { searchParams: Promise<{ plan?: string; redirect?: string; error?: string; field?: string; full_name?: string; username?: string; email?: string; phone?: string }> }) {
-  const params = await searchParams;
+  const [params, settings] = await Promise.all([searchParams, getAdminSettings()]);
+  const appName = settings.branding.appName || "Harmomus";
+  const logoUrl = settings.branding.logoUrl || "";
+  const loginImageUrl = settings.branding.loginImageUrl || settings.branding.heroImageUrl || "";
+  const headline = settings.home.headline || "Prepare sua voz. Honre seu chamado.";
   const selectedPlan = (PLAN_OPTIONS.includes((params.plan ?? "").toLowerCase() as PlanSlug) ? (params.plan ?? "free").toLowerCase() : "free") as PlanSlug;
   const redirectPath = safeRedirect(String(params.redirect ?? ""));
   const error = params.error ? decodeURIComponent(params.error) : "";
@@ -107,11 +123,12 @@ export default async function CadastroPage({ searchParams }: { searchParams: Pro
 
   return (
     <PublicAppShell>
-      <section className="px-4 pb-10 pt-16 md:pt-8">
-        <div className="mx-auto w-full max-w-2xl rounded-[2rem] border border-white/15 bg-gradient-to-b from-white/[0.08] to-white/[0.03] p-6 shadow-[0_0_90px_rgba(119,78,255,0.25)] backdrop-blur-2xl md:p-8">
-          <HarmomusAuthLogo />
+      <section className="relative overflow-hidden px-4 pb-10 pt-16 md:pt-8">
+        {loginImageUrl ? <img src={loginImageUrl} alt="" className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-10" /> : null}
+        <div className="relative mx-auto w-full max-w-2xl rounded-[2rem] border border-white/15 bg-gradient-to-b from-white/[0.08] to-white/[0.03] p-6 shadow-[0_0_90px_rgba(119,78,255,0.25)] backdrop-blur-2xl md:p-8">
+          <HarmomusAuthLogo logoUrl={logoUrl} appName={appName} />
           <h1 className="mt-2 text-center text-3xl font-semibold text-white md:text-4xl">Crie sua conta</h1>
-          <p className="mt-2 text-center text-sm text-zinc-300">Prepare sua voz. Honre seu chamado.</p>
+          <p className="mt-2 text-center text-sm text-zinc-300">{headline}</p>
           <form action={signUp} className="mt-7 grid gap-4 md:grid-cols-2">
             <input type="hidden" name="redirect" value={redirectPath} />
             <div className="md:col-span-2"><label className="mb-2 block text-sm text-zinc-200">Nome</label><input name="full_name" required defaultValue={defaults.fullName} className={inputClass("full_name", field)} /><FieldError name="full_name" field={field} error={error} /></div>
