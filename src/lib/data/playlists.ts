@@ -11,6 +11,10 @@ export interface PlaylistKitSummary {
   name: string;
   artist: string;
   cover_url: string | null;
+  original_tone: string | null;
+  default_tone: string | null;
+  allow_pitch_shift: boolean;
+  max_pitch_shift_semitones: number;
   category: { name: string; slug: string } | null;
   tracks: {
     id: string;
@@ -127,7 +131,7 @@ export async function getPlaylistBySlug(slug: string): Promise<PublicPlaylist | 
 
   const { data: items, error } = await supabase
     .from("playlist_items")
-    .select("position, kits!inner(id, slug, name, artist, cover_url, category_id, published)")
+    .select("position, kits!inner(id, slug, name, artist, cover_url, category_id, original_tone, default_tone, allow_pitch_shift, max_pitch_shift_semitones, published)")
     .eq("playlist_id", playlist.id)
     .order("position", { ascending: true });
   if (error) throw new Error(error.message);
@@ -168,6 +172,10 @@ export async function getPlaylistBySlug(slug: string): Promise<PublicPlaylist | 
       .filter((i: any) => i.kits.published)
       .map((i: any) => ({
         ...i.kits,
+        original_tone: i.kits.original_tone ?? null,
+        default_tone: i.kits.default_tone ?? null,
+        allow_pitch_shift: i.kits.allow_pitch_shift ?? true,
+        max_pitch_shift_semitones: i.kits.max_pitch_shift_semitones ?? 2,
         category: i.kits.category_id ? cmap.get(i.kits.category_id) ?? null : null,
         tracks: (filesByKitId.get(i.kits.id) ?? [])
           .sort((a, b) => `${a.tone}-${a.name}`.localeCompare(`${b.tone}-${b.name}`, "pt-BR"))
