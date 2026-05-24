@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 
-type PlanSlug = "free" | "plus" | "premium";
+type PlanSlug = "free" | "plus" | "premium" | "ministry_10";
 
 type PlanConfig = {
   slug: PlanSlug;
@@ -19,16 +19,13 @@ const PLAN_CONFIGS: PlanConfig[] = [
     price: "Grátis",
     cta: "Criar conta grátis",
     features: [
-      "✅ 5 acessos diários a kits",
+      "✅ 3 acessos diários a kits",
       "✅ Apenas tom original",
       "✅ Player limitado",
-      "✅ Criação de playlists",
+      "❌ Criação de playlists",
       "✅ Comunidade aberta",
       "❌ Troca de tonalidade",
       "❌ Solicitação de novos kits",
-      "❌ Prioridade na confecção",
-      "❌ Receber kits antecipadamente",
-      "❌ Grupo exclusivo",
       "❌ Solicitação de novos tons",
     ],
   },
@@ -44,11 +41,7 @@ const PLAN_CONFIGS: PlanConfig[] = [
       "✅ Catálogo completo",
       "✅ Criação de playlists",
       "✅ Comunidade aberta",
-      "✅ Sugestões de conteúdos",
       "❌ Solicitação de novos kits",
-      "❌ Prioridade na confecção",
-      "❌ Receber kits antecipadamente",
-      "❌ Grupo exclusivo",
       "❌ Solicitação de novos tons",
     ],
   },
@@ -60,17 +53,26 @@ const PLAN_CONFIGS: PlanConfig[] = [
     features: [
       "✅ Acesso ilimitado aos kits",
       "✅ Todos os tons disponíveis",
-      "✅ Troca de tonalidade",
-      "✅ Catálogo completo",
       "✅ Criação de playlists",
       "✅ Solicitação de novos kits",
-      "✅ Prioridade na confecção",
-      "✅ Receber kits antecipadamente",
-      "✅ Comunidade Harmomus + grupo Premium para pedidos",
       "✅ Solicitação de novos tons",
       "✅ Conteúdos extras",
       "✅ Votações internas",
       "✅ Selo Premium Harmomus",
+    ],
+  },
+  {
+    slug: "ministry_10",
+    label: "Ministerial",
+    price: "A partir de R$397/mês",
+    cta: "Criar conta e ver plano ministerial",
+    features: [
+      "✅ Acesso Premium para equipe",
+      "✅ 10, 20 ou 40 integrantes",
+      "✅ Responsável gerencia membros",
+      "✅ Ideal para ministérios de louvor",
+      "✅ Todos os tons e nipes",
+      "✅ Solicitações centralizadas",
     ],
   },
 ];
@@ -89,7 +91,7 @@ export function SignupPlanSelector({ initialPlan }: { initialPlan: PlanSlug }) {
 
       <div className="md:col-span-2 mt-2">
         <h2 className="text-lg font-semibold text-white">Escolha seu plano</h2>
-        <div className="mt-3 grid grid-cols-3 gap-2">
+        <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
           {PLAN_CONFIGS.map((plan) => {
             const isSelected = selectedPlan === plan.slug;
             return (
