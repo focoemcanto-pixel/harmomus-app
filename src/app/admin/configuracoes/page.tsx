@@ -1,4 +1,5 @@
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { BrandingPipelineManager } from "@/components/admin/branding-pipeline-manager";
 import { PageHeader } from "@/components/admin/page-header";
 import { getAdminSettings, saveAdminSettings } from "@/lib/data/admin-settings";
@@ -6,8 +7,14 @@ import { getAdminSettings, saveAdminSettings } from "@/lib/data/admin-settings";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export default async function ConfiguracoesPage() {
+export default async function ConfiguracoesPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ saved?: string }>;
+}) {
   const settings = await getAdminSettings();
+  const params = await searchParams;
+  const saved = params?.saved === "1";
 
   async function save(formData: FormData) {
     "use server";
@@ -54,11 +61,19 @@ export default async function ConfiguracoesPage() {
     revalidatePath("/", "page");
     revalidatePath("/login", "page");
     revalidatePath("/cadastro", "page");
+
+    redirect("/admin/configuracoes?saved=1");
   }
 
   return (
     <section className="space-y-6">
       <PageHeader title="Configurações" description="Central de branding, URLs, pagamentos, storage e home." />
+
+      {saved ? (
+        <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+          Configurações salvas com sucesso.
+        </div>
+      ) : null}
 
       <form action={save} className="grid gap-3 rounded-xl border border-border bg-surface p-6 text-sm shadow-premium md:grid-cols-2">
         <BrandingPipelineManager
@@ -100,7 +115,7 @@ export default async function ConfiguracoesPage() {
         <input name="supportPhone" defaultValue={settings.whatsapp.supportPhone} className="rounded border border-border bg-background px-3 py-2" placeholder="WhatsApp suporte" />
         <input name="webhook" defaultValue={settings.whatsapp.webhook} className="rounded border border-border bg-background px-3 py-2" placeholder="Webhook reservado" />
 
-        <button className="rounded bg-gold-500/20 px-4 py-2 text-gold-300 md:col-span-2">
+        <button type="submit" className="rounded bg-gold-500/20 px-4 py-2 text-gold-300 transition hover:bg-gold-500/30 md:col-span-2">
           Salvar configurações
         </button>
       </form>
