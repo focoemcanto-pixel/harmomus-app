@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 
@@ -33,17 +34,16 @@ export function HomeHeroCarousel({ banners, latestKits = [] }: { banners: Banner
       id: slide.id,
       node: (
         <div className="relative h-full w-full overflow-hidden">
-          <picture>
-            {slide.mobile_image_url ? <source media="(max-width: 768px)" srcSet={slide.mobile_image_url} /> : null}
-            <img
+          <div className="absolute inset-0">
+            <Image
               src={slide.image_url}
               alt={slide.title}
-              className="h-full w-full object-cover"
-              loading={slideIndex === 0 ? "eager" : "lazy"}
-              fetchPriority={slideIndex === 0 ? "high" : "auto"}
-              decoding="async"
+              fill
+              priority={slideIndex === 0}
+              sizes="100vw"
+              className="object-cover"
             />
-          </picture>
+          </div>
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/35 to-transparent" />
           <div className="absolute bottom-0 left-0 right-0 z-20 p-5 text-white md:p-6">
             {slide.title ? <h3 className="line-clamp-2 text-xl font-semibold md:text-2xl">{slide.title}</h3> : null}
@@ -65,13 +65,15 @@ export function HomeHeroCarousel({ banners, latestKits = [] }: { banners: Banner
             {latestKits.slice(0, 5).map((kit) => (
               <Link key={kit.id} href={`/biblioteca/${kit.slug}`} prefetch className="group min-w-0 overflow-hidden rounded-xl border border-white/15 bg-white/10 transition hover:-translate-y-1 hover:border-cyan-200/70">
                 {kit.coverUrl ? (
-                  <img
-                    src={kit.coverUrl}
-                    alt={kit.name}
-                    className="aspect-square w-full object-cover transition duration-500 group-hover:scale-105"
-                    loading="lazy"
-                    decoding="async"
-                  />
+                  <div className="relative aspect-square w-full overflow-hidden">
+                    <Image
+                      src={kit.coverUrl}
+                      alt={kit.name}
+                      fill
+                      sizes="160px"
+                      className="object-cover transition duration-500 group-hover:scale-105"
+                    />
+                  </div>
                 ) : <div className="aspect-square w-full bg-white/10" />}
                 <div className="p-2">
                   <p className="line-clamp-1 text-xs font-bold text-white">{kit.name}</p>
