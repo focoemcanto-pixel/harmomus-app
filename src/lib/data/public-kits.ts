@@ -1,6 +1,6 @@
 import { unstable_cache } from "next/cache";
 
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/database";
 
 export type UserTier = "guest" | "free" | "plus" | "premium";
@@ -53,11 +53,9 @@ const VOICE_MAP: Record<string, VoiceType> = {
 
 function normalizeVoice(value: string): VoiceType {
   const normalized = value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-
   for (const [key, target] of Object.entries(VOICE_MAP)) {
     if (normalized.includes(key)) return target;
   }
-
   return "todos";
 }
 
@@ -68,14 +66,9 @@ function mapKit(
   files: Database["public"]["Tables"]["kit_audio_files"]["Row"][],
 ): PublicKit {
   const tonesMap = new Map<string, PublicKitToneGroup>();
-
   for (const file of files) {
-    if (!tonesMap.has(file.tone)) {
-      tonesMap.set(file.tone, { tone: file.tone, voices: {} });
-    }
-
+    if (!tonesMap.has(file.tone)) tonesMap.set(file.tone, { tone: file.tone, voices: {} });
     const voice = normalizeVoice(file.name);
-
     tonesMap.get(file.tone)!.voices[voice] = {
       id: file.id,
       tone: file.tone,
@@ -89,7 +82,6 @@ function mapKit(
 
   const category = kit.category_id ? categoriesMap.get(kit.category_id) ?? null : null;
   const requiredPlan = kit.required_plan ? plansMap.get(kit.required_plan) ?? null : null;
-
   return {
     id: kit.id,
     slug: kit.slug,
@@ -106,67 +98,56 @@ function mapKit(
 
 function groupFilesByKit(files: Database["public"]["Tables"]["kit_audio_files"]["Row"][]) {
   const map = new Map<string, Database["public"]["Tables"]["kit_audio_files"]["Row"][]>();
-
   for (const file of files) {
     const list = map.get(file.kit_id) ?? [];
     list.push(file);
     map.set(file.kit_id, list);
   }
-
   return map;
 }
 
-const getPublishedKitsCached = unstable_cache(async (): Promise<PublicKit[]> => {
-  const supabase = createSupabaseAdminClient() as any;
+async function getPublicClient() {
+  return (await createClient()) as any;
+}
 
-  const [{ data: kits }, { data: categories }, { data: plans }, { data: files }] = await Promise.all([
+const getPublishedKitsCached = unstable_cache(async (): Promise<PublicKit[]> => {
+  const supabase = await getPublicClient();
+  const [{ data: kits, error: kitsError }, { data: categories, error: categoriesError }, { data: plans, error: plansError }, { data: files, error: filesError }] = await Promise.all([
     supabase.from("kits").select("*").eq("published", true).order("created_at", { ascending: false }),
     supabase.from("categories").select("*"),
     supabase.from("plans").select("*"),
     supabase.from("kit_audio_files").select("*"),
   ]);
 
+  if (kitsError) throw new Error(`Falha ao buscar kits públicos: ${kitsError.message}`);
+  if (categoriesError) throw new Error(`Falha ao buscar categorias: ${categoriesError.message}`);
+  if (plansError) throw new Error(`Falha ao buscar planos: ${plansError.message}`);
+  if (filesError) throw new Error(`Falha ao buscar áudios: ${filesError.message}`);
+
   const categoriesRows = (categories ?? []) as Database["public"]["Tables"]["categories"]["Row"][];
   const plansRows = (plans ?? []) as Database["public"]["Tables"]["plans"]["Row"][];
   const filesRows = (files ?? []) as Database["public"]["Tables"]["kit_audio_files"]["Row"][];
   const kitsRows = (kits ?? []) as Database["public"]["Tables"]["kits"]["Row"][];
-
   const categoriesMap = new Map(categoriesRows.map((row) => [row.id, row]));
   const plansMap = new Map(plansRows.map((row) => [row.id, row]));
   const filesByKit = groupFilesByKit(filesRows);
-
   return kitsRows.map((kit) => mapKit(kit, categoriesMap, plansMap, filesByKit.get(kit.id) ?? []));
-}, ["public-kits-cache-v1"], {
-  revalidate: 300,
-  tags: ["public-catalog"],
-});
+}, ["public-kits-cache-v2"], { revalidate: 300, tags: ["public-catalog"] });
 
 const getPublishedSearchCached = unstable_cache(async (limit: number): Promise<PublicKitSearchItem[]> => {
-  const supabase = createSupabaseAdminClient() as any;
-
-  const { data } = await supabase
+  const supabase = await getPublicClient();
+  const { data, error } = await supabase
     .from("kits")
     .select("id,slug,name,artist,category:categories(name)")
     .eq("published", true)
     .order("created_at", { ascending: false })
     .limit(limit);
-
+  if (error) throw new Error(`Falha ao buscar busca pública: ${error.message}`);
   return (data ?? []).map((kit: any) => {
     const category = kit.category?.name ?? "Sem categoria";
-
-    return {
-      id: kit.id,
-      slug: kit.slug,
-      name: kit.name,
-      artist: kit.artist,
-      category,
-      searchText: `${kit.name} ${kit.artist} ${category}`.toLowerCase(),
-    };
+    return { id: kit.id, slug: kit.slug, name: kit.name, artist: kit.artist, category, searchText: `${kit.name} ${kit.artist} ${category}`.toLowerCase() };
   });
-}, ["public-search-cache-v1"], {
-  revalidate: 300,
-  tags: ["public-search"],
-});
+}, ["public-search-cache-v2"], { revalidate: 300, tags: ["public-search"] });
 
 export async function getPublishedKits(): Promise<PublicKit[]> {
   return getPublishedKitsCached();
