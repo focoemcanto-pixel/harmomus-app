@@ -7,17 +7,22 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { HomeBanner } from "@/lib/data/home-banners";
 
 type BannerSlide = Pick<HomeBanner, "id" | "title" | "subtitle" | "button_label" | "button_href" | "image_url" | "mobile_image_url">;
+type BannerSlideWithImage = BannerSlide & { image_url: string };
 
 type LatestKitSlide = {
   id: string;
   slug: string;
   name: string;
-  artist: string;
+  artist: string | null;
   coverUrl: string | null;
 };
 
+function hasBannerImage(banner: BannerSlide): banner is BannerSlideWithImage {
+  return Boolean(banner.image_url && banner.image_url.trim());
+}
+
 export function HomeHeroCarousel({ banners, latestKits = [] }: { banners: BannerSlide[]; latestKits?: LatestKitSlide[] }) {
-  const bannerSlides = banners.filter((b) => b.image_url);
+  const bannerSlides = banners.filter(hasBannerImage);
   const hasLatestSlide = latestKits.length > 0;
   const totalSlides = bannerSlides.length + (hasLatestSlide ? 1 : 0) + 1;
   const [index, setIndex] = useState(0);
@@ -37,7 +42,7 @@ export function HomeHeroCarousel({ banners, latestKits = [] }: { banners: Banner
           <div className="absolute inset-0">
             <Image
               src={slide.image_url}
-              alt={slide.title}
+              alt={slide.title || "Banner Harmomus"}
               fill
               priority={slideIndex === 0}
               sizes="100vw"
@@ -77,7 +82,7 @@ export function HomeHeroCarousel({ banners, latestKits = [] }: { banners: Banner
                 ) : <div className="aspect-square w-full bg-white/10" />}
                 <div className="p-2">
                   <p className="line-clamp-1 text-xs font-bold text-white">{kit.name}</p>
-                  <p className="line-clamp-1 text-[10px] text-zinc-300">{kit.artist}</p>
+                  <p className="line-clamp-1 text-[10px] text-zinc-300">{kit.artist ?? "Kit vocal"}</p>
                 </div>
               </Link>
             ))}
