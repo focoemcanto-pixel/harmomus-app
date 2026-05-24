@@ -122,6 +122,11 @@ export async function getPublishedKits(): Promise<PublicKit[]> {
   return kitsRows.map((kit) => mapKit(kit, categoriesMap, plansMap, filesRows.filter((file) => file.kit_id === kit.id)));
 }
 
+export async function getPublicKits({ limit }: { limit?: number } = {}): Promise<PublicKit[]> {
+  const kits = await getPublishedKits();
+  return typeof limit === "number" ? kits.slice(0, limit) : kits;
+}
+
 export async function getPublishedKitBySlug(slug: string): Promise<PublicKit | null> {
   const kits = await getPublishedKits();
   return kits.find((kit) => kit.slug === slug) ?? null;
