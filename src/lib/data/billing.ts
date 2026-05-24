@@ -21,14 +21,23 @@ function resolvePlanPriceId(plan: { slug: string; stripe_price_id: string | null
   return null;
 }
 
+
+
+function resolveMinistryPriceId(planSlug: string) {
+  if (planSlug === "ministry_10") return process.env.STRIPE_MINISTRY_10_PRICE_ID?.trim() || null;
+  if (planSlug === "ministry_20") return process.env.STRIPE_MINISTRY_20_PRICE_ID?.trim() || null;
+  if (planSlug === "ministry_40") return process.env.STRIPE_MINISTRY_40_PRICE_ID?.trim() || null;
+  return null;
+}
+
 export async function startStripeCheckout(userId: string, email: string, planId: string, fallbackOrigin?: string | null) {
   assertStripeReady();
   const supabase = (await createClient()) as any;
   const { data: plan } = await supabase.from("plans").select("*").eq("id", planId).single();
 
   if (!plan) throw new Error("Plano não encontrado.");
-  const stripePriceId = resolvePlanPriceId(plan);
-  if (["plus", "premium"].includes(plan.slug) && !stripePriceId) throw new Error("Plano sem configuração de pagamento. Configure o Stripe Price ID no Admin > Planos.");
+  const stripePriceId = resolvePlanPriceId(plan) ?? resolveMinistryPriceId(plan.slug);
+  if (["plus", "premium", "ministry_10", "ministry_20", "ministry_40"].includes(plan.slug) && !stripePriceId) throw new Error("Plano sem configuração de pagamento. Configure o Stripe Price ID no ambiente.");
 
   const { data: existing } = await supabase.from("subscriptions").select("*").eq("user_id", userId).order("created_at", { ascending: false }).limit(1).maybeSingle();
 
