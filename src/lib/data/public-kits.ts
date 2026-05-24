@@ -57,6 +57,11 @@ function normalizeVoice(value: string): VoiceType {
   return "todos";
 }
 
+function getAudioStreamUrl(file: Database["public"]["Tables"]["kit_audio_files"]["Row"]) {
+  const directUrl = String((file as any).public_url ?? "").trim();
+  return directUrl || `/api/audio/${file.id}`;
+}
+
 function mapKit(
   kit: Database["public"]["Tables"]["kits"]["Row"],
   categoriesMap: Map<string, Database["public"]["Tables"]["categories"]["Row"]>,
@@ -73,7 +78,7 @@ function mapKit(
       voice,
       name: file.name,
       audioFileId: file.id,
-      streamUrl: `/api/audio/${file.id}`,
+      streamUrl: getAudioStreamUrl(file),
       fileType: file.file_type,
     };
   }
