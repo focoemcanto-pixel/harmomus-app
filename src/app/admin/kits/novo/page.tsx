@@ -4,6 +4,9 @@ import { revalidatePath } from "next/cache";
 import { KitForm } from "@/components/admin/kit-form";
 import { createKit, ensureArtistCategory, getArtistCategories, getKitFormOptions } from "@/lib/data/kits";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function NovoKitPage() {
   const [{ categories, plans }, artistCategories] = await Promise.all([getKitFormOptions(), getArtistCategories()]);
 
@@ -13,6 +16,7 @@ export default async function NovoKitPage() {
     const name = String(formData.get("name") ?? "").trim();
     const slug = String(formData.get("slug") ?? "").trim();
     const artist = String(formData.get("artist") ?? "").trim();
+    const defaultTone = String(formData.get("default_tone") ?? "").trim();
 
     if (!name || !slug || !artist) throw new Error("Preencha nome, slug e artista para continuar.");
 
@@ -29,11 +33,12 @@ export default async function NovoKitPage() {
       category_id: String(formData.get("category_id") ?? "") || artistCategory.id,
       required_plan: String(formData.get("required_plan") ?? "") || null,
       published: formData.get("published") === "on",
-    });
+      default_tone: defaultTone || null,
+    } as any);
 
-    revalidatePath("/admin/kits");
-    revalidatePath("/biblioteca");
-    revalidatePath("/todos-os-kits");
+    revalidatePath("/admin/kits", "page");
+    revalidatePath("/biblioteca", "page");
+    revalidatePath("/todos-os-kits", "page");
     redirect("/admin/kits");
   }
 
