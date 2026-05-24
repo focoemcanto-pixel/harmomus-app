@@ -1,14 +1,18 @@
-import { getSignedSemitoneDistance, normalizeTone, toneToSemitone } from "@/lib/music/tones";
+import { getSignedSemitoneDistance, normalizeTone } from "@/lib/music/tones";
 
 export type VocalRangeType = "tenor" | "contralto" | "soprano" | "baritono";
+
+export interface VocalZone {
+  minMidi: number;
+  maxMidi: number;
+}
 
 export interface VocalRange {
   type: VocalRangeType;
   label: string;
-  comfortableMinMidi: number;
-  comfortableMaxMidi: number;
-  absoluteMinMidi: number;
-  absoluteMaxMidi: number;
+  comfortable: VocalZone;
+  extended: VocalZone;
+  extreme: VocalZone;
   preferredOctaveShift: 0 | -12 | 12;
 }
 
@@ -20,7 +24,7 @@ export interface TessituraAnalysis {
     min: number;
     max: number;
   };
-  status: "comfortable" | "warning" | "unsafe";
+  status: "comfortable" | "extended" | "extreme" | "unsafe";
   suggestedRange: VocalRangeType;
   suggestedOctaveShift: 0 | -12 | 12;
   message: string;
@@ -30,37 +34,72 @@ export const VOCAL_RANGES: Record<VocalRangeType, VocalRange> = {
   baritono: {
     type: "baritono",
     label: "Barítono",
-    comfortableMinMidi: 45,
-    comfortableMaxMidi: 64,
-    absoluteMinMidi: 40,
-    absoluteMaxMidi: 67,
+    comfortable: {
+      minMidi: 43,
+      maxMidi: 62,
+    },
+    extended: {
+      minMidi: 40,
+      maxMidi: 65,
+    },
+    extreme: {
+      minMidi: 38,
+      maxMidi: 67,
+    },
     preferredOctaveShift: 0,
   },
+
   tenor: {
     type: "tenor",
     label: "Tenor",
-    comfortableMinMidi: 48,
-    comfortableMaxMidi: 67,
-    absoluteMinMidi: 43,
-    absoluteMaxMidi: 72,
+    comfortable: {
+      minMidi: 48,
+      maxMidi: 67,
+    },
+    extended: {
+      minMidi: 45,
+      maxMidi: 71,
+    },
+    extreme: {
+      minMidi: 43,
+      maxMidi: 74,
+    },
     preferredOctaveShift: 0,
   },
+
   contralto: {
     type: "contralto",
     label: "Contralto",
-    comfortableMinMidi: 53,
-    comfortableMaxMidi: 74,
-    absoluteMinMidi: 48,
-    absoluteMaxMidi: 77,
+    comfortable: {
+      minMidi: 52,
+      maxMidi: 72,
+    },
+    extended: {
+      minMidi: 48,
+      maxMidi: 76,
+    },
+    extreme: {
+      minMidi: 45,
+      maxMidi: 79,
+    },
     preferredOctaveShift: 0,
   },
+
   soprano: {
     type: "soprano",
     label: "Soprano",
-    comfortableMinMidi: 60,
-    comfortableMaxMidi: 81,
-    absoluteMinMidi: 55,
-    absoluteMaxMidi: 84,
+    comfortable: {
+      minMidi: 57,
+      maxMidi: 72,
+    },
+    extended: {
+      minMidi: 55,
+      maxMidi: 79,
+    },
+    extreme: {
+      minMidi: 53,
+      maxMidi: 84,
+    },
     preferredOctaveShift: 0,
   },
 };
@@ -83,8 +122,10 @@ const TONE_TO_MIDI_BASE: Record<string, number> = {
 export function toneToMidi(value: string, octave = 4): number | null {
   const normalized = normalizeTone(value);
   if (!normalized) return null;
+
   const base = TONE_TO_MIDI_BASE[normalized];
   if (typeof base !== "number") return null;
+
   return base + (octave - 4) * 12;
 }
 
@@ -93,13 +134,13 @@ export function applySemitoneShift(midi: number, semitoneShift: number, octaveSh
 }
 
 export function classifyRange(minMidi: number, maxMidi: number): {
-  status: "comfortable" | "warning" | "unsafe";
+  status: "comfortable" | "extended" | "extreme" | "unsafe";
   suggestedRange: VocalRange;
 } {
   const ranges = Object.values(VOCAL_RANGES);
 
   for (const range of ranges) {
-    if (minMidi >= range.comfortableMinMidi && maxMidi <= range.comfortableMaxMidi) {
+    if (minMidi >= range.comfortable.minMidi && maxMidi <= range.comfortable.maxMidi) {
       return {
         status: "comfortable",
         suggestedRange: range,
@@ -108,9 +149,18 @@ export function classifyRange(minMidi: number, maxMidi: number): {
   }
 
   for (const range of ranges) {
-    if (minMidi >= range.absoluteMinMidi && maxMidi <= range.absoluteMaxMidi) {
+    if (minMidi >= range.extended.minMidi && maxMidi <= range.extended.maxMidi) {
       return {
-        status: "warning",
+        status: "extended",
+        suggestedRange: range,
+      };
+    }
+  }
+
+  for (const range of ranges) {
+    if (minMidi >= range.extreme.minMidi && maxMidi <= range.extreme.maxMidi) {
+      return {
+        status: "extreme",
         suggestedRange: range,
       };
     }
@@ -144,11 +194,11 @@ export function analyzeTessitura({
   let octaveShift: 0 | -12 | 12 = 0;
 
   if (classification.status === "unsafe") {
-    if (shiftedMax > VOCAL_RANGES.soprano.absoluteMaxMidi) {
+    if (shiftedMax > VOCAL_RANGES.soprano.extreme.maxMidi) {
       octaveShift = -12;
     }
 
-    if (shiftedMin < VOCAL_RANGES.baritono.absoluteMinMidi) {
+    if (shiftedMin < VOCAL_RANGES.baritono.extreme.minMidi) {
       octaveShift = 12;
     }
   }
@@ -157,6 +207,13 @@ export function analyzeTessitura({
   const adjustedMax = shiftedMax + octaveShift;
 
   const adjustedClassification = classifyRange(adjustedMin, adjustedMax);
+
+  const messageMap: Record<TessituraAnalysis["status"], string> = {
+    comfortable: "Tessitura confortável para o nipe sugerido.",
+    extended: "Tessitura utilizável, mas fora da zona principal de conforto.",
+    extreme: "Tessitura extrema detectada. Requer maior técnica e controle vocal.",
+    unsafe: "Tessitura fora da região segura recomendada.",
+  };
 
   return {
     requestedTone,
@@ -171,13 +228,9 @@ export function analyzeTessitura({
     suggestedOctaveShift: octaveShift,
     message:
       octaveShift === -12
-        ? "Tessitura elevada detectada. Recomendada reprodução 1 oitava abaixo."
+        ? "Tessitura muito elevada detectada. Recomendada reprodução 1 oitava abaixo."
         : octaveShift === 12
           ? "Tessitura muito grave detectada. Recomendada reprodução 1 oitava acima."
-          : adjustedClassification.status === "comfortable"
-            ? "Tessitura confortável para o nipe sugerido."
-            : adjustedClassification.status === "warning"
-              ? "Tessitura utilizável, mas próxima do limite confortável."
-              : "Tessitura fora da zona recomendada.",
+          : messageMap[adjustedClassification.status],
   };
 }
