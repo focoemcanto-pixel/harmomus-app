@@ -21,6 +21,7 @@ export function HarmomusPlayer({ src, title, canPlay, onBlocked }: HarmomusPlaye
     volume,
     loop,
     errorMessage,
+    preloadTrack,
     playTrack,
     togglePlay,
     seekTo,
@@ -59,8 +60,22 @@ export function HarmomusPlayer({ src, title, canPlay, onBlocked }: HarmomusPlaye
     });
   }
 
+  function handlePreload() {
+    if (!canPlay || !src) return;
+
+    preloadTrack({
+      src,
+      title,
+    });
+  }
+
   return (
-    <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+    <div
+      className="rounded-xl border border-white/10 bg-black/30 p-4"
+      onMouseEnter={handlePreload}
+      onTouchStart={handlePreload}
+      onFocus={handlePreload}
+    >
       <p className="mb-3 text-sm text-muted">{title}</p>
 
       <div className="flex items-center gap-3">
