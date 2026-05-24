@@ -1,5 +1,6 @@
 "use client";
 
+import { Pause, Play, Repeat2, RotateCcw, RotateCw, Volume2, X } from "lucide-react";
 import { createContext, useContext, useMemo, useRef, useState, type ReactNode } from "react";
 
 export type GlobalTrack = {
@@ -22,9 +23,15 @@ type GlobalAudioPlayerContextValue = {
   skipBy: (seconds: number) => void;
   setVolumeValue: (value: number) => void;
   setLoopValue: (value: boolean) => void;
+  closePlayer: () => void;
 };
 
 const GlobalAudioPlayerContext = createContext<GlobalAudioPlayerContextValue | null>(null);
+
+function formatTime(value: number) {
+  if (!Number.isFinite(value)) return "0:00";
+  return `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, "0")}`;
+}
 
 export function GlobalAudioPlayerProvider({ children }: { children: ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -107,6 +114,20 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
     if (audioRef.current) audioRef.current.loop = value;
   }
 
+  function closePlayer() {
+    const audio = audioRef.current;
+    if (audio) {
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+    }
+    setTrack(null);
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
+    setErrorMessage(null);
+  }
+
   const value = useMemo<GlobalAudioPlayerContextValue>(() => ({
     audioRef,
     track,
@@ -122,6 +143,7 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
     skipBy,
     setVolumeValue,
     setLoopValue,
+    closePlayer,
   }), [track, isPlaying, currentTime, duration, volume, loop, errorMessage]);
 
   return (
@@ -138,7 +160,81 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
         onError={() => setErrorMessage("Áudio indisponível ou acesso negado.")}
         className="hidden"
       />
+      <FloatingMiniPlayer />
     </GlobalAudioPlayerContext.Provider>
+  );
+}
+
+function FloatingMiniPlayer() {
+  const {
+    track,
+    isPlaying,
+    currentTime,
+    duration,
+    volume,
+    loop,
+    errorMessage,
+    togglePlay,
+    seekTo,
+    skipBy,
+    setVolumeValue,
+    setLoopValue,
+    closePlayer,
+  } = useGlobalAudioPlayer();
+
+  if (!track) return null;
+
+  const progress = duration > 0 ? Math.min(100, Math.max(0, (currentTime / duration) * 100)) : 0;
+
+  return (
+    <div className="fixed bottom-3 left-3 right-3 z-[80] mx-auto max-w-5xl rounded-2xl border border-white/15 bg-[#070a12]/95 p-3 text-white shadow-[0_18px_70px_rgba(0,0,0,0.55)] backdrop-blur-xl md:bottom-5 md:p-4">
+      <div className="absolute left-0 top-0 h-1 rounded-t-2xl bg-gradient-to-r from-cyan-300 to-fuchsia-300" style={{ width: `${progress}%` }} />
+
+      <div className="flex flex-col gap-3 md:flex-row md:items-center">
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-bold text-white">{track.title}</p>
+          <p className="mt-1 text-xs text-white/50">{formatTime(currentTime)} / {formatTime(duration)}</p>
+        </div>
+
+        <div className="flex items-center justify-between gap-3 md:justify-center">
+          <button type="button" onClick={() => skipBy(-10)} className="rounded-full border border-white/10 p-2 text-white/80 hover:bg-white/10">
+            <RotateCcw size={18} />
+          </button>
+
+          <button type="button" onClick={togglePlay} className="rounded-full bg-cyan-300 p-3 text-black shadow-[0_0_30px_rgba(103,232,249,0.35)] hover:scale-[1.03]">
+            {isPlaying ? <Pause size={20} /> : <Play size={20} />}
+          </button>
+
+          <button type="button" onClick={() => skipBy(10)} className="rounded-full border border-white/10 p-2 text-white/80 hover:bg-white/10">
+            <RotateCw size={18} />
+          </button>
+
+          <button type="button" onClick={() => setLoopValue(!loop)} className={`rounded-full border border-white/10 p-2 hover:bg-white/10 ${loop ? "text-cyan-200" : "text-white/70"}`}>
+            <Repeat2 size={18} />
+          </button>
+        </div>
+
+        <div className="hidden items-center gap-2 md:flex">
+          <Volume2 size={16} className="text-white/60" />
+          <input type="range" min={0} max={1} step={0.01} value={volume} onChange={(event) => setVolumeValue(Number(event.target.value))} className="w-28" />
+        </div>
+
+        <button type="button" onClick={closePlayer} className="absolute right-2 top-2 rounded-full p-1 text-white/40 hover:bg-white/10 hover:text-white md:static md:p-2">
+          <X size={18} />
+        </button>
+      </div>
+
+      <input
+        type="range"
+        min={0}
+        max={duration || 0}
+        value={currentTime}
+        onChange={(event) => seekTo(Number(event.target.value))}
+        className="mt-3 w-full md:hidden"
+      />
+
+      {errorMessage ? <p className="mt-2 text-xs text-amber-300">{errorMessage}</p> : null}
+    </div>
   );
 }
 
