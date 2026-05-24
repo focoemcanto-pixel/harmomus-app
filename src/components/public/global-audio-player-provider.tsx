@@ -16,11 +16,13 @@ type GlobalAudioPlayerContextValue = {
   duration: number;
   volume: number;
   loop: boolean;
+  hasEnded: boolean;
   errorMessage: string | null;
   preloadedSrc: string | null;
   preloadTrack: (track: GlobalTrack) => void;
   playTrack: (track: GlobalTrack) => Promise<void>;
   togglePlay: () => Promise<void>;
+  replay: () => Promise<void>;
   seekTo: (seconds: number) => void;
   skipBy: (seconds: number) => void;
   setVolumeValue: (value: number) => void;
@@ -29,10 +31,35 @@ type GlobalAudioPlayerContextValue = {
 };
 
 const GlobalAudioPlayerContext = createContext<GlobalAudioPlayerContextValue | null>(null);
+const PLAYER_PREFS_KEY = "harmomus-player-preferences";
 
 function formatTime(value: number) {
   if (!Number.isFinite(value)) return "0:00";
   return `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, "0")}`;
+}
+
+function readStoredPreferences() {
+  if (typeof window === "undefined") return { volume: 1, loop: false };
+  try {
+    const raw = window.localStorage.getItem(PLAYER_PREFS_KEY);
+    if (!raw) return { volume: 1, loop: false };
+    const parsed = JSON.parse(raw) as { volume?: number; loop?: boolean };
+    return {
+      volume: typeof parsed.volume === "number" ? Math.max(0, Math.min(parsed.volume, 1)) : 1,
+      loop: Boolean(parsed.loop),
+    };
+  } catch {
+    return { volume: 1, loop: false };
+  }
+}
+
+function storePreferences(volume: number, loop: boolean) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(PLAYER_PREFS_KEY, JSON.stringify({ volume, loop }));
+  } catch {
+    // localStorage pode estar indisponível em navegação privada.
+  }
 }
 
 export function GlobalAudioPlayerProvider({ children }: { children: ReactNode }) {
@@ -44,8 +71,19 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
   const [loop, setLoop] = useState(false);
+  const [hasEnded, setHasEnded] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [preloadedSrc, setPreloadedSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    const prefs = readStoredPreferences();
+    setVolume(prefs.volume);
+    setLoop(prefs.loop);
+    if (audioRef.current) {
+      audioRef.current.volume = prefs.volume;
+      audioRef.current.loop = prefs.loop;
+    }
+  }, []);
 
   function preloadTrack(nextTrack: GlobalTrack) {
     if (!nextTrack.src || track?.src === nextTrack.src || preloadedSrc === nextTrack.src) return;
@@ -66,6 +104,7 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
     if (!audio) return;
 
     setErrorMessage(null);
+    setHasEnded(false);
 
     if (track?.src !== nextTrack.src) {
       setTrack(nextTrack);
@@ -95,6 +134,8 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
 
     if (audio.paused) {
       try {
+        if (hasEnded) audio.currentTime = 0;
+        setHasEnded(false);
         await audio.play();
         setErrorMessage(null);
         setIsPlaying(true);
@@ -107,12 +148,28 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
     }
   }
 
+  async function replay() {
+    const audio = audioRef.current;
+    if (!audio || !track?.src) return;
+    audio.currentTime = 0;
+    setCurrentTime(0);
+    setHasEnded(false);
+    try {
+      await audio.play();
+      setErrorMessage(null);
+      setIsPlaying(true);
+    } catch {
+      setErrorMessage("Não foi possível reproduzir este áudio agora.");
+    }
+  }
+
   function seekTo(seconds: number) {
     const audio = audioRef.current;
     if (!audio) return;
     const next = Math.max(0, Math.min(seconds, duration || seconds));
     audio.currentTime = next;
     setCurrentTime(next);
+    if (hasEnded && next < duration) setHasEnded(false);
   }
 
   function skipBy(seconds: number) {
@@ -125,11 +182,13 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
     const next = Math.max(0, Math.min(value, 1));
     setVolume(next);
     if (audioRef.current) audioRef.current.volume = next;
+    storePreferences(next, loop);
   }
 
   function setLoopValue(value: boolean) {
     setLoop(value);
     if (audioRef.current) audioRef.current.loop = value;
+    storePreferences(volume, value);
   }
 
   function closePlayer() {
@@ -143,6 +202,7 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(0);
+    setHasEnded(false);
     setErrorMessage(null);
   }
 
@@ -196,17 +256,19 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
     duration,
     volume,
     loop,
+    hasEnded,
     errorMessage,
     preloadedSrc,
     preloadTrack,
     playTrack,
     togglePlay,
+    replay,
     seekTo,
     skipBy,
     setVolumeValue,
     setLoopValue,
     closePlayer,
-  }), [track, isPlaying, currentTime, duration, volume, loop, errorMessage, preloadedSrc]);
+  }), [track, isPlaying, currentTime, duration, volume, loop, hasEnded, errorMessage, preloadedSrc]);
 
   return (
     <GlobalAudioPlayerContext.Provider value={value}>
@@ -218,7 +280,10 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
         onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)}
         onPause={() => setIsPlaying(false)}
         onPlay={() => setIsPlaying(true)}
-        onEnded={() => setIsPlaying(false)}
+        onEnded={() => {
+          setIsPlaying(false);
+          if (!loop) setHasEnded(true);
+        }}
         onError={() => setErrorMessage("Áudio indisponível ou acesso negado.")}
         className="hidden"
       />
@@ -236,8 +301,10 @@ function FloatingMiniPlayer() {
     duration,
     volume,
     loop,
+    hasEnded,
     errorMessage,
     togglePlay,
+    replay,
     seekTo,
     skipBy,
     setVolumeValue,
@@ -256,7 +323,7 @@ function FloatingMiniPlayer() {
       <div className="flex flex-col gap-3 md:flex-row md:items-center">
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-bold text-white">{track.title}</p>
-          <p className="mt-1 text-xs text-white/50">{formatTime(currentTime)} / {formatTime(duration)}</p>
+          <p className="mt-1 text-xs text-white/50">{hasEnded ? "Faixa finalizada" : `${formatTime(currentTime)} / ${formatTime(duration)}`}</p>
         </div>
 
         <div className="flex items-center justify-between gap-3 md:justify-center">
@@ -264,7 +331,7 @@ function FloatingMiniPlayer() {
             <RotateCcw size={18} />
           </button>
 
-          <button type="button" onClick={togglePlay} className="rounded-full bg-cyan-300 p-3 text-black shadow-[0_0_30px_rgba(103,232,249,0.35)] hover:scale-[1.03]">
+          <button type="button" onClick={hasEnded ? replay : togglePlay} className="rounded-full bg-cyan-300 p-3 text-black shadow-[0_0_30px_rgba(103,232,249,0.35)] hover:scale-[1.03]">
             {isPlaying ? <Pause size={20} /> : <Play size={20} />}
           </button>
 
@@ -272,7 +339,7 @@ function FloatingMiniPlayer() {
             <RotateCw size={18} />
           </button>
 
-          <button type="button" onClick={() => setLoopValue(!loop)} className={`rounded-full border border-white/10 p-2 hover:bg-white/10 ${loop ? "text-cyan-200" : "text-white/70"}`}>
+          <button type="button" aria-pressed={loop} title={loop ? "Loop ligado" : "Loop desligado"} onClick={() => setLoopValue(!loop)} className={`rounded-full border p-2 hover:bg-white/10 ${loop ? "border-cyan-200/70 bg-cyan-300/15 text-cyan-200" : "border-white/10 text-white/70"}`}>
             <Repeat2 size={18} />
           </button>
         </div>
@@ -296,6 +363,8 @@ function FloatingMiniPlayer() {
         className="mt-3 w-full md:hidden"
       />
 
+      {loop ? <p className="mt-2 text-xs text-cyan-200">Loop ligado: esta mesma faixa será repetida.</p> : null}
+      {hasEnded ? <p className="mt-2 text-xs text-white/55">Clique em reproduzir para ouvir novamente.</p> : null}
       {errorMessage ? <p className="mt-2 text-xs text-amber-300">{errorMessage}</p> : null}
     </div>
   );
