@@ -19,6 +19,15 @@ export interface PublicKitToneGroup {
   voices: Partial<Record<VoiceType, PublicKitAudioFile>>;
 }
 
+export interface PublicKitSearchItem {
+  id: string;
+  slug: string;
+  name: string;
+  artist: string;
+  category: string;
+  searchText: string;
+}
+
 export interface PublicKit {
   id: string;
   slug: string;
@@ -96,6 +105,16 @@ function mapKit(
   };
 }
 
+function groupFilesByKit(files: Database["public"]["Tables"]["kit_audio_files"]["Row"][]) {
+  const map = new Map<string, Database["public"]["Tables"]["kit_audio_files"]["Row"][]>();
+  for (const file of files) {
+    const list = map.get(file.kit_id) ?? [];
+    list.push(file);
+    map.set(file.kit_id, list);
+  }
+  return map;
+}
+
 export async function getPublishedKits(): Promise<PublicKit[]> {
   const supabase = (await createClient()) as any;
 
@@ -118,8 +137,9 @@ export async function getPublishedKits(): Promise<PublicKit[]> {
 
   const categoriesMap = new Map(categoriesRows.map((row) => [row.id, row]));
   const plansMap = new Map(plansRows.map((row) => [row.id, row]));
+  const filesByKit = groupFilesByKit(filesRows);
 
-  return kitsRows.map((kit) => mapKit(kit, categoriesMap, plansMap, filesRows.filter((file) => file.kit_id === kit.id)));
+  return kitsRows.map((kit) => mapKit(kit, categoriesMap, plansMap, filesByKit.get(kit.id) ?? []));
 }
 
 export async function getPublicKits({ limit }: { limit?: number } = {}): Promise<PublicKit[]> {
@@ -127,7 +147,64 @@ export async function getPublicKits({ limit }: { limit?: number } = {}): Promise
   return typeof limit === "number" ? kits.slice(0, limit) : kits;
 }
 
+export async function getPublishedKitSearchItems(limit = 250): Promise<PublicKitSearchItem[]> {
+  const supabase = (await createClient()) as any;
+
+  const { data, error } = await supabase
+    .from("kits")
+    .select("id,slug,name,artist,category:categories(name)")
+    .eq("published", true)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) throw new Error(`Falha ao buscar busca pública: ${error.message}`);
+
+  return (data ?? []).map((kit: any) => {
+    const category = kit.category?.name ?? "Sem categoria";
+    return {
+      id: kit.id,
+      slug: kit.slug,
+      name: kit.name,
+      artist: kit.artist,
+      category,
+      searchText: `${kit.name} ${kit.artist} ${category}`.toLowerCase(),
+    };
+  });
+}
+
 export async function getPublishedKitBySlug(slug: string): Promise<PublicKit | null> {
-  const kits = await getPublishedKits();
-  return kits.find((kit) => kit.slug === slug) ?? null;
+  const supabase = (await createClient()) as any;
+
+  const { data: kit, error: kitError } = await supabase
+    .from("kits")
+    .select("*")
+    .eq("slug", slug)
+    .eq("published", true)
+    .maybeSingle();
+
+  if (kitError) throw new Error(`Falha ao buscar kit: ${kitError.message}`);
+  if (!kit) return null;
+
+  const [{ data: category, error: categoryError }, { data: plans, error: plansError }, { data: files, error: filesError }] = await Promise.all([
+    kit.category_id ? supabase.from("categories").select("*").eq("id", kit.category_id).maybeSingle() : Promise.resolve({ data: null, error: null }),
+    supabase.from("plans").select("*"),
+    supabase.from("kit_audio_files").select("*").eq("kit_id", kit.id).order("tone", { ascending: true }),
+  ]);
+
+  if (categoryError) throw new Error(`Falha ao buscar categoria: ${categoryError.message}`);
+  if (plansError) throw new Error(`Falha ao buscar planos: ${plansError.message}`);
+  if (filesError) throw new Error(`Falha ao buscar áudios do kit: ${filesError.message}`);
+
+  const categoriesMap = new Map<string, Database["public"]["Tables"]["categories"]["Row"]>();
+  if (category) categoriesMap.set(category.id, category as Database["public"]["Tables"]["categories"]["Row"]);
+
+  const plansRows = (plans ?? []) as Database["public"]["Tables"]["plans"]["Row"][];
+  const plansMap = new Map(plansRows.map((row) => [row.id, row]));
+
+  return mapKit(
+    kit as Database["public"]["Tables"]["kits"]["Row"],
+    categoriesMap,
+    plansMap,
+    (files ?? []) as Database["public"]["Tables"]["kit_audio_files"]["Row"][],
+  );
 }
