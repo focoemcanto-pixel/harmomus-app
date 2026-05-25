@@ -7,6 +7,7 @@ const FREE_LIMIT = 3;
 
 export interface FreeAccessStats {
   accessCountToday: number;
+  uniqueKitCount24h: number;
   remaining: number;
   limit: number;
   nextResetAt: string;
@@ -29,23 +30,37 @@ export async function getFreeAccessStats(userId: string): Promise<FreeAccessStat
   const supabase = await createClient();
   const { start, nextResetAt } = getTodayWindow();
 
-  const { count } = await (supabase as any)
+  const { data } = await (supabase as any)
     .from("kit_access_logs")
-    .select("id", { count: "exact", head: true })
+    .select("kit_id")
     .eq("user_id", userId)
     .gte("accessed_at", start);
 
-  const accessCountToday = count ?? 0;
+  const uniqueKitCount24h = new Set(((data ?? []) as { kit_id: string }[]).map((row) => row.kit_id)).size;
+  const accessCountToday = uniqueKitCount24h;
   const remaining = Math.max(0, FREE_LIMIT - accessCountToday);
 
-  return { accessCountToday, remaining, limit: FREE_LIMIT, nextResetAt };
+  return { accessCountToday, uniqueKitCount24h, remaining, limit: FREE_LIMIT, nextResetAt };
 }
 
 export async function registerKitAccess(userId: string, kitId: string): Promise<FreeAccessStats> {
+  const supabase = await createClient();
+  const { start } = getTodayWindow();
+
+  const { data: existing } = await (supabase as any)
+    .from("kit_access_logs")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("kit_id", kitId)
+    .gte("accessed_at", start)
+    .limit(1)
+    .maybeSingle();
+
+  if (existing?.id) return getFreeAccessStats(userId);
+
   const stats = await getFreeAccessStats(userId);
   if (stats.accessCountToday >= FREE_LIMIT) return stats;
 
-  const supabase = await createClient();
   await (supabase as any).from("kit_access_logs").insert({ user_id: userId, kit_id: kitId });
   return getFreeAccessStats(userId);
 }
