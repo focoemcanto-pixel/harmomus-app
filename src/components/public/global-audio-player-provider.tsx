@@ -1,10 +1,12 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { getPitchEngine, type PitchPlaybackController } from "@/lib/audio/pitch-engine";
 
 export type GlobalTrack = {
   src: string;
   title: string;
+  semitoneShift?: number;
 };
 
 type GlobalAudioPlayerContextValue = {
@@ -63,9 +65,15 @@ function storePreferences(volume: number, loop: boolean) {
   }
 }
 
+function isSameTrack(a: GlobalTrack | null, b: GlobalTrack) {
+  return a?.src === b.src && (a.semitoneShift ?? 0) === (b.semitoneShift ?? 0);
+}
+
 export function GlobalAudioPlayerProvider({ children }: { children: ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const preloadAudioRef = useRef<HTMLAudioElement | null>(null);
+  const pitchControllerRef = useRef<PitchPlaybackController | null>(null);
+  const pitchSessionRef = useRef(0);
 
   const [track, setTrack] = useState<GlobalTrack | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -77,6 +85,15 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [preloadedSrc, setPreloadedSrc] = useState<string | null>(null);
 
+  function disposePitchController() {
+    try {
+      pitchControllerRef.current?.dispose();
+    } catch {
+      // ignore
+    }
+    pitchControllerRef.current = null;
+  }
+
   useEffect(() => {
     const prefs = readStoredPreferences();
 
@@ -87,6 +104,10 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
       audioRef.current.volume = prefs.volume;
       audioRef.current.loop = prefs.loop;
     }
+  }, []);
+
+  useEffect(() => {
+    return () => disposePitchController();
   }, []);
 
   function preloadTrack(nextTrack: GlobalTrack) {
@@ -105,15 +126,40 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
     }
   }
 
+  async function playNative(audio: HTMLAudioElement) {
+    disposePitchController();
+    await audio.play();
+  }
+
+  async function playShifted(audio: HTMLAudioElement, semitoneShift: number) {
+    const session = ++pitchSessionRef.current;
+    disposePitchController();
+
+    const controller = await getPitchEngine().createPlayback({ audio, semitoneShift });
+
+    if (session !== pitchSessionRef.current) {
+      controller.dispose();
+      return;
+    }
+
+    pitchControllerRef.current = controller;
+    await controller.play();
+  }
+
   async function playTrack(nextTrack: GlobalTrack) {
     const audio = audioRef.current;
 
     if (!audio) return;
 
+    const semitoneShift = nextTrack.semitoneShift ?? 0;
+
     setErrorMessage(null);
     setHasEnded(false);
 
-    if (track?.src !== nextTrack.src) {
+    if (!isSameTrack(track, nextTrack)) {
+      pitchSessionRef.current += 1;
+      disposePitchController();
+      audio.pause();
       setTrack(nextTrack);
       setCurrentTime(0);
       setDuration(0);
@@ -125,9 +171,11 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
     audio.loop = loop;
 
     try {
-      await audio.play();
+      if (semitoneShift === 0) await playNative(audio);
+      else await playShifted(audio, semitoneShift);
       setIsPlaying(true);
     } catch {
+      disposePitchController();
       setErrorMessage("Não foi possível reproduzir este áudio agora.");
       setIsPlaying(false);
     }
@@ -138,23 +186,30 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
 
     if (!audio || !track?.src) return;
 
-    if (audio.paused) {
-      try {
-        if (hasEnded) {
-          audio.currentTime = 0;
-        }
+    const semitoneShift = track.semitoneShift ?? 0;
 
-        setHasEnded(false);
+    if (isPlaying) {
+      if (pitchControllerRef.current) pitchControllerRef.current.pause();
+      else audio.pause();
+      setIsPlaying(false);
+      return;
+    }
 
-        await audio.play();
-
-        setErrorMessage(null);
-        setIsPlaying(true);
-      } catch {
-        setErrorMessage("Não foi possível reproduzir este áudio agora.");
+    try {
+      if (hasEnded) {
+        audio.currentTime = 0;
       }
-    } else {
-      audio.pause();
+
+      setHasEnded(false);
+
+      if (semitoneShift === 0) await playNative(audio);
+      else if (pitchControllerRef.current) await pitchControllerRef.current.play();
+      else await playShifted(audio, semitoneShift);
+
+      setErrorMessage(null);
+      setIsPlaying(true);
+    } catch {
+      setErrorMessage("Não foi possível reproduzir este áudio agora.");
       setIsPlaying(false);
     }
   }
@@ -164,12 +219,14 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
 
     if (!audio || !track?.src) return;
 
+    const semitoneShift = track.semitoneShift ?? 0;
     audio.currentTime = 0;
     setCurrentTime(0);
     setHasEnded(false);
 
     try {
-      await audio.play();
+      if (semitoneShift === 0) await playNative(audio);
+      else await playShifted(audio, semitoneShift);
       setErrorMessage(null);
       setIsPlaying(true);
     } catch {
@@ -181,6 +238,11 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
     const audio = audioRef.current;
 
     if (!audio) return;
+
+    if ((track?.semitoneShift ?? 0) !== 0) {
+      setErrorMessage("Busca manual ainda não está disponível em áudio modulado.");
+      return;
+    }
 
     const next = Math.max(0, Math.min(seconds, duration || seconds));
 
@@ -224,6 +286,9 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
 
   function closePlayer() {
     const audio = audioRef.current;
+
+    pitchSessionRef.current += 1;
+    disposePitchController();
 
     if (audio) {
       audio.pause();
@@ -273,6 +338,7 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
         onPause={() => setIsPlaying(false)}
         onPlay={() => setIsPlaying(true)}
         onEnded={() => {
+          disposePitchController();
           setIsPlaying(false);
 
           if (!loop) {
