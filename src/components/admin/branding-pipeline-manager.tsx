@@ -25,6 +25,8 @@ type GeneratedAsset = {
   quality?: number;
 };
 
+type SourceBounds = { sx: number; sy: number; sw: number; sh: number };
+
 const ASSETS: GeneratedAsset[] = [
   { key: "logo", label: "Logo principal", width: 1200, height: 360, field: "logoUrl", mimeType: "image/webp", fit: "contain", quality: 0.92 },
   { key: "favicon", label: "Favicon", width: 512, height: 512, field: "faviconUrl", mimeType: "image/png", fit: "contain" },
@@ -49,13 +51,19 @@ const EMPTY_VALUES: BrandingState = {
   ogImageUrl: "",
 };
 
+function proxiedImageUrl(url: string) {
+  if (!url || url.startsWith("blob:") || url.startsWith("data:")) return url;
+  if (url.startsWith("/api/admin/branding-image-proxy")) return url;
+  return `/api/admin/branding-image-proxy?url=${encodeURIComponent(url)}`;
+}
+
 function loadImageFromUrl(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.crossOrigin = "anonymous";
     image.onload = () => resolve(image);
     image.onerror = () => reject(new Error("Não foi possível abrir este upload para edição. Use 'Upload específico' para substituir."));
-    image.src = url;
+    image.src = proxiedImageUrl(url);
   });
 }
 
@@ -84,6 +92,52 @@ function canvasToBlob(canvas: HTMLCanvasElement, mimeType: string, quality?: num
   });
 }
 
+function getVisibleBounds(image: HTMLImageElement): SourceBounds {
+  const scanCanvas = document.createElement("canvas");
+  scanCanvas.width = image.naturalWidth || image.width;
+  scanCanvas.height = image.naturalHeight || image.height;
+  const scanCtx = scanCanvas.getContext("2d", { willReadFrequently: true });
+  if (!scanCtx) return { sx: 0, sy: 0, sw: image.width, sh: image.height };
+
+  scanCtx.drawImage(image, 0, 0, scanCanvas.width, scanCanvas.height);
+
+  let pixels: ImageData;
+  try {
+    pixels = scanCtx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
+  } catch {
+    return { sx: 0, sy: 0, sw: scanCanvas.width, sh: scanCanvas.height };
+  }
+
+  const { data, width, height } = pixels;
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = (y * width + x) * 4;
+      const alpha = data[index + 3];
+      if (alpha > 12) {
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+      }
+    }
+  }
+
+  if (maxX < 0 || maxY < 0) return { sx: 0, sy: 0, sw: width, sh: height };
+
+  const padding = Math.max(6, Math.round(Math.max(maxX - minX, maxY - minY) * 0.04));
+  const sx = Math.max(0, minX - padding);
+  const sy = Math.max(0, minY - padding);
+  const sw = Math.min(width - sx, maxX - minX + 1 + padding * 2);
+  const sh = Math.min(height - sy, maxY - minY + 1 + padding * 2);
+
+  return { sx, sy, sw, sh };
+}
+
 function drawAsset(image: HTMLImageElement, asset: GeneratedAsset, crop: CropState) {
   const canvas = document.createElement("canvas");
   canvas.width = asset.width;
@@ -93,19 +147,22 @@ function drawAsset(image: HTMLImageElement, asset: GeneratedAsset, crop: CropSta
 
   ctx.clearRect(0, 0, asset.width, asset.height);
 
+  const shouldTrim = asset.key === "logo" || asset.key === "favicon";
+  const source = shouldTrim ? getVisibleBounds(image) : { sx: 0, sy: 0, sw: image.naturalWidth || image.width, sh: image.naturalHeight || image.height };
+
   const baseScale = asset.fit === "cover"
-    ? Math.max(asset.width / image.width, asset.height / image.height)
-    : Math.min(asset.width / image.width, asset.height / image.height);
+    ? Math.max(asset.width / source.sw, asset.height / source.sh)
+    : Math.min(asset.width / source.sw, asset.height / source.sh);
 
   const scale = baseScale * crop.zoom;
-  const drawWidth = image.width * scale;
-  const drawHeight = image.height * scale;
+  const drawWidth = source.sw * scale;
+  const drawHeight = source.sh * scale;
   const drawX = (asset.width - drawWidth) / 2 + crop.x * asset.width;
   const drawY = (asset.height - drawHeight) / 2 + crop.y * asset.height;
 
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(image, drawX, drawY, drawWidth, drawHeight);
+  ctx.drawImage(image, source.sx, source.sy, source.sw, source.sh, drawX, drawY, drawWidth, drawHeight);
 
   return canvas;
 }
@@ -177,7 +234,7 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
       await loadImageFromUrl(url);
       if (sourcePreview && sourcePreview.startsWith("blob:")) URL.revokeObjectURL(sourcePreview);
       setSourceFile(null);
-      setSourcePreview(url);
+      setSourcePreview(proxiedImageUrl(url));
       setSelectedAssetKey(asset.key);
       setCrops((current) => ({ ...current, [asset.key]: DEFAULT_CROPS[asset.key] }));
       setMessage(`${asset.label} aberto no editor. Ajuste o enquadramento e clique em Regerar este formato.`);
@@ -268,7 +325,7 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
         <div>
           <p className="text-xs uppercase tracking-[0.25em] text-gold-300">Pipeline inteligente de identidade</p>
           <p className="mt-1 max-w-2xl text-sm text-muted">
-            Suba uma imagem matriz, envie uma imagem específica ou edite um upload já salvo. Depois clique em Salvar configurações para publicar.
+            Suba uma imagem matriz, envie uma imagem específica ou edite um upload já salvo. O sistema remove automaticamente margens transparentes de logo e favicon.
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
@@ -311,7 +368,7 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
               />
               <div className="pointer-events-none absolute inset-0 border-2 border-gold-300/40" />
             </div>
-            <p className="mt-3 text-xs text-muted">Editor visual: {selectedAsset.label} • {selectedAsset.width}x{selectedAsset.height}. A prévia mostra a imagem carregada para você ajustar e regerar.</p>
+            <p className="mt-3 text-xs text-muted">Editor visual: {selectedAsset.label} • {selectedAsset.width}x{selectedAsset.height}. Ao regerar logo/favicon, as margens transparentes são ignoradas.</p>
           </div>
 
           <div className="rounded-2xl border border-border bg-black/30 p-4">
