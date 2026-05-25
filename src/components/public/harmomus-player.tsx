@@ -38,11 +38,11 @@ export function HarmomusPlayer({ src, title, canPlay, semitoneShift = 0, onBlock
 
   useEffect(() => {
     if (!hasStaleActiveTrack) return;
-    closePlayer();
+    void closePlayer();
   }, [hasStaleActiveTrack, closePlayer]);
 
   useEffect(() => {
-    if (!src && track) closePlayer();
+    if (!src && track) void closePlayer();
   }, [src, track, closePlayer]);
 
   const formatTime = useMemo(
@@ -63,7 +63,7 @@ export function HarmomusPlayer({ src, title, canPlay, semitoneShift = 0, onBlock
       return;
     }
 
-    closePlayer();
+    await closePlayer();
 
     await playTrack({
       src,
