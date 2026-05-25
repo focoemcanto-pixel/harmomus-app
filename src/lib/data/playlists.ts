@@ -1,7 +1,19 @@
+import { canSavePlaylist } from "@/lib/access/access-engine";
+import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 const MAX_KITS = 20;
+
+async function ensurePlaylistAccess() {
+  const current = await getCurrentUserAccessContext();
+
+  if (!canSavePlaylist(current.effectiveSlug)) {
+    throw new Error("Playlists disponíveis apenas para Plus e Premium.");
+  }
+
+  return current;
+}
 
 export type PlaylistTrackVoice = "todos" | "tenor" | "contralto" | "soprano" | "baritono";
 
@@ -234,6 +246,8 @@ export async function getPlaylistBySlug(slug: string): Promise<PublicPlaylist | 
 }
 
 export async function createPlaylist({ name, kitIds }: { name: string; kitIds: string[] }) {
+  await ensurePlaylistAccess();
+
   if (!name.trim()) throw new Error("Nome obrigatório.");
   const uniqueKitIds = Array.from(new Set(kitIds));
   if (uniqueKitIds.length === 0) throw new Error("Selecione ao menos 1 kit.");
@@ -262,6 +276,8 @@ export async function createPlaylist({ name, kitIds }: { name: string; kitIds: s
 }
 
 export async function addKitToPlaylist(playlistId: string, kitId: string) {
+  await ensurePlaylistAccess();
+
   const supabase = createSupabaseAdminClient() as any;
   const { data: kit } = await supabase.from("kits").select("id").eq("id", kitId).eq("published", true).maybeSingle();
   if (!kit) throw new Error("Kit inválido.");
@@ -273,6 +289,8 @@ export async function addKitToPlaylist(playlistId: string, kitId: string) {
 }
 
 export async function removeKitFromPlaylist(playlistId: string, kitId: string) {
+  await ensurePlaylistAccess();
+
   const supabase = createSupabaseAdminClient() as any;
   await supabase.from("playlist_items").delete().eq("playlist_id", playlistId).eq("kit_id", kitId);
 }
