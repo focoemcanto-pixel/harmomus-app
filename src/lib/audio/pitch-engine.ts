@@ -147,15 +147,12 @@ class BrowserPitchEngine implements PitchEngine {
     if (typeof window === "undefined") return null;
 
     try {
-      const module = await import("soundtouchjs");
-      if (module?.SoundTouch && module?.SimpleFilter && module?.BufferSource && module?.getWebAudioNode) {
-        return module as SoundTouchModule;
-      }
+      const module = (await import("soundtouchjs")) as unknown as SoundTouchModule;
+      return module;
     } catch (error) {
       console.error("[PitchEngine] Failed to import bundled soundtouchjs", error);
+      return null;
     }
-
-    return null;
   }
 
   async createPlayback(request: PitchPlaybackRequest): Promise<PitchPlaybackController> {
