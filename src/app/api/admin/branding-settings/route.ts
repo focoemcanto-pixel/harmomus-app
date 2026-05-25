@@ -8,7 +8,8 @@ const ALLOWED_FIELDS = new Set(["logoUrl", "faviconUrl", "loginImageUrl", "heroI
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const payload = await request.json();
+    const body = payload?.branding && typeof payload.branding === "object" ? payload.branding : payload;
     const branding: Record<string, string> = {};
 
     for (const [key, value] of Object.entries(body ?? {})) {
@@ -26,6 +27,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, branding: settings.branding });
   } catch (error) {
     console.error("Falha ao salvar branding", error);
-    return NextResponse.json({ error: "Falha ao salvar branding." }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : "Falha ao salvar branding.",
+      },
+      { status: 500 },
+    );
   }
 }
