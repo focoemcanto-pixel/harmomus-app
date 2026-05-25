@@ -1,4 +1,4 @@
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 
 export interface AdminSettings {
   branding: {
@@ -17,7 +17,8 @@ export interface AdminSettings {
   whatsapp: { supportPhone: string; webhook: string };
 }
 
-const FALLBACK_SECTION_TYPE = "admin_settings_global";
+const SETTINGS_TYPE = "admin_settings_global";
+
 const DEFAULT_SETTINGS: AdminSettings = {
   branding: {
     appName: "Harmomus",
@@ -40,7 +41,12 @@ const DEFAULT_SETTINGS: AdminSettings = {
     r2PublicUrl: process.env.R2_PUBLIC_BASE_URL ?? "",
     connectionStatus: process.env.R2_BUCKET_NAME && process.env.R2_ACCESS_KEY_ID ? "conectado" : "pendente",
   },
-  home: { headline: "Prepare sua voz. Honre seu chamado.", subheadline: "Kits vocais completos em todos os tons e vozes para preparar seu ministério com excelência, segurança e unidade vocal.", primaryCta: "Explorar kits", secondaryCta: "Experimentar grátis por 7 dias" },
+  home: {
+    headline: "Prepare sua voz. Honre seu chamado.",
+    subheadline: "Kits vocais completos em todos os tons e vozes para preparar seu ministério com excelência, segurança e unidade vocal.",
+    primaryCta: "Explorar kits",
+    secondaryCta: "Experimentar grátis por 7 dias",
+  },
   whatsapp: { supportPhone: "", webhook: "" },
 };
 
@@ -55,7 +61,7 @@ function mergeSettings(payload: Partial<AdminSettings> | null | undefined): Admi
   };
 }
 
-function parseFallbackPayload(raw: unknown): Partial<AdminSettings> | null {
+function parsePayload(raw: unknown): Partial<AdminSettings> | null {
   if (!raw || typeof raw !== "string") return null;
   try {
     return JSON.parse(raw) as Partial<AdminSettings>;
@@ -64,97 +70,24 @@ function parseFallbackPayload(raw: unknown): Partial<AdminSettings> | null {
   }
 }
 
-function hasUsefulPayload(payload: Partial<AdminSettings> | null | undefined) {
-  return Boolean(
-    payload?.branding?.logoUrl ||
-      payload?.branding?.faviconUrl ||
-      payload?.branding?.loginImageUrl ||
-      payload?.branding?.heroImageUrl ||
-      payload?.branding?.ogImageUrl ||
-      payload?.branding?.appName,
-  );
-}
-
-async function getFallbackPayload(supabase: any): Promise<Partial<AdminSettings> | null> {
+export async function getAdminSettings(): Promise<AdminSettings> {
   try {
+    const supabase = (await createClient()) as any;
+
     const { data, error } = await supabase
       .from("home_sections")
       .select("subtitle")
-      .eq("type", FALLBACK_SECTION_TYPE)
+      .eq("type", SETTINGS_TYPE)
+      .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
 
     if (error) {
-      console.error("Falha ao carregar configurações fallback", error);
-      return null;
+      console.error("Falha ao carregar configurações", error);
+      return DEFAULT_SETTINGS;
     }
 
-    return parseFallbackPayload(data?.subtitle);
-  } catch (error) {
-    console.error("Erro inesperado ao carregar configurações fallback", error);
-    return null;
-  }
-}
-
-async function saveFallbackSettings(supabase: any, payload: AdminSettings): Promise<boolean> {
-  try {
-    const serialized = JSON.stringify(payload);
-    const { data: existing } = await supabase
-      .from("home_sections")
-      .select("id")
-      .eq("type", FALLBACK_SECTION_TYPE)
-      .limit(1)
-      .maybeSingle();
-
-    if (existing?.id) {
-      const { error } = await supabase
-        .from("home_sections")
-        .update({ title: "Admin Settings", subtitle: serialized, active: false, order_index: -999 })
-        .eq("id", existing.id);
-      if (error) {
-        console.error("Falha ao atualizar configurações fallback", error);
-        return false;
-      }
-      return true;
-    }
-
-    const { error } = await supabase.from("home_sections").insert({
-      type: FALLBACK_SECTION_TYPE,
-      title: "Admin Settings",
-      subtitle: serialized,
-      active: false,
-      order_index: -999,
-    });
-
-    if (error) {
-      console.error("Falha ao criar configurações fallback", error);
-      return false;
-    }
-
-    return true;
-  } catch (error) {
-    console.error("Erro inesperado ao salvar configurações fallback", error);
-    return false;
-  }
-}
-
-export async function getAdminSettings(): Promise<AdminSettings> {
-  try {
-    const supabase = createSupabaseAdminClient() as any;
-    const [{ data, error }, fallbackPayload] = await Promise.all([
-      supabase.from("admin_settings").select("payload").eq("key", "global").maybeSingle(),
-      getFallbackPayload(supabase),
-    ]);
-
-    if (error) {
-      console.error("Falha ao carregar admin_settings, usando fallback", error);
-      return mergeSettings(fallbackPayload);
-    }
-
-    const primaryPayload = data?.payload as Partial<AdminSettings> | null;
-    if (hasUsefulPayload(primaryPayload)) return mergeSettings(primaryPayload);
-    if (hasUsefulPayload(fallbackPayload)) return mergeSettings(fallbackPayload);
-    return mergeSettings(primaryPayload ?? fallbackPayload);
+    return mergeSettings(parsePayload(data?.subtitle));
   } catch (error) {
     console.error("Erro inesperado ao carregar configurações", error);
     return DEFAULT_SETTINGS;
@@ -162,19 +95,45 @@ export async function getAdminSettings(): Promise<AdminSettings> {
 }
 
 export async function saveAdminSettings(payload: AdminSettings): Promise<void> {
-  try {
-    const supabase = createSupabaseAdminClient() as any;
-    const [{ error }, savedFallback] = await Promise.all([
-      supabase.from("admin_settings").upsert({ key: "global", payload, updated_at: new Date().toISOString() }, { onConflict: "key" }),
-      saveFallbackSettings(supabase, payload),
-    ]);
+  const supabase = (await createClient()) as any;
+  const serialized = JSON.stringify(mergeSettings(payload));
 
-    if (error) console.error("Falha ao salvar admin_settings", error);
-    if (error && !savedFallback) throw new Error(error.message || "Falha ao salvar configurações.");
-  } catch (error) {
-    console.error("Erro inesperado ao salvar configurações", error);
-    throw error;
+  const { data: existing, error: existingError } = await supabase
+    .from("home_sections")
+    .select("id")
+    .eq("type", SETTINGS_TYPE)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingError) {
+    throw new Error(existingError.message);
   }
+
+  if (existing?.id) {
+    const { error } = await supabase
+      .from("home_sections")
+      .update({
+        title: "Configurações Harmomus",
+        subtitle: serialized,
+        active: true,
+        order_index: -999,
+      })
+      .eq("id", existing.id);
+
+    if (error) throw new Error(error.message);
+    return;
+  }
+
+  const { error } = await supabase.from("home_sections").insert({
+    type: SETTINGS_TYPE,
+    title: "Configurações Harmomus",
+    subtitle: serialized,
+    active: true,
+    order_index: -999,
+  });
+
+  if (error) throw new Error(error.message);
 }
 
 export async function updateBrandingSettings(branding: Partial<AdminSettings["branding"]>): Promise<AdminSettings> {
