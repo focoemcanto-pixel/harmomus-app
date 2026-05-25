@@ -1,10 +1,22 @@
+import { redirect } from "next/navigation";
+
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { CreatePlaylistForm } from "@/components/public/create-playlist-form";
+import { canSavePlaylist } from "@/lib/access/access-engine";
+import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { getPublishedKitsForPlaylist, searchPublishedKits } from "@/lib/data/playlists";
 import { getPublishedKitBySlug } from "@/lib/data/public-kits";
 
 export default async function CriarPlaylistPage({ searchParams }: { searchParams: Promise<{ kit?: string; kit_id?: string }> }) {
-  const params = await searchParams;
+  const [params, current] = await Promise.all([
+    searchParams,
+    getCurrentUserAccessContext(),
+  ]);
+
+  if (!canSavePlaylist(current.effectiveSlug)) {
+    redirect("/assinar?upgrade=playlist");
+  }
+
   const kits = await getPublishedKitsForPlaylist();
   let initialSelectedKit = null;
   if (params.kit) initialSelectedKit = await getPublishedKitBySlug(params.kit);
