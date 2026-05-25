@@ -53,7 +53,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   const [{ data: kit }, { data: plans }, context] = await Promise.all([
-    (supabase as any).from("kits").select("id,slug,name,artist,cover_url,description,lyrics,required_plan").eq("id", audioFile.kit_id).maybeSingle(),
+    (supabase as any)
+      .from("kits")
+      .select("id,slug,name,artist,cover_url,description,lyrics,required_plan,original_tone,default_tone,allow_pitch_shift,max_pitch_shift_semitones")
+      .eq("id", audioFile.kit_id)
+      .maybeSingle(),
     (supabase as any).from("plans").select("id,name,slug"),
     getCurrentUserAccessContext(),
   ]);
@@ -72,6 +76,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     coverUrl: kit.cover_url,
     description: kit.description,
     lyrics: kit.lyrics,
+    originalTone: kit.original_tone ?? null,
+    defaultTone: kit.default_tone ?? kit.original_tone ?? null,
+    allowPitchShift: kit.allow_pitch_shift ?? true,
+    maxPitchShiftSemitones: kit.max_pitch_shift_semitones ?? 2,
     category: null,
     requiredPlan,
     tones: [],
