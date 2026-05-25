@@ -4,8 +4,10 @@ import Link from "next/link";
 import { Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getPitchEngine, type PitchPlaybackController } from "@/lib/audio/pitch-engine";
+import { midiToNoteName } from "@/lib/audio/pitch-analysis";
 
 import type { PlaylistKitSummary, PlaylistTrackVoice, PublicPlaylist } from "@/lib/data/playlists";
+import { analyzeTessitura } from "@/lib/music/tessitura";
 import { CHROMATIC_TONES_SHARP, pickInitialTone, resolveToneTrack } from "@/lib/music/tones";
 
 interface PlaylistPlayerClientProps {
@@ -51,6 +53,24 @@ function toneStatusLabel(isReal: boolean) {
   return isReal ? "gravado" : "Harmomus AI";
 }
 
+function tessituraStatusLabel(status: string) {
+  const map: Record<string, string> = {
+    comfortable: "Confortável",
+    extended: "Estendida",
+    extreme: "Extrema",
+    unsafe: "Fora da zona segura",
+  };
+  return map[status] ?? status;
+}
+
+function getTrackMidiRange(track: KitTrack | null) {
+  if (!track) return null;
+  const min = track.minMidiNote ?? track.detectedMinMidiNote;
+  const max = track.maxMidiNote ?? track.detectedMaxMidiNote;
+  if (typeof min !== "number" || typeof max !== "number") return null;
+  return { min, max };
+}
+
 export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [currentKitIndex, setCurrentKitIndex] = useState(0);
@@ -84,6 +104,19 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
   const currentTrack = toneResolution?.sourceTrack ?? (currentKit ? findTrack(currentKit, selectedTone, selectedVoice) : null);
   const playableTrack = toneResolution?.isAvailable ? currentTrack : null;
   const semitoneShift = toneResolution?.isPitchShifted ? toneResolution.semitoneShift : 0;
+
+  const tessituraAnalysis = useMemo(() => {
+    if (!toneResolution?.sourceTone || !selectedTone) return null;
+    const range = getTrackMidiRange(currentTrack);
+    if (!range) return null;
+
+    return analyzeTessitura({
+      requestedTone: selectedTone,
+      sourceTone: toneResolution.sourceTone,
+      sourceMinMidi: range.min,
+      sourceMaxMidi: range.max,
+    });
+  }, [currentTrack, selectedTone, toneResolution?.sourceTone]);
 
   useEffect(() => {
     setCurrentKitIndex(0);
@@ -199,13 +232,13 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
     };
   }, []);
 
-
   if (!currentKit) {
     return <main className="min-h-screen bg-[radial-gradient(circle_at_top,#1f2840_0%,#06070c_40%)] p-6 text-white">Playlist vazia.</main>;
   }
 
   const isSelectedToneReal = realToneOptions.includes(selectedTone);
   const canPlaySelectedTone = Boolean(playableTrack?.streamUrl);
+  const trackMidiRange = getTrackMidiRange(currentTrack);
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,#1f2840_0%,#06070c_40%)] p-4 md:p-8">
@@ -280,7 +313,24 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
                 <p className="mt-1 text-xs text-zinc-500">Tom original: {currentKit.original_tone ?? "não informado"} • Tom inicial: {currentKit.default_tone ?? currentKit.original_tone ?? "automático"}</p>
                 {toneResolution?.isPitchShifted ? (
                   <p className="mt-2 rounded-xl border border-gold-400/20 bg-gold-400/10 px-3 py-2 text-xs text-gold-200">
-                    Tom Harmomus AI preparado: usar {toneResolution.sourceTone} {toneResolution.semitoneShift > 0 ? `+${toneResolution.semitoneShift}` : toneResolution.semitoneShift} semitom(ns). O processamento de áudio será ativado na próxima camada.
+                    Harmomus AI: usando {toneResolution.sourceTone} {toneResolution.semitoneShift > 0 ? `+${toneResolution.semitoneShift}` : toneResolution.semitoneShift} semitom(ns).
+                  </p>
+                ) : null}
+                {tessituraAnalysis ? (
+                  <div className="mt-3 rounded-xl border border-white/10 bg-black/25 px-3 py-3 text-xs text-zinc-200">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full border border-white/10 px-2 py-1 text-zinc-200">Zona: {tessituraStatusLabel(tessituraAnalysis.status)}</span>
+                      <span className="rounded-full border border-white/10 px-2 py-1 text-zinc-200">Nipe sugerido: {voiceLabel(tessituraAnalysis.suggestedRange)}</span>
+                      {tessituraAnalysis.suggestedOctaveShift !== 0 ? <span className="rounded-full border border-gold-400/20 px-2 py-1 text-gold-200">Oitava: {tessituraAnalysis.suggestedOctaveShift > 0 ? "+1" : "-1"}</span> : null}
+                    </div>
+                    <p className="mt-2 text-zinc-300">{tessituraAnalysis.message}</p>
+                    <p className="mt-1 text-zinc-500">
+                      Faixa original: {trackMidiRange ? `${midiToNoteName(trackMidiRange.min)} → ${midiToNoteName(trackMidiRange.max)}` : "não analisada"} • Após ajuste: {midiToNoteName(tessituraAnalysis.targetMidiRange.min)} → {midiToNoteName(tessituraAnalysis.targetMidiRange.max)}
+                    </p>
+                  </div>
+                ) : currentTrack ? (
+                  <p className="mt-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-zinc-400">
+                    Tessitura ainda não analisada para esta faixa.
                   </p>
                 ) : null}
                 {!toneResolution?.isAvailable && selectedTone ? (
