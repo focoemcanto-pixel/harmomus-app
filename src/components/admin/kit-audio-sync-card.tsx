@@ -1,19 +1,36 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { analyzeAudioUrlPitch, midiToNoteName } from "@/lib/audio/pitch-analysis";
 import type { KitAudioFile, KitAudioToneGroup } from "@/types/kit-audio";
+
+interface AnalysisSummary {
+  total: number;
+  analyzed: number;
+  saved: number;
+  failed: number;
+  migrationRequired: boolean;
+}
 
 export function KitAudioSyncCard({ kitId }: { kitId: string }) {
   const [loading, setLoading] = useState(false);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [analyzingKey, setAnalyzingKey] = useState<string | null>(null);
+  const [analyzingAll, setAnalyzingAll] = useState(false);
+  const [analysisSummary, setAnalysisSummary] = useState<AnalysisSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tones, setTones] = useState<KitAudioToneGroup[]>([]);
   const [usedPrefix, setUsedPrefix] = useState<string | null>(null);
+  const [hasTessituraColumns, setHasTessituraColumns] = useState(true);
 
   const VOICE_ORDER = ["todos", "soprano", "contralto", "tenor"] as const;
+
+  const allFiles = useMemo(() => tones.flatMap((tone) => tone.files), [tones]);
+  const pendingFiles = useMemo(
+    () => allFiles.filter((file) => typeof file.id === "string" && (typeof (file.minMidiNote ?? file.detectedMinMidiNote) !== "number" || typeof (file.maxMidiNote ?? file.detectedMaxMidiNote) !== "number")),
+    [allFiles],
+  );
 
   async function loadSyncedAudios() {
     setLoadingFiles(true);
@@ -25,6 +42,7 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
 
       if (!response.ok) throw new Error(data?.error ?? "Não foi possível carregar os áudios sincronizados.");
 
+      setHasTessituraColumns(data?.hasTessituraColumns !== false);
       setTones((data?.tones ?? []) as KitAudioToneGroup[]);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Erro inesperado ao carregar áudios.");
@@ -41,6 +59,7 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
   async function syncAudios() {
     setLoading(true);
     setError(null);
+    setAnalysisSummary(null);
     try {
       const response = await fetch(`/api/kits/${kitId}/sync-audio`, { method: "POST" });
       const data = await response.json();
@@ -56,30 +75,56 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
     }
   }
 
-  async function analyzeTessitura(file: KitAudioFile) {
-    if (!file.id) {
-      setError("Sincronize os áudios antes de analisar a tessitura.");
-      return;
+  async function persistTessitura(fileId: string, result: Awaited<ReturnType<typeof analyzeAudioUrlPitch>>) {
+    const response = await fetch(`/api/audio/${fileId}/analyze-tessitura`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        detectedMinMidiNote: result.minMidiNote,
+        detectedMaxMidiNote: result.maxMidiNote,
+        confidence: result.confidence,
+      }),
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(data?.error ?? "Não foi possível salvar a análise de tessitura.");
     }
 
-    setAnalyzingKey(file.id);
+    if (data?.migrationRequired) {
+      return { saved: false, migrationRequired: true };
+    }
+
+    return { saved: true, migrationRequired: false };
+  }
+
+  async function analyzeSingleFile(file: KitAudioFile) {
+    if (!file.id) {
+      throw new Error("Sincronize os áudios antes de analisar a tessitura.");
+    }
+
+    const result = await analyzeAudioUrlPitch(`/api/audio/${file.id}`);
+
+    if (typeof result.minMidiNote !== "number" || typeof result.maxMidiNote !== "number") {
+      throw new Error("Não foi possível detectar notas suficientes neste áudio.");
+    }
+
+    return persistTessitura(file.id, result);
+  }
+
+  async function analyzeTessitura(file: KitAudioFile) {
+    setAnalyzingKey(file.id ?? file.key);
     setError(null);
+    setAnalysisSummary(null);
 
     try {
-      const result = await analyzeAudioUrlPitch(`/api/audio/${file.id}`);
+      const result = await analyzeSingleFile(file);
 
-      const response = await fetch(`/api/audio/${file.id}/analyze-tessitura`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          detectedMinMidiNote: result.minMidiNote,
-          detectedMaxMidiNote: result.maxMidiNote,
-          confidence: result.confidence,
-        }),
-      });
-
-      const data = await response.json();
-      if (!response.ok) throw new Error(data?.error ?? "Não foi possível salvar a análise de tessitura.");
+      if (result.migrationRequired) {
+        setError("A análise rodou, mas não foi salva porque as colunas de tessitura ainda não existem no banco. Aplique a migration de tessitura no Supabase.");
+        return;
+      }
 
       await loadSyncedAudios();
     } catch (analysisError) {
@@ -87,6 +132,50 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
     } finally {
       setAnalyzingKey(null);
     }
+  }
+
+  async function analyzeAllTessituras() {
+    const filesToAnalyze = pendingFiles.length > 0 ? pendingFiles : allFiles.filter((file) => typeof file.id === "string");
+
+    if (filesToAnalyze.length === 0) {
+      setError("Nenhum áudio sincronizado disponível para análise.");
+      return;
+    }
+
+    setAnalyzingAll(true);
+    setError(null);
+    setAnalysisSummary({ total: filesToAnalyze.length, analyzed: 0, saved: 0, failed: 0, migrationRequired: false });
+
+    let analyzed = 0;
+    let saved = 0;
+    let failed = 0;
+    let migrationRequired = false;
+
+    for (const file of filesToAnalyze) {
+      setAnalyzingKey(file.id ?? file.key);
+
+      try {
+        const result = await analyzeSingleFile(file);
+        analyzed += 1;
+        if (result.saved) saved += 1;
+        if (result.migrationRequired) migrationRequired = true;
+      } catch (batchError) {
+        console.error("[KitAudioSyncCard] tessitura batch analysis failed", file, batchError);
+        failed += 1;
+      }
+
+      setAnalysisSummary({ total: filesToAnalyze.length, analyzed, saved, failed, migrationRequired });
+    }
+
+    setAnalyzingKey(null);
+    setAnalyzingAll(false);
+
+    if (migrationRequired) {
+      setError("As análises rodaram, mas uma ou mais não foram salvas porque a migration de tessitura ainda não foi aplicada no Supabase.");
+      return;
+    }
+
+    await loadSyncedAudios();
   }
 
   function formatTessitura(file: KitAudioFile) {
@@ -114,15 +203,23 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
           <button
             type="button"
             onClick={() => void loadSyncedAudios()}
-            disabled={loadingFiles || loading}
+            disabled={loadingFiles || loading || analyzingAll}
             className="rounded-lg border border-border bg-surface-muted px-4 py-2 text-sm font-medium text-muted transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
           >
             {loadingFiles ? "Carregando..." : "Atualizar lista"}
           </button>
           <button
             type="button"
+            onClick={() => void analyzeAllTessituras()}
+            disabled={loading || loadingFiles || analyzingAll || allFiles.length === 0}
+            className="rounded-lg border border-blue-400/40 bg-blue-500/10 px-4 py-2 text-sm font-medium text-blue-200 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {analyzingAll ? "Analisando todas..." : `Analisar todas${pendingFiles.length > 0 ? ` (${pendingFiles.length})` : ""}`}
+          </button>
+          <button
+            type="button"
             onClick={() => void syncAudios()}
-            disabled={loading}
+            disabled={loading || analyzingAll}
             className="rounded-lg border border-gold-500/40 bg-gold-500/10 px-4 py-2 text-sm font-medium text-gold-300 transition hover:bg-gold-500/20 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {loading ? "Sincronizando..." : "Sincronizar áudios"}
@@ -130,7 +227,19 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
         </div>
       </div>
 
+      {!hasTessituraColumns ? (
+        <p className="mb-3 rounded-lg border border-yellow-500/40 bg-yellow-500/10 px-3 py-2 text-sm text-yellow-200">
+          As colunas de tessitura ainda não existem no banco. A lista funciona, mas a análise só será salva depois que a migration for aplicada no Supabase.
+        </p>
+      ) : null}
+
       {error ? <p className="mb-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</p> : null}
+
+      {analysisSummary ? (
+        <p className="mb-3 rounded-lg border border-border bg-surface-muted px-3 py-2 text-sm text-muted">
+          Progresso da análise: {analysisSummary.analyzed}/{analysisSummary.total} processadas • {analysisSummary.saved} salvas • {analysisSummary.failed} falharam
+        </p>
+      ) : null}
 
       {usedPrefix ? <p className="mb-3 text-xs text-muted">Prefixo usado na sincronização: <span className="font-mono text-foreground">{usedPrefix}</span></p> : null}
 
@@ -169,7 +278,7 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
                             <button
                               type="button"
                               onClick={() => void analyzeTessitura(file)}
-                              disabled={Boolean(analyzingKey)}
+                              disabled={Boolean(analyzingKey) || analyzingAll}
                               className="rounded-lg border border-gold-500/30 bg-gold-500/10 px-3 py-1.5 text-xs font-medium text-gold-300 hover:bg-gold-500/20 disabled:cursor-not-allowed disabled:opacity-60"
                             >
                               {isAnalyzing ? "Analisando..." : "Analisar tessitura"}
