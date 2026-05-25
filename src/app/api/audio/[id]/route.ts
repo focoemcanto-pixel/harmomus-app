@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { resolveKitAccess } from "@/lib/access/access-rules";
+import type { PublicKit } from "@/lib/data/public-kits";
 import { getAudioStream } from "@/lib/r2/get-audio-stream";
 import { createClient } from "@/lib/supabase/server";
 
@@ -67,8 +68,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   const requiredPlan = (plans ?? []).find((p: any) => p.slug === kit.required_plan) ?? null;
-
-  const access = await resolveKitAccess(context, {
+  const accessKit: PublicKit = {
     id: kit.id,
     slug: kit.slug,
     name: kit.name,
@@ -83,7 +83,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     category: null,
     requiredPlan,
     tones: [],
-  });
+  };
+
+  const access = await resolveKitAccess(context, accessKit);
 
   if (!access.play.allowed) {
     await logAudioAccess({
