@@ -28,6 +28,9 @@ export interface KitListItem extends Kit {
   file_count: number;
 }
 
+const AUDIO_BASE_COLUMNS = "id,r2_key";
+const AUDIO_TESSITURA_COLUMNS = `${AUDIO_BASE_COLUMNS},min_midi_note,max_midi_note,detected_min_midi_note,detected_max_midi_note,tessitura_confidence,tessitura_source`;
+
 export async function getKits(): Promise<KitListItem[]> {
   const supabase = (await createClient()) as any;
   const [{ data: kits, error: kitsError }, { data: categories, error: categoriesError }, { data: plans, error: plansError }, { data: audioFiles, error: audioFilesError }] = await Promise.all([
@@ -118,38 +121,77 @@ export async function ensureArtistCategory(artistName: string): Promise<Category
   return data as Category;
 }
 
+async function getExistingAudioFilesForSync(supabase: any, kitId: string) {
+  const { data, error } = await supabase
+    .from("kit_audio_files")
+    .select(AUDIO_TESSITURA_COLUMNS)
+    .eq("kit_id", kitId);
+
+  if (!error) return { files: data ?? [], hasTessituraColumns: true };
+
+  const { data: fallbackData, error: fallbackError } = await supabase
+    .from("kit_audio_files")
+    .select(AUDIO_BASE_COLUMNS)
+    .eq("kit_id", kitId);
+
+  if (fallbackError) throw new Error(fallbackError.message);
+
+  return { files: fallbackData ?? [], hasTessituraColumns: false };
+}
+
+function buildAudioSyncRow({
+  kitId,
+  tone,
+  file,
+  existing,
+  hasTessituraColumns,
+}: {
+  kitId: string;
+  tone: string;
+  file: KitAudioToneGroup["files"][number];
+  existing: any;
+  hasTessituraColumns: boolean;
+}) {
+  const baseRow = {
+    id: existing?.id,
+    kit_id: kitId,
+    tone,
+    name: file.name,
+    r2_key: file.key,
+    public_url: file.url,
+    file_type: file.fileType,
+  };
+
+  if (!hasTessituraColumns) return baseRow;
+
+  return {
+    ...baseRow,
+    min_midi_note: existing?.min_midi_note ?? null,
+    max_midi_note: existing?.max_midi_note ?? null,
+    detected_min_midi_note: existing?.detected_min_midi_note ?? null,
+    detected_max_midi_note: existing?.detected_max_midi_note ?? null,
+    tessitura_confidence: existing?.tessitura_confidence ?? null,
+    tessitura_source: existing?.tessitura_source ?? "manual",
+  };
+}
+
 export async function saveKitAudioSync(kitId: string, tones: KitAudioToneGroup[]): Promise<void> {
   const supabase = (await createClient()) as any;
 
-  const { data: existingFiles } = await supabase
-    .from("kit_audio_files")
-    .select("id,r2_key,min_midi_note,max_midi_note,detected_min_midi_note,detected_max_midi_note,tessitura_confidence,tessitura_source")
-    .eq("kit_id", kitId);
+  const { files: existingFiles, hasTessituraColumns } = await getExistingAudioFilesForSync(supabase, kitId);
 
   const existingMap = new Map(
     ((existingFiles ?? []) as any[]).map((file) => [file.r2_key, file]),
   );
 
   const rows = tones.flatMap((toneGroup) =>
-    toneGroup.files.map((file) => {
-      const existing = existingMap.get(file.key);
-
-      return {
-        id: existing?.id,
-        kit_id: kitId,
-        tone: toneGroup.tone,
-        name: file.name,
-        r2_key: file.key,
-        public_url: file.url,
-        file_type: file.fileType,
-        min_midi_note: existing?.min_midi_note ?? null,
-        max_midi_note: existing?.max_midi_note ?? null,
-        detected_min_midi_note: existing?.detected_min_midi_note ?? null,
-        detected_max_midi_note: existing?.detected_max_midi_note ?? null,
-        tessitura_confidence: existing?.tessitura_confidence ?? null,
-        tessitura_source: existing?.tessitura_source ?? "manual",
-      };
-    }),
+    toneGroup.files.map((file) => buildAudioSyncRow({
+      kitId,
+      tone: toneGroup.tone,
+      file,
+      existing: existingMap.get(file.key),
+      hasTessituraColumns,
+    })),
   );
 
   const { error: deleteError } = await supabase
