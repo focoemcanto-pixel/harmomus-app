@@ -33,13 +33,17 @@ export function HarmomusPlayer({ src, title, canPlay, semitoneShift = 0, onBlock
   } = useGlobalAudioPlayer();
 
   const currentSemitoneShift = track?.semitoneShift ?? 0;
-  const isCurrentTrack = track?.src === src && currentSemitoneShift === semitoneShift;
-  const hasDifferentActiveTrack = Boolean(track && !isCurrentTrack);
+  const isCurrentTrack = Boolean(track && track.src === src && track.title === title && currentSemitoneShift === semitoneShift);
+  const hasStaleActiveTrack = Boolean(track && !isCurrentTrack);
 
   useEffect(() => {
-    if (!hasDifferentActiveTrack || !isPlaying) return;
+    if (!hasStaleActiveTrack) return;
     closePlayer();
-  }, [hasDifferentActiveTrack, isPlaying, closePlayer]);
+  }, [hasStaleActiveTrack, closePlayer]);
+
+  useEffect(() => {
+    if (!src && track) closePlayer();
+  }, [src, track, closePlayer]);
 
   const formatTime = useMemo(
     () => (value: number) => `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, "0")}`,
@@ -59,6 +63,8 @@ export function HarmomusPlayer({ src, title, canPlay, semitoneShift = 0, onBlock
       return;
     }
 
+    closePlayer();
+
     await playTrack({
       src,
       title,
@@ -67,7 +73,7 @@ export function HarmomusPlayer({ src, title, canPlay, semitoneShift = 0, onBlock
   }
 
   function handlePreload() {
-    if (!canPlay || !src) return;
+    if (!canPlay || !src || isPlaying) return;
 
     preloadTrack({
       src,
