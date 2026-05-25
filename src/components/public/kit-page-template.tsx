@@ -47,9 +47,28 @@ function getMidiRange(file: PublicKitAudioFile | null) {
   return { min, max };
 }
 
+function getReinterpretationCopy(analysis: ReturnType<typeof analyzeTessitura>) {
+  if (!analysis) return null;
+  const isRisky = analysis.status === "extreme" || analysis.status === "unsafe" || analysis.suggestedOctaveShift !== 0;
+  if (!isRisky) return null;
+
+  const octaveText = analysis.suggestedOctaveShift === -12
+    ? "1 oitava abaixo"
+    : analysis.suggestedOctaveShift === 12
+      ? "1 oitava acima"
+      : "na oitava atual";
+
+  return {
+    title: "Reinterpretação vocal sugerida",
+    description: `Para preservar conforto e estabilidade, esta voz pode funcionar melhor como ${voiceLabel(analysis.suggestedRange)} cantando ${octaveText}.`,
+    button: `Aplicar sugestão: ${voiceLabel(analysis.suggestedRange)}`,
+  };
+}
+
 export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
   const [selectedTone, setSelectedTone] = useState(kit.tones[0]?.tone ?? "");
   const [selectedVoice, setSelectedVoice] = useState<VoiceType>("todos");
+  const [manualInterpretation, setManualInterpretation] = useState<string | null>(null);
   const [loginOpen, setLoginOpen] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [upgradeConfig, setUpgradeConfig] = useState({
@@ -72,6 +91,8 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
       sourceMaxMidi: midiRange.max,
     });
   }, [selectedFile, midiRange, selectedTone]);
+
+  const reinterpretation = getReinterpretationCopy(tessituraAnalysis);
 
   function openPremiumToneUpgrade() {
     setUpgradeConfig({
@@ -113,8 +134,12 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
                   return;
                 }
                 setSelectedTone(tone);
+                setManualInterpretation(null);
               }} />
-              <VoiceSelector selectedVoice={selectedVoice} onSelectVoice={setSelectedVoice} />
+              <VoiceSelector selectedVoice={selectedVoice} onSelectVoice={(voice) => {
+                setSelectedVoice(voice);
+                setManualInterpretation(null);
+              }} />
               <HarmomusPlayer src={selectedFile?.streamUrl ?? null} title={`Tom ${selectedTone} • Voz ${selectedVoice}`} canPlay={accessContext.play.allowed} onBlocked={() => {
                 if (accessContext.play.reason === "guest") setLoginOpen(true);
                 else {
@@ -150,6 +175,20 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
                   <p className="mt-1 text-zinc-500">
                     Faixa: {midiRange ? `${midiToNoteName(midiRange.min)} → ${midiToNoteName(midiRange.max)}` : "não analisada"} • Após ajuste: {midiToNoteName(tessituraAnalysis.targetMidiRange.min)} → {midiToNoteName(tessituraAnalysis.targetMidiRange.max)}
                   </p>
+
+                  {reinterpretation ? (
+                    <div className="mt-3 rounded-xl border border-gold-400/20 bg-gold-400/10 p-3">
+                      <p className="font-medium text-gold-200">{reinterpretation.title}</p>
+                      <p className="mt-1 text-gold-100/80">{manualInterpretation ?? reinterpretation.description}</p>
+                      <button
+                        type="button"
+                        onClick={() => setManualInterpretation(`Sugestão aplicada: estudar esta voz como ${voiceLabel(tessituraAnalysis.suggestedRange)}${tessituraAnalysis.suggestedOctaveShift === -12 ? " 1 oitava abaixo" : tessituraAnalysis.suggestedOctaveShift === 12 ? " 1 oitava acima" : ""}.`)}
+                        className="mt-3 rounded-lg border border-gold-400/30 bg-black/20 px-3 py-2 text-xs font-medium text-gold-100 hover:bg-black/30"
+                      >
+                        {reinterpretation.button}
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               ) : selectedFile ? (
                 <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-xs text-zinc-400">
