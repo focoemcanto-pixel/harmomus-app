@@ -1,6 +1,7 @@
 import { getSignedSemitoneDistance, normalizeTone } from "@/lib/music/tones";
 
 export type VocalRangeType = "tenor" | "contralto" | "soprano" | "baritono";
+export type TessituraStatus = "comfortable" | "extended" | "extreme" | "unsafe";
 
 export interface VocalZone {
   minMidi: number;
@@ -24,8 +25,22 @@ export interface TessituraAnalysis {
     min: number;
     max: number;
   };
-  status: "comfortable" | "extended" | "extreme" | "unsafe";
+  status: TessituraStatus;
   suggestedRange: VocalRangeType;
+  suggestedOctaveShift: 0 | -12 | 12;
+  message: string;
+}
+
+export interface TargetVoiceTessituraAnalysis {
+  requestedTone: string;
+  sourceTone: string;
+  semitoneShift: number;
+  voice: VocalRangeType;
+  targetMidiRange: {
+    min: number;
+    max: number;
+  };
+  status: TessituraStatus;
   suggestedOctaveShift: 0 | -12 | 12;
   message: string;
 }
@@ -133,14 +148,21 @@ export function applySemitoneShift(midi: number, semitoneShift: number, octaveSh
   return midi + semitoneShift + octaveShift;
 }
 
+function classifyAgainstRange(minMidi: number, maxMidi: number, range: VocalRange): TessituraStatus {
+  if (minMidi >= range.comfortable.minMidi && maxMidi <= range.comfortable.maxMidi) return "comfortable";
+  if (minMidi >= range.extended.minMidi && maxMidi <= range.extended.maxMidi) return "extended";
+  if (minMidi >= range.extreme.minMidi && maxMidi <= range.extreme.maxMidi) return "extreme";
+  return "unsafe";
+}
+
 export function classifyRange(minMidi: number, maxMidi: number): {
-  status: "comfortable" | "extended" | "extreme" | "unsafe";
+  status: TessituraStatus;
   suggestedRange: VocalRange;
 } {
   const ranges = Object.values(VOCAL_RANGES);
 
   for (const range of ranges) {
-    if (minMidi >= range.comfortable.minMidi && maxMidi <= range.comfortable.maxMidi) {
+    if (classifyAgainstRange(minMidi, maxMidi, range) === "comfortable") {
       return {
         status: "comfortable",
         suggestedRange: range,
@@ -149,7 +171,7 @@ export function classifyRange(minMidi: number, maxMidi: number): {
   }
 
   for (const range of ranges) {
-    if (minMidi >= range.extended.minMidi && maxMidi <= range.extended.maxMidi) {
+    if (classifyAgainstRange(minMidi, maxMidi, range) === "extended") {
       return {
         status: "extended",
         suggestedRange: range,
@@ -158,7 +180,7 @@ export function classifyRange(minMidi: number, maxMidi: number): {
   }
 
   for (const range of ranges) {
-    if (minMidi >= range.extreme.minMidi && maxMidi <= range.extreme.maxMidi) {
+    if (classifyAgainstRange(minMidi, maxMidi, range) === "extreme") {
       return {
         status: "extreme",
         suggestedRange: range,
@@ -169,6 +191,72 @@ export function classifyRange(minMidi: number, maxMidi: number): {
   return {
     status: "unsafe",
     suggestedRange: VOCAL_RANGES.tenor,
+  };
+}
+
+export function analyzeTargetVoiceTessitura({
+  requestedTone,
+  sourceTone,
+  sourceMinMidi,
+  sourceMaxMidi,
+  voice,
+}: {
+  requestedTone: string;
+  sourceTone: string;
+  sourceMinMidi: number;
+  sourceMaxMidi: number;
+  voice: VocalRangeType;
+}): TargetVoiceTessituraAnalysis | null {
+  const semitoneShift = getSignedSemitoneDistance(sourceTone, requestedTone);
+  if (semitoneShift === null) return null;
+
+  const range = VOCAL_RANGES[voice];
+  const shiftedMin = applySemitoneShift(sourceMinMidi, semitoneShift);
+  const shiftedMax = applySemitoneShift(sourceMaxMidi, semitoneShift);
+
+  let octaveShift: 0 | -12 | 12 = 0;
+  let status = classifyAgainstRange(shiftedMin, shiftedMax, range);
+
+  if (status === "unsafe") {
+    const octaveDownStatus = classifyAgainstRange(shiftedMin - 12, shiftedMax - 12, range);
+    const octaveUpStatus = classifyAgainstRange(shiftedMin + 12, shiftedMax + 12, range);
+
+    if (octaveDownStatus !== "unsafe" && shiftedMax > range.extreme.maxMidi) {
+      octaveShift = -12;
+      status = octaveDownStatus;
+    } else if (octaveUpStatus !== "unsafe" && shiftedMin < range.extreme.minMidi) {
+      octaveShift = 12;
+      status = octaveUpStatus;
+    }
+  }
+
+  const adjustedMin = shiftedMin + octaveShift;
+  const adjustedMax = shiftedMax + octaveShift;
+
+  const messageMap: Record<TessituraStatus, string> = {
+    comfortable: `Tessitura confortável para ${range.label}.`,
+    extended: `Tessitura utilizável para ${range.label}, mas fora da zona principal de conforto.`,
+    extreme: `Tessitura extrema para ${range.label}. Exige maior técnica e controle vocal.`,
+    unsafe: `Tessitura fora da região recomendada para ${range.label}.`,
+  };
+
+  return {
+    requestedTone,
+    sourceTone,
+    semitoneShift,
+    voice,
+    targetMidiRange: {
+      min: adjustedMin,
+      max: adjustedMax,
+    },
+    status,
+    suggestedOctaveShift: octaveShift,
+    message:
+      octaveShift === -12
+        ? `A linha de ${range.label} ficou muito elevada. Recomendada leitura 1 oitava abaixo para esta função vocal.`
+        : octaveShift === 12
+          ? `A linha de ${range.label} ficou muito grave. Recomendada leitura 1 oitava acima para esta função vocal.`
+          : messageMap[status],
   };
 }
 
