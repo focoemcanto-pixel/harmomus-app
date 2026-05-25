@@ -47,7 +47,12 @@ function getMidiRange(file: PublicKitAudioFile | null) {
   return { min, max };
 }
 
-function getReinterpretationCopy(analysis: ReturnType<typeof analyzeTessitura>) {
+function toAvailableVoice(value: string, currentTone: PublicKit["tones"][number] | undefined): VoiceType | null {
+  if (value !== "todos" && value !== "tenor" && value !== "contralto" && value !== "soprano") return null;
+  return currentTone?.voices[value] ? value : null;
+}
+
+function getReinterpretationCopy(analysis: ReturnType<typeof analyzeTessitura>, hasSuggestedVoice: boolean) {
   if (!analysis) return null;
   const isRisky = analysis.status === "extreme" || analysis.status === "unsafe" || analysis.suggestedOctaveShift !== 0;
   if (!isRisky) return null;
@@ -61,7 +66,7 @@ function getReinterpretationCopy(analysis: ReturnType<typeof analyzeTessitura>) 
   return {
     title: "Reinterpretação vocal sugerida",
     description: `Para preservar conforto e estabilidade, esta voz pode funcionar melhor como ${voiceLabel(analysis.suggestedRange)} cantando ${octaveText}.`,
-    button: `Aplicar sugestão: ${voiceLabel(analysis.suggestedRange)}`,
+    button: hasSuggestedVoice ? `Aplicar voz: ${voiceLabel(analysis.suggestedRange)}` : `Aplicar orientação`,
   };
 }
 
@@ -92,7 +97,20 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
     });
   }, [selectedFile, midiRange, selectedTone]);
 
-  const reinterpretation = getReinterpretationCopy(tessituraAnalysis);
+  const suggestedVoice = tessituraAnalysis ? toAvailableVoice(tessituraAnalysis.suggestedRange, currentTone) : null;
+  const reinterpretation = getReinterpretationCopy(tessituraAnalysis, Boolean(suggestedVoice));
+
+  function applyReinterpretation() {
+    if (!tessituraAnalysis) return;
+
+    if (suggestedVoice) {
+      setSelectedVoice(suggestedVoice);
+    }
+
+    setManualInterpretation(
+      `Sugestão aplicada: estudar esta voz como ${voiceLabel(tessituraAnalysis.suggestedRange)}${tessituraAnalysis.suggestedOctaveShift === -12 ? " 1 oitava abaixo" : tessituraAnalysis.suggestedOctaveShift === 12 ? " 1 oitava acima" : ""}.`,
+    );
+  }
 
   function openPremiumToneUpgrade() {
     setUpgradeConfig({
@@ -182,7 +200,7 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
                       <p className="mt-1 text-gold-100/80">{manualInterpretation ?? reinterpretation.description}</p>
                       <button
                         type="button"
-                        onClick={() => setManualInterpretation(`Sugestão aplicada: estudar esta voz como ${voiceLabel(tessituraAnalysis.suggestedRange)}${tessituraAnalysis.suggestedOctaveShift === -12 ? " 1 oitava abaixo" : tessituraAnalysis.suggestedOctaveShift === 12 ? " 1 oitava acima" : ""}.`)}
+                        onClick={applyReinterpretation}
                         className="mt-3 rounded-lg border border-gold-400/30 bg-black/20 px-3 py-2 text-xs font-medium text-gold-100 hover:bg-black/30"
                       >
                         {reinterpretation.button}
