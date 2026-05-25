@@ -44,13 +44,13 @@ function FieldError({ name, field, error }: { name: Field; field: Field; error: 
 }
 function HarmomusAuthLogo({ logoUrl, appName }: { logoUrl: string; appName: string }) {
   return (
-    <div className="mx-auto mb-7 flex items-center justify-center gap-3">
+    <div className="mx-auto mb-8 flex min-h-[76px] items-center justify-center gap-3">
       {logoUrl ? (
-        <img src={logoUrl} alt={appName} className="max-h-16 w-auto object-contain" />
+        <img src={logoUrl} alt={appName} className="h-20 max-h-20 w-auto max-w-[320px] object-contain md:h-24 md:max-h-24 md:max-w-[420px]" />
       ) : (
         <>
-          <div className="grid h-12 w-12 place-items-center rounded-2xl border border-white/10 bg-white/[0.03] text-xl font-bold text-white shadow-[0_0_34px_rgba(129,140,248,0.25)]">H</div>
-          <p className="text-3xl font-semibold tracking-tight text-white">Harmo<span className="bg-gradient-to-r from-indigo-200 to-violet-500 bg-clip-text text-transparent">mus</span></p>
+          <div className="grid h-14 w-14 place-items-center rounded-2xl border border-white/10 bg-white/[0.03] text-2xl font-bold text-white shadow-[0_0_34px_rgba(129,140,248,0.25)]">H</div>
+          <p className="text-4xl font-semibold tracking-tight text-white">Harmo<span className="bg-gradient-to-r from-indigo-200 to-violet-500 bg-clip-text text-transparent">mus</span></p>
         </>
       )}
     </div>
