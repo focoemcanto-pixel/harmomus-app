@@ -30,6 +30,17 @@ export interface KitListItem extends Kit {
 
 const AUDIO_BASE_COLUMNS = "id,r2_key";
 const AUDIO_TESSITURA_COLUMNS = `${AUDIO_BASE_COLUMNS},min_midi_note,max_midi_note,detected_min_midi_note,detected_max_midi_note,tessitura_confidence,tessitura_source`;
+const KIT_TONE_COLUMNS = ["original_tone", "default_tone", "allow_pitch_shift", "max_pitch_shift_semitones"] as const;
+
+function isMissingKitToneColumnError(message: string) {
+  return KIT_TONE_COLUMNS.some((column) => message.includes(column));
+}
+
+function stripKitToneColumns<T extends Record<string, unknown>>(data: T): Omit<T, (typeof KIT_TONE_COLUMNS)[number]> {
+  const next = { ...data };
+  for (const column of KIT_TONE_COLUMNS) delete next[column];
+  return next;
+}
 
 export async function getKits(): Promise<KitListItem[]> {
   const supabase = (await createClient()) as any;
@@ -74,15 +85,42 @@ export async function getKitById(id: string): Promise<Kit | null> {
 export async function createKit(data: KitInsert): Promise<Kit> {
   const supabase = (await createClient()) as any;
   const { data: created, error } = await supabase.from("kits").insert(data as any).select("*").single();
-  if (error) throw new Error(`Falha ao criar kit: ${error.message}`);
-  return created as Kit;
+
+  if (!error) return created as Kit;
+
+  if (isMissingKitToneColumnError(error.message)) {
+    const { data: fallbackCreated, error: fallbackError } = await supabase
+      .from("kits")
+      .insert(stripKitToneColumns(data as Record<string, unknown>) as any)
+      .select("*")
+      .single();
+
+    if (fallbackError) throw new Error(`Falha ao criar kit: ${fallbackError.message}`);
+    return fallbackCreated as Kit;
+  }
+
+  throw new Error(`Falha ao criar kit: ${error.message}`);
 }
 
 export async function updateKit(id: string, data: KitUpdate): Promise<Kit> {
   const supabase = (await createClient()) as any;
   const { data: updated, error } = await supabase.from("kits").update(data as any).eq("id", id).select("*").single();
-  if (error) throw new Error(`Falha ao atualizar kit: ${error.message}`);
-  return updated as Kit;
+
+  if (!error) return updated as Kit;
+
+  if (isMissingKitToneColumnError(error.message)) {
+    const { data: fallbackUpdated, error: fallbackError } = await supabase
+      .from("kits")
+      .update(stripKitToneColumns(data as Record<string, unknown>) as any)
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (fallbackError) throw new Error(`Falha ao atualizar kit: ${fallbackError.message}`);
+    return fallbackUpdated as Kit;
+  }
+
+  throw new Error(`Falha ao atualizar kit: ${error.message}`);
 }
 
 export async function deleteKit(id: string): Promise<void> {
