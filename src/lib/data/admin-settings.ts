@@ -1,3 +1,6 @@
+import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+
+import { r2BucketName, r2Client } from "@/lib/r2/client";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export interface AdminSettings {
@@ -19,6 +22,7 @@ export interface AdminSettings {
 
 const SETTINGS_TYPE = "admin_settings_global";
 const SETTINGS_TITLE = "Configurações Harmomus";
+const SETTINGS_R2_KEY = "settings/admin-settings.json";
 
 const DEFAULT_SETTINGS: AdminSettings = {
   branding: {
@@ -81,29 +85,66 @@ function settingsRow(payload: AdminSettings) {
   };
 }
 
-export async function getAdminSettings(): Promise<AdminSettings> {
+function isMissingHomeSectionsError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return message.includes("public.home_sections") || message.includes("home_sections") || message.includes("schema cache");
+}
+
+async function bodyToString(body: any): Promise<string> {
+  if (!body) return "";
+  if (typeof body.transformToString === "function") return body.transformToString();
+  if (typeof body.text === "function") return body.text();
+
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of body) {
+    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : Buffer.from(chunk));
+  }
+
+  return Buffer.concat(chunks).toString("utf-8");
+}
+
+async function getSettingsFromR2(): Promise<AdminSettings | null> {
+  if (!r2BucketName) return null;
+
   try {
-    const supabase = createSupabaseAdminClient() as any;
-    const { data, error } = await supabase
-      .from("home_sections")
-      .select("subtitle")
-      .eq("type", SETTINGS_TYPE)
-      .order("created_at", { ascending: false })
-      .limit(1);
-
-    if (error) {
-      console.error("Falha ao carregar configurações", error);
-      return DEFAULT_SETTINGS;
-    }
-
-    return mergeSettings(parsePayload(data?.[0]?.subtitle));
+    const response = await r2Client.send(new GetObjectCommand({ Bucket: r2BucketName, Key: SETTINGS_R2_KEY }));
+    const raw = await bodyToString(response.Body);
+    return mergeSettings(parsePayload(raw));
   } catch (error) {
-    console.error("Erro inesperado ao carregar configurações", error);
-    return DEFAULT_SETTINGS;
+    const name = (error as { name?: string })?.name;
+    if (name !== "NoSuchKey" && name !== "NotFound") {
+      console.error("Falha ao carregar configurações do R2", error);
+    }
+    return null;
   }
 }
 
-export async function saveAdminSettings(payload: AdminSettings): Promise<void> {
+async function saveSettingsToR2(payload: AdminSettings): Promise<void> {
+  if (!r2BucketName) throw new Error("R2_BUCKET_NAME não configurado para salvar configurações.");
+
+  await r2Client.send(new PutObjectCommand({
+    Bucket: r2BucketName,
+    Key: SETTINGS_R2_KEY,
+    Body: JSON.stringify(mergeSettings(payload), null, 2),
+    ContentType: "application/json; charset=utf-8",
+    CacheControl: "private, max-age=0, no-store",
+  }));
+}
+
+async function getSettingsFromDatabase(): Promise<AdminSettings | null> {
+  const supabase = createSupabaseAdminClient() as any;
+  const { data, error } = await supabase
+    .from("home_sections")
+    .select("subtitle")
+    .eq("type", SETTINGS_TYPE)
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (error) throw new Error(`select: ${error.message}`);
+  return mergeSettings(parsePayload(data?.[0]?.subtitle));
+}
+
+async function saveSettingsToDatabase(payload: AdminSettings): Promise<void> {
   const supabase = createSupabaseAdminClient() as any;
   const row = settingsRow(payload);
 
@@ -135,6 +176,33 @@ export async function saveAdminSettings(payload: AdminSettings): Promise<void> {
   if (insertError) {
     throw new Error(`insert: ${insertError.message}`);
   }
+}
+
+export async function getAdminSettings(): Promise<AdminSettings> {
+  try {
+    return (await getSettingsFromDatabase()) ?? DEFAULT_SETTINGS;
+  } catch (error) {
+    if (!isMissingHomeSectionsError(error)) {
+      console.error("Falha ao carregar configurações", error);
+    }
+  }
+
+  const r2Settings = await getSettingsFromR2();
+  return r2Settings ?? DEFAULT_SETTINGS;
+}
+
+export async function saveAdminSettings(payload: AdminSettings): Promise<void> {
+  try {
+    await saveSettingsToDatabase(payload);
+    await saveSettingsToR2(payload);
+    return;
+  } catch (databaseError) {
+    if (!isMissingHomeSectionsError(databaseError)) {
+      console.error("Falha ao salvar configurações no banco. Usando fallback R2.", databaseError);
+    }
+  }
+
+  await saveSettingsToR2(payload);
 }
 
 export async function updateBrandingSettings(branding: Partial<AdminSettings["branding"]>): Promise<AdminSettings> {
