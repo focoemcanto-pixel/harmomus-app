@@ -11,7 +11,7 @@ import { VoiceSelector } from "@/components/public/voice-selector";
 import { midiToNoteName } from "@/lib/audio/pitch-analysis";
 import type { PublicKit, PublicKitAudioFile, PublicKitToneGroup, VoiceType } from "@/lib/data/public-kits";
 import { analyzeTargetVoiceTessitura, type TargetVoiceTessituraAnalysis, type VocalRangeType } from "@/lib/music/tessitura";
-import { CHROMATIC_TONES_SHARP, formatToneLabel, getSignedSemitoneDistance, normalizeTone, resolveToneTrack, sortTonesByChromaticOrder } from "@/lib/music/tones";
+import { CHROMATIC_TONES_SHARP, formatToneLabel, normalizeTone, resolveToneTrack, sortTonesByChromaticOrder } from "@/lib/music/tones";
 
 interface KitPageTemplateProps {
   kit: PublicKit;
@@ -142,7 +142,7 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
   const realToneOptions = useMemo(() => sortTonesByChromaticOrder(kit.tones.map((tone) => tone.tone)), [kit.tones]);
   const initialTone = normalizeTone(kit.defaultTone) ?? normalizeTone(kit.originalTone) ?? realToneOptions[0] ?? "";
 
-  const [selectedTone, setSelectedTone] = useState(initialTone);
+  const [selectedTone, setSelectedTone] = useState<string>(initialTone);
   const [selectedVoice, setSelectedVoice] = useState<VoiceType>("todos");
   const [loginOpen, setLoginOpen] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
