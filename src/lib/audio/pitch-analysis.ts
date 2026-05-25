@@ -18,6 +18,9 @@ const MAX_FREQUENCY = 1200;
 const DEFAULT_WINDOW_SIZE = 4096;
 const DEFAULT_HOP_SIZE = 2048;
 const MIN_CONFIDENCE = 0.72;
+const MAX_MELODY_JUMP_SEMITONES = 7;
+const MIN_NOTE_OCCURRENCE_RATIO = 0.018;
+const MIN_MELODY_FRAMES = 8;
 
 export function frequencyToMidi(frequency: number): number {
   return Math.round(69 + 12 * Math.log2(frequency / 440));
@@ -103,6 +106,77 @@ function percentile(values: number[], ratio: number): number | null {
   return sorted[index];
 }
 
+function median(values: number[]): number | null {
+  return percentile(values, 0.5);
+}
+
+function smoothMelodyFrames(frames: PitchAnalysisFrame[]): PitchAnalysisFrame[] {
+  if (frames.length < 3) return frames;
+
+  return frames.map((frame, index) => {
+    const window = frames.slice(Math.max(0, index - 1), Math.min(frames.length, index + 2));
+    const midi = median(window.map((item) => item.midi)) ?? frame.midi;
+    const frequency = midiToFrequency(midi);
+
+    return {
+      ...frame,
+      midi,
+      frequency,
+    };
+  });
+}
+
+function removeUnrealisticMelodyJumps(frames: PitchAnalysisFrame[]): PitchAnalysisFrame[] {
+  if (frames.length < 2) return frames;
+
+  const result: PitchAnalysisFrame[] = [];
+  let previous: PitchAnalysisFrame | null = null;
+
+  for (const frame of frames) {
+    if (!previous) {
+      result.push(frame);
+      previous = frame;
+      continue;
+    }
+
+    const jump = Math.abs(frame.midi - previous.midi);
+    if (jump <= MAX_MELODY_JUMP_SEMITONES || frame.confidence > 0.9) {
+      result.push(frame);
+      previous = frame;
+    }
+  }
+
+  return result;
+}
+
+function keepDenseMelodyNotes(frames: PitchAnalysisFrame[]): PitchAnalysisFrame[] {
+  if (frames.length < MIN_MELODY_FRAMES) return frames;
+
+  const counts = new Map<number, number>();
+  for (const frame of frames) {
+    counts.set(frame.midi, (counts.get(frame.midi) ?? 0) + 1);
+  }
+
+  const minCount = Math.max(2, Math.ceil(frames.length * MIN_NOTE_OCCURRENCE_RATIO));
+
+  return frames.filter((frame) => {
+    const directCount = counts.get(frame.midi) ?? 0;
+    const neighborCount = (counts.get(frame.midi - 1) ?? 0) + directCount + (counts.get(frame.midi + 1) ?? 0);
+    return directCount >= minCount || neighborCount >= minCount + 1;
+  });
+}
+
+function extractVocalMelodyFrames(frames: PitchAnalysisFrame[]): PitchAnalysisFrame[] {
+  const confidentFrames = frames.filter((frame) => frame.confidence >= MIN_CONFIDENCE);
+  if (confidentFrames.length < MIN_MELODY_FRAMES) return confidentFrames;
+
+  const smoothed = smoothMelodyFrames(confidentFrames);
+  const continuous = removeUnrealisticMelodyJumps(smoothed);
+  const dense = keepDenseMelodyNotes(continuous);
+
+  return dense.length >= MIN_MELODY_FRAMES ? dense : continuous;
+}
+
 export async function analyzeAudioBufferPitch(audioBuffer: AudioBuffer): Promise<PitchAnalysisResult> {
   const samples = extractMonoSamples(audioBuffer);
   const frames: PitchAnalysisFrame[] = [];
@@ -121,14 +195,14 @@ export async function analyzeAudioBufferPitch(audioBuffer: AudioBuffer): Promise
     });
   }
 
-  const confidentFrames = frames.filter((frame) => frame.confidence >= MIN_CONFIDENCE);
-  const midiValues = confidentFrames.map((frame) => frame.midi);
+  const melodyFrames = extractVocalMelodyFrames(frames);
+  const midiValues = melodyFrames.map((frame) => frame.midi);
 
-  const minMidi = percentile(midiValues, 0.03);
-  const maxMidi = percentile(midiValues, 0.97);
+  const minMidi = percentile(midiValues, 0.08);
+  const maxMidi = percentile(midiValues, 0.92);
   const medianMidi = percentile(midiValues, 0.5);
-  const confidence = confidentFrames.length > 0
-    ? confidentFrames.reduce((sum, frame) => sum + frame.confidence, 0) / confidentFrames.length
+  const confidence = melodyFrames.length > 0
+    ? melodyFrames.reduce((sum, frame) => sum + frame.confidence, 0) / melodyFrames.length
     : 0;
 
   return {
@@ -136,7 +210,7 @@ export async function analyzeAudioBufferPitch(audioBuffer: AudioBuffer): Promise
     maxMidiNote: maxMidi,
     medianMidiNote: medianMidi,
     confidence: Number(confidence.toFixed(4)),
-    frames: confidentFrames,
+    frames: melodyFrames,
   };
 }
 
