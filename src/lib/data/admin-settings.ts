@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export interface AdminSettings {
   branding: {
@@ -83,7 +83,7 @@ function settingsRow(payload: AdminSettings) {
 
 export async function getAdminSettings(): Promise<AdminSettings> {
   try {
-    const supabase = (await createClient()) as any;
+    const supabase = createSupabaseAdminClient() as any;
     const { data, error } = await supabase
       .from("home_sections")
       .select("subtitle")
@@ -104,19 +104,32 @@ export async function getAdminSettings(): Promise<AdminSettings> {
 }
 
 export async function saveAdminSettings(payload: AdminSettings): Promise<void> {
-  const supabase = (await createClient()) as any;
+  const supabase = createSupabaseAdminClient() as any;
   const row = settingsRow(payload);
 
-  const { error: updateError, count } = await supabase
+  const { data: existing, error: existingError } = await supabase
     .from("home_sections")
-    .update(row, { count: "exact" })
-    .eq("type", SETTINGS_TYPE);
+    .select("id")
+    .eq("type", SETTINGS_TYPE)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
-  if (updateError) {
-    throw new Error(`update: ${updateError.message}`);
+  if (existingError) {
+    throw new Error(`select: ${existingError.message}`);
   }
 
-  if ((count ?? 0) > 0) return;
+  if (existing?.id) {
+    const { error: updateError } = await supabase
+      .from("home_sections")
+      .update(row)
+      .eq("id", existing.id);
+
+    if (updateError) {
+      throw new Error(`update: ${updateError.message}`);
+    }
+    return;
+  }
 
   const { error: insertError } = await supabase.from("home_sections").insert(row);
   if (insertError) {
