@@ -9,10 +9,11 @@ interface HarmomusPlayerProps {
   src: string | null;
   title: string;
   canPlay: boolean;
+  semitoneShift?: number;
   onBlocked: () => void;
 }
 
-export function HarmomusPlayer({ src, title, canPlay, onBlocked }: HarmomusPlayerProps) {
+export function HarmomusPlayer({ src, title, canPlay, semitoneShift = 0, onBlocked }: HarmomusPlayerProps) {
   const {
     track,
     isPlaying,
@@ -28,13 +29,17 @@ export function HarmomusPlayer({ src, title, canPlay, onBlocked }: HarmomusPlaye
     skipBy,
     setVolumeValue,
     setLoopValue,
+    closePlayer,
   } = useGlobalAudioPlayer();
 
-  const isCurrentTrack = track?.src === src;
+  const currentSemitoneShift = track?.semitoneShift ?? 0;
+  const isCurrentTrack = track?.src === src && currentSemitoneShift === semitoneShift;
+  const hasDifferentActiveTrack = Boolean(track && !isCurrentTrack);
 
   useEffect(() => {
-    if (!isCurrentTrack) return;
-  }, [isCurrentTrack]);
+    if (!hasDifferentActiveTrack || !isPlaying) return;
+    closePlayer();
+  }, [hasDifferentActiveTrack, isPlaying, closePlayer]);
 
   const formatTime = useMemo(
     () => (value: number) => `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, "0")}`,
@@ -57,6 +62,7 @@ export function HarmomusPlayer({ src, title, canPlay, onBlocked }: HarmomusPlaye
     await playTrack({
       src,
       title,
+      semitoneShift,
     });
   }
 
@@ -66,6 +72,7 @@ export function HarmomusPlayer({ src, title, canPlay, onBlocked }: HarmomusPlaye
     preloadTrack({
       src,
       title,
+      semitoneShift,
     });
   }
 
@@ -79,7 +86,7 @@ export function HarmomusPlayer({ src, title, canPlay, onBlocked }: HarmomusPlaye
       <p className="mb-3 text-sm text-muted">{title}</p>
 
       <div className="flex items-center gap-3">
-        <button onClick={() => skipBy(-10)}>
+        <button onClick={() => skipBy(-10)} disabled={!isCurrentTrack} className="disabled:opacity-40">
           <RotateCcw size={18} />
         </button>
 
@@ -87,7 +94,7 @@ export function HarmomusPlayer({ src, title, canPlay, onBlocked }: HarmomusPlaye
           {isPlaying && isCurrentTrack ? <Pause size={18} /> : <Play size={18} />}
         </button>
 
-        <button onClick={() => skipBy(10)}>
+        <button onClick={() => skipBy(10)} disabled={!isCurrentTrack} className="disabled:opacity-40">
           <RotateCw size={18} />
         </button>
 
@@ -115,15 +122,20 @@ export function HarmomusPlayer({ src, title, canPlay, onBlocked }: HarmomusPlaye
         max={duration || 0}
         value={isCurrentTrack ? currentTime : 0}
         onChange={(e) => seekTo(Number(e.target.value))}
-        className="mt-3 w-full"
+        disabled={!isCurrentTrack}
+        className="mt-3 w-full disabled:opacity-40"
       />
 
       <div className="mt-1 flex justify-between text-xs text-muted">
         <span>{formatTime(isCurrentTrack ? currentTime : 0)}</span>
-        <span>{formatTime(duration)}</span>
+        <span>{formatTime(isCurrentTrack ? duration : 0)}</span>
       </div>
 
-      {errorMessage ? <p className="mt-2 text-xs text-amber-300">{errorMessage}</p> : null}
+      {semitoneShift !== 0 ? (
+        <p className="mt-2 text-xs text-gold-300">Modulação ativa: {semitoneShift > 0 ? `+${semitoneShift}` : semitoneShift} semitom(ns)</p>
+      ) : null}
+
+      {errorMessage && isCurrentTrack ? <p className="mt-2 text-xs text-amber-300">{errorMessage}</p> : null}
     </div>
   );
 }
