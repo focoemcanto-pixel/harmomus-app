@@ -54,15 +54,19 @@ function storePreferences(volume: number, loop: boolean) {
   try { window.localStorage.setItem(PLAYER_PREFS_KEY, JSON.stringify({ volume, loop })); } catch {}
 }
 
-function buildPlaybackKey(track: GlobalTrack | null) {
+function getTrackIdentity(track: GlobalTrack | null) {
   if (!track) return null;
   const shift = track.semitoneShift ?? 0;
-  const sourceId = track.trackId ?? track.src;
-  return `${sourceId}::${track.voice ?? "todos"}::${track.tone ?? "unknown"}::${shift}`;
+  const trackId = track.trackId ?? "unknown-track";
+  const src = track.src ?? "unknown-src";
+  const title = track.title ?? "unknown-title";
+  const voice = track.voice ?? "todos";
+  const tone = track.tone ?? "unknown";
+  return `${trackId}-${src}-${title}-${voice}-${tone}-${shift}`;
 }
 
 function isSameTrack(a: GlobalTrack | null, b: GlobalTrack) {
-  return buildPlaybackKey(a) === buildPlaybackKey(b);
+  return getTrackIdentity(a) === getTrackIdentity(b);
 }
 
 const isDev = process.env.NODE_ENV === "development";
@@ -77,6 +81,7 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
   const transitionLockRef = useRef(false);
 
   const [track, setTrack] = useState<GlobalTrack | null>(null);
+  const trackRef = useRef<GlobalTrack | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -85,6 +90,10 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
   const [hasEnded, setHasEnded] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [preloadedSrc, setPreloadedSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    trackRef.current = track;
+  }, [track]);
 
   function logDev(message: string, extra?: Record<string, unknown>) {
     if (!isDev) return;
@@ -95,6 +104,7 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
       tone: track?.tone ?? null,
       shift: track?.semitoneShift ?? 0,
       activePlaybackKey: activePlaybackKeyRef.current,
+      identity: getTrackIdentity(trackRef.current),
       ...extra,
     });
   }
@@ -148,7 +158,8 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
   }, []);
 
   function preloadTrack(nextTrack: GlobalTrack) {
-    if (!nextTrack.src || track?.src === nextTrack.src || preloadedSrc === nextTrack.src) return;
+    const currentTrack = trackRef.current;
+    if (!nextTrack.src || isSameTrack(currentTrack, nextTrack) || preloadedSrc === nextTrack.src) return;
     if ((nextTrack.semitoneShift ?? 0) !== 0) return;
     const preloadAudio = preloadAudioRef.current;
     if (!preloadAudio) return;
@@ -173,12 +184,15 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
       setErrorMessage(null);
       setHasEnded(false);
 
-      const cacheKey = `${nextTrack.trackId ?? nextTrack.src}-${nextTrack.voice ?? "todos"}-${nextTrack.tone ?? "unknown"}-${semitoneShift}`;
+      const identity = getTrackIdentity(nextTrack);
+      const cacheKey = identity ?? `${nextTrack.trackId ?? nextTrack.src}-${nextTrack.voice ?? "todos"}-${nextTrack.tone ?? "unknown"}-${semitoneShift}`;
       const sourceId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-      if (!isSameTrack(track, nextTrack)) {
+      const currentTrack = trackRef.current;
+      if (!isSameTrack(currentTrack, nextTrack)) {
         await invalidateCurrentPlayback("track-change");
         setTrack(nextTrack);
+        trackRef.current = nextTrack;
         setPreloadedSrc(null);
         activePlaybackKeyRef.current = cacheKey;
         logDev("building fresh playback pipeline", {
@@ -187,6 +201,8 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
           shift: semitoneShift,
           cacheKey,
           sourceId,
+          identity,
+          sessionId: currentPlaybackSessionIdRef.current,
         });
         setCurrentTime(0);
         setDuration(0);
@@ -213,7 +229,17 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
       }
 
       setIsPlaying(true);
-      logDev("source loaded", { src: nextTrack.src, semitoneShift, cacheKey, sourceId });
+      logDev("source loaded", {
+        src: nextTrack.src,
+        semitoneShift,
+        cacheKey,
+        sourceId,
+        identity,
+        voice: nextTrack.voice ?? null,
+        tone: nextTrack.tone ?? null,
+        shift: semitoneShift,
+        sessionId: currentPlaybackSessionIdRef.current,
+      });
     } catch (error) {
       setErrorMessage("Não foi possível reproduzir este áudio agora.");
       setIsPlaying(false);
@@ -229,7 +255,7 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
   function skipBy(seconds: number) { const audio = audioRef.current; if (!audio) return; seekTo(audio.currentTime + seconds); }
   function setVolumeValue(value: number) { const next = Math.max(0, Math.min(value, 1)); setVolume(next); if (audioRef.current) audioRef.current.volume = next; storePreferences(next, loop); }
   function setLoopValue(value: boolean) { setLoop(value); if (audioRef.current) audioRef.current.loop = value; storePreferences(volume, value); }
-  async function closePlayer() { await invalidateCurrentPlayback("close-player"); setTrack(null); setCurrentTime(0); setDuration(0); setHasEnded(false); setErrorMessage(null); }
+  async function closePlayer() { await invalidateCurrentPlayback("close-player"); trackRef.current = null; setTrack(null); setCurrentTime(0); setDuration(0); setHasEnded(false); setErrorMessage(null); }
 
   const value = useMemo<GlobalAudioPlayerContextValue>(() => ({ audioRef, track, isPlaying, currentTime, duration, volume, loop, hasEnded, errorMessage, preloadedSrc, preloadTrack, playTrack, togglePlay, replay, seekTo, skipBy, setVolumeValue, setLoopValue, closePlayer }), [track, isPlaying, currentTime, duration, volume, loop, hasEnded, errorMessage, preloadedSrc]);
 
