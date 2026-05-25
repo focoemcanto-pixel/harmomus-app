@@ -1,6 +1,7 @@
 export interface PitchPlaybackRequest {
   audio: HTMLAudioElement;
   semitoneShift: number;
+  signal?: AbortSignal;
 }
 
 export interface PitchPlaybackController {
@@ -177,7 +178,7 @@ class BrowserPitchEngine implements PitchEngine {
   }
 
   async createPlayback(request: PitchPlaybackRequest): Promise<PitchPlaybackController> {
-    const { audio, semitoneShift } = request;
+    const { audio, semitoneShift, signal } = request;
 
     if (typeof window === "undefined" || semitoneShift === 0) {
       return new NativePlaybackController(audio, semitoneShift);
@@ -187,6 +188,10 @@ class BrowserPitchEngine implements PitchEngine {
 
     if (!st) {
       throw new Error("Pitch shifting indisponível: soundtouchjs não foi carregado.");
+    }
+
+    if (signal?.aborted) {
+      throw new DOMException("Playback aborted", "AbortError");
     }
 
     return new SoundTouchPlaybackController(audio, Math.max(-3, Math.min(3, semitoneShift)), st);
