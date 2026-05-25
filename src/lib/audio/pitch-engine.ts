@@ -37,8 +37,13 @@ class NativePlaybackController implements PitchPlaybackController {
 type SoundTouchModule = {
   SoundTouch: new (sampleRate: number) => { pitch: number };
   SimpleFilter: new (source: unknown, soundTouch: unknown) => { sourcePosition?: number };
-  BufferSource: new (audioBuffer: AudioBuffer) => unknown;
-  getWebAudioNode: (context: AudioContext, filter: unknown) => AudioNode;
+  WebAudioBufferSource: new (audioBuffer: AudioBuffer) => unknown;
+  getWebAudioNode: (
+    context: AudioContext,
+    filter: unknown,
+    sourcePositionCallback?: (sourcePosition: number) => void,
+    bufferSize?: number,
+  ) => AudioNode;
 };
 
 class SoundTouchPlaybackController implements PitchPlaybackController {
@@ -47,23 +52,30 @@ class SoundTouchPlaybackController implements PitchPlaybackController {
   private filter: { sourcePosition?: number } | null = null;
   private decodedBuffer: AudioBuffer | null = null;
   private startOffsetSec = 0;
-  private startedAt = 0;
 
   constructor(private readonly audio: HTMLAudioElement, private semitoneShift: number, private readonly soundTouchModule: SoundTouchModule) {}
 
   private async ensureDecodedBuffer() {
     if (this.decodedBuffer) return;
+
     const src = this.audio.currentSrc || this.audio.src;
-    if (!src) throw new Error("Missing audio source");
+
+    if (!src) {
+      throw new Error("Missing audio source");
+    }
 
     this.audio.pause();
     this.audio.muted = true;
 
     const response = await fetch(src, { cache: "force-cache" });
-    if (!response.ok) throw new Error("Failed to fetch audio for pitch shifting");
+
+    if (!response.ok) {
+      throw new Error("Failed to fetch audio for pitch shifting");
+    }
 
     const arr = await response.arrayBuffer();
     const decodeContext = new AudioContext();
+
     try {
       this.decodedBuffer = await decodeContext.decodeAudioData(arr.slice(0));
     } finally {
@@ -73,22 +85,37 @@ class SoundTouchPlaybackController implements PitchPlaybackController {
 
   private async startGraph() {
     await this.ensureDecodedBuffer();
-    if (!this.decodedBuffer) return;
+
+    if (!this.decodedBuffer) {
+      return;
+    }
 
     this.context = new AudioContext();
-    const st = new this.soundTouchModule.SoundTouch(this.decodedBuffer.sampleRate);
-    st.pitch = 2 ** (this.semitoneShift / 12);
 
-    const source = new this.soundTouchModule.BufferSource(this.decodedBuffer);
-    this.filter = new this.soundTouchModule.SimpleFilter(source, st);
+    const soundTouch = new this.soundTouchModule.SoundTouch(this.decodedBuffer.sampleRate);
+    soundTouch.pitch = 2 ** (this.semitoneShift / 12);
+
+    const source = new this.soundTouchModule.WebAudioBufferSource(this.decodedBuffer);
+
+    this.filter = new this.soundTouchModule.SimpleFilter(source, soundTouch);
 
     if (this.startOffsetSec > 0 && this.filter) {
       this.filter.sourcePosition = Math.floor(this.startOffsetSec * this.decodedBuffer.sampleRate);
     }
 
-    this.output = this.soundTouchModule.getWebAudioNode(this.context, this.filter);
+    this.output = this.soundTouchModule.getWebAudioNode(
+      this.context,
+      this.filter,
+      (sourcePosition) => {
+        if (!this.decodedBuffer) return;
+
+        this.startOffsetSec = sourcePosition / this.decodedBuffer.sampleRate;
+        this.audio.currentTime = this.startOffsetSec;
+      },
+      2048,
+    );
+
     this.output.connect(this.context.destination);
-    this.startedAt = this.context.currentTime;
   }
 
   async play() {
@@ -102,15 +129,6 @@ class SoundTouchPlaybackController implements PitchPlaybackController {
 
   pause() {
     if (!this.context) return;
-
-    if (this.filter && this.decodedBuffer) {
-      const samplePos = this.filter.sourcePosition ?? 0;
-      this.startOffsetSec = samplePos / this.decodedBuffer.sampleRate;
-      this.audio.currentTime = this.startOffsetSec;
-    } else {
-      this.startOffsetSec += this.context.currentTime - this.startedAt;
-      this.audio.currentTime = this.startOffsetSec;
-    }
 
     this.context.close().catch(() => undefined);
     this.context = null;
@@ -126,6 +144,7 @@ class SoundTouchPlaybackController implements PitchPlaybackController {
 
   setSemitoneShift(value: number) {
     this.semitoneShift = value;
+
     if (this.context) {
       this.pause();
       void this.play();
@@ -140,15 +159,17 @@ class BrowserPitchEngine implements PitchEngine {
     if (!this.soundTouchModulePromise) {
       this.soundTouchModulePromise = this.loadFromPackage();
     }
+
     return this.soundTouchModulePromise;
   }
 
   private async loadFromPackage(): Promise<SoundTouchModule | null> {
-    if (typeof window === "undefined") return null;
+    if (typeof window === "undefined") {
+      return null;
+    }
 
     try {
-      const module = (await import("soundtouchjs")) as unknown as SoundTouchModule;
-      return module;
+      return (await import("soundtouchjs")) as unknown as SoundTouchModule;
     } catch (error) {
       console.error("[PitchEngine] Failed to import bundled soundtouchjs", error);
       return null;
@@ -175,6 +196,9 @@ class BrowserPitchEngine implements PitchEngine {
 let singleton: PitchEngine | null = null;
 
 export function getPitchEngine(): PitchEngine {
-  if (!singleton) singleton = new BrowserPitchEngine();
+  if (!singleton) {
+    singleton = new BrowserPitchEngine();
+  }
+
   return singleton;
 }
