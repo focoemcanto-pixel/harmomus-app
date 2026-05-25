@@ -130,6 +130,21 @@ export async function getPublishedKitsForPlaylist() {
   return searchPublishedKits("");
 }
 
+async function getAudioFilesForPlaylist(supabase: any, kitIds: string[]) {
+  if (!kitIds.length) return [];
+
+  const baseSelect = "id, kit_id, tone, name, file_type";
+  const tessituraSelect = `${baseSelect}, min_midi_note, max_midi_note, detected_min_midi_note, detected_max_midi_note, tessitura_confidence, tessitura_source`;
+
+  const { data, error } = await supabase.from("kit_audio_files").select(tessituraSelect).in("kit_id", kitIds);
+
+  if (!error) return data ?? [];
+
+  const { data: fallbackData, error: fallbackError } = await supabase.from("kit_audio_files").select(baseSelect).in("kit_id", kitIds);
+  if (fallbackError) throw new Error(fallbackError.message);
+  return fallbackData ?? [];
+}
+
 export async function getPlaylistBySlug(slug: string): Promise<PublicPlaylist | null> {
   const supabase = createSupabaseAdminClient() as any;
   const { data: playlist } = await supabase.from("playlists").select("id, name, slug, is_public").eq("slug", slug).maybeSingle();
@@ -149,13 +164,7 @@ export async function getPlaylistBySlug(slug: string): Promise<PublicPlaylist | 
   const cmap = new Map((categories ?? []).map((c: any) => [c.id, c]));
 
   const kitIds = (items ?? []).map((i: any) => i.kits.id);
-  const { data: audioFiles, error: audioFilesError } = kitIds.length
-    ? await supabase
-        .from("kit_audio_files")
-        .select("id, kit_id, tone, name, file_type, min_midi_note, max_midi_note, detected_min_midi_note, detected_max_midi_note, tessitura_confidence, tessitura_source")
-        .in("kit_id", kitIds)
-    : { data: [], error: null };
-  if (audioFilesError) throw new Error(audioFilesError.message);
+  const audioFiles = await getAudioFilesForPlaylist(supabase, kitIds);
 
   const normalizeVoice = (value: string): PlaylistTrackVoice => {
     const normalized = value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
