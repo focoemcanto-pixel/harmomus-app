@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 
 import { KitPageTemplate } from "@/components/public/kit-page-template";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
-import { resolveKitAccess } from "@/lib/access/access-rules";
+import { registerKitAccess, resolveKitAccess } from "@/lib/access/access-rules";
 import { getPublishedKitBySlug } from "@/lib/data/public-kits";
 import { createClient } from "@/lib/supabase/server";
 
@@ -14,6 +14,11 @@ export default async function BibliotecaKitPage({ params }: { params: Promise<{ 
 
   const current = await getCurrentUserAccessContext();
   const accessContext = await resolveKitAccess(current, kit);
+
+  if (accessContext.play.allowed && current.effectiveSlug === "free" && current.profile?.id) {
+    accessContext.play.stats = await registerKitAccess(current.profile.id, kit.id);
+  }
+
   if (!accessContext.play.allowed) {
     try {
       const supabase = await createClient();
