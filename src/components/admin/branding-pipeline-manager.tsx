@@ -41,6 +41,14 @@ const DEFAULT_CROPS: Record<BrandingAssetKey, CropState> = {
   og: { zoom: 1, x: 0, y: 0 },
 };
 
+const EMPTY_VALUES: BrandingState = {
+  logoUrl: "",
+  faviconUrl: "",
+  loginImageUrl: "",
+  heroImageUrl: "",
+  ogImageUrl: "",
+};
+
 function loadImage(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -172,6 +180,22 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
     }
   }
 
+  function clearAsset(asset: GeneratedAsset) {
+    setValues((current) => ({ ...current, [asset.field]: "" }));
+    setMessage(`${asset.label} removido. Clique em Salvar configurações para publicar o padrão novamente.`);
+    setError(null);
+  }
+
+  function clearAllAssets() {
+    setValues(EMPTY_VALUES);
+    setSourceFile(null);
+    if (sourcePreview) URL.revokeObjectURL(sourcePreview);
+    setSourcePreview("");
+    setCrops(DEFAULT_CROPS);
+    setMessage("Todos os uploads de identidade foram removidos. Clique em Salvar configurações para voltar ao padrão original.");
+    setError(null);
+  }
+
   function updateCrop(partial: Partial<CropState>) {
     setCrops((current) => ({
       ...current,
@@ -194,20 +218,30 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
             Suba uma imagem matriz para gerar tudo automaticamente ou envie uma imagem específica para cada formato. Depois clique em Salvar configurações para publicar.
           </p>
         </div>
-        <label className="inline-flex cursor-pointer rounded-xl border border-gold-300/30 bg-gold-500/15 px-4 py-2 text-sm font-semibold text-gold-200 hover:bg-gold-500/25">
-          {loading ? "Processando..." : "Subir imagem matriz"}
-          <input
-            type="file"
-            accept="image/png,image/jpeg,image/webp"
-            className="hidden"
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <label className="inline-flex cursor-pointer rounded-xl border border-gold-300/30 bg-gold-500/15 px-4 py-2 text-sm font-semibold text-gold-200 hover:bg-gold-500/25">
+            {loading ? "Processando..." : "Subir imagem matriz"}
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              className="hidden"
+              disabled={loading}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.currentTarget.value = "";
+                if (file) handleMatrixFile(file);
+              }}
+            />
+          </label>
+          <button
+            type="button"
+            onClick={clearAllAssets}
             disabled={loading}
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              event.currentTarget.value = "";
-              if (file) handleMatrixFile(file);
-            }}
-          />
-        </label>
+            className="rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-2 text-sm font-semibold text-red-200 hover:bg-red-500/20 disabled:opacity-50"
+          >
+            Remover tudo
+          </button>
+        </div>
       </div>
 
       {sourcePreview ? (
@@ -282,6 +316,14 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
                 }}
               />
             </label>
+            <button
+              type="button"
+              onClick={() => clearAsset(asset)}
+              disabled={loading || !asset.url}
+              className="mt-2 w-full rounded-xl border border-red-400/20 bg-red-500/10 px-3 py-2 text-[11px] font-semibold text-red-200 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Remover upload
+            </button>
           </div>
         ))}
       </div>
