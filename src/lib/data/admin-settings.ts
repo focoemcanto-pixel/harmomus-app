@@ -18,6 +18,7 @@ export interface AdminSettings {
 }
 
 const SETTINGS_TYPE = "admin_settings_global";
+const SETTINGS_TITLE = "Configurações Harmomus";
 
 const DEFAULT_SETTINGS: AdminSettings = {
   branding: {
@@ -70,24 +71,32 @@ function parsePayload(raw: unknown): Partial<AdminSettings> | null {
   }
 }
 
+function settingsRow(payload: AdminSettings) {
+  return {
+    type: SETTINGS_TYPE,
+    title: SETTINGS_TITLE,
+    subtitle: JSON.stringify(mergeSettings(payload)),
+    active: true,
+    order_index: -999,
+  };
+}
+
 export async function getAdminSettings(): Promise<AdminSettings> {
   try {
     const supabase = (await createClient()) as any;
-
     const { data, error } = await supabase
       .from("home_sections")
       .select("subtitle")
       .eq("type", SETTINGS_TYPE)
       .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .limit(1);
 
     if (error) {
       console.error("Falha ao carregar configurações", error);
       return DEFAULT_SETTINGS;
     }
 
-    return mergeSettings(parsePayload(data?.subtitle));
+    return mergeSettings(parsePayload(data?.[0]?.subtitle));
   } catch (error) {
     console.error("Erro inesperado ao carregar configurações", error);
     return DEFAULT_SETTINGS;
@@ -96,44 +105,23 @@ export async function getAdminSettings(): Promise<AdminSettings> {
 
 export async function saveAdminSettings(payload: AdminSettings): Promise<void> {
   const supabase = (await createClient()) as any;
-  const serialized = JSON.stringify(mergeSettings(payload));
+  const row = settingsRow(payload);
 
-  const { data: existing, error: existingError } = await supabase
+  const { error: updateError, count } = await supabase
     .from("home_sections")
-    .select("id")
-    .eq("type", SETTINGS_TYPE)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .update(row, { count: "exact" })
+    .eq("type", SETTINGS_TYPE);
 
-  if (existingError) {
-    throw new Error(existingError.message);
+  if (updateError) {
+    throw new Error(`update: ${updateError.message}`);
   }
 
-  if (existing?.id) {
-    const { error } = await supabase
-      .from("home_sections")
-      .update({
-        title: "Configurações Harmomus",
-        subtitle: serialized,
-        active: true,
-        order_index: -999,
-      })
-      .eq("id", existing.id);
+  if ((count ?? 0) > 0) return;
 
-    if (error) throw new Error(error.message);
-    return;
+  const { error: insertError } = await supabase.from("home_sections").insert(row);
+  if (insertError) {
+    throw new Error(`insert: ${insertError.message}`);
   }
-
-  const { error } = await supabase.from("home_sections").insert({
-    type: SETTINGS_TYPE,
-    title: "Configurações Harmomus",
-    subtitle: serialized,
-    active: true,
-    order_index: -999,
-  });
-
-  if (error) throw new Error(error.message);
 }
 
 export async function updateBrandingSettings(branding: Partial<AdminSettings["branding"]>): Promise<AdminSettings> {
