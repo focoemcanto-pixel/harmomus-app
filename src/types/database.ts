@@ -337,6 +337,7 @@ export interface Database {
           cover_url: string | null;
           r2_folder: string | null;
           required_plan: string | null;
+          allowed_plan_slugs: string[];
           original_tone: string | null;
           default_tone: string | null;
           allow_pitch_shift: boolean;
@@ -356,6 +357,7 @@ export interface Database {
           cover_url?: string | null;
           r2_folder?: string | null;
           required_plan?: string | null;
+          allowed_plan_slugs?: string[];
           original_tone?: string | null;
           default_tone?: string | null;
           allow_pitch_shift?: boolean;
