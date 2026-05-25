@@ -6,6 +6,7 @@ import { AccessStatusBadge } from "@/components/public/access-status-badge";
 import { HarmomusPlayer } from "@/components/public/harmomus-player";
 import { KitActionsMenu } from "@/components/public/kit-actions-menu";
 import { LoginRequiredModal } from "@/components/public/login-required-modal";
+import { PremiumKitGateCard } from "@/components/public/premium-kit-gate-card";
 import { UpgradeRequiredModal } from "@/components/public/upgrade-required-modal";
 import { VoiceSelector } from "@/components/public/voice-selector";
 import { midiToNoteName } from "@/lib/audio/pitch-analysis";
@@ -140,16 +141,7 @@ function getToneGroup(kit: PublicKit, tone: string): PublicKitToneGroup | null {
 
 export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
   if (!accessContext?.play?.allowed) {
-    return (
-      <main className="min-h-screen bg-[radial-gradient(circle_at_top,#1f2840_0%,#06070c_40%)] px-4 py-6 md:px-8 md:py-10">
-        <section className="mx-auto max-w-2xl rounded-2xl border border-gold-500/30 bg-surface/80 p-8 text-center shadow-premium">
-          <p className="text-3xl">🔒</p>
-          <h1 className="mt-3 text-2xl font-semibold text-white">Este kit é exclusivo para Plus/Premium</h1>
-          <p className="mt-2 text-sm text-zinc-300">Faça upgrade para desbloquear o player, os áudios e os recursos avançados.</p>
-          <a href="/assinar?plan=premium" className="mt-5 inline-flex rounded-lg border border-gold-500/40 bg-gold-500/10 px-4 py-2 text-sm font-medium text-gold-200">Fazer upgrade</a>
-        </section>
-      </main>
-    );
+    return <PremiumKitGateCard />;
   }
   const realToneOptions = useMemo(() => sortTonesByChromaticOrder(kit.tones.map((tone) => tone.tone)), [kit.tones]);
   const initialTone = normalizeTone(kit.defaultTone) ?? normalizeTone(kit.originalTone) ?? realToneOptions[0] ?? "";
