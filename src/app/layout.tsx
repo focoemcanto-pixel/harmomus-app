@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 
 import { GlobalAudioPlayerProvider } from "@/components/public/global-audio-player-provider";
 import { getAdminSettings } from "@/lib/data/admin-settings";
@@ -6,14 +6,21 @@ import { getAdminSettings } from "@/lib/data/admin-settings";
 import "./globals.css";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+function withVersion(url: string | undefined) {
+  if (!url) return undefined;
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}v=${Date.now()}`;
+}
 
 export async function generateMetadata(): Promise<Metadata> {
   const settings = await getAdminSettings();
   const appName = settings.branding.appName || "Harmomus";
   const description = settings.home.subheadline || "Kits vocais premium para equipes de louvor.";
-  const faviconUrl = settings.branding.faviconUrl || settings.branding.logoUrl || undefined;
-  const ogImageUrl = settings.branding.ogImageUrl || settings.branding.heroImageUrl || settings.branding.logoUrl || undefined;
-  const appUrl = settings.urls.appUrl || undefined;
+  const faviconUrl = withVersion(settings.branding.faviconUrl || settings.branding.logoUrl || undefined);
+  const ogImageUrl = withVersion(settings.branding.ogImageUrl || settings.branding.heroImageUrl || settings.branding.logoUrl || undefined);
+  const appUrl = settings.urls.appUrl || process.env.NEXT_PUBLIC_APP_URL || undefined;
 
   return {
     title: {
@@ -21,19 +28,24 @@ export async function generateMetadata(): Promise<Metadata> {
       template: `%s • ${appName}`,
     },
     description,
+    applicationName: appName,
     metadataBase: appUrl ? new URL(appUrl) : undefined,
     icons: faviconUrl
       ? {
-          icon: [{ url: faviconUrl }],
+          icon: [{ url: faviconUrl, type: "image/png" }],
           shortcut: [{ url: faviconUrl }],
           apple: [{ url: faviconUrl }],
         }
-      : undefined,
+      : {
+          icon: [{ url: "/favicon.ico" }],
+          shortcut: [{ url: "/favicon.ico" }],
+        },
     openGraph: {
       title: appName,
       description,
       type: "website",
       siteName: appName,
+      locale: "pt_BR",
       images: ogImageUrl ? [{ url: ogImageUrl, width: 1200, height: 630, alt: appName }] : undefined,
     },
     twitter: {
@@ -44,6 +56,10 @@ export async function generateMetadata(): Promise<Metadata> {
     },
   };
 }
+
+export const viewport: Viewport = {
+  themeColor: "#07080f",
+};
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
