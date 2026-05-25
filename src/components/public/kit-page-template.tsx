@@ -141,7 +141,11 @@ function getToneGroup(kit: PublicKit, tone: string): PublicKitToneGroup | null {
 
 export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
   if (!accessContext?.play?.allowed) {
-    return <PremiumKitGateCard />;
+    return (
+      <PremiumKitGateCard
+        mode={accessContext?.isGuest ? "guest" : "upgrade"}
+      />
+    );
   }
   const realToneOptions = useMemo(() => sortTonesByChromaticOrder(kit.tones.map((tone) => tone.tone)), [kit.tones]);
   const initialTone = normalizeTone(kit.defaultTone) ?? normalizeTone(kit.originalTone) ?? realToneOptions[0] ?? "";
