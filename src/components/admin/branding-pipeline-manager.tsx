@@ -105,6 +105,16 @@ async function uploadGeneratedAsset(asset: GeneratedAsset, blob: Blob) {
   return data.url as string;
 }
 
+async function persistBranding(values: Partial<BrandingState>) {
+  const response = await fetch("/api/admin/branding-settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(values),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data?.error || "Falha ao persistir branding.");
+}
+
 export function BrandingPipelineManager({ initial }: { initial: BrandingState }) {
   const [values, setValues] = useState<BrandingState>(initial);
   const [sourceFile, setSourceFile] = useState<File | null>(null);
@@ -127,6 +137,7 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
 
       const image = await loadImage(file);
       const nextValues = { ...values };
+      const changedValues: Partial<BrandingState> = {};
       const targets = onlyAsset ? [onlyAsset] : ASSETS;
 
       for (const asset of targets) {
@@ -134,11 +145,15 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
         const canvas = drawAsset(image, asset, crops[asset.key]);
         const blob = await canvasToBlob(canvas, asset.mimeType, asset.quality);
         setMessage(`Enviando ${asset.label}...`);
-        nextValues[asset.field] = await uploadGeneratedAsset(asset, blob);
+        const url = await uploadGeneratedAsset(asset, blob);
+        nextValues[asset.field] = url;
+        changedValues[asset.field] = url;
       }
 
+      setMessage("Salvando branding no site...");
+      await persistBranding(changedValues);
       setValues(nextValues);
-      setMessage(onlyAsset ? `${onlyAsset.label} atualizado. Clique em Salvar configurações.` : "Pipeline concluído. Clique em Salvar configurações para gravar tudo.");
+      setMessage(onlyAsset ? `${onlyAsset.label} atualizado e salvo no site.` : "Pipeline concluído e branding salvo no site.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao processar identidade visual.");
       setMessage(null);
@@ -160,8 +175,11 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
       setError(null);
       setMessage(`Enviando ${asset.label} personalizado...`);
       const url = await uploadGeneratedAsset(asset, file);
-      setValues((current) => ({ ...current, [asset.field]: url }));
-      setMessage(`${asset.label} enviado. Clique em Salvar configurações para gravar.`);
+      const nextValues = { ...values, [asset.field]: url };
+      setMessage("Salvando branding no site...");
+      await persistBranding({ [asset.field]: url });
+      setValues(nextValues);
+      setMessage(`${asset.label} enviado e salvo no site.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao enviar imagem específica.");
       setMessage(null);
@@ -189,7 +207,7 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
         <div>
           <p className="text-xs uppercase tracking-[0.25em] text-gold-300">Pipeline inteligente de identidade</p>
           <p className="mt-1 max-w-2xl text-sm text-muted">
-            Suba uma imagem matriz para gerar tudo automaticamente ou envie uma imagem específica para cada formato. O editor abaixo usa a matriz inteira, sem pré-cortar a imagem.
+            Suba uma imagem matriz para gerar tudo automaticamente ou envie uma imagem específica para cada formato. Agora cada upload já salva automaticamente no site.
           </p>
         </div>
         <label className="inline-flex cursor-pointer rounded-xl border border-gold-300/30 bg-gold-500/15 px-4 py-2 text-sm font-semibold text-gold-200 hover:bg-gold-500/25">
