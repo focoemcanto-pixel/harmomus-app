@@ -2,9 +2,10 @@ import { PublicAppShell } from "@/components/public/public-app-shell";
 import { BibliotecaClient } from "@/components/public/biblioteca-client";
 
 import { getPublishedKits } from "@/lib/data/public-kits";
+import { getCurrentSubscription } from "@/lib/access/current-subscription";
 
 export default async function BibliotecaPage() {
-  const kits = await getPublishedKits();
+  const [kits, subscription] = await Promise.all([getPublishedKits(), getCurrentSubscription()]);
 
   return (
     <PublicAppShell>
@@ -14,7 +15,7 @@ export default async function BibliotecaPage() {
             <h1 className="text-2xl text-white">Biblioteca Pública</h1>
           </header>
 
-          <BibliotecaClient kits={kits} />
+          <BibliotecaClient kits={kits} planSlug={subscription.planSlug} />
         </div>
       </main>
     </PublicAppShell>

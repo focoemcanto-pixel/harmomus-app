@@ -2,6 +2,14 @@ import { NextResponse } from "next/server";
 
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { ensureArtistCategory, updateKit } from "@/lib/data/kits";
+const DEFAULT_ALLOWED_PLANS = ["free", "plus", "premium"];
+
+function resolveLegacyRequiredPlan(allowedPlanSlugs: string[]) {
+  if (allowedPlanSlugs.includes("free")) return null;
+  if (allowedPlanSlugs.includes("plus")) return "plus";
+  if (allowedPlanSlugs.includes("premium")) return "premium";
+  return null;
+}
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -24,6 +32,9 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
     const artistCategory = await ensureArtistCategory(artist);
     const maxPitchShift = Number(body.max_pitch_shift_semitones ?? 2);
+    const allowedPlanSlugs: string[] = Array.isArray(body.allowed_plan_slugs) && body.allowed_plan_slugs.length
+      ? Array.from(new Set((body.allowed_plan_slugs as unknown[]).map((value: unknown) => String(value).trim().toLowerCase())))
+      : DEFAULT_ALLOWED_PLANS;
 
     const updated = await updateKit(id, {
       name,
@@ -34,7 +45,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       cover_url: String(body.cover_url ?? "").trim() || null,
       r2_folder: String(body.r2_folder ?? "").trim() || null,
       category_id: String(body.category_id ?? "") || artistCategory.id,
-      required_plan: String(body.required_plan ?? "") || null,
+      required_plan: resolveLegacyRequiredPlan(allowedPlanSlugs),
+      allowed_plan_slugs: allowedPlanSlugs,
       original_tone: String(body.original_tone ?? "").trim() || null,
       default_tone: String(body.default_tone ?? "").trim() || null,
       allow_pitch_shift: Boolean(body.allow_pitch_shift),

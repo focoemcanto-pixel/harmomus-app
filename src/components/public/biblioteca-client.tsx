@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { canAccessKit, normalizePlan } from "@/lib/access/access-engine";
 
 import type { PublicKit } from "@/lib/data/public-kits";
 
 interface BibliotecaClientProps {
   kits: PublicKit[];
+  planSlug: string;
 }
 
 function normalizeSearch(value: string) {
@@ -27,7 +29,7 @@ function getKitSearchText(kit: PublicKit) {
   ].filter(Boolean).join(" "));
 }
 
-export function BibliotecaClient({ kits }: BibliotecaClientProps) {
+export function BibliotecaClient({ kits, planSlug }: BibliotecaClientProps) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
   const [artist, setArtist] = useState("");
@@ -124,8 +126,15 @@ export function BibliotecaClient({ kits }: BibliotecaClientProps) {
       ) : (
         <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((kit) => (
-            <Link key={kit.id} href={`/biblioteca/${kit.slug}`} className="rounded-xl border border-white/10 bg-surface p-3 transition hover:-translate-y-0.5 hover:border-gold-400/30 hover:bg-white/[0.04]">
+            <Link key={kit.id} href={`/biblioteca/${kit.slug}`} className="relative rounded-xl border border-white/10 bg-surface p-3 transition hover:-translate-y-0.5 hover:border-gold-400/30 hover:bg-white/[0.04]">
               <img src={kit.coverUrl ?? "https://placehold.co/600x360/101114/f4f4f5?text=Harmomus"} className="h-40 w-full rounded-lg object-cover" alt={kit.name} />
+              {!canAccessKit(normalizePlan(planSlug), kit.allowedPlanSlugs) ? (
+                <div className="absolute inset-3 flex flex-col items-center justify-center rounded-lg bg-black/55 text-center backdrop-blur-[1px]">
+                  <p className="text-lg">🔒</p>
+                  <p className="text-xs text-white">Kit exclusivo para Plus/Premium</p>
+                  <span className="mt-2 rounded-md border border-gold-400/40 bg-gold-500/20 px-2 py-1 text-xs text-gold-200">Fazer upgrade</span>
+                </div>
+              ) : null}
               <h3 className="mt-3 text-white">{kit.name}</h3>
               <p className="text-sm text-zinc-300">{kit.artist}</p>
               <div className="mt-2 flex flex-wrap gap-2">
