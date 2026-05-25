@@ -54,8 +54,15 @@ function storePreferences(volume: number, loop: boolean) {
   try { window.localStorage.setItem(PLAYER_PREFS_KEY, JSON.stringify({ volume, loop })); } catch {}
 }
 
+function buildPlaybackKey(track: GlobalTrack | null) {
+  if (!track) return null;
+  const shift = track.semitoneShift ?? 0;
+  const sourceId = track.trackId ?? track.src;
+  return `${sourceId}::${track.voice ?? "todos"}::${track.tone ?? "unknown"}::${shift}`;
+}
+
 function isSameTrack(a: GlobalTrack | null, b: GlobalTrack) {
-  return a?.src === b.src && (a.semitoneShift ?? 0) === (b.semitoneShift ?? 0);
+  return buildPlaybackKey(a) === buildPlaybackKey(b);
 }
 
 const isDev = process.env.NODE_ENV === "development";
@@ -65,6 +72,7 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
   const preloadAudioRef = useRef<HTMLAudioElement | null>(null);
   const pitchControllerRef = useRef<PitchPlaybackController | null>(null);
   const currentPlaybackSessionIdRef = useRef(0);
+  const activePlaybackKeyRef = useRef<string | null>(null);
   const currentPlaybackAbortControllerRef = useRef<AbortController | null>(null);
   const transitionLockRef = useRef(false);
 
@@ -86,6 +94,7 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
       voice: track?.voice ?? null,
       tone: track?.tone ?? null,
       shift: track?.semitoneShift ?? 0,
+      activePlaybackKey: activePlaybackKeyRef.current,
       ...extra,
     });
   }
@@ -111,6 +120,7 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
       preloadAudio.load();
     }
 
+    activePlaybackKeyRef.current = null;
     setIsPlaying(false);
     logDev("engine cleanup complete");
   }
@@ -163,9 +173,21 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
       setErrorMessage(null);
       setHasEnded(false);
 
+      const cacheKey = `${nextTrack.trackId ?? nextTrack.src}-${nextTrack.voice ?? "todos"}-${nextTrack.tone ?? "unknown"}-${semitoneShift}`;
+      const sourceId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
       if (!isSameTrack(track, nextTrack)) {
         await invalidateCurrentPlayback("track-change");
         setTrack(nextTrack);
+        setPreloadedSrc(null);
+        activePlaybackKeyRef.current = cacheKey;
+        logDev("building fresh playback pipeline", {
+          voice: nextTrack.voice ?? null,
+          tone: nextTrack.tone ?? null,
+          shift: semitoneShift,
+          cacheKey,
+          sourceId,
+        });
         setCurrentTime(0);
         setDuration(0);
         audio.src = nextTrack.src;
@@ -191,7 +213,7 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
       }
 
       setIsPlaying(true);
-      logDev("source loaded", { src: nextTrack.src, semitoneShift });
+      logDev("source loaded", { src: nextTrack.src, semitoneShift, cacheKey, sourceId });
     } catch (error) {
       setErrorMessage("Não foi possível reproduzir este áudio agora.");
       setIsPlaying(false);
