@@ -64,7 +64,18 @@ function parseFallbackPayload(raw: unknown): Partial<AdminSettings> | null {
   }
 }
 
-async function getFallbackSettings(supabase: any): Promise<AdminSettings> {
+function hasUsefulPayload(payload: Partial<AdminSettings> | null | undefined) {
+  return Boolean(
+    payload?.branding?.logoUrl ||
+      payload?.branding?.faviconUrl ||
+      payload?.branding?.loginImageUrl ||
+      payload?.branding?.heroImageUrl ||
+      payload?.branding?.ogImageUrl ||
+      payload?.branding?.appName,
+  );
+}
+
+async function getFallbackPayload(supabase: any): Promise<Partial<AdminSettings> | null> {
   try {
     const { data, error } = await supabase
       .from("home_sections")
@@ -75,13 +86,13 @@ async function getFallbackSettings(supabase: any): Promise<AdminSettings> {
 
     if (error) {
       console.error("Falha ao carregar configurações fallback", error);
-      return DEFAULT_SETTINGS;
+      return null;
     }
 
-    return mergeSettings(parseFallbackPayload(data?.subtitle));
+    return parseFallbackPayload(data?.subtitle);
   } catch (error) {
     console.error("Erro inesperado ao carregar configurações fallback", error);
-    return DEFAULT_SETTINGS;
+    return null;
   }
 }
 
@@ -130,14 +141,20 @@ async function saveFallbackSettings(supabase: any, payload: AdminSettings): Prom
 export async function getAdminSettings(): Promise<AdminSettings> {
   try {
     const supabase = createSupabaseAdminClient() as any;
-    const { data, error } = await supabase.from("admin_settings").select("payload").eq("key", "global").maybeSingle();
+    const [{ data, error }, fallbackPayload] = await Promise.all([
+      supabase.from("admin_settings").select("payload").eq("key", "global").maybeSingle(),
+      getFallbackPayload(supabase),
+    ]);
 
     if (error) {
       console.error("Falha ao carregar admin_settings, usando fallback", error);
-      return getFallbackSettings(supabase);
+      return mergeSettings(fallbackPayload);
     }
 
-    return mergeSettings(data?.payload as Partial<AdminSettings> | null);
+    const primaryPayload = data?.payload as Partial<AdminSettings> | null;
+    if (hasUsefulPayload(primaryPayload)) return mergeSettings(primaryPayload);
+    if (hasUsefulPayload(fallbackPayload)) return mergeSettings(fallbackPayload);
+    return mergeSettings(primaryPayload ?? fallbackPayload);
   } catch (error) {
     console.error("Erro inesperado ao carregar configurações", error);
     return DEFAULT_SETTINGS;
@@ -147,17 +164,16 @@ export async function getAdminSettings(): Promise<AdminSettings> {
 export async function saveAdminSettings(payload: AdminSettings): Promise<void> {
   try {
     const supabase = createSupabaseAdminClient() as any;
-    const { error } = await supabase.from("admin_settings").upsert({ key: "global", payload, updated_at: new Date().toISOString() }, { onConflict: "key" });
+    const [{ error }, savedFallback] = await Promise.all([
+      supabase.from("admin_settings").upsert({ key: "global", payload, updated_at: new Date().toISOString() }, { onConflict: "key" }),
+      saveFallbackSettings(supabase, payload),
+    ]);
 
-    if (!error) return;
-
-    console.error("Falha ao salvar admin_settings, tentando fallback", error);
-    const savedFallback = await saveFallbackSettings(supabase, payload);
-    if (!savedFallback) {
-      console.error("Configurações não foram persistidas, mas a página não será derrubada.");
-    }
+    if (error) console.error("Falha ao salvar admin_settings", error);
+    if (error && !savedFallback) throw new Error(error.message || "Falha ao salvar configurações.");
   } catch (error) {
     console.error("Erro inesperado ao salvar configurações", error);
+    throw error;
   }
 }
 
