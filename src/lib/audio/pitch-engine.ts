@@ -55,13 +55,19 @@ class SoundTouchPlaybackController implements PitchPlaybackController {
     if (this.decodedBuffer) return;
     const src = this.audio.currentSrc || this.audio.src;
     if (!src) throw new Error("Missing audio source");
-    const response = await fetch(src);
+
+    this.audio.pause();
+    this.audio.muted = true;
+
+    const response = await fetch(src, { cache: "force-cache" });
+    if (!response.ok) throw new Error("Failed to fetch audio for pitch shifting");
+
     const arr = await response.arrayBuffer();
     const decodeContext = new AudioContext();
     try {
-      this.decodedBuffer = await decodeContext.decodeAudioData(arr);
+      this.decodedBuffer = await decodeContext.decodeAudioData(arr.slice(0));
     } finally {
-      await decodeContext.close();
+      await decodeContext.close().catch(() => undefined);
     }
   }
 
@@ -72,6 +78,7 @@ class SoundTouchPlaybackController implements PitchPlaybackController {
     this.context = new AudioContext();
     const st = new this.soundTouchModule.SoundTouch(this.decodedBuffer.sampleRate);
     st.pitch = 2 ** (this.semitoneShift / 12);
+
     const source = new this.soundTouchModule.BufferSource(this.decodedBuffer);
     this.filter = new this.soundTouchModule.SimpleFilter(source, st);
 
@@ -89,17 +96,22 @@ class SoundTouchPlaybackController implements PitchPlaybackController {
       await this.context.resume();
       return;
     }
+
     await this.startGraph();
   }
 
   pause() {
     if (!this.context) return;
+
     if (this.filter && this.decodedBuffer) {
       const samplePos = this.filter.sourcePosition ?? 0;
       this.startOffsetSec = samplePos / this.decodedBuffer.sampleRate;
+      this.audio.currentTime = this.startOffsetSec;
     } else {
       this.startOffsetSec += this.context.currentTime - this.startedAt;
+      this.audio.currentTime = this.startOffsetSec;
     }
+
     this.context.close().catch(() => undefined);
     this.context = null;
     this.output = null;
@@ -109,6 +121,7 @@ class SoundTouchPlaybackController implements PitchPlaybackController {
     this.pause();
     this.decodedBuffer = null;
     this.startOffsetSec = 0;
+    this.audio.muted = false;
   }
 
   setSemitoneShift(value: number) {
@@ -125,38 +138,26 @@ class BrowserPitchEngine implements PitchEngine {
 
   private loadSoundTouch() {
     if (!this.soundTouchModulePromise) {
-      this.soundTouchModulePromise = this.loadFromWindow();
+      this.soundTouchModulePromise = this.loadFromPackage();
     }
     return this.soundTouchModulePromise;
   }
 
-
-  private async loadFromWindow(): Promise<SoundTouchModule | null> {
+  private async loadFromPackage(): Promise<SoundTouchModule | null> {
     if (typeof window === "undefined") return null;
-    const w = window as Window & { soundtouch?: SoundTouchModule };
-    if (w.soundtouch) return w.soundtouch;
 
-    await new Promise<void>((resolve, reject) => {
-      const existing = document.querySelector<HTMLScriptElement>('script[data-soundtouchjs="1"]');
-      if (existing) {
-        existing.addEventListener("load", () => resolve(), { once: true });
-        existing.addEventListener("error", () => reject(new Error("Failed to load soundtouchjs")), { once: true });
-        return;
+    try {
+      const module = await import("soundtouchjs");
+      if (module?.SoundTouch && module?.SimpleFilter && module?.BufferSource && module?.getWebAudioNode) {
+        return module as SoundTouchModule;
       }
+    } catch (error) {
+      console.error("[PitchEngine] Failed to import bundled soundtouchjs", error);
+    }
 
-      const script = document.createElement("script");
-      script.src = "https://unpkg.com/soundtouchjs@0.1.30/dist/soundtouch.js";
-      script.async = true;
-      script.dataset.soundtouchjs = "1";
-      script.onload = () => resolve();
-      script.onerror = () => reject(new Error("Failed to load soundtouchjs"));
-      document.head.appendChild(script);
-    }).catch((error) => {
-      console.error("[PitchEngine] Failed to load soundtouchjs", error);
-    });
-
-    return (window as Window & { soundtouch?: SoundTouchModule }).soundtouch ?? null;
+    return null;
   }
+
   async createPlayback(request: PitchPlaybackRequest): Promise<PitchPlaybackController> {
     const { audio, semitoneShift } = request;
 
@@ -165,14 +166,12 @@ class BrowserPitchEngine implements PitchEngine {
     }
 
     const st = await this.loadSoundTouch();
-    if (!st) return new NativePlaybackController(audio, semitoneShift);
 
-    try {
-      return new SoundTouchPlaybackController(audio, Math.max(-3, Math.min(3, semitoneShift)), st);
-    } catch (error) {
-      console.error("[PitchEngine] Failed to create shifted playback", error);
-      return new NativePlaybackController(audio, semitoneShift);
+    if (!st) {
+      throw new Error("Pitch shifting indisponível: soundtouchjs não foi carregado.");
     }
+
+    return new SoundTouchPlaybackController(audio, Math.max(-3, Math.min(3, semitoneShift)), st);
   }
 }
 
