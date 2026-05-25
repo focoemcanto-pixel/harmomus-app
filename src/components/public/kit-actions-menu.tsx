@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { ShareButton } from "@/components/public/share-button";
+import { canSavePlaylist } from "@/lib/access/access-engine";
 
 export function KitActionsMenu({
   kitName,
@@ -20,10 +21,11 @@ export function KitActionsMenu({
 }) {
   const [open, setOpen] = useState(false);
   const isPremium = planSlug === "premium";
+  const canUsePlaylists = canSavePlaylist(planSlug);
 
   const requestToneHref = `/area-premium?kit=${encodeURIComponent(kitSlug)}&nome=${encodeURIComponent(kitName)}#solicitar-tom`;
 
-  function handleBlockedToneRequest() {
+  function handleBlockedPremiumAction() {
     setOpen(false);
     onPremiumRequired?.();
   }
@@ -35,9 +37,19 @@ export function KitActionsMenu({
         <div className="absolute right-0 z-30 mt-2 w-64 rounded-xl border border-white/10 bg-[#0d1019] p-2 shadow-premium">
           <ShareButton title={kitName} />
 
-          <Link href={`/criar-playlist?kit=${kitSlug}`} className="mt-1 block rounded-lg border border-white/10 px-3 py-2 text-sm text-zinc-200 hover:bg-white/5">
-            Salvar na playlist
-          </Link>
+          {canUsePlaylists ? (
+            <Link href={`/criar-playlist?kit=${kitSlug}`} className="mt-1 block rounded-lg border border-white/10 px-3 py-2 text-sm text-zinc-200 hover:bg-white/5">
+              Salvar na playlist
+            </Link>
+          ) : (
+            <button
+              type="button"
+              onClick={handleBlockedPremiumAction}
+              className="mt-1 block w-full rounded-lg border border-yellow-400/25 bg-yellow-400/10 px-3 py-2 text-left text-sm text-yellow-100 hover:bg-white/5"
+            >
+              Salvar na playlist
+            </button>
+          )}
 
           {isPremium ? (
             <Link href={requestToneHref} className="mt-1 block rounded-lg border border-emerald-400/25 px-3 py-2 text-sm text-emerald-200 hover:bg-white/5">
@@ -46,7 +58,7 @@ export function KitActionsMenu({
           ) : (
             <button
               type="button"
-              onClick={handleBlockedToneRequest}
+              onClick={handleBlockedPremiumAction}
               className="mt-1 block w-full rounded-lg border border-yellow-400/25 bg-yellow-400/10 px-3 py-2 text-left text-sm text-yellow-100 hover:bg-white/5"
             >
               Solicitar novo tom
