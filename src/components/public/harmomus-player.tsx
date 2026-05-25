@@ -1,7 +1,7 @@
 "use client";
 
 import { Pause, Play, RotateCcw, RotateCw, Repeat2, Volume2 } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 
 import { useGlobalAudioPlayer } from "@/components/public/global-audio-player-provider";
 
@@ -11,6 +11,15 @@ interface HarmomusPlayerProps {
   canPlay: boolean;
   semitoneShift?: number;
   onBlocked: () => void;
+}
+
+function parseTrackMeta(title: string) {
+  const toneMatch = title.match(/Tom\s+(.+?)\s+•/i);
+  const voiceMatch = title.match(/Voz\s+(.+)$/i);
+  return {
+    tone: toneMatch?.[1]?.trim() || "unknown-tone",
+    voice: voiceMatch?.[1]?.trim().toLowerCase() || "unknown-voice",
+  };
 }
 
 export function HarmomusPlayer({ src, title, canPlay, semitoneShift = 0, onBlocked }: HarmomusPlayerProps) {
@@ -29,21 +38,22 @@ export function HarmomusPlayer({ src, title, canPlay, semitoneShift = 0, onBlock
     skipBy,
     setVolumeValue,
     setLoopValue,
-    closePlayer,
   } = useGlobalAudioPlayer();
 
+  const trackMeta = useMemo(() => parseTrackMeta(title), [title]);
+  const trackId = useMemo(
+    () => [src ?? "no-src", title, trackMeta.voice, trackMeta.tone, String(semitoneShift)].join("::"),
+    [src, title, trackMeta.voice, trackMeta.tone, semitoneShift],
+  );
+
   const currentSemitoneShift = track?.semitoneShift ?? 0;
-  const isCurrentTrack = Boolean(track && track.src === src && track.title === title && currentSemitoneShift === semitoneShift);
-  const hasStaleActiveTrack = Boolean(track && !isCurrentTrack);
-
-  useEffect(() => {
-    if (!hasStaleActiveTrack) return;
-    void closePlayer();
-  }, [hasStaleActiveTrack, closePlayer]);
-
-  useEffect(() => {
-    if (!src && track) void closePlayer();
-  }, [src, track, closePlayer]);
+  const isCurrentTrack = Boolean(
+    track &&
+      track.trackId === trackId &&
+      track.src === src &&
+      track.title === title &&
+      currentSemitoneShift === semitoneShift,
+  );
 
   const formatTime = useMemo(
     () => (value: number) => `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, "0")}`,
@@ -63,22 +73,26 @@ export function HarmomusPlayer({ src, title, canPlay, semitoneShift = 0, onBlock
       return;
     }
 
-    await closePlayer();
-
     await playTrack({
       src,
       title,
       semitoneShift,
+      trackId,
+      voice: trackMeta.voice,
+      tone: trackMeta.tone,
     });
   }
 
   function handlePreload() {
-    if (!canPlay || !src || isPlaying) return;
+    if (!canPlay || !src || isPlaying || semitoneShift !== 0) return;
 
     preloadTrack({
       src,
       title,
       semitoneShift,
+      trackId,
+      voice: trackMeta.voice,
+      tone: trackMeta.tone,
     });
   }
 
