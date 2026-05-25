@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { SignupPlanSelector } from "@/components/public/signup-plan-selector";
+import { ensureUserAccess } from "@/lib/auth/ensure-user-access";
 import { getAdminSettings } from "@/lib/data/admin-settings";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -105,11 +106,20 @@ export default async function CadastroPage({ searchParams }: { searchParams: Pro
       fail(mapped.message, mapped.field);
     }
 
-    const { error: profileError } = await (supabaseAdmin as any).from("profiles").upsert(
-      { id: createdUserId, email, full_name: fullName, role: "user", updated_at: new Date().toISOString() },
-      { onConflict: "id" },
-    );
-    if (profileError) fail(`Conta criada, mas houve erro ao salvar perfil: ${profileError.message}`, "form");
+    try {
+      await ensureUserAccess({
+        id: createdUserId,
+        email,
+        fullName,
+      });
+    } catch (bootstrapError) {
+      fail(
+        bootstrapError instanceof Error
+          ? `Conta criada, mas houve erro ao configurar acesso: ${bootstrapError.message}`
+          : "Conta criada, mas houve erro ao configurar acesso.",
+        "form",
+      );
+    }
 
     const { error: loginError } = await supabase.auth.signInWithPassword({ email, password });
     if (loginError) {
