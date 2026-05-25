@@ -42,6 +42,10 @@ export interface PublicKit {
   coverUrl: string | null;
   description: string | null;
   lyrics: string | null;
+  originalTone: string | null;
+  defaultTone: string | null;
+  allowPitchShift: boolean;
+  maxPitchShiftSemitones: number;
   category: { id: string; name: string; slug: string; description: string | null; cover_url: string | null } | null;
   requiredPlan: { id: string; name: string; slug: string } | null;
   tones: PublicKitToneGroup[];
@@ -68,7 +72,12 @@ function getAudioStreamUrl(file: Database["public"]["Tables"]["kit_audio_files"]
 }
 
 function mapKit(
-  kit: Database["public"]["Tables"]["kits"]["Row"],
+  kit: Database["public"]["Tables"]["kits"]["Row"] & {
+    original_tone?: string | null;
+    default_tone?: string | null;
+    allow_pitch_shift?: boolean | null;
+    max_pitch_shift_semitones?: number | null;
+  },
   categoriesMap: Map<string, Database["public"]["Tables"]["categories"]["Row"]>,
   plansMap: Map<string, Database["public"]["Tables"]["plans"]["Row"]>,
   files: Database["public"]["Tables"]["kit_audio_files"]["Row"][],
@@ -85,12 +94,12 @@ function mapKit(
       audioFileId: file.id,
       streamUrl: getAudioStreamUrl(file),
       fileType: file.file_type,
-      minMidiNote: file.min_midi_note ?? null,
-      maxMidiNote: file.max_midi_note ?? null,
-      detectedMinMidiNote: file.detected_min_midi_note ?? null,
-      detectedMaxMidiNote: file.detected_max_midi_note ?? null,
-      tessituraConfidence: file.tessitura_confidence ?? null,
-      tessituraSource: file.tessitura_source ?? "manual",
+      minMidiNote: (file as any).min_midi_note ?? null,
+      maxMidiNote: (file as any).max_midi_note ?? null,
+      detectedMinMidiNote: (file as any).detected_min_midi_note ?? null,
+      detectedMaxMidiNote: (file as any).detected_max_midi_note ?? null,
+      tessituraConfidence: (file as any).tessitura_confidence ?? null,
+      tessituraSource: (file as any).tessitura_source ?? "manual",
     };
   }
 
@@ -104,6 +113,10 @@ function mapKit(
     coverUrl: kit.cover_url,
     description: kit.description,
     lyrics: kit.lyrics,
+    originalTone: kit.original_tone ?? null,
+    defaultTone: kit.default_tone ?? kit.original_tone ?? null,
+    allowPitchShift: kit.allow_pitch_shift ?? true,
+    maxPitchShiftSemitones: kit.max_pitch_shift_semitones ?? 2,
     category: category ? { id: category.id, name: category.name, slug: category.slug, description: category.description, cover_url: (category as any).cover_url ?? null } : null,
     requiredPlan: requiredPlan ? { id: requiredPlan.id, name: requiredPlan.name, slug: requiredPlan.slug } : null,
     tones: Array.from(tonesMap.values()).sort((a, b) => a.tone.localeCompare(b.tone, "pt-BR")),
@@ -141,7 +154,7 @@ export async function getPublishedKits(): Promise<PublicKit[]> {
   const categoriesRows = (categories ?? []) as Database["public"]["Tables"]["categories"]["Row"][];
   const plansRows = (plans ?? []) as Database["public"]["Tables"]["plans"]["Row"][];
   const filesRows = (files ?? []) as Database["public"]["Tables"]["kit_audio_files"]["Row"][];
-  const kitsRows = (kits ?? []) as Database["public"]["Tables"]["kits"]["Row"][];
+  const kitsRows = (kits ?? []) as (Database["public"]["Tables"]["kits"]["Row"] & any)[];
   const categoriesMap = new Map(categoriesRows.map((row) => [row.id, row]));
   const plansMap = new Map(plansRows.map((row) => [row.id, row]));
   const filesByKit = groupFilesByKit(filesRows);
@@ -197,7 +210,7 @@ export async function getPublishedKitBySlug(slug: string): Promise<PublicKit | n
   const plansMap = new Map(plansRows.map((row) => [row.id, row]));
 
   return mapKit(
-    kit as Database["public"]["Tables"]["kits"]["Row"],
+    kit as Database["public"]["Tables"]["kits"]["Row"] & any,
     categoriesMap,
     plansMap,
     (files ?? []) as Database["public"]["Tables"]["kit_audio_files"]["Row"][],
