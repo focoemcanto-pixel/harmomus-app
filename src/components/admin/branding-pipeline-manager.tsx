@@ -49,6 +49,16 @@ const EMPTY_VALUES: BrandingState = {
   ogImageUrl: "",
 };
 
+function loadImageFromUrl(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Não foi possível abrir este upload para edição. Use 'Upload específico' para substituir."));
+    image.src = url;
+  });
+}
+
 function loadImage(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -156,8 +166,31 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
     }
   }
 
+  async function editSavedAsset(asset: GeneratedAsset) {
+    const url = values[asset.field];
+    if (!url) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+      setMessage(`Abrindo ${asset.label} salvo para edição...`);
+      await loadImageFromUrl(url);
+      if (sourcePreview && sourcePreview.startsWith("blob:")) URL.revokeObjectURL(sourcePreview);
+      setSourceFile(null);
+      setSourcePreview(url);
+      setSelectedAssetKey(asset.key);
+      setCrops((current) => ({ ...current, [asset.key]: DEFAULT_CROPS[asset.key] }));
+      setMessage(`${asset.label} aberto no editor. Ajuste o enquadramento e clique em Regerar este formato.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível abrir o upload salvo para edição.");
+      setMessage(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   function handleMatrixFile(file: File) {
-    if (sourcePreview) URL.revokeObjectURL(sourcePreview);
+    if (sourcePreview && sourcePreview.startsWith("blob:")) URL.revokeObjectURL(sourcePreview);
     setSourceFile(file);
     setSourcePreview(URL.createObjectURL(file));
     void generateAssets(file);
@@ -180,6 +213,26 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
     }
   }
 
+  async function regenerateSelectedFromPreview() {
+    if (!sourcePreview) return;
+    try {
+      setLoading(true);
+      setError(null);
+      setMessage(`Regerando ${selectedAsset.label}...`);
+      const image = sourceFile ? await loadImage(sourceFile) : await loadImageFromUrl(sourcePreview);
+      const canvas = drawAsset(image, selectedAsset, selectedCrop);
+      const blob = await canvasToBlob(canvas, selectedAsset.mimeType, selectedAsset.quality);
+      const url = await uploadGeneratedAsset(selectedAsset, blob);
+      setValues((current) => ({ ...current, [selectedAsset.field]: url }));
+      setMessage(`${selectedAsset.label} atualizado. Clique em Salvar configurações para publicar.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao regerar imagem.");
+      setMessage(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   function clearAsset(asset: GeneratedAsset) {
     setValues((current) => ({ ...current, [asset.field]: "" }));
     setMessage(`${asset.label} removido. Clique em Salvar configurações para publicar o padrão novamente.`);
@@ -189,7 +242,7 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
   function clearAllAssets() {
     setValues(EMPTY_VALUES);
     setSourceFile(null);
-    if (sourcePreview) URL.revokeObjectURL(sourcePreview);
+    if (sourcePreview && sourcePreview.startsWith("blob:")) URL.revokeObjectURL(sourcePreview);
     setSourcePreview("");
     setCrops(DEFAULT_CROPS);
     setMessage("Todos os uploads de identidade foram removidos. Clique em Salvar configurações para voltar ao padrão original.");
@@ -215,7 +268,7 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
         <div>
           <p className="text-xs uppercase tracking-[0.25em] text-gold-300">Pipeline inteligente de identidade</p>
           <p className="mt-1 max-w-2xl text-sm text-muted">
-            Suba uma imagem matriz para gerar tudo automaticamente ou envie uma imagem específica para cada formato. Depois clique em Salvar configurações para publicar.
+            Suba uma imagem matriz, envie uma imagem específica ou edite um upload já salvo. Depois clique em Salvar configurações para publicar.
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
@@ -233,12 +286,7 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
               }}
             />
           </label>
-          <button
-            type="button"
-            onClick={clearAllAssets}
-            disabled={loading}
-            className="rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-2 text-sm font-semibold text-red-200 hover:bg-red-500/20 disabled:opacity-50"
-          >
+          <button type="button" onClick={clearAllAssets} disabled={loading} className="rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-2 text-sm font-semibold text-red-200 hover:bg-red-500/20 disabled:opacity-50">
             Remover tudo
           </button>
         </div>
@@ -249,12 +297,7 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
           <div className="rounded-2xl border border-border bg-black/30 p-4">
             <div className="mb-3 flex flex-wrap gap-2">
               {ASSETS.map((asset) => (
-                <button
-                  key={asset.key}
-                  type="button"
-                  onClick={() => setSelectedAssetKey(asset.key)}
-                  className={`rounded-full border px-3 py-1 text-xs ${asset.key === selectedAssetKey ? "border-gold-300 bg-gold-500/20 text-gold-100" : "border-white/10 bg-white/5 text-zinc-300"}`}
-                >
+                <button key={asset.key} type="button" onClick={() => setSelectedAssetKey(asset.key)} className={`rounded-full border px-3 py-1 text-xs ${asset.key === selectedAssetKey ? "border-gold-300 bg-gold-500/20 text-gold-100" : "border-white/10 bg-white/5 text-zinc-300"}`}>
                   {asset.label}
                 </button>
               ))}
@@ -264,14 +307,11 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
                 src={sourcePreview}
                 alt="Prévia de enquadramento"
                 className="h-full w-full object-contain"
-                style={{
-                  transform: `translate(${selectedCrop.x * 100}%, ${selectedCrop.y * 100}%) scale(${selectedCrop.zoom})`,
-                  transformOrigin: "center",
-                }}
+                style={{ transform: `translate(${selectedCrop.x * 100}%, ${selectedCrop.y * 100}%) scale(${selectedCrop.zoom})`, transformOrigin: "center" }}
               />
               <div className="pointer-events-none absolute inset-0 border-2 border-gold-300/40" />
             </div>
-            <p className="mt-3 text-xs text-muted">Editor visual: {selectedAsset.label} • {selectedAsset.width}x{selectedAsset.height}. A prévia mostra a matriz completa para você recuperar laterais e topo/base.</p>
+            <p className="mt-3 text-xs text-muted">Editor visual: {selectedAsset.label} • {selectedAsset.width}x{selectedAsset.height}. A prévia mostra a imagem carregada para você ajustar e regerar.</p>
           </div>
 
           <div className="rounded-2xl border border-border bg-black/30 p-4">
@@ -283,7 +323,7 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
             <label className="mt-4 block text-xs text-zinc-300">Vertical</label>
             <input type="range" min="-1" max="1" step="0.01" value={selectedCrop.y} onChange={(e) => updateCrop({ y: Number(e.target.value) })} className="mt-2 w-full" />
             <div className="mt-5 grid gap-2">
-              <button type="button" disabled={!sourceFile || loading} onClick={() => sourceFile && generateAssets(sourceFile, selectedAsset)} className="rounded-xl bg-gold-500/20 px-4 py-2 text-sm font-semibold text-gold-200 disabled:opacity-50">Regerar este formato</button>
+              <button type="button" disabled={!sourcePreview || loading} onClick={() => void regenerateSelectedFromPreview()} className="rounded-xl bg-gold-500/20 px-4 py-2 text-sm font-semibold text-gold-200 disabled:opacity-50">Regerar este formato</button>
               <button type="button" disabled={!sourceFile || loading} onClick={() => sourceFile && generateAssets(sourceFile)} className="rounded-xl border border-white/10 px-4 py-2 text-sm text-zinc-200 disabled:opacity-50">Regerar todos</button>
               <button type="button" onClick={() => updateCrop(DEFAULT_CROPS[selectedAssetKey])} className="rounded-xl border border-white/10 px-4 py-2 text-sm text-zinc-200">Resetar enquadramento</button>
             </div>
@@ -302,7 +342,10 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
             </div>
             <p className="mt-2 text-xs font-semibold text-white">{asset.label}</p>
             <p className="text-[11px] text-muted">{asset.width}x{asset.height}</p>
-            <label className="mt-3 block cursor-pointer rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-center text-[11px] font-semibold text-zinc-200 hover:bg-white/10">
+            <button type="button" onClick={() => void editSavedAsset(asset)} disabled={loading || !asset.url} className="mt-3 w-full rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-3 py-2 text-[11px] font-semibold text-cyan-100 hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-40">
+              Editar upload salvo
+            </button>
+            <label className="mt-2 block cursor-pointer rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-center text-[11px] font-semibold text-zinc-200 hover:bg-white/10">
               Upload específico
               <input
                 type="file"
@@ -316,12 +359,7 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
                 }}
               />
             </label>
-            <button
-              type="button"
-              onClick={() => clearAsset(asset)}
-              disabled={loading || !asset.url}
-              className="mt-2 w-full rounded-xl border border-red-400/20 bg-red-500/10 px-3 py-2 text-[11px] font-semibold text-red-200 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-            >
+            <button type="button" onClick={() => clearAsset(asset)} disabled={loading || !asset.url} className="mt-2 w-full rounded-xl border border-red-400/20 bg-red-500/10 px-3 py-2 text-[11px] font-semibold text-red-200 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40">
               Remover upload
             </button>
           </div>
