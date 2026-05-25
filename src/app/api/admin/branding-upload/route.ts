@@ -4,7 +4,11 @@ import { NextResponse } from "next/server";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { r2BucketName, r2Client } from "@/lib/r2/client";
 
+export const dynamic = "force-dynamic";
+
 const ALLOWED_ASSETS = new Set(["logo", "favicon", "login", "hero", "og"]);
+const ALLOWED_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+const MAX_FILE_SIZE_BYTES = 8 * 1024 * 1024;
 
 export async function POST(request: Request) {
   try {
@@ -14,11 +18,11 @@ export async function POST(request: Request) {
     }
 
     if (!r2BucketName) {
-      return NextResponse.json({ error: "R2_BUCKET_NAME não configurado." }, { status: 400 });
+      return NextResponse.json({ error: "R2_BUCKET_NAME não configurado." }, { status: 500 });
     }
 
     const form = await request.formData();
-    const asset = String(form.get("asset") ?? "").trim();
+    const asset = String(form.get("asset") ?? "").trim().toLowerCase();
     const file = form.get("file");
 
     if (!ALLOWED_ASSETS.has(asset)) {
@@ -29,8 +33,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Arquivo inválido." }, { status: 400 });
     }
 
-    if (!file.type.startsWith("image/")) {
-      return NextResponse.json({ error: "Envie apenas imagens." }, { status: 400 });
+    if (!ALLOWED_MIME_TYPES.has(file.type)) {
+      return NextResponse.json({ error: "Envie apenas imagens PNG, JPG ou WEBP." }, { status: 400 });
+    }
+
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      return NextResponse.json({ error: "Imagem muito grande. O limite é 8MB." }, { status: 400 });
     }
 
     const extension = asset === "favicon" ? "png" : "webp";
@@ -43,15 +51,22 @@ export async function POST(request: Request) {
       Key: key,
       Body: body,
       ContentType: contentType,
-      CacheControl: "public, max-age=31536000, immutable",
+      CacheControl: "public, max-age=300, must-revalidate",
     }));
 
     const customDomain = process.env.R2_PUBLIC_BASE_URL?.replace(/\/$/, "");
-    const baseUrl = customDomain || `https://pub-${process.env.R2_ACCOUNT_ID}.r2.dev`;
-    const url = `${baseUrl}/${key}?v=${Date.now()}`;
+    const baseUrl = customDomain || (process.env.R2_ACCOUNT_ID ? `https://pub-${process.env.R2_ACCOUNT_ID}.r2.dev` : "");
 
-    return NextResponse.json({ success: true, asset, key, url });
+    if (!baseUrl) {
+      return NextResponse.json({ error: "R2_PUBLIC_BASE_URL ou R2_ACCOUNT_ID não configurado." }, { status: 500 });
+    }
+
+    const version = Date.now();
+    const url = `${baseUrl}/${key}?v=${version}`;
+
+    return NextResponse.json({ ok: true, success: true, asset, key, url, version });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro inesperado." }, { status: 400 });
+    console.error("Falha no upload de branding", error);
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro inesperado no upload de branding." }, { status: 500 });
   }
 }
