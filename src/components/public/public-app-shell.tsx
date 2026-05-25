@@ -19,10 +19,19 @@ export async function PublicAppShell({ children }: { children: React.ReactNode }
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,#1f2840_0%,#06070c_40%)] text-white">
       <header className="fixed inset-x-0 top-0 z-40 border-b border-white/10 bg-black/50 backdrop-blur-xl">
         <div className="mx-auto flex h-16 w-full max-w-7xl items-center gap-3 px-3 md:h-24 md:gap-5 md:px-8">
-          <Link href="/" prefetch className="flex min-w-[132px] shrink-0 items-center gap-3 text-base font-semibold tracking-wide text-white sm:min-w-[178px] md:min-w-[260px] md:text-xl" aria-label={appName}>
+          <Link
+            href="/"
+            prefetch
+            className="flex min-w-[150px] shrink-0 items-center gap-3 text-base font-semibold tracking-wide text-white sm:min-w-[210px] md:min-w-[300px] md:text-xl lg:min-w-[340px]"
+            aria-label={appName}
+          >
             {logoUrl ? (
-              <span className="flex h-12 w-[132px] items-center overflow-hidden sm:h-14 sm:w-[178px] md:h-20 md:w-[260px] lg:w-[300px]">
-                <img src={logoUrl} alt={appName} className="h-full w-full origin-left scale-[2.2] object-contain object-left sm:scale-[2.35] md:scale-[2.55]" />
+              <span className="flex h-12 w-[150px] items-center sm:h-14 sm:w-[210px] md:h-20 md:w-[300px] lg:w-[340px]">
+                <img
+                  src={logoUrl}
+                  alt={appName}
+                  className="h-full max-h-full w-full object-contain object-left"
+                />
               </span>
             ) : (
               <span className="text-xl font-bold md:text-2xl">{appName}</span>
