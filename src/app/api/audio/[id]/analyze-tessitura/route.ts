@@ -30,10 +30,24 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       })
       .eq("id", id);
 
-    if (error) throw new Error(error.message);
+    if (error) {
+      if (isMissingTessituraColumnError(error.message)) {
+        return NextResponse.json({
+          success: false,
+          migrationRequired: true,
+          error: "A análise foi executada, mas as colunas de tessitura ainda não existem no banco. Aplique a migration antes de salvar o resultado.",
+          detectedMinMidiNote,
+          detectedMaxMidiNote,
+          confidence,
+        }, { status: 200 });
+      }
+
+      throw new Error(error.message);
+    }
 
     return NextResponse.json({
       success: true,
+      migrationRequired: false,
       detectedMinMidiNote,
       detectedMaxMidiNote,
       confidence,
@@ -42,6 +56,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const message = error instanceof Error ? error.message : "Erro inesperado ao salvar tessitura.";
     return NextResponse.json({ error: message }, { status: 400 });
   }
+}
+
+function isMissingTessituraColumnError(message: string) {
+  return [
+    "detected_min_midi_note",
+    "detected_max_midi_note",
+    "tessitura_confidence",
+    "tessitura_source",
+    "min_midi_note",
+    "max_midi_note",
+  ].some((column) => message.includes(column));
 }
 
 function normalizeMidi(value: unknown): number | null {
