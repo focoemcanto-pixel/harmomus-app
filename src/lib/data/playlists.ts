@@ -130,6 +130,28 @@ export async function getPublishedKitsForPlaylist() {
   return searchPublishedKits("");
 }
 
+async function getPlaylistItems(supabase: any, playlistId: string) {
+  const toneSelect = "position, kits!inner(id, slug, name, artist, cover_url, category_id, original_tone, default_tone, allow_pitch_shift, max_pitch_shift_semitones, published)";
+  const baseSelect = "position, kits!inner(id, slug, name, artist, cover_url, category_id, published)";
+
+  const { data, error } = await supabase
+    .from("playlist_items")
+    .select(toneSelect)
+    .eq("playlist_id", playlistId)
+    .order("position", { ascending: true });
+
+  if (!error) return data ?? [];
+
+  const { data: fallbackData, error: fallbackError } = await supabase
+    .from("playlist_items")
+    .select(baseSelect)
+    .eq("playlist_id", playlistId)
+    .order("position", { ascending: true });
+
+  if (fallbackError) throw new Error(fallbackError.message);
+  return fallbackData ?? [];
+}
+
 async function getAudioFilesForPlaylist(supabase: any, kitIds: string[]) {
   if (!kitIds.length) return [];
 
@@ -147,15 +169,11 @@ async function getAudioFilesForPlaylist(supabase: any, kitIds: string[]) {
 
 export async function getPlaylistBySlug(slug: string): Promise<PublicPlaylist | null> {
   const supabase = createSupabaseAdminClient() as any;
-  const { data: playlist } = await supabase.from("playlists").select("id, name, slug, is_public").eq("slug", slug).maybeSingle();
+  const { data: playlist, error: playlistError } = await supabase.from("playlists").select("id, name, slug, is_public").eq("slug", slug).maybeSingle();
+  if (playlistError) throw new Error(playlistError.message);
   if (!playlist || !playlist.is_public) return null;
 
-  const { data: items, error } = await supabase
-    .from("playlist_items")
-    .select("position, kits!inner(id, slug, name, artist, cover_url, category_id, original_tone, default_tone, allow_pitch_shift, max_pitch_shift_semitones, published)")
-    .eq("playlist_id", playlist.id)
-    .order("position", { ascending: true });
-  if (error) throw new Error(error.message);
+  const items = await getPlaylistItems(supabase, playlist.id);
 
   const catIds = Array.from(new Set((items ?? []).map((i: any) => i.kits.category_id).filter(Boolean)));
   const { data: categories } = catIds.length
