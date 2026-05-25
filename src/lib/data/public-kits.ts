@@ -12,6 +12,12 @@ export interface PublicKitAudioFile {
   audioFileId: string;
   streamUrl: string;
   fileType: string;
+  minMidiNote: number | null;
+  maxMidiNote: number | null;
+  detectedMinMidiNote: number | null;
+  detectedMaxMidiNote: number | null;
+  tessituraConfidence: number | null;
+  tessituraSource: "manual" | "auto" | "hybrid";
 }
 
 export interface PublicKitToneGroup {
@@ -58,8 +64,7 @@ function normalizeVoice(value: string): VoiceType {
 }
 
 function getAudioStreamUrl(file: Database["public"]["Tables"]["kit_audio_files"]["Row"]) {
-  const directUrl = String((file as any).public_url ?? "").trim();
-  return directUrl || `/api/audio/${file.id}`;
+  return `/api/audio/${file.id}`;
 }
 
 function mapKit(
@@ -80,6 +85,12 @@ function mapKit(
       audioFileId: file.id,
       streamUrl: getAudioStreamUrl(file),
       fileType: file.file_type,
+      minMidiNote: file.min_midi_note ?? null,
+      maxMidiNote: file.max_midi_note ?? null,
+      detectedMinMidiNote: file.detected_min_midi_note ?? null,
+      detectedMaxMidiNote: file.detected_max_midi_note ?? null,
+      tessituraConfidence: file.tessitura_confidence ?? null,
+      tessituraSource: file.tessitura_source ?? "manual",
     };
   }
 
