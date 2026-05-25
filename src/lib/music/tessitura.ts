@@ -42,8 +42,11 @@ export interface TargetVoiceTessituraAnalysis {
   };
   status: TessituraStatus;
   suggestedOctaveShift: 0 | -12 | 12;
+  toleranceSemitones: number;
   message: string;
 }
+
+const DEFAULT_TESSITURA_TOLERANCE_SEMITONES = 1;
 
 export const VOCAL_RANGES: Record<VocalRangeType, VocalRange> = {
   baritono: {
@@ -148,10 +151,13 @@ export function applySemitoneShift(midi: number, semitoneShift: number, octaveSh
   return midi + semitoneShift + octaveShift;
 }
 
-function classifyAgainstRange(minMidi: number, maxMidi: number, range: VocalRange): TessituraStatus {
-  if (minMidi >= range.comfortable.minMidi && maxMidi <= range.comfortable.maxMidi) return "comfortable";
-  if (minMidi >= range.extended.minMidi && maxMidi <= range.extended.maxMidi) return "extended";
-  if (minMidi >= range.extreme.minMidi && maxMidi <= range.extreme.maxMidi) return "extreme";
+function classifyAgainstRange(minMidi: number, maxMidi: number, range: VocalRange, toleranceSemitones = 0): TessituraStatus {
+  const min = minMidi + toleranceSemitones;
+  const max = maxMidi - toleranceSemitones;
+
+  if (min >= range.comfortable.minMidi && max <= range.comfortable.maxMidi) return "comfortable";
+  if (min >= range.extended.minMidi && max <= range.extended.maxMidi) return "extended";
+  if (min >= range.extreme.minMidi && max <= range.extreme.maxMidi) return "extreme";
   return "unsafe";
 }
 
@@ -162,7 +168,7 @@ export function classifyRange(minMidi: number, maxMidi: number): {
   const ranges = Object.values(VOCAL_RANGES);
 
   for (const range of ranges) {
-    if (classifyAgainstRange(minMidi, maxMidi, range) === "comfortable") {
+    if (classifyAgainstRange(minMidi, maxMidi, range, DEFAULT_TESSITURA_TOLERANCE_SEMITONES) === "comfortable") {
       return {
         status: "comfortable",
         suggestedRange: range,
@@ -171,7 +177,7 @@ export function classifyRange(minMidi: number, maxMidi: number): {
   }
 
   for (const range of ranges) {
-    if (classifyAgainstRange(minMidi, maxMidi, range) === "extended") {
+    if (classifyAgainstRange(minMidi, maxMidi, range, DEFAULT_TESSITURA_TOLERANCE_SEMITONES) === "extended") {
       return {
         status: "extended",
         suggestedRange: range,
@@ -180,7 +186,7 @@ export function classifyRange(minMidi: number, maxMidi: number): {
   }
 
   for (const range of ranges) {
-    if (classifyAgainstRange(minMidi, maxMidi, range) === "extreme") {
+    if (classifyAgainstRange(minMidi, maxMidi, range, DEFAULT_TESSITURA_TOLERANCE_SEMITONES) === "extreme") {
       return {
         status: "extreme",
         suggestedRange: range,
@@ -200,12 +206,14 @@ export function analyzeTargetVoiceTessitura({
   sourceMinMidi,
   sourceMaxMidi,
   voice,
+  toleranceSemitones = DEFAULT_TESSITURA_TOLERANCE_SEMITONES,
 }: {
   requestedTone: string;
   sourceTone: string;
   sourceMinMidi: number;
   sourceMaxMidi: number;
   voice: VocalRangeType;
+  toleranceSemitones?: number;
 }): TargetVoiceTessituraAnalysis | null {
   const semitoneShift = getSignedSemitoneDistance(sourceTone, requestedTone);
   if (semitoneShift === null) return null;
@@ -215,16 +223,16 @@ export function analyzeTargetVoiceTessitura({
   const shiftedMax = applySemitoneShift(sourceMaxMidi, semitoneShift);
 
   let octaveShift: 0 | -12 | 12 = 0;
-  let status = classifyAgainstRange(shiftedMin, shiftedMax, range);
+  let status = classifyAgainstRange(shiftedMin, shiftedMax, range, toleranceSemitones);
 
   if (status === "unsafe") {
-    const octaveDownStatus = classifyAgainstRange(shiftedMin - 12, shiftedMax - 12, range);
-    const octaveUpStatus = classifyAgainstRange(shiftedMin + 12, shiftedMax + 12, range);
+    const octaveDownStatus = classifyAgainstRange(shiftedMin - 12, shiftedMax - 12, range, toleranceSemitones);
+    const octaveUpStatus = classifyAgainstRange(shiftedMin + 12, shiftedMax + 12, range, toleranceSemitones);
 
-    if (octaveDownStatus !== "unsafe" && shiftedMax > range.extreme.maxMidi) {
+    if (octaveDownStatus !== "unsafe" && shiftedMax > range.extreme.maxMidi + toleranceSemitones) {
       octaveShift = -12;
       status = octaveDownStatus;
-    } else if (octaveUpStatus !== "unsafe" && shiftedMin < range.extreme.minMidi) {
+    } else if (octaveUpStatus !== "unsafe" && shiftedMin < range.extreme.minMidi - toleranceSemitones) {
       octaveShift = 12;
       status = octaveUpStatus;
     }
@@ -251,6 +259,7 @@ export function analyzeTargetVoiceTessitura({
     },
     status,
     suggestedOctaveShift: octaveShift,
+    toleranceSemitones,
     message:
       octaveShift === -12
         ? `A linha de ${range.label} ficou muito elevada. Recomendada leitura 1 oitava abaixo para esta função vocal.`
@@ -282,11 +291,11 @@ export function analyzeTessitura({
   let octaveShift: 0 | -12 | 12 = 0;
 
   if (classification.status === "unsafe") {
-    if (shiftedMax > VOCAL_RANGES.soprano.extreme.maxMidi) {
+    if (shiftedMax > VOCAL_RANGES.soprano.extreme.maxMidi + DEFAULT_TESSITURA_TOLERANCE_SEMITONES) {
       octaveShift = -12;
     }
 
-    if (shiftedMin < VOCAL_RANGES.baritono.extreme.minMidi) {
+    if (shiftedMin < VOCAL_RANGES.baritono.extreme.minMidi - DEFAULT_TESSITURA_TOLERANCE_SEMITONES) {
       octaveShift = 12;
     }
   }
