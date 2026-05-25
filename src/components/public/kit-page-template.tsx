@@ -11,7 +11,7 @@ import { UpgradeRequiredModal } from "@/components/public/upgrade-required-modal
 import { VoiceSelector } from "@/components/public/voice-selector";
 import { midiToNoteName } from "@/lib/audio/pitch-analysis";
 import type { PublicKit, PublicKitAudioFile, VoiceType } from "@/lib/data/public-kits";
-import { analyzeTessitura } from "@/lib/music/tessitura";
+import { analyzeTargetVoiceTessitura, type TargetVoiceTessituraAnalysis, type VocalRangeType } from "@/lib/music/tessitura";
 
 interface KitPageTemplateProps {
   kit: PublicKit;
@@ -47,13 +47,14 @@ function getMidiRange(file: PublicKitAudioFile | null) {
   return { min, max };
 }
 
-function toAvailableVoice(value: string, currentTone: PublicKit["tones"][number] | undefined): VoiceType | null {
-  if (value !== "todos" && value !== "tenor" && value !== "contralto" && value !== "soprano") return null;
-  return currentTone?.voices[value] ? value : null;
+function toAnalyzableVoice(voice: VoiceType): VocalRangeType | null {
+  if (voice === "tenor" || voice === "contralto" || voice === "soprano") return voice;
+  return null;
 }
 
-function getReinterpretationCopy(analysis: ReturnType<typeof analyzeTessitura>, hasSuggestedVoice: boolean) {
+function getArrangementGuidance(analysis: TargetVoiceTessituraAnalysis | null, selectedVoice: VoiceType) {
   if (!analysis) return null;
+
   const isRisky = analysis.status === "extreme" || analysis.status === "unsafe" || analysis.suggestedOctaveShift !== 0;
   if (!isRisky) return null;
 
@@ -64,16 +65,17 @@ function getReinterpretationCopy(analysis: ReturnType<typeof analyzeTessitura>, 
       : "na oitava atual";
 
   return {
-    title: "Reinterpretação vocal sugerida",
-    description: `Para preservar conforto e estabilidade, esta voz pode funcionar melhor como ${voiceLabel(analysis.suggestedRange)} cantando ${octaveText}.`,
-    button: hasSuggestedVoice ? `Aplicar voz: ${voiceLabel(analysis.suggestedRange)}` : `Aplicar orientação`,
+    title: "Atenção à linha do arranjo",
+    description:
+      analysis.suggestedOctaveShift !== 0
+        ? `A linha de ${voiceLabel(selectedVoice)} saiu da zona ideal neste tom. Para manter a função vocal, considere estudar essa linha ${octaveText}.`
+        : `A linha de ${voiceLabel(selectedVoice)} está em região ${statusLabel(analysis.status).toLowerCase()}. Se a modulação for usada no grupo, avalie redistribuir as linhas entre os nipes para preservar conforto e timbre.`,
   };
 }
 
 export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
   const [selectedTone, setSelectedTone] = useState(kit.tones[0]?.tone ?? "");
   const [selectedVoice, setSelectedVoice] = useState<VoiceType>("todos");
-  const [manualInterpretation, setManualInterpretation] = useState<string | null>(null);
   const [loginOpen, setLoginOpen] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [upgradeConfig, setUpgradeConfig] = useState({
@@ -86,31 +88,20 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
   const currentTone = kit.tones.find((t) => t.tone === selectedTone) ?? kit.tones[0];
   const selectedFile = currentTone?.voices[selectedVoice] ?? currentTone?.voices.todos ?? null;
   const midiRange = getMidiRange(selectedFile);
+  const analysisVoice = toAnalyzableVoice(selectedVoice);
 
   const tessituraAnalysis = useMemo(() => {
-    if (!selectedFile || !midiRange) return null;
-    return analyzeTessitura({
+    if (!selectedFile || !midiRange || !analysisVoice) return null;
+    return analyzeTargetVoiceTessitura({
       requestedTone: selectedTone,
       sourceTone: selectedFile.tone,
       sourceMinMidi: midiRange.min,
       sourceMaxMidi: midiRange.max,
+      voice: analysisVoice,
     });
-  }, [selectedFile, midiRange, selectedTone]);
+  }, [selectedFile, midiRange, selectedTone, analysisVoice]);
 
-  const suggestedVoice = tessituraAnalysis ? toAvailableVoice(tessituraAnalysis.suggestedRange, currentTone) : null;
-  const reinterpretation = getReinterpretationCopy(tessituraAnalysis, Boolean(suggestedVoice));
-
-  function applyReinterpretation() {
-    if (!tessituraAnalysis) return;
-
-    if (suggestedVoice) {
-      setSelectedVoice(suggestedVoice);
-    }
-
-    setManualInterpretation(
-      `Sugestão aplicada: estudar esta voz como ${voiceLabel(tessituraAnalysis.suggestedRange)}${tessituraAnalysis.suggestedOctaveShift === -12 ? " 1 oitava abaixo" : tessituraAnalysis.suggestedOctaveShift === 12 ? " 1 oitava acima" : ""}.`,
-    );
-  }
+  const arrangementGuidance = getArrangementGuidance(tessituraAnalysis, selectedVoice);
 
   function openPremiumToneUpgrade() {
     setUpgradeConfig({
@@ -152,12 +143,8 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
                   return;
                 }
                 setSelectedTone(tone);
-                setManualInterpretation(null);
               }} />
-              <VoiceSelector selectedVoice={selectedVoice} onSelectVoice={(voice) => {
-                setSelectedVoice(voice);
-                setManualInterpretation(null);
-              }} />
+              <VoiceSelector selectedVoice={selectedVoice} onSelectVoice={setSelectedVoice} />
               <HarmomusPlayer src={selectedFile?.streamUrl ?? null} title={`Tom ${selectedTone} • Voz ${selectedVoice}`} canPlay={accessContext.play.allowed} onBlocked={() => {
                 if (accessContext.play.reason === "guest") setLoginOpen(true);
                 else {
@@ -182,29 +169,26 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
                 }
               }} />
 
-              {tessituraAnalysis ? (
+              {selectedVoice === "todos" ? (
+                <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-xs text-zinc-400">
+                  A faixa “Todos” é a referência completa do arranjo. A leitura de tessitura inteligente aparece ao selecionar Soprano, Contralto ou Tenor.
+                </div>
+              ) : tessituraAnalysis ? (
                 <div className="rounded-xl border border-white/10 bg-black/25 px-4 py-3 text-xs text-zinc-200">
                   <div className="flex flex-wrap gap-2">
-                    <span className="rounded-full border border-white/10 px-2 py-1">Zona vocal: {statusLabel(tessituraAnalysis.status)}</span>
-                    <span className="rounded-full border border-white/10 px-2 py-1">Nipe sugerido: {voiceLabel(tessituraAnalysis.suggestedRange)}</span>
-                    {tessituraAnalysis.suggestedOctaveShift !== 0 ? <span className="rounded-full border border-gold-400/30 px-2 py-1 text-gold-200">Oitava: {tessituraAnalysis.suggestedOctaveShift > 0 ? "+1" : "-1"}</span> : null}
+                    <span className="rounded-full border border-white/10 px-2 py-1">Linha: {voiceLabel(selectedVoice)}</span>
+                    <span className="rounded-full border border-white/10 px-2 py-1">Zona: {statusLabel(tessituraAnalysis.status)}</span>
+                    {tessituraAnalysis.suggestedOctaveShift !== 0 ? <span className="rounded-full border border-gold-400/30 px-2 py-1 text-gold-200">Leitura: {tessituraAnalysis.suggestedOctaveShift > 0 ? "+1 oitava" : "-1 oitava"}</span> : null}
                   </div>
                   <p className="mt-2 text-zinc-300">{tessituraAnalysis.message}</p>
                   <p className="mt-1 text-zinc-500">
                     Faixa: {midiRange ? `${midiToNoteName(midiRange.min)} → ${midiToNoteName(midiRange.max)}` : "não analisada"} • Após ajuste: {midiToNoteName(tessituraAnalysis.targetMidiRange.min)} → {midiToNoteName(tessituraAnalysis.targetMidiRange.max)}
                   </p>
 
-                  {reinterpretation ? (
+                  {arrangementGuidance ? (
                     <div className="mt-3 rounded-xl border border-gold-400/20 bg-gold-400/10 p-3">
-                      <p className="font-medium text-gold-200">{reinterpretation.title}</p>
-                      <p className="mt-1 text-gold-100/80">{manualInterpretation ?? reinterpretation.description}</p>
-                      <button
-                        type="button"
-                        onClick={applyReinterpretation}
-                        className="mt-3 rounded-lg border border-gold-400/30 bg-black/20 px-3 py-2 text-xs font-medium text-gold-100 hover:bg-black/30"
-                      >
-                        {reinterpretation.button}
-                      </button>
+                      <p className="font-medium text-gold-200">{arrangementGuidance.title}</p>
+                      <p className="mt-1 text-gold-100/80">{arrangementGuidance.description}</p>
                     </div>
                   ) : null}
                 </div>
