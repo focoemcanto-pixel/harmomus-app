@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { AccessCounter } from "@/components/public/access-counter";
 import { AccessStatusBadge } from "@/components/public/access-status-badge";
 import { HarmomusPlayer } from "@/components/public/harmomus-player";
@@ -9,11 +9,42 @@ import { LoginRequiredModal } from "@/components/public/login-required-modal";
 import { ToneSelector } from "@/components/public/tone-selector";
 import { UpgradeRequiredModal } from "@/components/public/upgrade-required-modal";
 import { VoiceSelector } from "@/components/public/voice-selector";
-import type { PublicKit, VoiceType } from "@/lib/data/public-kits";
+import { midiToNoteName } from "@/lib/audio/pitch-analysis";
+import type { PublicKit, PublicKitAudioFile, VoiceType } from "@/lib/data/public-kits";
+import { analyzeTessitura } from "@/lib/music/tessitura";
 
 interface KitPageTemplateProps {
   kit: PublicKit;
   accessContext: any;
+}
+
+function voiceLabel(voice: string) {
+  const map: Record<string, string> = {
+    todos: "Todos",
+    tenor: "Tenor",
+    contralto: "Contralto",
+    soprano: "Soprano",
+    baritono: "Barítono",
+  };
+  return map[voice] ?? voice;
+}
+
+function statusLabel(status: string) {
+  const map: Record<string, string> = {
+    comfortable: "Confortável",
+    extended: "Estendida",
+    extreme: "Extrema",
+    unsafe: "Fora da zona segura",
+  };
+  return map[status] ?? status;
+}
+
+function getMidiRange(file: PublicKitAudioFile | null) {
+  if (!file) return null;
+  const min = file.minMidiNote ?? file.detectedMinMidiNote;
+  const max = file.maxMidiNote ?? file.detectedMaxMidiNote;
+  if (typeof min !== "number" || typeof max !== "number") return null;
+  return { min, max };
 }
 
 export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
@@ -30,6 +61,17 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
 
   const currentTone = kit.tones.find((t) => t.tone === selectedTone) ?? kit.tones[0];
   const selectedFile = currentTone?.voices[selectedVoice] ?? currentTone?.voices.todos ?? null;
+  const midiRange = getMidiRange(selectedFile);
+
+  const tessituraAnalysis = useMemo(() => {
+    if (!selectedFile || !midiRange) return null;
+    return analyzeTessitura({
+      requestedTone: selectedTone,
+      sourceTone: selectedFile.tone,
+      sourceMinMidi: midiRange.min,
+      sourceMaxMidi: midiRange.max,
+    });
+  }, [selectedFile, midiRange, selectedTone]);
 
   function openPremiumToneUpgrade() {
     setUpgradeConfig({
@@ -96,6 +138,25 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
                   setUpgradeOpen(true);
                 }
               }} />
+
+              {tessituraAnalysis ? (
+                <div className="rounded-xl border border-white/10 bg-black/25 px-4 py-3 text-xs text-zinc-200">
+                  <div className="flex flex-wrap gap-2">
+                    <span className="rounded-full border border-white/10 px-2 py-1">Zona vocal: {statusLabel(tessituraAnalysis.status)}</span>
+                    <span className="rounded-full border border-white/10 px-2 py-1">Nipe sugerido: {voiceLabel(tessituraAnalysis.suggestedRange)}</span>
+                    {tessituraAnalysis.suggestedOctaveShift !== 0 ? <span className="rounded-full border border-gold-400/30 px-2 py-1 text-gold-200">Oitava: {tessituraAnalysis.suggestedOctaveShift > 0 ? "+1" : "-1"}</span> : null}
+                  </div>
+                  <p className="mt-2 text-zinc-300">{tessituraAnalysis.message}</p>
+                  <p className="mt-1 text-zinc-500">
+                    Faixa: {midiRange ? `${midiToNoteName(midiRange.min)} → ${midiToNoteName(midiRange.max)}` : "não analisada"} • Após ajuste: {midiToNoteName(tessituraAnalysis.targetMidiRange.min)} → {midiToNoteName(tessituraAnalysis.targetMidiRange.max)}
+                  </p>
+                </div>
+              ) : selectedFile ? (
+                <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-xs text-zinc-400">
+                  Tessitura ainda não analisada para esta voz. Analise no painel admin para liberar a leitura inteligente.
+                </div>
+              ) : null}
+
               <AccessCounter value={accessContext.play.stats?.uniqueKitCount24h ?? 0} limit={accessContext.play.stats?.limit ?? 5} />
             </div>
           </div>
