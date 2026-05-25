@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { normalizePlan } from "@/lib/access/access-engine";
 import type { Database } from "@/types/database";
 
 export type UserTier = "guest" | "free" | "plus" | "premium";
@@ -48,6 +49,7 @@ export interface PublicKit {
   maxPitchShiftSemitones: number;
   category: { id: string; name: string; slug: string; description: string | null; cover_url: string | null } | null;
   requiredPlan: { id: string; name: string; slug: string } | null;
+  allowedPlanSlugs: ("free" | "plus" | "premium")[];
   tones: PublicKitToneGroup[];
 }
 
@@ -105,6 +107,13 @@ function mapKit(
 
   const category = kit.category_id ? categoriesMap.get(kit.category_id) ?? null : null;
   const requiredPlan = kit.required_plan ? plansMap.get(kit.required_plan) ?? null : null;
+  const allowedPlanSlugs: ("free" | "plus" | "premium")[] = Array.isArray((kit as any).allowed_plan_slugs) && (kit as any).allowed_plan_slugs.length
+    ? Array.from(new Set(((kit as any).allowed_plan_slugs as unknown[]).map((slug) => normalizePlan(slug))))
+    : requiredPlan?.slug === "premium"
+      ? ["premium"]
+      : requiredPlan?.slug === "plus"
+        ? ["plus", "premium"]
+        : ["free", "plus", "premium"];
   return {
     id: kit.id,
     slug: kit.slug,
@@ -119,6 +128,7 @@ function mapKit(
     maxPitchShiftSemitones: kit.max_pitch_shift_semitones ?? 2,
     category: category ? { id: category.id, name: category.name, slug: category.slug, description: category.description, cover_url: (category as any).cover_url ?? null } : null,
     requiredPlan: requiredPlan ? { id: requiredPlan.id, name: requiredPlan.name, slug: requiredPlan.slug } : null,
+    allowedPlanSlugs,
     tones: Array.from(tonesMap.values()).sort((a, b) => a.tone.localeCompare(b.tone, "pt-BR")),
   };
 }
