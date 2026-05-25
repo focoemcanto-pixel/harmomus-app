@@ -23,6 +23,12 @@ export interface PlaylistKitSummary {
     name: string;
     streamUrl: string;
     fileType: string;
+    minMidiNote: number | null;
+    maxMidiNote: number | null;
+    detectedMinMidiNote: number | null;
+    detectedMaxMidiNote: number | null;
+    tessituraConfidence: number | null;
+    tessituraSource: "manual" | "auto" | "hybrid";
   }[];
 }
 
@@ -144,7 +150,10 @@ export async function getPlaylistBySlug(slug: string): Promise<PublicPlaylist | 
 
   const kitIds = (items ?? []).map((i: any) => i.kits.id);
   const { data: audioFiles, error: audioFilesError } = kitIds.length
-    ? await supabase.from("kit_audio_files").select("id, kit_id, tone, name, file_type").in("kit_id", kitIds)
+    ? await supabase
+        .from("kit_audio_files")
+        .select("id, kit_id, tone, name, file_type, min_midi_note, max_midi_note, detected_min_midi_note, detected_max_midi_note, tessitura_confidence, tessitura_source")
+        .in("kit_id", kitIds)
     : { data: [], error: null };
   if (audioFilesError) throw new Error(audioFilesError.message);
 
@@ -186,6 +195,12 @@ export async function getPlaylistBySlug(slug: string): Promise<PublicPlaylist | 
             name: file.name,
             streamUrl: `/api/audio/${file.id}`,
             fileType: file.file_type,
+            minMidiNote: file.min_midi_note ?? null,
+            maxMidiNote: file.max_midi_note ?? null,
+            detectedMinMidiNote: file.detected_min_midi_note ?? null,
+            detectedMaxMidiNote: file.detected_max_midi_note ?? null,
+            tessituraConfidence: file.tessitura_confidence ?? null,
+            tessituraSource: file.tessitura_source ?? "manual",
           })),
       })),
   };
