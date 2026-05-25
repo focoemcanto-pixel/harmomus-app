@@ -31,6 +31,7 @@ type GlobalAudioPlayerContextValue = {
   skipBy: (seconds: number) => void;
   setVolumeValue: (value: number) => void;
   setLoopValue: (value: boolean) => void;
+  stopPlayback: () => void;
   closePlayer: () => Promise<void>;
 };
 
@@ -120,6 +121,42 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
       shift: trackRef.current?.semitoneShift ?? 0,
       ...extra,
     });
+  }
+
+  function stopPlayback() {
+    latestPlayRequestIdRef.current += 1;
+    currentPlaybackSessionIdRef.current += 1;
+    currentPlaybackAbortControllerRef.current?.abort("stop-playback::abort");
+    currentPlaybackAbortControllerRef.current = null;
+
+    try {
+      pitchControllerRef.current?.dispose();
+    } catch {}
+    pitchControllerRef.current = null;
+
+    const audio = audioRef.current;
+    if (audio) {
+      try {
+        audio.pause();
+      } catch {}
+      try {
+        audio.currentTime = 0;
+      } catch {}
+      audio.removeAttribute("src");
+      audio.src = "";
+      try {
+        audio.load();
+      } catch {}
+    }
+
+    activePlaybackKeyRef.current = null;
+    setActiveTrack(null);
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
+    setHasEnded(false);
+    setErrorMessage(null);
+    logDev("immediate playback stop");
   }
 
   async function fullyDisposeEngine() {
@@ -220,8 +257,12 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
         setErrorMessage(null);
         setHasEnded(false);
 
-        await invalidateCurrentPlayback("track-change");
-        if (requestId !== latestPlayRequestIdRef.current) return;
+        if (!isSameTrack(trackRef.current, nextTrack)) {
+          if (trackRef.current || activePlaybackKeyRef.current || isPlaying) {
+            await invalidateCurrentPlayback("track-change");
+          }
+          if (requestId !== latestPlayRequestIdRef.current) return;
+        }
 
         setActiveTrack(nextTrack);
         activePlaybackKeyRef.current = targetIdentity;
@@ -330,7 +371,7 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
   }
 
   async function closePlayer() {
-    latestPlayRequestIdRef.current += 1;
+    stopPlayback();
     return enqueueOperation(async () => {
       await invalidateCurrentPlayback("close-player");
       setActiveTrack(null);
@@ -360,6 +401,7 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
     skipBy,
     setVolumeValue,
     setLoopValue,
+    stopPlayback,
     closePlayer,
   }), [track, isPlaying, currentTime, duration, volume, loop, hasEnded, errorMessage, preloadedSrc]);
 
