@@ -19,6 +19,7 @@ type CropState = { x: number; y: number; zoom: number };
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 const CROP_SIZE = 512;
+const DEFAULT_ALLOWED_PLANS = ["free", "plus", "premium"];
 
 function slugify(value: string) {
   return value
@@ -41,6 +42,23 @@ function SubmitButton({ mode }: { mode: "create" | "edit" }) {
       {pending ? "Salvando..." : mode === "create" ? "Criar kit" : "Salvar alterações"}
     </button>
   );
+}
+
+function resolveInitialAllowedPlans(initialData?: Kit | null) {
+  const explicit = (initialData as (Kit & { allowed_plan_slugs?: string[] | null }) | null | undefined)?.allowed_plan_slugs;
+  if (Array.isArray(explicit) && explicit.length) return explicit;
+
+  if (initialData?.required_plan === "premium") return ["premium"];
+  if (initialData?.required_plan === "plus") return ["plus", "premium"];
+
+  return DEFAULT_ALLOWED_PLANS;
+}
+
+function planHelperText(slug: string) {
+  if (slug === "free") return "Inclui o kit no catálogo gratuito, respeitando limite diário.";
+  if (slug === "plus") return "Libera o kit para assinantes Plus sem limite diário.";
+  if (slug === "premium") return "Libera o kit para Premium e recursos avançados.";
+  return "Libera o kit para este plano.";
 }
 
 export function KitForm({ mode, categories, artistCategories, plans, initialData, action }: KitFormProps) {
@@ -68,6 +86,8 @@ export function KitForm({ mode, categories, artistCategories, plans, initialData
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cropAreaRef = useRef<HTMLDivElement | null>(null);
 
+  const selectedAllowedPlans = useMemo(() => new Set(resolveInitialAllowedPlans(initialData)), [initialData]);
+  const orderedPlans = useMemo(() => [...plans].sort((a, b) => (a.hierarchy_level ?? 0) - (b.hierarchy_level ?? 0)), [plans]);
   const preview = useMemo(() => coverUrl.trim() || "https://placehold.co/800x800/101114/f4f4f5?text=Sem+capa", [coverUrl]);
 
   const uploadLabel =
@@ -326,20 +346,35 @@ export function KitForm({ mode, categories, artistCategories, plans, initialData
           </div>
         </div>
 
-        <label className="space-y-2 text-sm">
+        <label className="space-y-2 text-sm md:col-span-2">
           <span className="text-muted">Pasta R2</span>
           <input name="r2_folder" defaultValue={initialData?.r2_folder ?? ""} placeholder="images/kits/grandioso-es-tu" className="w-full rounded-lg border border-border bg-surface-muted px-3 py-2" />
         </label>
 
-        <label className="space-y-2 text-sm">
-          <span className="text-muted">Plano necessário</span>
-          <select name="required_plan" defaultValue={initialData?.required_plan ?? ""} className="w-full rounded-lg border border-border bg-surface-muted px-3 py-2">
-            <option value="">Todos os planos</option>
-            {plans.map((plan) => (
-              <option key={plan.id} value={plan.slug}>{plan.name}</option>
+        <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/5 p-4 md:col-span-2">
+          <div className="mb-4">
+            <p className="text-sm font-medium text-cyan-100">Disponibilidade por plano</p>
+            <p className="mt-1 text-xs text-muted">Escolha exatamente quais planos podem abrir este kit. Usuários sem acesso verão uma chamada para upgrade.</p>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            {orderedPlans.map((plan) => (
+              <label key={plan.id} className="flex cursor-pointer items-start gap-3 rounded-2xl border border-border bg-surface-muted p-4 transition hover:border-cyan-300/50 hover:bg-cyan-400/5">
+                <input
+                  name="allowed_plan_slugs"
+                  type="checkbox"
+                  value={plan.slug}
+                  defaultChecked={selectedAllowedPlans.has(plan.slug)}
+                  className="mt-1 h-4 w-4 rounded border-border bg-surface-muted accent-cyan-300"
+                />
+                <span>
+                  <span className="block text-sm font-semibold text-foreground">{plan.name}</span>
+                  <span className="mt-1 block text-xs leading-relaxed text-muted">{planHelperText(plan.slug)}</span>
+                </span>
+              </label>
             ))}
-          </select>
-        </label>
+          </div>
+          <p className="mt-3 text-xs text-amber-200">Dica: para kit exclusivo, deixe marcado apenas Plus/Premium ou apenas Premium.</p>
+        </div>
 
         <div className="rounded-xl border border-gold-500/20 bg-gold-500/5 p-4 md:col-span-2">
           <div className="mb-4">
