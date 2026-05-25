@@ -5,7 +5,7 @@ import { getAdminSettings } from "@/lib/data/admin-settings";
 import { createClient } from "@/lib/supabase/server";
 
 function normalizeRedirect(raw: string) {
-  if (!raw || !raw.startsWith("/")) return "/biblioteca";
+  if (!raw || !raw.startsWith("/")) return "/";
   return raw;
 }
 
