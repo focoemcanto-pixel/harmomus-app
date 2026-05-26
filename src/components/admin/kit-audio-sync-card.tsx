@@ -23,6 +23,8 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
   const [tones, setTones] = useState<KitAudioToneGroup[]>([]);
   const [usedPrefix, setUsedPrefix] = useState<string | null>(null);
   const [hasTessituraColumns, setHasTessituraColumns] = useState(true);
+  const [jobLoading, setJobLoading] = useState(false);
+  const [jobs, setJobs] = useState<Array<{ id: string; status: string; target_tone: string; error_message?: string | null }>>([]);
 
   const VOICE_ORDER = ["todos", "soprano", "contralto", "tenor"] as const;
 
@@ -54,7 +56,44 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
 
   useEffect(() => {
     void loadSyncedAudios();
+    void loadJobs();
   }, [kitId]);
+
+  async function loadJobs() {
+    const response = await fetch(`/api/audio/status?kitId=${kitId}`);
+    const data = await response.json().catch(() => ({}));
+    if (response.ok) setJobs((data.jobs ?? []) as any[]);
+  }
+
+  async function generateTonesAutomatically() {
+    const source = allFiles.find((file) => typeof file.id === "string");
+    if (!source?.id) {
+      setError("É necessário ter ao menos um áudio sincronizado para gerar tons automaticamente.");
+      return;
+    }
+
+    setJobLoading(true);
+    setError(null);
+    try {
+      const tonesSet = new Set(tones.map((toneGroup) => toneGroup.tone));
+      const chromatic = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+      const targets = chromatic.filter((tone) => !tonesSet.has(tone));
+      const voice = source.voice || "todos";
+
+      const response = await fetch(`/api/audio/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceAudioFileId: source.id, targetTones: targets, voice }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error ?? "Falha ao enfileirar jobs.");
+      await loadJobs();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro ao gerar tons automaticamente.");
+    } finally {
+      setJobLoading(false);
+    }
+  }
 
   async function syncAudios() {
     setLoading(true);
@@ -224,6 +263,14 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
           >
             {loading ? "Sincronizando..." : "Sincronizar áudios"}
           </button>
+          <button
+            type="button"
+            onClick={() => void generateTonesAutomatically()}
+            disabled={jobLoading || loading || loadingFiles || allFiles.length === 0}
+            className="rounded-lg border border-emerald-400/40 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {jobLoading ? "Enfileirando..." : "Gerar tons automaticamente"}
+          </button>
         </div>
       </div>
 
@@ -242,6 +289,8 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
       ) : null}
 
       {usedPrefix ? <p className="mb-3 text-xs text-muted">Prefixo usado na sincronização: <span className="font-mono text-foreground">{usedPrefix}</span></p> : null}
+
+      {jobs.length > 0 ? (<div className="mb-4 rounded-lg border border-border bg-surface-muted p-3 text-xs text-muted">{jobs.map((job) => <p key={job.id}>{job.target_tone}: <strong>{job.status}</strong>{job.error_message ? ` — ${job.error_message}` : ""}</p>)}</div>) : null}
 
       {tones.length === 0 && !loading && !loadingFiles ? <p className="text-sm text-muted">Nenhum áudio encontrado ainda para este kit.</p> : null}
 
