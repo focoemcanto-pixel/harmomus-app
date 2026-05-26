@@ -7,11 +7,35 @@ function runCommand(command: string, args: string[]) {
   });
 }
 
+export async function mp3ToWav(inputMp3: string, outputWav: string) {
+  await runCommand("ffmpeg", ["-y", "-i", inputMp3, outputWav]);
+}
+
 export async function generateAudioWithRubberBand(inputWav: string, outputWav: string, semitoneShift: number) {
   const ratio = 2 ** (semitoneShift / 12);
-  await runCommand("rubberband", ["--fine", "--formant", "--pitch-quality", "--threads", "--timemap-stretch", "--pitch", String(ratio), inputWav, outputWav]);
+
+  await runCommand("rubberband", [
+    "--fine",
+    "--formant",
+    "--pitch-quality",
+    "--threads",
+    "--timemap-stretch",
+    "--pitch",
+    String(ratio),
+    inputWav,
+    outputWav,
+  ]);
 }
 
 export async function wavToMp3(inputWav: string, outputMp3: string) {
-  await runCommand("ffmpeg", ["-y", "-i", inputWav, "-codec:a", "libmp3lame", "-qscale:a", "2", outputMp3]);
+  await runCommand("ffmpeg", [
+    "-y",
+    "-i",
+    inputWav,
+    "-codec:a",
+    "libmp3lame",
+    "-qscale:a",
+    "2",
+    outputMp3,
+  ]);
 }
