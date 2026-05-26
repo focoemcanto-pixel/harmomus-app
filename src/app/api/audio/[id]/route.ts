@@ -24,6 +24,16 @@ function parseRangeHeader(rangeHeader: string | null, totalSize?: number): { sta
   return { start, end };
 }
 
+function resolveAudioContentType(fileType: string | null | undefined, upstreamContentType: string | null | undefined) {
+  const normalized = String(fileType ?? "").toLowerCase().replace(/^audio\//, "");
+  if (normalized === "mp3" || normalized === "mpeg") return "audio/mpeg";
+  if (normalized === "wav" || normalized === "wave") return "audio/wav";
+  if (normalized === "ogg") return "audio/ogg";
+  if (normalized === "m4a" || normalized === "mp4") return "audio/mp4";
+  if (upstreamContentType?.startsWith("audio/")) return upstreamContentType;
+  return "audio/mpeg";
+}
+
 async function logAudioAccess(payload: {
   user_id: string | null;
   kit_id: string;
@@ -129,7 +139,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const totalLength = typeof streamResponse.ContentLength === "number" ? streamResponse.ContentLength : undefined;
   const status = range ? 206 : 200;
   const headers = new Headers();
-  headers.set("Content-Type", streamResponse.ContentType ?? `audio/${audioFile.file_type}`);
+  headers.set("Content-Type", resolveAudioContentType(audioFile.file_type, streamResponse.ContentType));
   headers.set("Cache-Control", "private, max-age=60, must-revalidate");
   headers.set("Accept-Ranges", "bytes");
   headers.set("Content-Disposition", `inline; filename="${audioFile.name}.${audioFile.file_type}"`);
