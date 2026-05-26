@@ -1,18 +1,15 @@
 import { NextResponse } from "next/server";
 
-import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
 
 const BASE_SELECT = "id,kit_id,tone,name,r2_key,public_url,file_type";
 const TESSITURA_SELECT = `${BASE_SELECT},min_midi_note,max_midi_note,detected_min_midi_note,detected_max_midi_note,tessitura_confidence,tessitura_source`;
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const current = await getCurrentUserAccessContext();
-    if (!current.isAdmin) {
-      return NextResponse.json({ error: "Acesso negado." }, { status: 403 });
-    }
-
     const { id } = await params;
     const supabase = (await createClient()) as any;
 
@@ -20,13 +17,17 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
 
     const grouped = new Map<string, any[]>();
     for (const file of files ?? []) {
-      const list = grouped.get(file.tone) ?? [];
+      const tone = normalizeTone(file.tone);
+      if (!tone) continue;
+
+      const list = grouped.get(tone) ?? [];
       list.push({
         id: file.id,
         name: file.name,
         key: file.r2_key,
         url: file.public_url,
-        tone: file.tone,
+        streamUrl: `/api/audio/${file.id}`,
+        tone,
         voice: normalizeVoice(file.name),
         fileType: file.file_type,
         minMidiNote: file.min_midi_note ?? null,
@@ -36,7 +37,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
         tessituraConfidence: file.tessitura_confidence ?? null,
         tessituraSource: file.tessitura_source ?? "manual",
       });
-      grouped.set(file.tone, list);
+      grouped.set(tone, list);
     }
 
     return NextResponse.json({
@@ -67,6 +68,29 @@ async function getAudioFiles(supabase: any, kitId: string) {
   if (fallbackError) throw new Error(fallbackError.message);
 
   return { files: fallbackData ?? [], hasTessituraColumns: false };
+}
+
+function normalizeTone(value: string | null | undefined) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+
+  const normalized = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/♯/g, "#")
+    .replace(/＃/g, "#")
+    .replace(/\s+/g, "")
+    .toUpperCase();
+
+  const flatMap: Record<string, string> = {
+    DB: "C#",
+    EB: "D#",
+    GB: "F#",
+    AB: "G#",
+    BB: "A#",
+  };
+
+  return flatMap[normalized] ?? normalized;
 }
 
 function normalizeVoice(value: string) {
