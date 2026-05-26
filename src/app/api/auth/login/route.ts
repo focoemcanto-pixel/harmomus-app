@@ -15,6 +15,15 @@ export async function POST(request: Request) {
   const supabase = await createClient();
 
   if (email && !password) {
+    const { data: existingProfile } = await (supabase as any)
+      .from("profiles")
+      .select("id")
+      .ilike("email", email)
+      .maybeSingle();
+
+    if (existingProfile?.id) {
+      // Já existe perfil na plataforma nova: segue fluxo normal de login.
+    } else {
     const { data: legacyMember } = await (supabase as any)
       .from("legacy_members")
       .select("email,legacy_plan_slug,legacy_status,migrated,password_created")
@@ -30,6 +39,7 @@ export async function POST(request: Request) {
       const url = new URL("/definir-senha-migrada", request.url);
       url.searchParams.set("email", email);
       return NextResponse.redirect(url, 303);
+    }
     }
   }
 

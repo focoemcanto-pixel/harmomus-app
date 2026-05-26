@@ -8,6 +8,14 @@ export async function POST(request: Request) {
     if (!email || !email.includes("@")) return NextResponse.json({ migrated: false });
 
     const supabase = await createClient();
+    const { data: existingProfile } = await (supabase as any)
+      .from("profiles")
+      .select("id")
+      .ilike("email", email)
+      .maybeSingle();
+
+    if (existingProfile?.id) return NextResponse.json({ migrated: false });
+
     const { data: legacyMember } = await (supabase as any)
       .from("legacy_members")
       .select("legacy_plan_slug,legacy_status,migrated,password_created")

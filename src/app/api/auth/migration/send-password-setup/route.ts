@@ -9,9 +9,12 @@ export async function POST(request: Request) {
   const supabase = await createClient();
 
   if (email && email.includes("@")) {
+    const admin = createSupabaseAdminClient() as any;
+    const { data: existingProfile } = await admin.from("profiles").select("id,email").ilike("email", email).maybeSingle();
+
     const { data: legacyMember } = await (supabase as any)
       .from("legacy_members")
-      .select("id,email,name,legacy_plan_slug,legacy_status,migrated,password_created")
+      .select("id,email,display_name,legacy_plan_slug,legacy_status,migrated,password_created")
       .ilike("email", email)
       .maybeSingle();
 
@@ -22,18 +25,27 @@ export async function POST(request: Request) {
       (!legacyMember.migrated || !legacyMember.password_created);
 
     if (eligible) {
-      const admin = createSupabaseAdminClient() as any;
       const now = new Date().toISOString();
-
-      const { data: usersData } = await admin.auth.admin.listUsers();
-      const existingUser = (usersData?.users ?? []).find((user: any) => String(user.email ?? "").toLowerCase() === email);
-
-      let userId = String(existingUser?.id ?? "");
+      let userId = String(existingProfile?.id ?? "");
+      if (!userId) {
+        let page = 1;
+        const perPage = 200;
+        let foundId = "";
+        while (!foundId) {
+          const { data: usersData, error: listError } = await admin.auth.admin.listUsers({ page, perPage });
+          if (listError || !(usersData?.users?.length > 0)) break;
+          const existingUser = (usersData.users ?? []).find((user: any) => String(user.email ?? "").toLowerCase() === email);
+          foundId = String(existingUser?.id ?? "");
+          if (foundId || (usersData.users?.length ?? 0) < perPage) break;
+          page += 1;
+        }
+        userId = foundId;
+      }
       if (!userId) {
         const created = await admin.auth.admin.createUser({
           email,
           email_confirm: false,
-          user_metadata: { full_name: legacyMember.name ?? "" },
+          user_metadata: { full_name: legacyMember.display_name ?? "" },
         });
         userId = String(created.data.user?.id ?? "");
       }
@@ -43,7 +55,7 @@ export async function POST(request: Request) {
           {
             id: userId,
             email,
-            full_name: legacyMember.name ?? null,
+            full_name: legacyMember.display_name ?? null,
             role: "member",
             migrated_from_pms: true,
             requires_password_setup: true,
@@ -54,17 +66,34 @@ export async function POST(request: Request) {
 
         const { data: freePlan } = await admin.from("plans").select("id,slug").eq("slug", "free").maybeSingle();
         if (freePlan?.id) {
-          await admin.from("subscriptions").upsert(
-            {
+          const { data: activeSubscription } = await admin
+            .from("subscriptions")
+            .select("id")
+            .eq("user_id", userId)
+            .eq("status", "active")
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (activeSubscription?.id) {
+            await admin
+              .from("subscriptions")
+              .update({
+                plan_id: freePlan.id,
+                gateway: "legacy",
+                migrated_from_pms: true,
+                updated_at: now,
+              })
+              .eq("id", activeSubscription.id);
+          } else {
+            await admin.from("subscriptions").insert({
               user_id: userId,
               plan_id: freePlan.id,
               status: "active",
               gateway: "legacy",
               migrated_from_pms: true,
               updated_at: now,
-            },
-            { onConflict: "user_id" },
-          );
+            });
+          }
         }
 
         await (supabase as any)
