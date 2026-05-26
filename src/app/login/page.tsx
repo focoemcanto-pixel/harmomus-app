@@ -1,8 +1,5 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
-
 import { getAdminSettings } from "@/lib/data/admin-settings";
-import { createClient } from "@/lib/supabase/server";
 
 function normalizeRedirect(raw: string) {
   if (!raw || !raw.startsWith("/")) return "/";
@@ -31,36 +28,6 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const logoUrl = settings.branding.logoUrl || "";
   const loginImageUrl = settings.branding.loginImageUrl || settings.branding.heroImageUrl || "";
 
-  async function signIn(formData: FormData) {
-    "use server";
-    const email = String(formData.get("email") ?? "").trim();
-    const password = String(formData.get("password") ?? "");
-    const redirectPath = normalizeRedirect(String(formData.get("redirect") ?? ""));
-    const supabase = await createClient();
-
-    const { error: signInError, data } = await supabase.auth.signInWithPassword({ email, password });
-
-    if (signInError) {
-      redirect(`/login?error=${encodeURIComponent("Credenciais inválidas. Tente novamente.")}&redirect=${encodeURIComponent(redirectPath)}`);
-    }
-
-    const user = data.user;
-
-    if (user?.email) {
-      const { data: profile } = await (supabase as any)
-        .from("profiles")
-        .select("role")
-        .ilike("email", user.email.trim().toLowerCase())
-        .maybeSingle();
-
-      if (String(profile?.role ?? "").trim().toLowerCase() === "admin") {
-        redirect("/admin");
-      }
-    }
-
-    redirect(redirectPath);
-  }
-
   return (
     <main className="min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,#17213a_0%,#07080f_42%,#020207_100%)] px-4 py-8 text-white">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_80%_20%,rgba(139,92,246,0.22),transparent_35%),radial-gradient(circle_at_20%_70%,rgba(34,211,238,0.14),transparent_32%)]" />
@@ -83,7 +50,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
               <div className="mx-auto max-w-md">
                 <p className="text-center text-sm text-zinc-300">Bem-vindo de volta</p>
                 <h1 className="mt-2 text-center text-4xl font-semibold text-white">Entrar no {appName}</h1>
-                <form action={signIn} className="mt-8 space-y-5">
+                <form action="/api/auth/login" method="post" className="mt-8 space-y-5">
                   <input type="hidden" name="redirect" value={redirectTo} />
                   <div>
                     <label className="mb-2 block text-sm text-zinc-200">E-mail</label>
