@@ -101,41 +101,36 @@ async function reserveJob() {
   return locked ?? null;
 }
 
-async function upsertGeneratedAudioFile(job: any, publicUrl: string | null) {
-  const canonicalVoice = canonicalVoiceName(job.voice);
-  const payload = {
-    kit_id: job.kit_id,
-    tone: job.target_tone,
-    name: canonicalVoice,
-    r2_key: job.target_r2_key,
-    public_url: publicUrl,
-    file_type: "mp3",
-  };
+async function upsertGeneratedAudioFile(job: any) {
+  const targetTone = job.target_tone;
+  const voice = canonicalVoiceName(job.voice);
+  const r2Key = job.target_r2_key;
+  const fileName = voice;
+  const sourceId = job.source_audio_file_id;
 
-  const { data: existing, error: findError } = await supabase
+  const { data, error } = await supabase
     .from("kit_audio_files")
-    .select("id")
-    .eq("kit_id", job.kit_id)
-    .eq("r2_key", job.target_r2_key)
-    .maybeSingle();
-
-  if (findError) throw new Error(findError.message);
-
-  if (existing?.id) {
-    const { error } = await supabase
-      .from("kit_audio_files")
-      .update(payload)
-      .eq("id", existing.id);
-
-    if (error) throw new Error(error.message);
-    return;
-  }
-
-  const { error } = await supabase
-    .from("kit_audio_files")
-    .insert(payload);
+    .upsert(
+      {
+        kit_id: job.kit_id,
+        tone: targetTone,
+        voice,
+        r2_key: r2Key,
+        name: fileName,
+        file_type: "mp3",
+        generated: true,
+        source_audio_file_id: sourceId,
+        created_by_job_id: job.id,
+      },
+      {
+        onConflict: "kit_id,r2_key",
+      },
+    )
+    .select()
+    .single();
 
   if (error) throw new Error(error.message);
+  return data;
 }
 
 async function processJob(job: any) {
@@ -156,10 +151,20 @@ async function processJob(job: any) {
     const outputBytes = await readFile(outputMp3);
     await uploadToR2(job.target_r2_key, outputBytes);
 
-    const publicBaseUrl = (process.env.R2_PUBLIC_BASE_URL ?? "").replace(/\/$/, "");
-    const publicUrl = publicBaseUrl ? `${publicBaseUrl}/${job.target_r2_key}` : null;
+    await upsertGeneratedAudioFile(job);
 
-    await upsertGeneratedAudioFile(job, publicUrl);
+    const appUrl = String(process.env.APP_URL ?? "").trim().replace(/\/$/, "");
+    const internalToken = String(process.env.INTERNAL_TOKEN ?? "").trim();
+    if (appUrl && internalToken) {
+      await fetch(`${appUrl}/api/revalidate-kit`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${internalToken}`,
+        },
+        body: JSON.stringify({ kitId: job.kit_id }),
+      });
+    }
 
     const { error: updateError } = await supabase
       .from("audio_generation_jobs")

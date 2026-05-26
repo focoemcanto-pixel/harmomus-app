@@ -20,13 +20,6 @@ interface KitPageTemplateProps {
   accessContext: any;
 }
 
-type ToneOption = {
-  tone: string;
-  label: string;
-  isOriginal: boolean;
-  isAvailable: boolean;
-};
-
 type AudioFilesApiFile = {
   id?: string;
   tone?: string;
@@ -115,29 +108,6 @@ function getArrangementGuidance(analysis: TargetVoiceTessituraAnalysis | null, s
         ? `Ao modular, a linha de ${voiceLabel(selectedVoice)} saiu da zona ideal. Para manter a função vocal, considere estudar essa linha ${octaveText}.`
         : `Ao modular, a linha de ${voiceLabel(selectedVoice)} entrou em região ${statusLabel(analysis.status).toLowerCase()}. Avalie redistribuir as linhas entre os nipes para preservar conforto e timbre.`,
   };
-}
-
-function getToneFileCount(toneGroup: PublicKitToneGroup) {
-  const files = (toneGroup as PublicKitToneGroup & { files?: unknown[] }).files;
-  if (Array.isArray(files)) return files.length;
-  return Object.values(toneGroup.voices ?? {}).filter(Boolean).length;
-}
-
-function buildToneOptions({ kit }: { kit: PublicKit }): ToneOption[] {
-  const availableTones = sortTonesByChromaticOrder(kit.tones.map((tone) => tone.tone));
-  const originalTone = normalizeTone(kit.originalTone) ?? normalizeTone(kit.defaultTone) ?? availableTones[0] ?? null;
-
-  return availableTones.map((tone) => {
-    const toneGroup = getToneGroup(kit, tone);
-    const isAvailable = Boolean(toneGroup && getToneFileCount(toneGroup) > 0);
-
-    return {
-      tone,
-      label: formatToneLabel(tone),
-      isOriginal: Boolean(originalTone && tone === originalTone),
-      isAvailable,
-    };
-  });
 }
 
 function getToneGroup(kit: PublicKit, tone: string): PublicKitToneGroup | null {
@@ -232,7 +202,19 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
     ctaHref: "/assinar?plan=premium",
   });
 
-  const toneOptions = useMemo(() => buildToneOptions({ kit: liveKit }), [liveKit]);
+  const availableTones = useMemo(
+    () => liveKit.tones.filter((tone) => Array.isArray((tone as PublicKitToneGroup & { files?: unknown[] }).files) && ((tone as PublicKitToneGroup & { files?: unknown[] }).files?.length ?? 0) > 0),
+    [liveKit.tones],
+  );
+  const toneOptions = useMemo(() => {
+    const originalTone = normalizeTone(liveKit.originalTone) ?? normalizeTone(liveKit.defaultTone) ?? null;
+    return availableTones.map((toneGroup) => ({
+      tone: toneGroup.tone,
+      label: formatToneLabel(toneGroup.tone),
+      isOriginal: Boolean(originalTone && toneGroup.tone === originalTone),
+      isAvailable: true,
+    }));
+  }, [availableTones, liveKit.originalTone, liveKit.defaultTone]);
   const tracksForSelectedVoice = useMemo(
     () => liveKit.tones.flatMap((toneGroup) => {
       const preferred = toneGroup.voices[selectedVoice] ?? toneGroup.voices.todos;
