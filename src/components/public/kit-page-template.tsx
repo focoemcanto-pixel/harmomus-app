@@ -118,8 +118,8 @@ function buildToneOptions({ kit, selectedVoice }: { kit: PublicKit; selectedVoic
     const resolution = resolveToneTrack({
       tracks,
       requestedTone: tone,
-      allowPitchShift: kit.allowPitchShift,
-      maxPitchShiftSemitones: kit.maxPitchShiftSemitones,
+      allowPitchShift: false,
+      maxPitchShiftSemitones: 0,
       pickTrack: (toneTracks) => toneTracks.find((track) => track.voice === selectedVoice) ?? toneTracks.find((track) => track.voice === "todos") ?? toneTracks[0] ?? null,
     });
 
@@ -128,8 +128,8 @@ function buildToneOptions({ kit, selectedVoice }: { kit: PublicKit; selectedVoic
       label: formatToneLabel(tone),
       isOriginal: Boolean(originalTone && tone === originalTone),
       isExact: resolution.isExact,
-      isPitchShifted: resolution.isPitchShifted,
-      semitoneShift: resolution.semitoneShift,
+      isPitchShifted: false,
+      semitoneShift: 0,
       sourceTone: resolution.sourceTone,
       isAvailable: resolution.isAvailable,
     };
@@ -177,16 +177,16 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
   const toneResolution = useMemo(() => resolveToneTrack({
     tracks: tracksForSelectedVoice,
     requestedTone: selectedTone,
-    allowPitchShift: kit.allowPitchShift,
-    maxPitchShiftSemitones: kit.maxPitchShiftSemitones,
+    allowPitchShift: false,
+    maxPitchShiftSemitones: 0,
     pickTrack: (toneTracks) => toneTracks.find((track) => track.voice === selectedVoice) ?? toneTracks.find((track) => track.voice === "todos") ?? toneTracks[0] ?? null,
-  }), [tracksForSelectedVoice, selectedTone, kit.allowPitchShift, kit.maxPitchShiftSemitones, selectedVoice]);
+  }), [tracksForSelectedVoice, selectedTone, selectedVoice]);
 
   const sourceTone = toneResolution.sourceTone ?? selectedTone;
-  const currentTone = getToneGroup(kit, sourceTone) ?? kit.tones[0];
-  const selectedFile = toneResolution.sourceTrack ?? currentTone?.voices[selectedVoice] ?? currentTone?.voices.todos ?? null;
-  const semitoneShift = toneResolution.isPitchShifted ? toneResolution.semitoneShift : 0;
-  const isModulated = semitoneShift !== 0;
+  const currentTone = getToneGroup(kit, sourceTone) ?? null;
+  const selectedFile = toneResolution.sourceTrack ?? currentTone?.voices[selectedVoice] ?? null;
+  const semitoneShift = 0;
+  const isModulated = false;
   const midiRange = getMidiRange(selectedFile);
   const analysisVoice = toAnalyzableVoice(selectedVoice);
 
@@ -258,13 +258,7 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
               <div className="rounded-xl border border-white/10 bg-black/20 p-3">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <p className="text-xs font-medium uppercase tracking-[0.16em] text-zinc-400">Modular tom</p>
-                  {isModulated ? (
-                    <span className="rounded-full border border-gold-400/30 px-2 py-1 text-[11px] text-gold-200">
-                      Usando {formatToneLabel(sourceTone)} {semitoneShift > 0 ? `+${semitoneShift}` : semitoneShift} semitom(ns)
-                    </span>
-                  ) : (
-                    <span className="rounded-full border border-emerald-400/20 px-2 py-1 text-[11px] text-emerald-200">Tom base/original</span>
-                  )}
+                  <span className="rounded-full border border-emerald-400/20 px-2 py-1 text-[11px] text-emerald-200">Arquivos reais</span>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {toneOptions.map((option) => {
@@ -283,7 +277,7 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
                       >
                         <span className="block font-medium">{option.label}</span>
                         <span className="mt-0.5 block text-[10px] text-zinc-400">
-                          {option.isOriginal ? "Original" : option.isExact ? "Gravado" : option.isPitchShifted ? "Modulado" : "Indisponível"}
+                          {option.isOriginal ? "Original" : option.isExact ? "Gerado" : "Indisponível"}
                         </span>
                       </button>
                     );
@@ -296,15 +290,15 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
                 engine={audioEngine}
                 src={selectedFile?.streamUrl ?? null}
                 title={`Tom ${formatToneLabel(selectedTone)} • Voz ${voiceLabel(selectedVoice)}`}
-                canPlay={accessContext.play.allowed && toneResolution.isAvailable}
-                semitoneShift={semitoneShift}
+                canPlay={accessContext.play.allowed && toneResolution.isAvailable && Boolean(selectedFile)}
+                semitoneShift={0}
                 onBlocked={() => {
                   if (accessContext.play.reason === "guest") setLoginOpen(true);
                   else {
-                    if (!toneResolution.isAvailable) {
+                    if (!toneResolution.isAvailable || !selectedFile) {
                       setUpgradeConfig({
-                        title: "Tom indisponível para este kit.",
-                        message: "Este tom ainda não possui áudio gravado e está fora do limite de modulação configurado.",
+                        title: "Tom ainda não gerado para este nipe.",
+                        message: "Este tom precisa existir como arquivo real no Harmomus. Gere ou envie esse tom no painel admin para liberar a reprodução.",
                         ctaLabel: "Entendi",
                         ctaHref: "#",
                       });
@@ -332,36 +326,17 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
 
               {selectedVoice === "todos" ? (
                 <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-xs text-zinc-400">
-                  A faixa “Todos” é a referência completa do arranjo. A leitura de tessitura inteligente aparece ao modular Soprano, Contralto ou Tenor.
-                </div>
-              ) : !isModulated ? (
-                <div className="rounded-xl border border-emerald-400/15 bg-emerald-400/5 px-4 py-3 text-xs text-emerald-100/80">
-                  Tom base do arranjo. Esta linha foi gravada como referência oficial para {voiceLabel(selectedVoice)}; os alertas inteligentes aparecem quando você modular o tom.
-                </div>
-              ) : tessituraAnalysis ? (
-                <div className="rounded-xl border border-white/10 bg-black/25 px-4 py-3 text-xs text-zinc-200">
-                  <div className="flex flex-wrap gap-2">
-                    <span className="rounded-full border border-white/10 px-2 py-1">Linha: {voiceLabel(selectedVoice)}</span>
-                    <span className="rounded-full border border-white/10 px-2 py-1">Zona após modulação: {statusLabel(tessituraAnalysis.status)}</span>
-                    {tessituraAnalysis.suggestedOctaveShift !== 0 ? <span className="rounded-full border border-gold-400/30 px-2 py-1 text-gold-200">Leitura: {tessituraAnalysis.suggestedOctaveShift > 0 ? "+1 oitava" : "-1 oitava"}</span> : null}
-                  </div>
-                  <p className="mt-2 text-zinc-300">{tessituraAnalysis.message}</p>
-                  <p className="mt-1 text-zinc-500">
-                    Faixa original: {midiRange ? `${midiToNoteName(midiRange.min)} → ${midiToNoteName(midiRange.max)}` : "não analisada"} • Após modulação: {midiToNoteName(tessituraAnalysis.targetMidiRange.min)} → {midiToNoteName(tessituraAnalysis.targetMidiRange.max)}
-                  </p>
-
-                  {arrangementGuidance ? (
-                    <div className="mt-3 rounded-xl border border-gold-400/20 bg-gold-400/10 p-3">
-                      <p className="font-medium text-gold-200">{arrangementGuidance.title}</p>
-                      <p className="mt-1 text-gold-100/80">{arrangementGuidance.description}</p>
-                    </div>
-                  ) : null}
+                  A faixa “Todos” é a referência completa do arranjo. A leitura de tessitura inteligente aparece quando houver arquivos reais gerados para os demais tons.
                 </div>
               ) : selectedFile ? (
-                <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-xs text-zinc-400">
-                  Tessitura ainda não analisada para esta voz. Analise no painel admin para liberar a leitura inteligente da modulação.
+                <div className="rounded-xl border border-emerald-400/15 bg-emerald-400/5 px-4 py-3 text-xs text-emerald-100/80">
+                  Arquivo real disponível para {voiceLabel(selectedVoice)} em {formatToneLabel(selectedTone)}. A reprodução não usa modulação em tempo real.
                 </div>
-              ) : null}
+              ) : (
+                <div className="rounded-xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-xs text-amber-100/90">
+                  Este tom ainda não possui arquivo real para {voiceLabel(selectedVoice)}. Gere o tom no admin para liberar a reprodução correta.
+                </div>
+              )}
 
               <AccessCounter value={accessContext.play.stats?.uniqueKitCount24h ?? 0} limit={accessContext.play.stats?.limit ?? 5} />
             </div>
