@@ -8,6 +8,9 @@ import { registerKitAccess, resolveKitAccess } from "@/lib/access/access-rules";
 import { getPublishedKitBySlug } from "@/lib/data/public-kits";
 import { createClient } from "@/lib/supabase/server";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function BibliotecaKitPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const kit = await getPublishedKitBySlug(slug);
