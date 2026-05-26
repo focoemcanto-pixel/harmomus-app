@@ -3,9 +3,10 @@
 import { Pause, Play, RotateCcw, RotateCw, Repeat2, Volume2 } from "lucide-react";
 import { useMemo } from "react";
 
-import { useGlobalAudioPlayer } from "@/components/public/global-audio-player-provider";
+import { type KitTrack, useKitAudioEngine } from "@/components/public/use-kit-audio-engine";
 
 interface HarmomusPlayerProps {
+  engine: ReturnType<typeof useKitAudioEngine>;
   src: string | null;
   title: string;
   canPlay: boolean;
@@ -22,7 +23,7 @@ function parseTrackMeta(title: string) {
   };
 }
 
-export function HarmomusPlayer({ src, title, canPlay, semitoneShift = 0, onBlocked }: HarmomusPlayerProps) {
+export function HarmomusPlayer({ engine, src, title, canPlay, semitoneShift = 0, onBlocked }: HarmomusPlayerProps) {
   const {
     track,
     isPlaying,
@@ -38,7 +39,8 @@ export function HarmomusPlayer({ src, title, canPlay, semitoneShift = 0, onBlock
     skipBy,
     setVolumeValue,
     setLoopValue,
-  } = useGlobalAudioPlayer();
+    isCurrentTrack: engineIsCurrentTrack,
+  } = engine;
 
   const trackMeta = useMemo(() => parseTrackMeta(title), [title]);
   const trackId = useMemo(
@@ -47,13 +49,8 @@ export function HarmomusPlayer({ src, title, canPlay, semitoneShift = 0, onBlock
   );
 
   const currentSemitoneShift = track?.semitoneShift ?? 0;
-  const isCurrentTrack = Boolean(
-    track &&
-      track.trackId === trackId &&
-      track.src === src &&
-      track.title === title &&
-      currentSemitoneShift === semitoneShift,
-  );
+  const candidateTrack: KitTrack = { src: src ?? "", title, semitoneShift, trackId };
+  const isCurrentTrack = Boolean(track && src && currentSemitoneShift === semitoneShift && engineIsCurrentTrack(candidateTrack));
 
   const formatTime = useMemo(
     () => (value: number) => `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, "0")}`,
@@ -78,8 +75,6 @@ export function HarmomusPlayer({ src, title, canPlay, semitoneShift = 0, onBlock
       title,
       semitoneShift,
       trackId,
-      voice: trackMeta.voice,
-      tone: trackMeta.tone,
     });
   }
 
@@ -91,8 +86,6 @@ export function HarmomusPlayer({ src, title, canPlay, semitoneShift = 0, onBlock
       title,
       semitoneShift,
       trackId,
-      voice: trackMeta.voice,
-      tone: trackMeta.tone,
     });
   }
 
