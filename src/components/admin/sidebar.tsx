@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BarChart3, CreditCard, Database, LayoutDashboard, Library, MessageSquareText, PanelTop, Settings, Sparkles, Tags, Users, Waves } from "lucide-react";
+import { BarChart3, CreditCard, Database, LayoutDashboard, Library, MessageSquareText, PanelTop, Settings, Sparkles, Tags, Users, Waves, Webhook } from "lucide-react";
 
 const items = [
   { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
@@ -15,6 +15,7 @@ const items = [
   { label: "Harmomus Premium", href: "/admin/harmomus-premium", icon: Sparkles },
   { label: "Solicitações", href: "/admin/harmomus-premium/solicitacoes", icon: MessageSquareText, child: true },
   { label: "Migração", href: "/admin/migracao", icon: Database },
+  { label: "Webhooks", href: "/admin/webhooks", icon: Webhook },
   { label: "Configurações", href: "/admin/configuracoes", icon: Settings },
 ];
 
