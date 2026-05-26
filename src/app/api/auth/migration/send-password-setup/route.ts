@@ -3,9 +3,22 @@ import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
+function redirectToMigrationPage(request: Request, email: string, error?: string) {
+  const url = new URL("/definir-senha-migrada", request.url);
+  url.searchParams.set("email", email);
+  if (error) url.searchParams.set("error", error);
+  return NextResponse.redirect(url, 303);
+}
+
 export async function POST(request: Request) {
   const formData = await request.formData();
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
+
+  if (!(email && email.includes("@"))) {
+    return redirectToMigrationPage(request, email, "E-mail inválido");
+  }
+
+  const admin = createSupabaseAdminClient() as any;
   const supabase = await createClient();
 
   if (email && email.includes("@")) {
@@ -116,6 +129,25 @@ export async function POST(request: Request) {
           .ilike("email", email);
       }
     }
+  }
+
+  const origin = new URL(request.url).origin;
+  const callbackUrl = new URL("/auth/confirm", origin);
+  callbackUrl.searchParams.set("type", "recovery");
+  callbackUrl.searchParams.set("next", "/redefinir-senha?migration=1");
+
+  const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: callbackUrl.toString() });
+  if (resetError) {
+    return redirectToMigrationPage(request, email, `Erro ao enviar e-mail:${resetError.message}`);
+  }
+
+  const { error: updateLegacyError } = await admin
+    .from("legacy_members")
+    .update({ migrated: true, supabase_user_id: userId, migrated_at: now })
+    .ilike("email", email);
+
+  if (updateLegacyError) {
+    return redirectToMigrationPage(request, email, `Erro ao atualizar legado:${updateLegacyError.message}`);
   }
 
   const url = new URL("/cadastro/verifique-email", request.url);
