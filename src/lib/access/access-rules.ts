@@ -1,3 +1,5 @@
+import { cookies } from "next/headers";
+
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { canAccessKit, canUsePitchShift, getDailyKitLimit } from "@/lib/access/access-engine";
 import type { PublicKit } from "@/lib/data/public-kits";
@@ -5,6 +7,7 @@ import type { CurrentUserAccessContext } from "@/lib/auth/current-user";
 
 const FREE_LIMIT = 3;
 const ACCESS_WINDOW_HOURS = 24;
+const ACTIVE_FREE_KIT_COOKIE = "harmomus_active_kit_id";
 
 export interface FreeAccessStats {
   accessCountToday: number;
@@ -19,6 +22,15 @@ function getAccessWindow() {
   const start = new Date(now.getTime() - ACCESS_WINDOW_HOURS * 60 * 60 * 1000);
   const nextReset = new Date(now.getTime() + ACCESS_WINDOW_HOURS * 60 * 60 * 1000);
   return { start: start.toISOString(), nextResetAt: nextReset.toISOString() };
+}
+
+async function getActiveFreeKitId() {
+  try {
+    const cookieStore = await cookies();
+    return cookieStore.get(ACTIVE_FREE_KIT_COOKIE)?.value ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export function canViewKit() {
@@ -42,8 +54,9 @@ export async function getFreeAccessStats(userId: string): Promise<FreeAccessStat
     });
   }
 
-  const uniqueKitCount24h = new Set(((data ?? []) as { kit_id: string }[]).map((row) => row.kit_id)).size;
-  const accessCountToday = uniqueKitCount24h;
+  const rows = ((data ?? []) as { kit_id: string }[]).filter((row) => row.kit_id);
+  const accessCountToday = rows.length;
+  const uniqueKitCount24h = accessCountToday;
   const remaining = Math.max(0, FREE_LIMIT - accessCountToday);
 
   return { accessCountToday, uniqueKitCount24h, remaining, limit: FREE_LIMIT, nextResetAt };
@@ -51,28 +64,8 @@ export async function getFreeAccessStats(userId: string): Promise<FreeAccessStat
 
 export async function registerKitAccess(userId: string, kitId: string): Promise<FreeAccessStats> {
   const supabase = createSupabaseAdminClient() as any;
-  const { start } = getAccessWindow();
-
-  const { data: existing, error: existingError } = await supabase
-    .from("kit_access_logs")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("kit_id", kitId)
-    .gte("accessed_at", start)
-    .limit(1)
-    .maybeSingle();
-
-  if (existingError) {
-    console.error("[access-rules] Could not check existing kit access log", {
-      userId,
-      kitId,
-      error: existingError,
-    });
-  }
-
-  if (existing?.id) return getFreeAccessStats(userId);
-
   const stats = await getFreeAccessStats(userId);
+
   if (stats.accessCountToday >= FREE_LIMIT) return stats;
 
   const { error: insertError } = await supabase.from("kit_access_logs").insert({ user_id: userId, kit_id: kitId });
@@ -97,7 +90,12 @@ export async function canPlayAudio(context: CurrentUserAccessContext, kit: Publi
   if (context.effectiveSlug === "free" && context.profile) {
     const stats = await getFreeAccessStats(context.profile.id);
     const dailyLimit = getDailyKitLimit(context.effectiveSlug) ?? FREE_LIMIT;
-    if (stats.accessCountToday >= dailyLimit) return { allowed: false, reason: "free_limit" as const, stats };
+    const activeKitId = await getActiveFreeKitId();
+
+    if (stats.accessCountToday >= dailyLimit && activeKitId !== kit.id) {
+      return { allowed: false, reason: "free_limit" as const, stats };
+    }
+
     return { allowed: true, reason: "ok" as const, stats };
   }
 
