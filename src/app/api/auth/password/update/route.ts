@@ -17,10 +17,16 @@ export async function POST(request: Request) {
 
   const userEmail = data.user?.email?.toLowerCase();
   if (userEmail) {
+    const now = new Date().toISOString();
     const { data: profile } = await (supabase as any).from("profiles").select("requires_password_setup").eq("email", userEmail).maybeSingle();
     if (profile?.requires_password_setup) {
-      await (supabase as any).from("profiles").update({ requires_password_setup: false, password_setup_completed_at: new Date().toISOString() }).eq("email", userEmail);
+      await (supabase as any).from("profiles").update({ requires_password_setup: false, password_setup_completed_at: now }).eq("email", userEmail);
     }
+
+    await (supabase as any)
+      .from("legacy_members")
+      .update({ password_created: true, migrated_at: now })
+      .ilike("email", userEmail);
   }
 
   const formMigration = String(formData.get("migration") ?? "");
