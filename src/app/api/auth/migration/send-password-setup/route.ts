@@ -44,7 +44,7 @@ export async function POST(request: Request) {
       if (!userId) {
         const created = await admin.auth.admin.createUser({
           email,
-          email_confirm: false,
+          email_confirm: true,
           user_metadata: { full_name: legacyMember.display_name ?? "" },
         });
         userId = String(created.data.user?.id ?? "");
@@ -96,16 +96,24 @@ export async function POST(request: Request) {
           }
         }
 
-        await (supabase as any)
-          .from("legacy_members")
-          .update({ migrated: true })
-          .ilike("email", email);
-
         const origin = new URL(request.url).origin;
         const callbackUrl = new URL("/auth/confirm", origin);
         callbackUrl.searchParams.set("type", "recovery");
         callbackUrl.searchParams.set("next", "/redefinir-senha?migration=1");
-        await supabase.auth.resetPasswordForEmail(email, { redirectTo: callbackUrl.toString() });
+
+        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: callbackUrl.toString() });
+
+        if (error) {
+          const errorUrl = new URL("/definir-senha-migrada", request.url);
+          errorUrl.searchParams.set("email", email);
+          errorUrl.searchParams.set("error", error.message);
+          return NextResponse.redirect(errorUrl, 303);
+        }
+
+        await (supabase as any)
+          .from("legacy_members")
+          .update({ migrated: true, supabase_user_id: userId, migrated_at: now })
+          .ilike("email", email);
       }
     }
   }
