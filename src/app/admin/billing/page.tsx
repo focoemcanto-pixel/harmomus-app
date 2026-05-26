@@ -136,7 +136,7 @@ export default async function BillingPage() {
         <div className="rounded-2xl border border-white/10 bg-surface/80 p-5 shadow-premium">
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-base font-semibold text-white">Controle de acesso dos planos</h2>
-            <Link href="/admin/planos" className="rounded-xl border border-gold-400/40 bg-gold-500/10 px-3 py-1.5 text-xs font-medium text-gold-200 transition hover:bg-gold-500/20">
+            <Link href="/admin/billing/permissoes" className="rounded-xl border border-gold-400/40 bg-gold-500/10 px-3 py-1.5 text-xs font-medium text-gold-200 transition hover:bg-gold-500/20">
               Editar permissões
             </Link>
           </div>
