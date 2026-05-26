@@ -9,6 +9,8 @@ import { generateAudioWithRubberBand, mp3ToWav, wavToMp3 } from "./generate-audi
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? "";
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 const port = Number(process.env.PORT ?? 10000);
+const pollIntervalMs = Number(process.env.AUDIO_WORKER_POLL_INTERVAL_MS ?? 2500);
+const staleProcessingMinutes = Number(process.env.AUDIO_WORKER_STALE_PROCESSING_MINUTES ?? 10);
 
 if (!supabaseUrl) throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_URL.");
 if (!serviceRoleKey) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY.");
@@ -32,6 +34,30 @@ function startHealthServer() {
   }).listen(port, "0.0.0.0", () => {
     console.info(`[audio-generator] Health server listening on :${port}`);
   });
+}
+
+async function recoverStaleProcessingJobs() {
+  const cutoff = new Date(Date.now() - staleProcessingMinutes * 60_000).toISOString();
+
+  const { data, error } = await supabase
+    .from("audio_generation_jobs")
+    .update({
+      status: "pending",
+      error_message: null,
+      started_at: null,
+    })
+    .eq("status", "processing")
+    .lt("started_at", cutoff)
+    .select("id,target_tone");
+
+  if (error) {
+    console.warn(`[audio-generator] Could not recover stale jobs: ${error.message}`);
+    return;
+  }
+
+  if ((data ?? []).length > 0) {
+    console.info(`[audio-generator] Recovered ${data?.length ?? 0} stale processing job(s).`);
+  }
 }
 
 async function reserveJob() {
@@ -146,23 +172,44 @@ async function processJob(job: any) {
   }
 }
 
-async function main() {
-  startHealthServer();
-  console.info("[audio-generator] Worker started");
+async function runQueueForever() {
+  let idleTicks = 0;
+  let lastRecoveryAt = 0;
 
   for (;;) {
-    const job = await reserveJob();
+    try {
+      if (Date.now() - lastRecoveryAt > 60_000) {
+        await recoverStaleProcessingJobs();
+        lastRecoveryAt = Date.now();
+      }
 
-    if (!job) {
-      await sleep(3000);
-      continue;
+      const job = await reserveJob();
+
+      if (!job) {
+        idleTicks += 1;
+        if (idleTicks === 1 || idleTicks % 24 === 0) {
+          console.info("[audio-generator] No pending jobs. Waiting...");
+        }
+        await sleep(pollIntervalMs);
+        continue;
+      }
+
+      idleTicks = 0;
+      await processJob(job);
+    } catch (error) {
+      console.error("[audio-generator] Queue loop error", error);
+      await sleep(pollIntervalMs);
     }
-
-    await processJob(job);
   }
 }
 
-void main().catch((error) => {
-  console.error("[audio-generator] Fatal error", error);
+async function bootstrap() {
+  startHealthServer();
+  console.info("[audio-generator] Worker started");
+  await runQueueForever();
+}
+
+void bootstrap().catch((error) => {
+  console.error("[audio-generator] Fatal bootstrap error", error);
   process.exit(1);
 });
