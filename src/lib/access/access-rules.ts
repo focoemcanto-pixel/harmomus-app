@@ -1,9 +1,10 @@
-import { createClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { canAccessKit, canUsePitchShift, getDailyKitLimit } from "@/lib/access/access-engine";
 import type { PublicKit } from "@/lib/data/public-kits";
 import type { CurrentUserAccessContext } from "@/lib/auth/current-user";
 
 const FREE_LIMIT = 3;
+const ACCESS_WINDOW_HOURS = 24;
 
 export interface FreeAccessStats {
   accessCountToday: number;
@@ -13,12 +14,10 @@ export interface FreeAccessStats {
   nextResetAt: string;
 }
 
-function getTodayWindow() {
+function getAccessWindow() {
   const now = new Date();
-  const start = new Date(now);
-  start.setHours(0, 0, 0, 0);
-  const nextReset = new Date(start);
-  nextReset.setDate(nextReset.getDate() + 1);
+  const start = new Date(now.getTime() - ACCESS_WINDOW_HOURS * 60 * 60 * 1000);
+  const nextReset = new Date(now.getTime() + ACCESS_WINDOW_HOURS * 60 * 60 * 1000);
   return { start: start.toISOString(), nextResetAt: nextReset.toISOString() };
 }
 
@@ -27,14 +26,21 @@ export function canViewKit() {
 }
 
 export async function getFreeAccessStats(userId: string): Promise<FreeAccessStats> {
-  const supabase = await createClient();
-  const { start, nextResetAt } = getTodayWindow();
+  const supabase = createSupabaseAdminClient() as any;
+  const { start, nextResetAt } = getAccessWindow();
 
-  const { data } = await (supabase as any)
+  const { data, error } = await supabase
     .from("kit_access_logs")
     .select("kit_id")
     .eq("user_id", userId)
     .gte("accessed_at", start);
+
+  if (error) {
+    console.error("[access-rules] Could not load kit access logs", {
+      userId,
+      error,
+    });
+  }
 
   const uniqueKitCount24h = new Set(((data ?? []) as { kit_id: string }[]).map((row) => row.kit_id)).size;
   const accessCountToday = uniqueKitCount24h;
@@ -44,10 +50,10 @@ export async function getFreeAccessStats(userId: string): Promise<FreeAccessStat
 }
 
 export async function registerKitAccess(userId: string, kitId: string): Promise<FreeAccessStats> {
-  const supabase = await createClient();
-  const { start } = getTodayWindow();
+  const supabase = createSupabaseAdminClient() as any;
+  const { start } = getAccessWindow();
 
-  const { data: existing } = await (supabase as any)
+  const { data: existing, error: existingError } = await supabase
     .from("kit_access_logs")
     .select("id")
     .eq("user_id", userId)
@@ -56,12 +62,30 @@ export async function registerKitAccess(userId: string, kitId: string): Promise<
     .limit(1)
     .maybeSingle();
 
+  if (existingError) {
+    console.error("[access-rules] Could not check existing kit access log", {
+      userId,
+      kitId,
+      error: existingError,
+    });
+  }
+
   if (existing?.id) return getFreeAccessStats(userId);
 
   const stats = await getFreeAccessStats(userId);
   if (stats.accessCountToday >= FREE_LIMIT) return stats;
 
-  await (supabase as any).from("kit_access_logs").insert({ user_id: userId, kit_id: kitId });
+  const { error: insertError } = await supabase.from("kit_access_logs").insert({ user_id: userId, kit_id: kitId });
+
+  if (insertError) {
+    console.error("[access-rules] Could not register kit access", {
+      userId,
+      kitId,
+      error: insertError,
+    });
+    return stats;
+  }
+
   return getFreeAccessStats(userId);
 }
 
