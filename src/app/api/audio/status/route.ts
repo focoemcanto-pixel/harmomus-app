@@ -76,6 +76,15 @@ async function reconcileCompletedJobs(supabase: ReturnType<typeof createSupabase
   return repaired;
 }
 
+async function listJobs(supabase: ReturnType<typeof createSupabaseAdminClient>, kitId: string) {
+  return supabase
+    .from("audio_generation_jobs")
+    .select("id,status,voice,source_tone,target_tone,semitone_shift,source_r2_key,target_r2_key,error_message,created_at,started_at,completed_at,updated_at,generated_audio_file_id")
+    .eq("kit_id", kitId)
+    .order("created_at", { ascending: false })
+    .limit(200);
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const jobId = searchParams.get("jobId");
@@ -93,22 +102,19 @@ export async function GET(request: Request) {
     return NextResponse.json({ job: data });
   }
 
+  let repaired = 0;
+  let repairError: string | null = null;
+
   try {
-    const repaired = await reconcileCompletedJobs(supabase, kitId!);
-
-    const { data, error } = await supabase
-      .from("audio_generation_jobs")
-      .select("id,status,voice,source_tone,target_tone,semitone_shift,source_r2_key,target_r2_key,error_message,created_at,started_at,completed_at,updated_at,generated_audio_file_id")
-      .eq("kit_id", kitId)
-      .order("created_at", { ascending: false })
-      .limit(200);
-
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-    return NextResponse.json({ jobs: data ?? [], repaired });
-  } catch (repairError) {
-    const message = repairError instanceof Error ? repairError.message : "Falha ao reparar jobs concluídos.";
-    console.error("[audio-status] reconcile failed", repairError);
-    return NextResponse.json({ error: message }, { status: 500 });
+    repaired = await reconcileCompletedJobs(supabase, kitId!);
+  } catch (error) {
+    repairError = error instanceof Error ? error.message : "Falha ao reparar jobs concluídos.";
+    console.error("[audio-status] reconcile failed", error);
   }
+
+  const { data, error } = await listJobs(supabase, kitId!);
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  return NextResponse.json({ jobs: data ?? [], repaired, repairError });
 }
