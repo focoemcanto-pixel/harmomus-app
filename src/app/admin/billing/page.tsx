@@ -1,13 +1,19 @@
 import { Activity, ArrowRightLeft, BadgeCheck, ChartNoAxesCombined, RefreshCw, ShieldCheck, Sparkles, Users } from "lucide-react";
 
 import { PageHeader } from "@/components/admin/page-header";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import type { Database } from "@/types/database";
 
-const stats = [
-  { label: "MRR estimado", value: "R$ 38.900", detail: "+8.4% no mês", icon: ChartNoAxesCombined, glow: "from-gold-500/20 via-gold-300/5" },
-  { label: "Assinantes ativos", value: "1.284", detail: "92 novos em 30 dias", icon: Users, glow: "from-cyan-500/20 via-cyan-300/5" },
-  { label: "Conversão Free → Premium", value: "7,2%", detail: "meta 8%", icon: ArrowRightLeft, glow: "from-violet-500/20 via-violet-300/5" },
-  { label: "Status Stripe", value: "Operacional", detail: "sem incidentes", icon: ShieldCheck, glow: "from-emerald-500/20 via-emerald-300/5" },
-];
+type SubscriptionRow = Database["public"]["Tables"]["subscriptions"]["Row"];
+type PlanRow = Database["public"]["Tables"]["plans"]["Row"];
+
+type RecentActivityItem = {
+  user: string;
+  plan: string;
+  gateway: string;
+  status: string;
+  createdAt: string;
+};
 
 const permissions = [
   { feature: "Playlists", free: true, plus: true, premium: true },
@@ -16,13 +22,86 @@ const permissions = [
   { feature: "Kits premium", free: false, plus: false, premium: true },
 ];
 
-const recentActivity = [
-  { user: "Renatha Santos", plan: "Premium", gateway: "manual_migration", status: "Ativo" },
-  { user: "Sarah Spindola", plan: "Premium", gateway: "stripe", status: "Falha pagamento" },
-  { user: "Lucas Ferreira", plan: "Plus", gateway: "stripe", status: "Ativo" },
-];
+function formatMoney(cents: number) {
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(cents / 100);
+}
 
-export default function BillingPage() {
+function formatCount(value: number) {
+  return new Intl.NumberFormat("pt-BR").format(value);
+}
+
+function mapStatusLabel(status: SubscriptionRow["status"]) {
+  if (status === "active") return "Ativo";
+  if (status === "overdue") return "Atrasado";
+  if (status === "canceled") return "Cancelado";
+  if (status === "expired") return "Expirado";
+  return "Pendente";
+}
+
+export default async function BillingPage() {
+  const supabase = createSupabaseAdminClient() as any;
+
+  const [subscriptionsResult, plansResult, billingEventsResult] = await Promise.all([
+    supabase.from("subscriptions").select("id,user_id,plan_id,gateway,status,created_at").eq("status", "active"),
+    supabase.from("plans").select("id,slug,name,price_cents"),
+    supabase.from("billing_events").select("id,processed,created_at,event_type,provider").eq("processed", false).order("created_at", { ascending: false }).limit(10),
+  ]);
+
+  const activeSubscriptions = ((subscriptionsResult.data ?? []) as Pick<SubscriptionRow, "id" | "user_id" | "plan_id" | "gateway" | "status" | "created_at">[]);
+  const plans = (plansResult.data ?? []) as Pick<PlanRow, "id" | "slug" | "name" | "price_cents">[];
+  const failedEvents = billingEventsResult.error ? [] : (billingEventsResult.data ?? []);
+
+  const planById = new Map(plans.map((plan) => [plan.id, plan]));
+
+  const countByPlan = { free: 0, plus: 0, premium: 0 };
+  let mrrCents = 0;
+
+  for (const subscription of activeSubscriptions) {
+    const plan = planById.get(subscription.plan_id);
+    const slug = String(plan?.slug ?? "").toLowerCase();
+
+    if (slug === "free" || slug === "plus" || slug === "premium") {
+      countByPlan[slug] += 1;
+    }
+
+    if (slug !== "free" && typeof plan?.price_cents === "number") {
+      mrrCents += plan.price_cents;
+    }
+  }
+
+  const gatewayCount = { stripe: 0, manual_migration: 0, migration: 0 };
+  for (const subscription of activeSubscriptions) {
+    const gateway = String(subscription.gateway ?? "").toLowerCase();
+    if (gateway === "stripe" || gateway === "manual_migration" || gateway === "migration") {
+      gatewayCount[gateway] += 1;
+    }
+  }
+
+  const { data: recentRaw } = await supabase
+    .from("subscriptions")
+    .select("id,user_id,plan_id,gateway,status,created_at,profiles(full_name,email)")
+    .order("created_at", { ascending: false })
+    .limit(10);
+
+  const recentActivity: RecentActivityItem[] = ((recentRaw ?? []) as any[]).map((row) => {
+    const plan = planById.get(String(row.plan_id));
+    const profile = row.profiles;
+    return {
+      user: profile?.full_name ?? profile?.email ?? "Usuário sem nome",
+      plan: plan?.name ?? plan?.slug ?? "Plano desconhecido",
+      gateway: row.gateway ?? "-",
+      status: mapStatusLabel(row.status),
+      createdAt: row.created_at,
+    };
+  });
+
+  const stats = [
+    { label: "MRR estimado", value: formatMoney(mrrCents), detail: `${formatCount(countByPlan.plus + countByPlan.premium)} pagantes ativos`, icon: ChartNoAxesCombined, glow: "from-gold-500/20 via-gold-300/5" },
+    { label: "Assinantes ativos", value: formatCount(activeSubscriptions.length), detail: `Free ${formatCount(countByPlan.free)} • Plus ${formatCount(countByPlan.plus)} • Premium ${formatCount(countByPlan.premium)}`, icon: Users, glow: "from-cyan-500/20 via-cyan-300/5" },
+    { label: "Conversão Free → Premium", value: "—", detail: "sem cálculo nesta tela", icon: ArrowRightLeft, glow: "from-violet-500/20 via-violet-300/5" },
+    { label: "Status Stripe", value: gatewayCount.stripe > 0 ? "Operacional" : "Sem dados", detail: `stripe ${formatCount(gatewayCount.stripe)} • manual ${formatCount(gatewayCount.manual_migration)} • migration ${formatCount(gatewayCount.migration)}`, icon: ShieldCheck, glow: "from-emerald-500/20 via-emerald-300/5" },
+  ];
+
   return (
     <section className="space-y-6">
       <PageHeader title="Billing" description="Visão administrativa de assinaturas, cobrança e gateways." />
@@ -102,7 +181,7 @@ export default function BillingPage() {
               </div>
               <div className="rounded-xl border border-white/10 bg-[#101827] p-3">
                 <p className="text-xs text-muted">Eventos falhos</p>
-                <p className="text-sm font-semibold text-white">2</p>
+                <p className="text-sm font-semibold text-white">{formatCount(failedEvents.length)}</p>
               </div>
             </div>
           </div>
@@ -132,8 +211,8 @@ export default function BillingPage() {
               </tr>
             </thead>
             <tbody>
-              {recentActivity.map((item) => (
-                <tr key={item.user} className="border-b border-white/5 last:border-none">
+              {recentActivity.map((item, index) => (
+                <tr key={`${item.user}-${item.createdAt}-${index}`} className="border-b border-white/5 last:border-none">
                   <td className="px-3 py-3 text-white">{item.user}</td>
                   <td className="px-3 py-3 text-muted">{item.plan}</td>
                   <td className="px-3 py-3 text-muted">{item.gateway}</td>
@@ -149,6 +228,11 @@ export default function BillingPage() {
                   </td>
                 </tr>
               ))}
+              {recentActivity.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="px-3 py-6 text-center text-muted">Nenhuma assinatura encontrada.</td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
         </div>
