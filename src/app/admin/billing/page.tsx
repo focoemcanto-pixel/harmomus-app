@@ -16,10 +16,10 @@ type RecentActivityItem = {
 };
 
 const permissions = [
-  { feature: "Playlists", free: true, plus: true, premium: true },
-  { feature: "Troca de tons", free: false, plus: true, premium: true },
-  { feature: "Solicitar músicas", free: false, plus: true, premium: true },
-  { feature: "Kits premium", free: false, plus: false, premium: true },
+  { feature: "Playlists", free: false, plus: true, premium: true },
+  { feature: "Troca de tons", free: false, plus: false, premium: true },
+  { feature: "Solicitar músicas", free: false, plus: false, premium: true },
+  { feature: "Kits premium", free: false, plus: true, premium: true },
 ];
 
 function formatMoney(cents: number) {
@@ -41,15 +41,17 @@ function mapStatusLabel(status: SubscriptionRow["status"]) {
 export default async function BillingPage() {
   const supabase = createSupabaseAdminClient() as any;
 
-  const [subscriptionsResult, plansResult, billingEventsResult] = await Promise.all([
+  const [subscriptionsResult, plansResult, failedEventsResult, latestSyncResult] = await Promise.all([
     supabase.from("subscriptions").select("id,user_id,plan_id,gateway,status,created_at").eq("status", "active"),
     supabase.from("plans").select("id,slug,name,price_cents"),
-    supabase.from("billing_events").select("id,processed,created_at,event_type,provider").eq("processed", false).order("created_at", { ascending: false }).limit(10),
+    supabase.from("billing_events").select("id", { count: "exact", head: true }).eq("processed", false),
+    supabase.from("billing_events").select("created_at").order("created_at", { ascending: false }).limit(1),
   ]);
 
   const activeSubscriptions = ((subscriptionsResult.data ?? []) as Pick<SubscriptionRow, "id" | "user_id" | "plan_id" | "gateway" | "status" | "created_at">[]);
   const plans = (plansResult.data ?? []) as Pick<PlanRow, "id" | "slug" | "name" | "price_cents">[];
-  const failedEvents = billingEventsResult.error ? [] : (billingEventsResult.data ?? []);
+  const failedEventsCount = failedEventsResult.error ? 0 : (failedEventsResult.count ?? 0);
+  const latestEventCreatedAt = latestSyncResult.error ? null : latestSyncResult.data?.[0]?.created_at ?? null;
 
   const planById = new Map(plans.map((plan) => [plan.id, plan]));
 
@@ -94,6 +96,12 @@ export default async function BillingPage() {
       createdAt: row.created_at,
     };
   });
+
+  const isStripeConnected = Boolean(process.env.STRIPE_SECRET_KEY);
+  const isWebhookActive = Boolean(process.env.STRIPE_WEBHOOK_SECRET);
+  const lastSyncLabel = latestEventCreatedAt
+    ? new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(latestEventCreatedAt))
+    : "sem eventos";
 
   const stats = [
     { label: "MRR estimado", value: formatMoney(mrrCents), detail: `${formatCount(countByPlan.plus + countByPlan.premium)} pagantes ativos`, icon: ChartNoAxesCombined, glow: "from-gold-500/20 via-gold-300/5" },
@@ -168,20 +176,20 @@ export default async function BillingPage() {
           <div className="space-y-3">
             <div className="rounded-xl border border-cyan-400/25 bg-cyan-500/10 p-3 text-sm text-cyan-100">
               <p className="font-medium">Stripe conectado</p>
-              <p className="text-xs text-cyan-100/70">Conta principal ativa.</p>
+              <p className="text-xs text-cyan-100/70">{isStripeConnected ? "Conta principal ativa." : "Chave STRIPE_SECRET_KEY ausente."}</p>
             </div>
             <div className="rounded-xl border border-violet-400/25 bg-violet-500/10 p-3 text-sm text-violet-100">
               <p className="font-medium">Webhook ativo</p>
-              <p className="text-xs text-violet-100/70">Endpoint recebendo eventos.</p>
+              <p className="text-xs text-violet-100/70">{isWebhookActive ? "Endpoint recebendo eventos." : "Webhook STRIPE_WEBHOOK_SECRET ausente."}</p>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-xl border border-white/10 bg-[#101827] p-3">
                 <p className="text-xs text-muted">Último sync</p>
-                <p className="text-sm font-semibold text-white">há 4 min</p>
+                <p className="text-sm font-semibold text-white">{lastSyncLabel}</p>
               </div>
               <div className="rounded-xl border border-white/10 bg-[#101827] p-3">
                 <p className="text-xs text-muted">Eventos falhos</p>
-                <p className="text-sm font-semibold text-white">{formatCount(failedEvents.length)}</p>
+                <p className="text-sm font-semibold text-white">{formatCount(failedEventsCount)}</p>
               </div>
             </div>
           </div>
