@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AccessCounter } from "@/components/public/access-counter";
 import { AccessStatusBadge } from "@/components/public/access-status-badge";
 import { HarmomusPlayer } from "@/components/public/harmomus-player";
@@ -13,7 +13,7 @@ import { useKitAudioEngine } from "@/components/public/use-kit-audio-engine";
 import { midiToNoteName } from "@/lib/audio/pitch-analysis";
 import type { PublicKit, PublicKitAudioFile, PublicKitToneGroup, VoiceType } from "@/lib/data/public-kits";
 import { analyzeTargetVoiceTessitura, type TargetVoiceTessituraAnalysis, type VocalRangeType } from "@/lib/music/tessitura";
-import { CHROMATIC_TONES_SHARP, formatToneLabel, normalizeTone, resolveToneTrack, sortTonesByChromaticOrder } from "@/lib/music/tones";
+import { formatToneLabel, normalizeTone, resolveToneTrack, sortTonesByChromaticOrder } from "@/lib/music/tones";
 
 interface KitPageTemplateProps {
   kit: PublicKit;
@@ -25,6 +25,28 @@ type ToneOption = {
   label: string;
   isOriginal: boolean;
   isAvailable: boolean;
+};
+
+type AudioFilesApiFile = {
+  id?: string;
+  tone?: string;
+  name?: string;
+  voice?: VoiceType;
+  fileType?: string;
+  file_type?: string;
+  streamUrl?: string;
+  url?: string;
+  minMidiNote?: number | null;
+  maxMidiNote?: number | null;
+  detectedMinMidiNote?: number | null;
+  detectedMaxMidiNote?: number | null;
+  tessituraConfidence?: number | null;
+  tessituraSource?: "manual" | "auto" | "hybrid";
+};
+
+type AudioFilesApiTone = {
+  tone: string;
+  files?: AudioFilesApiFile[];
 };
 
 function voiceLabel(voice: string) {
@@ -46,6 +68,19 @@ function statusLabel(status: string) {
     unsafe: "Fora da zona segura",
   };
   return map[status] ?? status;
+}
+
+function normalizeVoice(value: string | null | undefined): VoiceType {
+  const normalized = String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+
+  if (normalized.includes("soprano")) return "soprano";
+  if (normalized.includes("contralto")) return "contralto";
+  if (normalized.includes("tenor")) return "tenor";
+  return "todos";
 }
 
 function getMidiRange(file: PublicKitAudioFile | null) {
@@ -109,9 +144,72 @@ function getToneGroup(kit: PublicKit, tone: string): PublicKitToneGroup | null {
   return kit.tones.find((toneGroup) => normalizeTone(toneGroup.tone) === normalizeTone(tone)) ?? null;
 }
 
+function mapApiTonesToPublicToneGroups(tones: AudioFilesApiTone[]): PublicKitToneGroup[] {
+  const groups = new Map<string, PublicKitToneGroup>();
+
+  for (const toneGroup of tones ?? []) {
+    const tone = normalizeTone(toneGroup.tone);
+    if (!tone) continue;
+
+    const group = groups.get(tone) ?? { tone, voices: {} };
+
+    for (const file of toneGroup.files ?? []) {
+      const id = String(file.id ?? "").trim();
+      if (!id) continue;
+
+      const voice = normalizeVoice(file.voice ?? file.name);
+      group.voices[voice] = {
+        id,
+        tone,
+        voice,
+        name: file.name ?? voice,
+        audioFileId: id,
+        streamUrl: file.streamUrl ?? `/api/audio/${id}`,
+        fileType: file.fileType ?? file.file_type ?? "mp3",
+        minMidiNote: file.minMidiNote ?? null,
+        maxMidiNote: file.maxMidiNote ?? null,
+        detectedMinMidiNote: file.detectedMinMidiNote ?? null,
+        detectedMaxMidiNote: file.detectedMaxMidiNote ?? null,
+        tessituraConfidence: file.tessituraConfidence ?? null,
+        tessituraSource: file.tessituraSource ?? "manual",
+      };
+    }
+
+    groups.set(tone, group);
+  }
+
+  return sortTonesByChromaticOrder(Array.from(groups.keys())).map((tone) => groups.get(tone)!).filter(Boolean);
+}
+
 export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
   const audioEngine = useKitAudioEngine();
   const { stopPlayback } = audioEngine;
+  const [liveKit, setLiveKit] = useState<PublicKit>(kit);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function hydrateAudioFiles() {
+      try {
+        const response = await fetch(`/api/kits/${kit.id}/audio-files`, { cache: "no-store" });
+        const data = await response.json().catch(() => null);
+        if (!response.ok || !data?.tones) return;
+
+        const liveTones = mapApiTonesToPublicToneGroups(data.tones as AudioFilesApiTone[]);
+        if (cancelled || liveTones.length === 0) return;
+
+        setLiveKit((current) => ({ ...current, tones: liveTones }));
+      } catch (error) {
+        console.warn("[KitPageTemplate] Could not hydrate live audio files", error);
+      }
+    }
+
+    void hydrateAudioFiles();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [kit.id]);
 
   if (!accessContext?.play?.allowed) {
     return (
@@ -120,8 +218,8 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
       />
     );
   }
-  const realToneOptions = useMemo(() => sortTonesByChromaticOrder(kit.tones.map((tone) => tone.tone)), [kit.tones]);
-  const initialTone = normalizeTone(kit.defaultTone) ?? normalizeTone(kit.originalTone) ?? realToneOptions[0] ?? "";
+  const realToneOptions = useMemo(() => sortTonesByChromaticOrder(liveKit.tones.map((tone) => tone.tone)), [liveKit.tones]);
+  const initialTone = normalizeTone(liveKit.defaultTone) ?? normalizeTone(liveKit.originalTone) ?? realToneOptions[0] ?? "";
 
   const [selectedTone, setSelectedTone] = useState<string>(initialTone);
   const [selectedVoice, setSelectedVoice] = useState<VoiceType>("todos");
@@ -134,13 +232,13 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
     ctaHref: "/assinar?plan=premium",
   });
 
-  const toneOptions = useMemo(() => buildToneOptions({ kit }), [kit]);
+  const toneOptions = useMemo(() => buildToneOptions({ kit: liveKit }), [liveKit]);
   const tracksForSelectedVoice = useMemo(
-    () => kit.tones.flatMap((toneGroup) => {
+    () => liveKit.tones.flatMap((toneGroup) => {
       const preferred = toneGroup.voices[selectedVoice] ?? toneGroup.voices.todos;
       return preferred ? [preferred] : [];
     }),
-    [kit.tones, selectedVoice],
+    [liveKit.tones, selectedVoice],
   );
 
   const toneResolution = useMemo(() => resolveToneTrack({
@@ -152,8 +250,9 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
   }), [tracksForSelectedVoice, selectedTone, selectedVoice]);
 
   const sourceTone = toneResolution.sourceTone ?? selectedTone;
-  const currentTone = getToneGroup(kit, sourceTone) ?? null;
+  const currentTone = getToneGroup(liveKit, sourceTone) ?? null;
   const selectedFile = currentTone?.voices[selectedVoice] ?? currentTone?.voices.todos ?? toneResolution.sourceTrack ?? null;
+  const canPlaySelected = accessContext.play.allowed && Boolean(selectedFile?.streamUrl) && Boolean(getToneGroup(liveKit, selectedTone));
   const semitoneShift = 0;
   const isModulated = false;
   const midiRange = getMidiRange(selectedFile);
@@ -210,18 +309,18 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,#1f2840_0%,#06070c_40%)] px-4 py-6 md:px-8 md:py-10">
       <section className="mx-auto max-w-6xl rounded-2xl border border-white/10 bg-surface/80 p-4 shadow-premium backdrop-blur md:p-8">
         <div className="grid gap-8 md:grid-cols-[280px_1fr] md:gap-10">
-          <img src={kit.coverUrl ?? "https://placehold.co/600x600/101114/f4f4f5?text=Harmomus"} alt={kit.name} className="aspect-square w-full rounded-xl border border-white/10 object-cover" />
+          <img src={liveKit.coverUrl ?? "https://placehold.co/600x600/101114/f4f4f5?text=Harmomus"} alt={liveKit.name} className="aspect-square w-full rounded-xl border border-white/10 object-cover" />
           <div>
             <div className="mb-2 flex justify-end">
               <KitActionsMenu
-                kitName={kit.name}
-                kitSlug={kit.slug}
-                categorySlug={kit.category?.slug}
+                kitName={liveKit.name}
+                kitSlug={liveKit.slug}
+                categorySlug={liveKit.category?.slug}
                 planSlug={accessContext.effectiveSlug}
                 onPremiumRequired={openPremiumToneUpgrade}
               />
             </div>
-            <h1 className="mt-2 text-3xl font-semibold text-white">{kit.name}</h1>
+            <h1 className="mt-2 text-3xl font-semibold text-white">{liveKit.name}</h1>
             <div className="mt-3"><AccessStatusBadge planSlug={accessContext.effectiveSlug} /></div>
             <div className="mt-5 space-y-3">
               <div className="rounded-xl border border-white/10 bg-black/20 p-3">
@@ -259,15 +358,15 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
                 engine={audioEngine}
                 src={selectedFile?.streamUrl ?? null}
                 title={`Tom ${formatToneLabel(selectedTone)} • Voz ${voiceLabel(selectedVoice)}`}
-                canPlay={accessContext.play.allowed && toneResolution.isAvailable && Boolean(selectedFile)}
+                canPlay={canPlaySelected}
                 semitoneShift={0}
                 onBlocked={() => {
                   if (accessContext.play.reason === "guest") setLoginOpen(true);
                   else {
-                    if (!toneResolution.isAvailable || !selectedFile) {
+                    if (!canPlaySelected || !selectedFile) {
                       setUpgradeConfig({
                         title: "Tom ainda não gerado para este nipe.",
-                        message: "Este tom precisa existir como arquivo real no Harmomus. Gere ou envie esse tom no painel admin para liberar a reprodução.",
+                        message: "Este tom precisa existir como arquivo real no Harmomus. Gere ou envie esse tom no painel admin para liberar a reprodução correta.",
                         ctaLabel: "Entendi",
                         ctaHref: "#",
                       });
@@ -312,11 +411,11 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
           </div>
         </div>
       </section>
-      {kit.lyrics?.trim() ? (
+      {liveKit.lyrics?.trim() ? (
         <section className="mx-auto mt-8 w-full max-w-4xl md:mt-12">
           <h2 className="mb-4 text-center text-2xl font-semibold tracking-wide text-zinc-100 md:mb-6 md:text-3xl">Letra</h2>
           <div className="rounded-2xl border border-white/10 bg-zinc-950/70 p-6 shadow-[0_0_60px_rgba(168,85,247,0.12)] backdrop-blur-xl md:rounded-3xl md:p-10">
-            <p className="whitespace-pre-wrap text-base leading-8 text-zinc-100 md:text-lg md:leading-9">{kit.lyrics}</p>
+            <p className="whitespace-pre-wrap text-base leading-8 text-zinc-100 md:text-lg md:leading-9">{liveKit.lyrics}</p>
           </div>
         </section>
       ) : null}
