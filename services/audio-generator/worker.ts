@@ -34,7 +34,6 @@ async function reserveJob() {
     .update({
       status: "processing",
       started_at: new Date().toISOString(),
-      attempts: (data.attempts ?? 0) + 1,
       error_message: null,
     })
     .eq("id", data.id)
@@ -67,18 +66,19 @@ async function processJob(job: any) {
     const publicBaseUrl = (process.env.R2_PUBLIC_BASE_URL ?? "").replace(/\/$/, "");
     const publicUrl = publicBaseUrl ? `${publicBaseUrl}/${job.target_r2_key}` : null;
 
-    const { data: file, error: fileError } = await supabase
+    const { error: fileError } = await supabase
       .from("kit_audio_files")
-      .insert({
-        kit_id: job.kit_id,
-        tone: job.target_tone,
-        name: `${job.voice} - ${job.target_tone}`,
-        r2_key: job.target_r2_key,
-        public_url: publicUrl,
-        file_type: "audio/mpeg",
-      })
-      .select("id")
-      .maybeSingle();
+      .upsert(
+        {
+          kit_id: job.kit_id,
+          tone: job.target_tone,
+          name: `${job.voice} - ${job.target_tone}`,
+          r2_key: job.target_r2_key,
+          public_url: publicUrl,
+          file_type: "audio/mpeg",
+        },
+        { onConflict: "kit_id,r2_key" },
+      );
 
     if (fileError) throw new Error(fileError.message);
 
@@ -86,7 +86,6 @@ async function processJob(job: any) {
       .from("audio_generation_jobs")
       .update({
         status: "completed",
-        generated_audio_file_id: file?.id ?? null,
         completed_at: new Date().toISOString(),
         error_message: null,
       })
