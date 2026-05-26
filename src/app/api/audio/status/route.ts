@@ -27,8 +27,6 @@ function normalizeStatus(value: string | null | undefined) {
 }
 
 function parseJobs(rawJobs: any[]) {
-  console.log("[audio-status] parsing jobs", { count: rawJobs.length });
-
   return rawJobs.map((job) => ({
     id: String(job.id ?? ""),
     status: normalizeStatus(job.status),
@@ -43,21 +41,16 @@ function parseJobs(rawJobs: any[]) {
     started_at: job.started_at ?? null,
     completed_at: job.completed_at ?? null,
     updated_at: job.updated_at ?? null,
-    generated_audio_file_id: job.generated_audio_file_id ?? null,
   }));
 }
 
 async function reconcileCompletedJobs(supabase: ReturnType<typeof createSupabaseAdminClient>, kitId: string) {
-  const query = supabase
+  const { data: completedJobs, error } = await supabase
     .from("audio_generation_jobs")
-    .select("id,kit_id,generated_audio_file_id,voice,target_tone,target_r2_key,status,output_file_type")
+    .select("id,kit_id,voice,target_tone,target_r2_key,status,output_file_type")
     .eq("kit_id", kitId)
     .eq("status", "completed");
 
-  console.log("[audio-status] reconcile query", { kitId, table: "audio_generation_jobs", filterStatus: "completed" });
-  const { data: completedJobs, error } = await query;
-
-  console.log("[audio-status] reconcile result", { count: completedJobs?.length ?? 0, supabaseError: error ?? null });
   if (error) throw new Error(error.message);
 
   let repaired = 0;
@@ -73,59 +66,33 @@ async function reconcileCompletedJobs(supabase: ReturnType<typeof createSupabase
       .maybeSingle();
 
     if (findError) throw new Error(findError.message);
+    if (existing?.id) continue;
 
-    let audioFileId = existing?.id as string | undefined;
+    const { error: insertError } = await supabase
+      .from("kit_audio_files")
+      .insert({
+        kit_id: kitId,
+        tone: job.target_tone,
+        name: canonicalVoiceName(job.voice),
+        r2_key: job.target_r2_key,
+        public_url: buildPublicUrl(job.target_r2_key),
+        file_type: String(job.output_file_type ?? "mp3").replace(/^\./, "") || "mp3",
+      });
 
-    if (!audioFileId) {
-      const { data: inserted, error: insertError } = await supabase
-        .from("kit_audio_files")
-        .insert({
-          kit_id: kitId,
-          tone: job.target_tone,
-          name: canonicalVoiceName(job.voice),
-          r2_key: job.target_r2_key,
-          public_url: buildPublicUrl(job.target_r2_key),
-          file_type: String(job.output_file_type ?? "mp3").replace(/^\./, "") || "mp3",
-        })
-        .select("id")
-        .maybeSingle();
-
-      if (insertError) throw new Error(insertError.message);
-      audioFileId = inserted?.id as string | undefined;
-      repaired += 1;
-    }
-
-    if (audioFileId && job.generated_audio_file_id !== audioFileId) {
-      const { error: updateError } = await supabase
-        .from("audio_generation_jobs")
-        .update({ generated_audio_file_id: audioFileId })
-        .eq("id", job.id);
-
-      if (updateError) throw new Error(updateError.message);
-    }
+    if (insertError) throw new Error(insertError.message);
+    repaired += 1;
   }
 
   return repaired;
 }
 
 async function listJobs(supabase: ReturnType<typeof createSupabaseAdminClient>, kitId: string) {
-  const query = supabase
+  return supabase
     .from("audio_generation_jobs")
-    .select(
-      "id,status,voice,source_tone,target_tone,semitone_shift,source_r2_key,target_r2_key,error_message,created_at,started_at,completed_at,updated_at,generated_audio_file_id",
-    )
+    .select("id,status,voice,source_tone,target_tone,semitone_shift,source_r2_key,target_r2_key,error_message,created_at,started_at,completed_at,updated_at")
     .eq("kit_id", kitId)
     .order("created_at", { ascending: false })
     .limit(200);
-
-  console.log("[audio-status] jobs query", {
-    kitId,
-    table: "audio_generation_jobs",
-    columns:
-      "id,status,voice,source_tone,target_tone,semitone_shift,source_r2_key,target_r2_key,error_message,created_at,started_at,completed_at,updated_at,generated_audio_file_id",
-  });
-
-  return query;
 }
 
 export async function GET(request: Request) {
@@ -134,8 +101,6 @@ export async function GET(request: Request) {
     const jobId = searchParams.get("jobId");
     const kitId = searchParams.get("kitId");
 
-    console.log("[audio-status] request", { kitId, jobId });
-
     const supabase = createSupabaseAdminClient();
 
     if (!jobId && !kitId) {
@@ -143,14 +108,17 @@ export async function GET(request: Request) {
     }
 
     if (jobId) {
-      const { data, error } = await supabase.from("audio_generation_jobs").select("*").eq("id", jobId).maybeSingle();
-      console.log("[audio-status] job by id result", { found: !!data, supabaseError: error ?? null });
+      const { data, error } = await supabase
+        .from("audio_generation_jobs")
+        .select("id,status,voice,source_tone,target_tone,semitone_shift,source_r2_key,target_r2_key,error_message,created_at,started_at,completed_at,updated_at")
+        .eq("id", jobId)
+        .maybeSingle();
 
       if (error) {
-        return NextResponse.json({ success: true, jobs: [] }, { status: 200 });
+        return NextResponse.json({ success: true, jobs: [], error: error.message }, { status: 200 });
       }
 
-      return NextResponse.json({ success: true, jobs: data ? [data] : [] }, { status: 200 });
+      return NextResponse.json({ success: true, jobs: data ? parseJobs([data]) : [] }, { status: 200 });
     }
 
     let repaired = 0;
@@ -164,15 +132,13 @@ export async function GET(request: Request) {
     }
 
     const { data, error } = await listJobs(supabase, kitId!);
-    console.log("[audio-status] jobs raw result", { count: data?.length ?? 0, supabaseError: error ?? null, rawData: data ?? [] });
 
     if (error) {
       console.error("[audio-status] listJobs failed", error);
-      return NextResponse.json({ success: true, jobs: [], repaired, repairError }, { status: 200 });
+      return NextResponse.json({ success: true, jobs: [], repaired, repairError, error: error.message }, { status: 200 });
     }
 
     const jobs = parseJobs(data ?? []);
-    console.log("[audio-status] parsed jobs", { count: jobs.length });
 
     return NextResponse.json({ success: true, jobs, repaired, repairError }, { status: 200 });
   } catch (error) {
@@ -180,7 +146,7 @@ export async function GET(request: Request) {
     return Response.json(
       {
         success: false,
-        error: String(error),
+        error: error instanceof Error ? error.message : String(error),
         jobs: [],
       },
       { status: 200 },
