@@ -1,0 +1,9 @@
+import { PublicAppShell } from "@/components/public/public-app-shell";
+
+export default async function DefinirSenhaMigradaPage({ searchParams }: { searchParams: Promise<{ email?: string; success?: string }> }) {
+  const params = await searchParams;
+  const email = String(params.email ?? "");
+  const success = String(params.success ?? "") === "1";
+
+  return <PublicAppShell><section className="px-4 pb-10"><div className="mx-auto w-full max-w-2xl rounded-3xl border border-white/15 bg-gradient-to-b from-white/10 to-white/5 p-8 shadow-[0_0_80px_rgba(34,211,238,0.12)] backdrop-blur-2xl"><p className="text-xs uppercase tracking-[0.32em] text-cyan-200">Primeiro acesso</p><h1 className="mt-3 text-3xl font-semibold">Encontramos sua conta do Harmomus antigo</h1><p className="mt-4 text-zinc-300">Estamos migrando sua experiência para uma nova plataforma mais rápida, organizada e segura.</p><p className="mt-2 text-zinc-300">Para proteger seu acesso, crie uma nova senha. Você pode usar a mesma senha anterior, se desejar.</p>{success ? <p className="mt-5 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">Se o e-mail for elegível, enviaremos um link seguro para criar sua senha.</p> : null}<form action="/api/auth/migration/send-password-setup" method="post" className="mt-6 space-y-4"><div><label className="mb-2 block text-sm text-zinc-200">E-mail</label><input readOnly name="email" value={email} className="h-12 w-full rounded-2xl border border-white/15 bg-black/40 px-4 text-zinc-200" /></div><button className="h-12 w-full rounded-2xl border border-cyan-300/40 bg-gradient-to-r from-cyan-400 to-violet-400 font-semibold text-zinc-950">Enviar link para criar senha</button></form></div></section></PublicAppShell>;
+}

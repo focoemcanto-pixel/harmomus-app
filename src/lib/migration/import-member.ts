@@ -46,14 +46,14 @@ export async function createOrLinkProfile(input: LegacyImportInput) {
 
   const existing = (usersData.users as Array<{id:string;email?:string}>).find((u) => u.email?.toLowerCase() === input.email.toLowerCase());
   if (existing) {
-    await admin.from("profiles").upsert({ id: existing.id, email: input.email, full_name: input.name ?? null, role: "member", migrated_from_pms: true, migration_completed_at: now, updated_at: now }, { onConflict: "id" });
+    await admin.from("profiles").upsert({ id: existing.id, email: input.email, full_name: input.name ?? null, role: "member", migrated_from_pms: true, requires_password_setup: true, migration_completed_at: now, updated_at: now }, { onConflict: "id" });
     return { userId: existing.id, created: false };
   }
 
   const createdUser = await admin.auth.admin.createUser({ email: input.email, email_confirm: false, user_metadata: { full_name: input.name ?? "" } });
   if (createdUser.error || !createdUser.data.user) throw new Error(createdUser.error?.message ?? "Falha ao criar usuário para migração");
 
-  await admin.from("profiles").insert({ id: createdUser.data.user.id, email: input.email, full_name: input.name ?? null, role: "member", migrated_from_pms: true, migration_completed_at: now });
+  await admin.from("profiles").insert({ id: createdUser.data.user.id, email: input.email, full_name: input.name ?? null, role: "member", migrated_from_pms: true, requires_password_setup: true, migration_completed_at: now });
   return { userId: createdUser.data.user.id, created: true };
 }
 

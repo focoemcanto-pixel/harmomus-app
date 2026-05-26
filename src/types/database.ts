@@ -13,6 +13,8 @@ export interface Database {
           legacy_pms_member_id: string | null;
           migrated_from_pms: boolean;
           migration_completed_at: string | null;
+          requires_password_setup: boolean;
+          password_setup_completed_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -25,6 +27,8 @@ export interface Database {
           legacy_pms_member_id?: string | null;
           migrated_from_pms?: boolean;
           migration_completed_at?: string | null;
+          requires_password_setup?: boolean;
+          password_setup_completed_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
