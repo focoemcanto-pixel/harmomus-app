@@ -3,11 +3,7 @@ import { redirect } from "next/navigation";
 
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { SignupPlanSelector } from "@/components/public/signup-plan-selector";
-import { ensureUserAccess } from "@/lib/auth/ensure-user-access";
 import { getAdminSettings } from "@/lib/data/admin-settings";
-import { sendEmail } from "@/lib/email/send-email";
-import { welcomeTemplate } from "@/lib/email/templates";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 const PLAN_OPTIONS = ["free", "plus", "premium", "ministry_10"] as const;
@@ -94,49 +90,23 @@ export default async function CadastroPage({ searchParams }: { searchParams: Pro
     if (password !== confirmPassword) fail("As senhas não conferem.", "confirm_password");
 
     const supabase = await createClient();
-    const supabaseAdmin = createSupabaseAdminClient();
+    const origin = process.env.NEXT_PUBLIC_SITE_URL || new URL(process.env.NEXT_PUBLIC_SUPABASE_URL || "http://localhost:3000").origin;
 
-    const { data: createdUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
+    const { error: createError } = await supabase.auth.signUp({
       email,
       password,
-      email_confirm: true,
-      user_metadata: { full_name: fullName, username, phone, plan_slug: plan },
+      options: {
+        emailRedirectTo: `${origin}/auth/callback?next=/cadastro/sucesso?plan=${plan}`,
+        data: { full_name: fullName, username, phone, plan_slug: plan },
+      },
     });
-    const createdUserId = createdUser.user?.id ?? "";
-    if (createError || !createdUserId) {
-      const mapped = mapSupabaseError(createError?.message ?? "Não foi possível criar a conta.");
+
+    if (createError) {
+      const mapped = mapSupabaseError(createError.message ?? "Não foi possível criar a conta.");
       fail(mapped.message, mapped.field);
     }
 
-    try {
-      await ensureUserAccess({
-        id: createdUserId,
-        email,
-        fullName,
-      });
-
-      await sendEmail({
-        to: email,
-        subject: "Bem-vindo ao Harmomus 🎵",
-        html: welcomeTemplate(fullName),
-      });
-    } catch (bootstrapError) {
-      fail(
-        bootstrapError instanceof Error
-          ? `Conta criada, mas houve erro ao configurar acesso: ${bootstrapError.message}`
-          : "Conta criada, mas houve erro ao configurar acesso.",
-        "form",
-      );
-    }
-
-    const { error: loginError } = await supabase.auth.signInWithPassword({ email, password });
-    if (loginError) {
-      const mapped = mapSupabaseError(loginError.message);
-      fail(`Conta criada, mas não foi possível iniciar sessão automaticamente. ${mapped.message}`, mapped.field);
-    }
-
-    if (plan === "free") redirect("/cadastro/sucesso?plan=free");
-    redirect(`/api/billing/checkout?plan=${encodeURIComponent(plan)}&welcome=1`);
+    redirect(`/cadastro/verifique-email?email=${encodeURIComponent(email)}`);
   }
 
   return (
