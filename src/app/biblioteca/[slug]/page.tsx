@@ -25,10 +25,19 @@ export default async function BibliotecaKitPage({ params }: { params: Promise<{ 
       await (supabase as any).from("usage_tracking").insert({
         user_id: current.profile?.id ?? null,
         action: "premium_gate_viewed",
-        metadata: { feature: "kit_page", kitId: kit.id, requiredPlans: kit.allowedPlanSlugs, userPlan: current.effectiveSlug },
+        metadata: {
+          feature: "kit_page",
+          kitId: kit.id,
+          requiredPlan: kit.requiredPlan?.slug ?? null,
+          userPlan: current.effectiveSlug,
+        },
       });
     } catch {}
   }
 
-  return <PublicAppShell><KitPageTemplate kit={kit} accessContext={{ ...current, ...accessContext }} /></PublicAppShell>;
+  return (
+    <PublicAppShell>
+      <KitPageTemplate kit={kit} accessContext={{ ...current, ...accessContext }} />
+    </PublicAppShell>
+  );
 }
