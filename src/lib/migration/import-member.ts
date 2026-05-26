@@ -10,10 +10,13 @@ export type LegacyImportInput = {
   name?: string;
   plan: string;
   status: ImportStatus;
-  stripe_customer_id: string;
-  stripe_subscription_id: string;
+  stripe_customer_id?: string;
+  stripe_subscription_id?: string;
   next_billing_at?: string | null;
 };
+
+export type MigrationMode = "stripe" | "manual";
+type ImportResult = { status: "importado" | "conflito" | "invalido"; message: string; mode: MigrationMode };
 
 function createSupabaseAdminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -71,8 +74,34 @@ export async function syncStripeSubscription(input: LegacyImportInput) {
   };
 }
 
-export async function importStripeMember(input: LegacyImportInput) {
+export async function createManualSubscription(input: LegacyImportInput): Promise<ImportResult> {
+  const plan = await resolvePlanByLegacy(input.plan);
+  const { userId } = await createOrLinkProfile(input);
+  const admin = createSupabaseAdminClient();
+  const now = new Date().toISOString();
+
+  await admin.from("subscriptions").upsert({
+    user_id: userId,
+    plan_id: (plan as any).id,
+    status: "active",
+    next_billing_at: input.next_billing_at ?? null,
+    gateway: "manual_migration",
+    migrated_from_pms: true,
+    original_gateway: "pms",
+    imported_at: now,
+    updated_at: now,
+  }, { onConflict: "user_id" });
+
+  await logMigration(input.email, "sincronizado", { plan: (plan as any).slug, status: "active", mode: "manual" });
+  return { status: "importado" as const, message: "Usuário migrado com assinatura manual", mode: "manual" as const };
+}
+
+export async function importStripeMember(input: LegacyImportInput): Promise<ImportResult> {
   try {
+    if (!input.stripe_customer_id || !input.stripe_subscription_id) {
+      throw new Error("stripe_customer_id e stripe_subscription_id são obrigatórios no modo stripe");
+    }
+
     const [plan, stripeData] = await Promise.all([resolvePlanByLegacy(input.plan), syncStripeSubscription(input)] as const);
     const { userId } = await createOrLinkProfile(input);
     const admin = createSupabaseAdminClient();
@@ -81,7 +110,7 @@ export async function importStripeMember(input: LegacyImportInput) {
     const currentSub = existingSub as { user_id: string } | null;
     if (currentSub && currentSub.user_id !== userId) {
       await logMigration(input.email, "conflito", { reason: "subscription_already_linked", existingUserId: currentSub.user_id, userId });
-      return { status: "conflito" as const, message: "Assinatura Stripe já vinculada a outro usuário" };
+      return { status: "conflito" as const, message: "Assinatura Stripe já vinculada a outro usuário", mode: "stripe" as const };
     }
 
     await admin.from("subscriptions").upsert({
@@ -102,9 +131,24 @@ export async function importStripeMember(input: LegacyImportInput) {
     }, { onConflict: "user_id" });
 
     await logMigration(input.email, "sincronizado", { plan: (plan as any).slug, subscriptionId: input.stripe_subscription_id, status: stripeData.status });
-    return { status: "importado" as const, message: "Usuário migrado e assinatura sincronizada" };
+    return { status: "importado" as const, message: "Usuário migrado e assinatura sincronizada", mode: "stripe" as const };
   } catch (error) {
     await logMigration(input.email, "erro", { message: error instanceof Error ? error.message : "Erro inesperado" });
-    return { status: "invalido" as const, message: error instanceof Error ? error.message : "Erro inesperado" };
+    return { status: "invalido" as const, message: error instanceof Error ? error.message : "Erro inesperado", mode: "stripe" as const };
+  }
+}
+
+export async function importMember(input: LegacyImportInput): Promise<ImportResult> {
+  const mode: MigrationMode = input.stripe_customer_id && input.stripe_subscription_id ? "stripe" : "manual";
+
+  if (mode === "stripe") {
+    return importStripeMember(input);
+  }
+
+  try {
+    return await createManualSubscription(input);
+  } catch (error) {
+    await logMigration(input.email, "erro", { message: error instanceof Error ? error.message : "Erro inesperado", mode: "manual" });
+    return { status: "invalido" as const, message: error instanceof Error ? error.message : "Erro inesperado", mode: "manual" as const };
   }
 }
