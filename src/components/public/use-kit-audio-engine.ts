@@ -15,6 +15,14 @@ function getTrackIdentity(track: KitTrack | null | undefined) {
   return [track.trackId ?? track.src, track.src, track.title, String(track.semitoneShift ?? 0)].join("::");
 }
 
+function createAudioElement(preload: "metadata" | "auto") {
+  const audio = new Audio();
+  audio.preload = preload;
+  audio.crossOrigin = "anonymous";
+  audio.playsInline = true;
+  return audio;
+}
+
 export function useKitAudioEngine() {
   const [track, setTrack] = useState<KitTrack | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -32,6 +40,16 @@ export function useKitAudioEngine() {
   const sessionIdRef = useRef<string | null>(null);
   const transitionLockRef = useRef<Promise<void>>(Promise.resolve());
   const abortRef = useRef<AbortController | null>(null);
+  const volumeRef = useRef(1);
+  const loopRef = useRef(false);
+
+  const ensureAudio = useCallback(() => {
+    if (!audioRef.current) audioRef.current = createAudioElement("metadata");
+    if (!preloaderRef.current) preloaderRef.current = createAudioElement("auto");
+    audioRef.current.volume = volumeRef.current;
+    audioRef.current.loop = loopRef.current;
+    return audioRef.current;
+  }, []);
 
   const cancelRaf = useCallback(() => {
     if (rafIdRef.current !== null) {
@@ -41,7 +59,6 @@ export function useKitAudioEngine() {
   }, []);
 
   const disposePlaybackSession = useCallback(async () => {
-    const disposeSessionId = sessionIdRef.current;
     sessionIdRef.current = null;
 
     abortRef.current?.abort("dispose");
@@ -71,14 +88,12 @@ export function useKitAudioEngine() {
       try { preloader.load(); } catch {}
     }
 
-    if (!disposeSessionId || disposeSessionId === sessionIdRef.current) {
-      setIsPlaying(false);
-      setCurrentTime(0);
-      setDuration(0);
-      setErrorMessage(null);
-      setTrack(null);
-      trackRef.current = null;
-    }
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
+    setErrorMessage(null);
+    setTrack(null);
+    trackRef.current = null;
   }, [cancelRaf]);
 
   const runTransition = useCallback(async (operation: () => Promise<void>) => {
@@ -100,12 +115,12 @@ export function useKitAudioEngine() {
   }, [cancelRaf]);
 
   const playTrack = useCallback(async (nextTrack: KitTrack) => {
+    if (!nextTrack.src) return;
+
     await runTransition(async () => {
       await disposePlaybackSession();
 
-      const audio = audioRef.current;
-      if (!audio?.src && !nextTrack.src) return;
-
+      const audio = ensureAudio();
       const sessionId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
       sessionIdRef.current = sessionId;
       setErrorMessage(null);
@@ -115,17 +130,17 @@ export function useKitAudioEngine() {
       const abortController = new AbortController();
       abortRef.current = abortController;
 
-      audio!.src = nextTrack.src;
-      audio!.volume = volume;
-      audio!.loop = loop;
-      audio!.load();
+      audio.src = nextTrack.src;
+      audio.volume = volumeRef.current;
+      audio.loop = loopRef.current;
+      audio.load();
 
       try {
         const shift = nextTrack.semitoneShift ?? 0;
         if (shift === 0) {
-          await audio!.play();
+          await audio.play();
         } else {
-          const pitchController = await getPitchEngine().createPlayback({ audio: audio!, semitoneShift: shift, signal: abortController.signal });
+          const pitchController = await getPitchEngine().createPlayback({ audio, semitoneShift: shift, signal: abortController.signal });
           if (abortController.signal.aborted || sessionIdRef.current !== sessionId) {
             pitchController.dispose();
             return;
@@ -143,7 +158,7 @@ export function useKitAudioEngine() {
         setErrorMessage(error instanceof Error ? error.message : "Não foi possível reproduzir este áudio agora.");
       }
     });
-  }, [disposePlaybackSession, loop, runTransition, startRafLoop, volume]);
+  }, [disposePlaybackSession, ensureAudio, runTransition, startRafLoop]);
 
   const togglePlay = useCallback(async () => {
     const audio = audioRef.current;
@@ -161,7 +176,8 @@ export function useKitAudioEngine() {
   }, [isPlaying, playTrack]);
 
   const preloadTrack = useCallback((nextTrack: KitTrack) => {
-    if (!preloaderRef.current || (nextTrack.semitoneShift ?? 0) !== 0 || !nextTrack.src) return;
+    if ((nextTrack.semitoneShift ?? 0) !== 0 || !nextTrack.src) return;
+    if (!preloaderRef.current) preloaderRef.current = createAudioElement("auto");
     preloaderRef.current.src = nextTrack.src;
     preloaderRef.current.load();
   }, []);
@@ -181,11 +197,25 @@ export function useKitAudioEngine() {
     seekTo(audio.currentTime + seconds);
   }, [seekTo]);
 
+  const setVolumeValue = useCallback((value: number) => {
+    const next = Math.max(0, Math.min(value, 1));
+    volumeRef.current = next;
+    setVolume(next);
+    if (audioRef.current) audioRef.current.volume = next;
+  }, []);
+
+  const setLoopValue = useCallback((value: boolean) => {
+    loopRef.current = value;
+    setLoop(value);
+    if (audioRef.current) audioRef.current.loop = value;
+  }, []);
+
   useEffect(() => {
+    ensureAudio();
     return () => {
       void runTransition(disposePlaybackSession);
     };
-  }, [disposePlaybackSession, runTransition]);
+  }, [disposePlaybackSession, ensureAudio, runTransition]);
 
   return {
     audioRef,
@@ -202,8 +232,8 @@ export function useKitAudioEngine() {
     togglePlay,
     seekTo,
     skipBy,
-    setVolumeValue: setVolume,
-    setLoopValue: setLoop,
+    setVolumeValue,
+    setLoopValue,
     stopPlayback: () => void runTransition(disposePlaybackSession),
     disposePlaybackSession: () => runTransition(disposePlaybackSession),
     isCurrentTrack: (trackToCheck: KitTrack) => getTrackIdentity(trackRef.current) === getTrackIdentity(trackToCheck),
