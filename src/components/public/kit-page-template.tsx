@@ -24,10 +24,6 @@ type ToneOption = {
   tone: string;
   label: string;
   isOriginal: boolean;
-  isExact: boolean;
-  isPitchShifted: boolean;
-  semitoneShift: number;
-  sourceTone: string | null;
   isAvailable: boolean;
 };
 
@@ -86,52 +82,25 @@ function getArrangementGuidance(analysis: TargetVoiceTessituraAnalysis | null, s
   };
 }
 
-function getToneByShift(baseTone: string, shift: number) {
-  const normalized = normalizeTone(baseTone);
-  if (!normalized) return null;
-  const index = CHROMATIC_TONES_SHARP.indexOf(normalized);
-  if (index < 0) return null;
-  return CHROMATIC_TONES_SHARP[(index + shift + 12) % 12];
+function getToneFileCount(toneGroup: PublicKitToneGroup) {
+  const files = (toneGroup as PublicKitToneGroup & { files?: unknown[] }).files;
+  if (Array.isArray(files)) return files.length;
+  return Object.values(toneGroup.voices ?? {}).filter(Boolean).length;
 }
 
-function buildToneOptions({ kit, selectedVoice }: { kit: PublicKit; selectedVoice: VoiceType }): ToneOption[] {
-  const realTones = sortTonesByChromaticOrder(kit.tones.map((tone) => tone.tone));
-  const originalTone = normalizeTone(kit.originalTone) ?? normalizeTone(kit.defaultTone) ?? realTones[0] ?? null;
-  const maxShift = Math.max(0, Math.min(12, Math.round(kit.maxPitchShiftSemitones ?? 2)));
-  const candidates = new Set<string>();
+function buildToneOptions({ kit }: { kit: PublicKit }): ToneOption[] {
+  const availableTones = sortTonesByChromaticOrder(kit.tones.map((tone) => tone.tone));
+  const originalTone = normalizeTone(kit.originalTone) ?? normalizeTone(kit.defaultTone) ?? availableTones[0] ?? null;
 
-  for (const tone of realTones) candidates.add(tone);
-
-  if (kit.allowPitchShift && originalTone) {
-    for (let shift = -maxShift; shift <= maxShift; shift += 1) {
-      const tone = getToneByShift(originalTone, shift);
-      if (tone) candidates.add(tone);
-    }
-  }
-
-  const tracks = kit.tones.flatMap((toneGroup) => {
-    const preferred = toneGroup.voices[selectedVoice] ?? toneGroup.voices.todos;
-    return preferred ? [preferred] : [];
-  });
-
-  return sortTonesByChromaticOrder(Array.from(candidates)).map((tone) => {
-    const resolution = resolveToneTrack({
-      tracks,
-      requestedTone: tone,
-      allowPitchShift: false,
-      maxPitchShiftSemitones: 0,
-      pickTrack: (toneTracks) => toneTracks.find((track) => track.voice === selectedVoice) ?? toneTracks.find((track) => track.voice === "todos") ?? toneTracks[0] ?? null,
-    });
+  return availableTones.map((tone) => {
+    const toneGroup = getToneGroup(kit, tone);
+    const isAvailable = Boolean(toneGroup && getToneFileCount(toneGroup) > 0);
 
     return {
       tone,
       label: formatToneLabel(tone),
       isOriginal: Boolean(originalTone && tone === originalTone),
-      isExact: resolution.isExact,
-      isPitchShifted: false,
-      semitoneShift: 0,
-      sourceTone: resolution.sourceTone,
-      isAvailable: resolution.isAvailable,
+      isAvailable,
     };
   });
 }
@@ -165,7 +134,7 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
     ctaHref: "/assinar?plan=premium",
   });
 
-  const toneOptions = useMemo(() => buildToneOptions({ kit, selectedVoice }), [kit, selectedVoice]);
+  const toneOptions = useMemo(() => buildToneOptions({ kit }), [kit]);
   const tracksForSelectedVoice = useMemo(
     () => kit.tones.flatMap((toneGroup) => {
       const preferred = toneGroup.voices[selectedVoice] ?? toneGroup.voices.todos;
@@ -184,7 +153,7 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
 
   const sourceTone = toneResolution.sourceTone ?? selectedTone;
   const currentTone = getToneGroup(kit, sourceTone) ?? null;
-  const selectedFile = toneResolution.sourceTrack ?? currentTone?.voices[selectedVoice] ?? null;
+  const selectedFile = currentTone?.voices[selectedVoice] ?? currentTone?.voices.todos ?? toneResolution.sourceTrack ?? null;
   const semitoneShift = 0;
   const isModulated = false;
   const midiRange = getMidiRange(selectedFile);
@@ -228,7 +197,7 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
       return;
     }
 
-    if (normalizeTone(selectedTone) !== normalizedTone) stopPlayback();
+    stopPlayback();
     setSelectedTone(normalizedTone);
   }
 
@@ -277,7 +246,7 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
                       >
                         <span className="block font-medium">{option.label}</span>
                         <span className="mt-0.5 block text-[10px] text-zinc-400">
-                          {option.isOriginal ? "Original" : option.isExact ? "Gerado" : "Indisponível"}
+                          {option.isAvailable ? (option.isOriginal ? "Original" : "Disponível") : "Indisponível"}
                         </span>
                       </button>
                     );
