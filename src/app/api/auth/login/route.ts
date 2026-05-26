@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 function normalizeRedirect(raw: string) {
@@ -15,7 +16,9 @@ export async function POST(request: Request) {
   const supabase = await createClient();
 
   if (email && !password) {
-    const { data: existingProfile } = await (supabase as any)
+    const admin = createSupabaseAdminClient() as any;
+
+    const { data: existingProfile } = await admin
       .from("profiles")
       .select("id")
       .ilike("email", email)
@@ -24,22 +27,22 @@ export async function POST(request: Request) {
     if (existingProfile?.id) {
       // Já existe perfil na plataforma nova: segue fluxo normal de login.
     } else {
-    const { data: legacyMember } = await (supabase as any)
+      const { data: legacyMember } = await admin
       .from("legacy_members")
       .select("email,legacy_plan_slug,legacy_status,migrated,password_created")
       .ilike("email", email)
       .maybeSingle();
 
-    if (
-      legacyMember &&
-      String(legacyMember.legacy_plan_slug ?? "").toLowerCase() === "free" &&
-      String(legacyMember.legacy_status ?? "").toLowerCase() === "active" &&
-      (!legacyMember.migrated || !legacyMember.password_created)
-    ) {
-      const url = new URL("/definir-senha-migrada", request.url);
-      url.searchParams.set("email", email);
-      return NextResponse.redirect(url, 303);
-    }
+      if (
+        legacyMember &&
+        String(legacyMember.legacy_plan_slug ?? "").toLowerCase() === "free" &&
+        String(legacyMember.legacy_status ?? "").toLowerCase() === "active" &&
+        (!legacyMember.migrated || !legacyMember.password_created)
+      ) {
+        const url = new URL("/definir-senha-migrada", request.url);
+        url.searchParams.set("email", email);
+        return NextResponse.redirect(url, 303);
+      }
     }
   }
 

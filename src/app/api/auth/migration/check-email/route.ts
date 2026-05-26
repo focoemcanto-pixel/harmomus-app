@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export async function POST(request: Request) {
   try {
@@ -7,8 +7,8 @@ export async function POST(request: Request) {
     const email = String((body as { email?: string }).email ?? "").trim().toLowerCase();
     if (!email || !email.includes("@")) return NextResponse.json({ migrated: false });
 
-    const supabase = await createClient();
-    const { data: existingProfile } = await (supabase as any)
+    const admin = createSupabaseAdminClient() as any;
+    const { data: existingProfile } = await admin
       .from("profiles")
       .select("id")
       .ilike("email", email)
@@ -16,7 +16,7 @@ export async function POST(request: Request) {
 
     if (existingProfile?.id) return NextResponse.json({ migrated: false });
 
-    const { data: legacyMember } = await (supabase as any)
+    const { data: legacyMember } = await admin
       .from("legacy_members")
       .select("legacy_plan_slug,legacy_status,migrated,password_created")
       .ilike("email", email)
