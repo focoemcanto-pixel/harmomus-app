@@ -61,6 +61,16 @@ function fileMatchesVoice(file: SourceAudioFile, voice: string) {
   return normalizeVoice(file.name) === voice;
 }
 
+function normalizePathPart(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9#-]/g, "");
+}
+
+function isGeneratedAudioFile(file: SourceAudioFile, kitSlug: string, voice: string) {
+  const key = String(file.r2_key ?? "").trim().toLowerCase();
+  const generatedPrefix = `kits/${normalizePathPart(kitSlug)}/${normalizePathPart(voice)}/`;
+  return key.startsWith(generatedPrefix);
+}
+
 function pickNearestSource(sources: SourceAudioFile[], targetTone: CanonicalTone) {
   let best: { source: SourceAudioFile; sourceTone: CanonicalTone; shift: number; distance: number } | null = null;
 
@@ -183,10 +193,12 @@ export async function POST(request: Request) {
       .filter((tone): tone is CanonicalTone => Boolean(tone)),
   );
 
-  const sourceFiles = voiceFiles.filter((file) => Boolean(file.r2_key) && Boolean(normalizeTone(file.tone)));
+  const originalSourceFiles = voiceFiles.filter(
+    (file) => Boolean(file.r2_key) && Boolean(normalizeTone(file.tone)) && !isGeneratedAudioFile(file, kitSlug, voice),
+  );
 
-  if (sourceFiles.length === 0) {
-    return NextResponse.json({ error: `Nenhum áudio original encontrado para ${voice}.` }, { status: 400 });
+  if (originalSourceFiles.length === 0) {
+    return NextResponse.json({ error: `Nenhum áudio original encontrado para ${voice}. Os arquivos gerados não podem ser usados como fonte para evitar perda de qualidade em cascata.` }, { status: 400 });
   }
 
   const jobsToProcess: JobPayload[] = [];
@@ -198,10 +210,10 @@ export async function POST(request: Request) {
       continue;
     }
 
-    const best = pickNearestSource(sourceFiles, targetTone);
+    const best = pickNearestSource(originalSourceFiles, targetTone);
 
     if (!best) {
-      skipped.push({ tone: targetTone, reason: "no-source-within-2-semitones" });
+      skipped.push({ tone: targetTone, reason: "no-original-source-within-2-semitones" });
       continue;
     }
 
@@ -230,7 +242,7 @@ export async function POST(request: Request) {
 
   if (jobsToProcess.length === 0) {
     return NextResponse.json({
-      message: "Nenhum job novo criado.",
+      message: "Nenhum job novo criado. Só geramos até ±2 semitons a partir de áudios originais; adicione mais tons originais para ampliar a cobertura.",
       createdCount: 0,
       jobs: [],
       skipped,
@@ -250,7 +262,7 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json({
-    message: "Jobs enfileirados/reiniciados com qualidade limitada a ±2 semitons por origem.",
+    message: "Jobs enfileirados/reiniciados usando apenas áudios originais e limite de ±2 semitons por origem.",
     createdCount: jobs.length,
     jobs,
     skipped,
