@@ -103,6 +103,10 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
   const VOICE_ORDER = ["todos", "soprano", "contralto", "tenor"] as const;
 
   const allFiles = useMemo(() => tones.flatMap((tone) => tone.files), [tones]);
+  const generatedTones = useMemo(
+    () => tones.filter((tone) => (tone as any).generated || tone.files?.some((file: any) => file.generated)),
+    [tones],
+  );
   const pendingFiles = useMemo(
     () => allFiles.filter((file) => typeof file.id === "string" && (typeof (file.minMidiNote ?? file.detectedMinMidiNote) !== "number" || typeof (file.maxMidiNote ?? file.detectedMaxMidiNote) !== "number")),
     [allFiles],
@@ -146,8 +150,9 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
   useEffect(() => {
     if (!jobs.some((job) => job.status === "pending" || job.status === "processing")) return;
     const interval = window.setInterval(() => {
+      void loadSyncedAudios();
       void loadJobs();
-    }, 5000);
+    }, 3000);
     return () => window.clearInterval(interval);
   }, [jobs]);
 
@@ -406,6 +411,12 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
       ) : null}
 
       {tones.length === 0 && !loading && !loadingFiles ? <p className="text-sm text-muted">Nenhum áudio encontrado ainda para este kit.</p> : null}
+      {generatedTones.length > 0 ? (
+        <div className="mb-4 rounded-lg border border-emerald-400/20 bg-emerald-500/5 p-4">
+          <h3 className="text-sm font-semibold text-emerald-200">Tons gerados</h3>
+          <p className="mt-1 text-xs text-emerald-100/80">{generatedTones.map((tone) => tone.tone).join(", ")}</p>
+        </div>
+      ) : null}
 
       <div className="space-y-4">
         {tones.map((toneGroup) => (
