@@ -1,4 +1,5 @@
 import { readFile, rm } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createClient } from "@supabase/supabase-js";
@@ -7,6 +8,7 @@ import { generateAudioWithRubberBand, mp3ToWav, wavToMp3 } from "./generate-audi
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? "";
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+const port = Number(process.env.PORT ?? 10000);
 
 if (!supabaseUrl) throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_URL.");
 if (!serviceRoleKey) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY.");
@@ -16,6 +18,21 @@ const supabase = createClient(supabaseUrl, serviceRoleKey, {
 });
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function startHealthServer() {
+  createServer((request, response) => {
+    if (request.url === "/healthz" || request.url === "/") {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ ok: true, service: "harmomus-audio-generator" }));
+      return;
+    }
+
+    response.writeHead(404, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ error: "not_found" }));
+  }).listen(port, "0.0.0.0", () => {
+    console.info(`[audio-generator] Health server listening on :${port}`);
+  });
+}
 
 async function reserveJob() {
   const { data, error } = await supabase
@@ -45,6 +62,42 @@ async function reserveJob() {
   return locked ?? null;
 }
 
+async function upsertGeneratedAudioFile(job: any, publicUrl: string | null) {
+  const payload = {
+    kit_id: job.kit_id,
+    tone: job.target_tone,
+    name: `${job.voice} - ${job.target_tone}`,
+    r2_key: job.target_r2_key,
+    public_url: publicUrl,
+    file_type: "audio/mpeg",
+  };
+
+  const { data: existing, error: findError } = await supabase
+    .from("kit_audio_files")
+    .select("id")
+    .eq("kit_id", job.kit_id)
+    .eq("r2_key", job.target_r2_key)
+    .maybeSingle();
+
+  if (findError) throw new Error(findError.message);
+
+  if (existing?.id) {
+    const { error } = await supabase
+      .from("kit_audio_files")
+      .update(payload)
+      .eq("id", existing.id);
+
+    if (error) throw new Error(error.message);
+    return;
+  }
+
+  const { error } = await supabase
+    .from("kit_audio_files")
+    .insert(payload);
+
+  if (error) throw new Error(error.message);
+}
+
 async function processJob(job: any) {
   const base = join(tmpdir(), `audio-job-${job.id}`);
   const inputMp3 = `${base}-input.mp3`;
@@ -66,21 +119,7 @@ async function processJob(job: any) {
     const publicBaseUrl = (process.env.R2_PUBLIC_BASE_URL ?? "").replace(/\/$/, "");
     const publicUrl = publicBaseUrl ? `${publicBaseUrl}/${job.target_r2_key}` : null;
 
-    const { error: fileError } = await supabase
-      .from("kit_audio_files")
-      .upsert(
-        {
-          kit_id: job.kit_id,
-          tone: job.target_tone,
-          name: `${job.voice} - ${job.target_tone}`,
-          r2_key: job.target_r2_key,
-          public_url: publicUrl,
-          file_type: "audio/mpeg",
-        },
-        { onConflict: "kit_id,r2_key" },
-      );
-
-    if (fileError) throw new Error(fileError.message);
+    await upsertGeneratedAudioFile(job, publicUrl);
 
     const { error: updateError } = await supabase
       .from("audio_generation_jobs")
@@ -108,6 +147,7 @@ async function processJob(job: any) {
 }
 
 async function main() {
+  startHealthServer();
   console.info("[audio-generator] Worker started");
 
   for (;;) {
