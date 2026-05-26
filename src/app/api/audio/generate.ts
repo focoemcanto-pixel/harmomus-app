@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { getSignedSemitoneDistance, normalizeTone } from "@/lib/music/tones";
+import { getSignedSemitoneDistance, normalizeTone, type CanonicalTone } from "@/lib/music/tones";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const VALID_VOICES = new Set(["todos", "tenor", "contralto", "soprano"]);
@@ -27,15 +27,23 @@ function buildTargetR2Key({ kitSlug, voice, targetTone }: { kitSlug: string; voi
   return `kits/${sanitizePathPart(kitSlug)}/${sanitizePathPart(voice)}/${sanitizePathPart(targetTone)}.mp3`;
 }
 
+function parseTargetTones(value: unknown): CanonicalTone[] {
+  if (!Array.isArray(value)) return [];
+
+  const tones = value
+    .map((tone) => normalizeTone(String(tone ?? "")))
+    .filter((tone): tone is CanonicalTone => Boolean(tone));
+
+  return Array.from(new Set(tones));
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
     const sourceAudioFileId = String(body?.sourceAudioFileId ?? "").trim();
     const requestedVoice = normalizeVoice(body?.voice);
-    const targetTones = Array.from(
-      new Set((body?.targetTones ?? []).map((tone: string) => normalizeTone(tone)).filter(Boolean)),
-    );
+    const targetTones = parseTargetTones(body?.targetTones);
 
     if (!sourceAudioFileId) {
       return NextResponse.json({ error: "sourceAudioFileId é obrigatório." }, { status: 400 });
@@ -70,7 +78,6 @@ export async function POST(request: NextRequest) {
     }
 
     const kitSlug = sourceFile.kits?.slug ?? sourceFile.kit_id;
-
     const jobs = [];
 
     for (const targetTone of targetTones) {
