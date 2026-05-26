@@ -1,4 +1,4 @@
-FROM node:20-bookworm-slim
+FROM node:22-bookworm-slim
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ffmpeg rubberband-cli \
@@ -6,9 +6,9 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY package.json package-lock.json* ./
-RUN npm install --include=dev
+COPY services/audio-generator/package.json ./package.json
+RUN npm install
 
-COPY . .
+COPY services/audio-generator ./
 
-CMD ["node", "services/audio-generator/worker.ts"]
+CMD ["npm", "start"]
