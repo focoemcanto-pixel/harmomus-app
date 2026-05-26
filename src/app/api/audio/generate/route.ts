@@ -139,7 +139,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: `Nenhum áudio original encontrado para ${voice}.` }, { status: 400 });
   }
 
-  const jobsToInsert = [];
+  const jobsToUpsert = [];
   const skipped: Array<{ tone: string; reason: string }> = [];
 
   for (const targetTone of requestedTargetTones) {
@@ -161,7 +161,7 @@ export async function POST(request: Request) {
       continue;
     }
 
-    jobsToInsert.push({
+    jobsToUpsert.push({
       kit_id: kitId,
       source_audio_file_id: best.source.id,
       voice,
@@ -172,10 +172,13 @@ export async function POST(request: Request) {
       target_r2_key: target.key,
       output_file_type: "mp3",
       status: "pending",
+      error_message: null,
+      started_at: null,
+      completed_at: null,
     });
   }
 
-  if (jobsToInsert.length === 0) {
+  if (jobsToUpsert.length === 0) {
     return NextResponse.json({
       message: "Nenhum job novo criado.",
       createdCount: 0,
@@ -186,13 +189,13 @@ export async function POST(request: Request) {
 
   const { data, error } = await supabase
     .from("audio_generation_jobs")
-    .upsert(jobsToInsert as never[], { onConflict: "kit_id,voice,target_tone,source_audio_file_id", ignoreDuplicates: true })
+    .upsert(jobsToUpsert as never[], { onConflict: "kit_id,voice,target_tone,source_audio_file_id" })
     .select("id,status,voice,source_tone,target_tone,semitone_shift,target_r2_key");
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   return NextResponse.json({
-    message: "Jobs enfileirados com qualidade limitada a ±2 semitons por origem.",
+    message: "Jobs enfileirados/reiniciados com qualidade limitada a ±2 semitons por origem.",
     createdCount: data?.length ?? 0,
     jobs: data ?? [],
     skipped,
