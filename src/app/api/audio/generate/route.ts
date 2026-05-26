@@ -1,10 +1,70 @@
 import { NextResponse } from "next/server";
 
-import { normalizeTone, getSignedSemitoneDistance } from "@/lib/music/tones";
+import { CHROMATIC_TONES_SHARP, getSignedSemitoneDistance, normalizeTone, type CanonicalTone } from "@/lib/music/tones";
 import { resolveGeneratedTone } from "@/lib/audio/resolve-generated-tone";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const VALID_VOICES = new Set(["soprano", "contralto", "tenor", "todos"]);
+const MAX_GENERATION_SHIFT = 2;
+
+type SourceAudioFile = {
+  id: string;
+  kit_id: string;
+  tone: string | null;
+  r2_key: string;
+  name: string | null;
+  kits?: { slug?: string | null } | null;
+};
+
+function normalizeVoice(value: string | null | undefined) {
+  const normalized = String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+
+  if (normalized.includes("soprano")) return "soprano";
+  if (normalized.includes("contralto")) return "contralto";
+  if (normalized.includes("tenor")) return "tenor";
+  if (normalized.includes("todos")) return "todos";
+  return normalized;
+}
+
+function parseTargetTones(value: unknown): CanonicalTone[] {
+  if (Array.isArray(value) && value.length > 0) {
+    const tones = value
+      .map((tone) => normalizeTone(String(tone ?? "")))
+      .filter((tone): tone is CanonicalTone => Boolean(tone));
+    return Array.from(new Set(tones));
+  }
+
+  return [...CHROMATIC_TONES_SHARP];
+}
+
+function fileMatchesVoice(file: SourceAudioFile, voice: string) {
+  return normalizeVoice(file.name) === voice;
+}
+
+function pickNearestSource(sources: SourceAudioFile[], targetTone: CanonicalTone) {
+  let best: { source: SourceAudioFile; sourceTone: CanonicalTone; shift: number; distance: number } | null = null;
+
+  for (const source of sources) {
+    const sourceTone = normalizeTone(source.tone);
+    if (!sourceTone) continue;
+
+    const shift = getSignedSemitoneDistance(sourceTone, targetTone);
+    if (shift === null || shift === 0) continue;
+
+    const distance = Math.abs(shift);
+    if (distance > MAX_GENERATION_SHIFT) continue;
+
+    if (!best || distance < best.distance) {
+      best = { source, sourceTone, shift, distance };
+    }
+  }
+
+  return best;
+}
 
 export async function POST(request: Request) {
   const supabase = createSupabaseAdminClient();
@@ -12,59 +72,129 @@ export async function POST(request: Request) {
     sourceAudioFileId?: string;
     targetTones?: string[];
     voice?: string;
+    kitId?: string;
   };
 
   const sourceAudioFileId = String(body.sourceAudioFileId ?? "").trim();
-  const targetTones = Array.isArray(body.targetTones) ? body.targetTones : [];
-  const voice = String(body.voice ?? "").trim().toLowerCase();
+  const voice = normalizeVoice(body.voice);
+  const requestedTargetTones = parseTargetTones(body.targetTones);
 
-  if (!sourceAudioFileId || targetTones.length === 0 || !voice) {
-    return NextResponse.json({ error: "sourceAudioFileId, targetTones[] e voice são obrigatórios." }, { status: 400 });
+  if (!sourceAudioFileId && !body.kitId) {
+    return NextResponse.json({ error: "sourceAudioFileId ou kitId é obrigatório." }, { status: 400 });
   }
-  if (!VALID_VOICES.has(voice)) return NextResponse.json({ error: "voice inválido." }, { status: 400 });
 
-  const { data: sourceFile, error: sourceError } = await supabase
-    .from("kit_audio_files")
-    .select("id,kit_id,tone,r2_key,name,kits(slug)")
-    .eq("id", sourceAudioFileId)
+  if (!voice || !VALID_VOICES.has(voice)) {
+    return NextResponse.json({ error: "voice inválido." }, { status: 400 });
+  }
+
+  let kitId = String(body.kitId ?? "").trim();
+  let kitSlug: string | undefined;
+
+  if (sourceAudioFileId) {
+    const { data: sourceFile, error: sourceError } = await supabase
+      .from("kit_audio_files")
+      .select("id,kit_id,tone,r2_key,name,kits(slug)")
+      .eq("id", sourceAudioFileId)
+      .maybeSingle();
+
+    if (sourceError) return NextResponse.json({ error: sourceError.message }, { status: 500 });
+    if (!sourceFile) return NextResponse.json({ error: "sourceAudioFileId não encontrado." }, { status: 404 });
+
+    kitId = sourceFile.kit_id;
+    kitSlug = (sourceFile as SourceAudioFile)?.kits?.slug ?? undefined;
+  }
+
+  const { data: kit, error: kitError } = await supabase
+    .from("kits")
+    .select("id,slug")
+    .eq("id", kitId)
     .maybeSingle();
 
-  if (sourceError) return NextResponse.json({ error: sourceError.message }, { status: 500 });
-  if (!sourceFile) return NextResponse.json({ error: "sourceAudioFileId não encontrado." }, { status: 404 });
+  if (kitError) return NextResponse.json({ error: kitError.message }, { status: 500 });
+  if (!kit) return NextResponse.json({ error: "Kit não encontrado." }, { status: 404 });
 
-  const sourceTone = normalizeTone(sourceFile.tone);
-  const kitSlug = (sourceFile as any)?.kits?.slug as string | undefined;
-  if (!sourceTone || !kitSlug) return NextResponse.json({ error: "Arquivo de origem inválido (tom/kit)." }, { status: 400 });
+  kitSlug = kitSlug ?? kit.slug;
 
-  const normalizedTargets = [...new Set(targetTones.map((t) => normalizeTone(t)).filter(Boolean))] as string[];
-  const jobsToInsert = normalizedTargets
-    .map((targetTone) => {
-      const semitoneShift = getSignedSemitoneDistance(sourceTone, targetTone);
-      const target = resolveGeneratedTone({ kitSlug, voice, tone: targetTone, extension: "mp3" });
-      if (semitoneShift === null || !target) return null;
-      return {
-        kit_id: sourceFile.kit_id,
-        source_audio_file_id: sourceFile.id,
-        voice,
-        source_tone: sourceTone,
-        target_tone: targetTone,
-        semitone_shift: semitoneShift,
-        source_r2_key: sourceFile.r2_key,
-        target_r2_key: target.key,
-        output_file_type: "mp3",
-        status: "pending",
-      };
-    })
-    .filter(Boolean);
+  if (!kitSlug) {
+    return NextResponse.json({ error: "Kit sem slug válido." }, { status: 400 });
+  }
 
-  if (jobsToInsert.length === 0) return NextResponse.json({ error: "Nenhum targetTone válido para enfileirar." }, { status: 400 });
+  const { data: allKitFiles, error: filesError } = await supabase
+    .from("kit_audio_files")
+    .select("id,kit_id,tone,r2_key,name")
+    .eq("kit_id", kitId);
+
+  if (filesError) return NextResponse.json({ error: filesError.message }, { status: 500 });
+
+  const voiceFiles = ((allKitFiles ?? []) as SourceAudioFile[]).filter((file) => fileMatchesVoice(file, voice));
+  const existingTones = new Set(
+    voiceFiles
+      .map((file) => normalizeTone(file.tone))
+      .filter((tone): tone is CanonicalTone => Boolean(tone)),
+  );
+
+  const sourceFiles = voiceFiles.filter((file) => Boolean(file.r2_key) && Boolean(normalizeTone(file.tone)));
+
+  if (sourceFiles.length === 0) {
+    return NextResponse.json({ error: `Nenhum áudio original encontrado para ${voice}.` }, { status: 400 });
+  }
+
+  const jobsToInsert = [];
+  const skipped: Array<{ tone: string; reason: string }> = [];
+
+  for (const targetTone of requestedTargetTones) {
+    if (existingTones.has(targetTone)) {
+      skipped.push({ tone: targetTone, reason: "already-exists" });
+      continue;
+    }
+
+    const best = pickNearestSource(sourceFiles, targetTone);
+
+    if (!best) {
+      skipped.push({ tone: targetTone, reason: "no-source-within-2-semitones" });
+      continue;
+    }
+
+    const target = resolveGeneratedTone({ kitSlug, voice, tone: targetTone, extension: "mp3" });
+    if (!target) {
+      skipped.push({ tone: targetTone, reason: "invalid-target" });
+      continue;
+    }
+
+    jobsToInsert.push({
+      kit_id: kitId,
+      source_audio_file_id: best.source.id,
+      voice,
+      source_tone: best.sourceTone,
+      target_tone: targetTone,
+      semitone_shift: best.shift,
+      source_r2_key: best.source.r2_key,
+      target_r2_key: target.key,
+      output_file_type: "mp3",
+      status: "pending",
+    });
+  }
+
+  if (jobsToInsert.length === 0) {
+    return NextResponse.json({
+      message: "Nenhum job novo criado.",
+      createdCount: 0,
+      jobs: [],
+      skipped,
+    });
+  }
 
   const { data, error } = await supabase
     .from("audio_generation_jobs")
     .upsert(jobsToInsert as never[], { onConflict: "kit_id,voice,target_tone,source_audio_file_id", ignoreDuplicates: true })
-    .select("id,status,target_tone,semitone_shift,target_r2_key");
+    .select("id,status,voice,source_tone,target_tone,semitone_shift,target_r2_key");
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  return NextResponse.json({ message: "Jobs enfileirados com sucesso.", jobs: data ?? [] });
+  return NextResponse.json({
+    message: "Jobs enfileirados com qualidade limitada a ±2 semitons por origem.",
+    createdCount: data?.length ?? 0,
+    jobs: data ?? [],
+    skipped,
+  });
 }
