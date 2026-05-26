@@ -9,7 +9,9 @@ export async function POST(request: Request) {
 
   if (email && email.includes("@")) {
     const supabase = await createClient();
-    await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${origin}/redefinir-senha` });
+    await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${origin}/auth/callback?next=/redefinir-senha`,
+    });
   }
 
   return NextResponse.redirect(new URL("/recuperar-senha?success=1", request.url), 303);
