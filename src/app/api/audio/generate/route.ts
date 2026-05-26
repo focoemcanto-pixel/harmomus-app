@@ -16,6 +16,22 @@ type SourceAudioFile = {
   kits?: { slug?: string | null } | null;
 };
 
+type JobPayload = {
+  kit_id: string;
+  source_audio_file_id: string;
+  voice: string;
+  source_tone: string;
+  target_tone: string;
+  semitone_shift: number;
+  source_r2_key: string;
+  target_r2_key: string;
+  output_file_type: string;
+  status: string;
+  error_message: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+};
+
 function normalizeVoice(value: string | null | undefined) {
   const normalized = String(value ?? "")
     .normalize("NFD")
@@ -64,6 +80,40 @@ function pickNearestSource(sources: SourceAudioFile[], targetTone: CanonicalTone
   }
 
   return best;
+}
+
+async function resetOrCreateJob(supabase: any, job: JobPayload) {
+  const { data: existing, error: findError } = await supabase
+    .from("audio_generation_jobs")
+    .select("id")
+    .eq("kit_id", job.kit_id)
+    .eq("voice", job.voice)
+    .eq("target_tone", job.target_tone)
+    .eq("source_audio_file_id", job.source_audio_file_id)
+    .maybeSingle();
+
+  if (findError) throw new Error(findError.message);
+
+  if (existing?.id) {
+    const { data, error } = await supabase
+      .from("audio_generation_jobs")
+      .update(job)
+      .eq("id", existing.id)
+      .select("id,status,voice,source_tone,target_tone,semitone_shift,target_r2_key")
+      .maybeSingle();
+
+    if (error) throw new Error(error.message);
+    return data;
+  }
+
+  const { data, error } = await supabase
+    .from("audio_generation_jobs")
+    .insert(job)
+    .select("id,status,voice,source_tone,target_tone,semitone_shift,target_r2_key")
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  return data;
 }
 
 export async function POST(request: Request) {
@@ -139,7 +189,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: `Nenhum áudio original encontrado para ${voice}.` }, { status: 400 });
   }
 
-  const jobsToUpsert = [];
+  const jobsToProcess: JobPayload[] = [];
   const skipped: Array<{ tone: string; reason: string }> = [];
 
   for (const targetTone of requestedTargetTones) {
@@ -161,7 +211,7 @@ export async function POST(request: Request) {
       continue;
     }
 
-    jobsToUpsert.push({
+    jobsToProcess.push({
       kit_id: kitId,
       source_audio_file_id: best.source.id,
       voice,
@@ -178,7 +228,7 @@ export async function POST(request: Request) {
     });
   }
 
-  if (jobsToUpsert.length === 0) {
+  if (jobsToProcess.length === 0) {
     return NextResponse.json({
       message: "Nenhum job novo criado.",
       createdCount: 0,
@@ -187,17 +237,22 @@ export async function POST(request: Request) {
     });
   }
 
-  const { data, error } = await supabase
-    .from("audio_generation_jobs")
-    .upsert(jobsToUpsert as never[], { onConflict: "kit_id,voice,target_tone,source_audio_file_id" })
-    .select("id,status,voice,source_tone,target_tone,semitone_shift,target_r2_key");
+  const jobs = [];
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  try {
+    for (const job of jobsToProcess) {
+      const saved = await resetOrCreateJob(supabase, job);
+      if (saved) jobs.push(saved);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Erro ao enfileirar jobs.";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 
   return NextResponse.json({
     message: "Jobs enfileirados/reiniciados com qualidade limitada a ±2 semitons por origem.",
-    createdCount: data?.length ?? 0,
-    jobs: data ?? [],
+    createdCount: jobs.length,
+    jobs,
     skipped,
   });
 }
