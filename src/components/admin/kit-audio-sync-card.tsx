@@ -127,7 +127,7 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
     setError(null);
 
     try {
-      const response = await fetch(`/api/kits/${kitId}/audio-files`, { method: "GET" });
+      const response = await fetch(`/api/kits/${kitId}/audio-files`, { method: "GET", cache: "no-store" });
       const data = await response.json();
 
       if (!response.ok) throw new Error(data?.error ?? "Não foi possível carregar os áudios sincronizados.");
@@ -157,7 +157,7 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
   }, [jobs]);
 
   async function loadJobs() {
-    const response = await fetch(`/api/audio/status?kitId=${kitId}`);
+    const response = await fetch(`/api/audio/status?kitId=${kitId}`, { cache: "no-store" });
     const data = await response.json().catch(() => ({}));
     if (response.ok) {
       setJobs((data.jobs ?? []) as AudioJob[]);
@@ -183,11 +183,12 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
       const response = await fetch(`/api/audio/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sourceAudioFileId: source.id, targetTones: targets, voice }),
+        body: JSON.stringify({ kitId, targetTones: targets, voice }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error ?? "Falha ao enfileirar jobs.");
       await loadJobs();
+      await loadSyncedAudios();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao gerar tons automaticamente.");
     } finally {
@@ -359,8 +360,7 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
       {analysisSummary ? <p className="mb-3 rounded-lg border border-border bg-surface-muted px-3 py-2 text-sm text-muted">Progresso da análise: {analysisSummary.analyzed}/{analysisSummary.total} processadas • {analysisSummary.saved} salvas • {analysisSummary.failed} falharam</p> : null}
       {usedPrefix ? <p className="mb-3 text-xs text-muted">Prefixo usado na sincronização: <span className="font-mono text-foreground">{usedPrefix}</span></p> : null}
 
-      {jobs.length > 0 ? (
-        <div className="mb-5 overflow-hidden rounded-2xl border border-white/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] shadow-[0_18px_60px_rgba(0,0,0,0.28)]">
+      <div className="mb-5 overflow-hidden rounded-2xl border border-white/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] shadow-[0_18px_60px_rgba(0,0,0,0.28)]">
           <div className="border-b border-white/10 p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
@@ -388,27 +388,32 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
           </div>
 
           <div className="grid gap-2 p-3 sm:grid-cols-2 lg:grid-cols-3">
-            {jobs.map((job) => {
-              const status = getStatusMeta(job.status);
-              return (
-                <article key={job.id} className={`rounded-xl border p-3 ${status.className}`}>
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className={`h-2.5 w-2.5 rounded-full ${status.dot}`} />
-                      <span className="text-xs font-semibold uppercase tracking-wide">{status.label}</span>
+            {jobs.length === 0 ? (
+              <div className="col-span-full rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-muted">
+                Nenhum job encontrado ainda para este kit. Clique em “Gerar tons automaticamente” para criar a fila.
+              </div>
+            ) : (
+              jobs.map((job) => {
+                const status = getStatusMeta(job.status);
+                return (
+                  <article key={job.id} className={`rounded-xl border p-3 ${status.className}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className={`h-2.5 w-2.5 rounded-full ${status.dot}`} />
+                        <span className="text-xs font-semibold uppercase tracking-wide">{status.label}</span>
+                      </div>
+                      <span className="rounded-full border border-current/20 px-2 py-0.5 text-xs font-bold">{job.target_tone}</span>
                     </div>
-                    <span className="rounded-full border border-current/20 px-2 py-0.5 text-xs font-bold">{job.target_tone}</span>
-                  </div>
-                  <p className="mt-2 text-sm font-semibold text-foreground">{formatJobVoice(job.voice)} {job.source_tone ? `${job.source_tone} → ${job.target_tone}` : job.target_tone}</p>
-                  <p className="mt-1 text-xs opacity-80">Modulação: {formatShift(job.semitone_shift)}</p>
-                  {job.error_message ? <p className="mt-2 line-clamp-2 rounded-lg bg-black/20 p-2 text-[11px] text-red-100">{job.error_message}</p> : null}
-                  {job.completed_at ? <p className="mt-2 text-[11px] opacity-70">Concluído às {formatTime(job.completed_at)}</p> : null}
-                </article>
-              );
-            })}
+                    <p className="mt-2 text-sm font-semibold text-foreground">{formatJobVoice(job.voice)} {job.source_tone ? `${job.source_tone} → ${job.target_tone}` : job.target_tone}</p>
+                    <p className="mt-1 text-xs opacity-80">Modulação: {formatShift(job.semitone_shift)}</p>
+                    {job.error_message ? <p className="mt-2 line-clamp-2 rounded-lg bg-black/20 p-2 text-[11px] text-red-100">{job.error_message}</p> : null}
+                    {job.completed_at ? <p className="mt-2 text-[11px] opacity-70">Concluído às {formatTime(job.completed_at)}</p> : null}
+                  </article>
+                );
+              })
+            )}
           </div>
         </div>
-      ) : null}
 
       {tones.length === 0 && !loading && !loadingFiles ? <p className="text-sm text-muted">Nenhum áudio encontrado ainda para este kit.</p> : null}
       {generatedTones.length > 0 ? (
