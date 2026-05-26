@@ -5,6 +5,8 @@ import { PublicAppShell } from "@/components/public/public-app-shell";
 import { SignupPlanSelector } from "@/components/public/signup-plan-selector";
 import { ensureUserAccess } from "@/lib/auth/ensure-user-access";
 import { getAdminSettings } from "@/lib/data/admin-settings";
+import { sendEmail } from "@/lib/email/send-email";
+import { welcomeTemplate } from "@/lib/email/templates";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -111,6 +113,12 @@ export default async function CadastroPage({ searchParams }: { searchParams: Pro
         id: createdUserId,
         email,
         fullName,
+      });
+
+      await sendEmail({
+        to: email,
+        subject: "Bem-vindo ao Harmomus 🎵",
+        html: welcomeTemplate(fullName),
       });
     } catch (bootstrapError) {
       fail(
