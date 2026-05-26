@@ -1,4 +1,5 @@
 import { PublicAppShell } from "@/components/public/public-app-shell";
+import { GlobalAudioPlayerProvider } from "@/components/public/global-audio-player-provider";
 import { notFound } from "next/navigation";
 
 import { KitPageTemplate } from "@/components/public/kit-page-template";
@@ -37,7 +38,9 @@ export default async function BibliotecaKitPage({ params }: { params: Promise<{ 
 
   return (
     <PublicAppShell>
-      <KitPageTemplate kit={kit} accessContext={{ ...current, ...accessContext }} />
+      <GlobalAudioPlayerProvider key={kit.id}>
+        <KitPageTemplate kit={kit} accessContext={{ ...current, ...accessContext }} />
+      </GlobalAudioPlayerProvider>
     </PublicAppShell>
   );
 }
