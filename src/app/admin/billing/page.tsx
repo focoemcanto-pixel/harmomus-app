@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Activity, ArrowRightLeft, BadgeCheck, ChartNoAxesCombined, RefreshCw, ShieldCheck, Sparkles, Users } from "lucide-react";
 
 import { PageHeader } from "@/components/admin/page-header";
@@ -99,6 +100,7 @@ export default async function BillingPage() {
 
   const isStripeConnected = Boolean(process.env.STRIPE_SECRET_KEY);
   const isWebhookActive = Boolean(process.env.STRIPE_WEBHOOK_SECRET);
+  const stripeDashboardUrl = process.env.STRIPE_DASHBOARD_URL || "https://dashboard.stripe.com/";
   const lastSyncLabel = latestEventCreatedAt
     ? new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(latestEventCreatedAt))
     : "sem eventos";
@@ -134,9 +136,9 @@ export default async function BillingPage() {
         <div className="rounded-2xl border border-white/10 bg-surface/80 p-5 shadow-premium">
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-base font-semibold text-white">Controle de acesso dos planos</h2>
-            <button className="rounded-xl border border-gold-400/40 bg-gold-500/10 px-3 py-1.5 text-xs font-medium text-gold-200 transition hover:bg-gold-500/20">
+            <Link href="/admin/planos" className="rounded-xl border border-gold-400/40 bg-gold-500/10 px-3 py-1.5 text-xs font-medium text-gold-200 transition hover:bg-gold-500/20">
               Editar permissões
-            </button>
+            </Link>
           </div>
 
           <div className="overflow-x-auto">
@@ -202,10 +204,10 @@ export default async function BillingPage() {
             <Activity className="h-4 w-4 text-violet-300" />
             Migração e atividade recente
           </h2>
-          <button className="inline-flex items-center gap-2 rounded-xl border border-cyan-400/35 bg-cyan-500/10 px-3 py-1.5 text-xs font-medium text-cyan-200 transition hover:bg-cyan-500/20">
+          <a href={stripeDashboardUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-xl border border-cyan-400/35 bg-cyan-500/10 px-3 py-1.5 text-xs font-medium text-cyan-200 transition hover:bg-cyan-500/20">
             <Sparkles className="h-3.5 w-3.5" />
             Abrir central Stripe
-          </button>
+          </a>
         </div>
 
         <div className="overflow-x-auto">
