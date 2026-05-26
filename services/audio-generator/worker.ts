@@ -21,6 +21,19 @@ const supabase = createClient(supabaseUrl, serviceRoleKey, {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function canonicalVoiceName(value: string) {
+  const normalized = String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+
+  if (normalized.includes("soprano")) return "soprano";
+  if (normalized.includes("contralto")) return "contralto";
+  if (normalized.includes("tenor")) return "tenor";
+  return "todos";
+}
+
 function startHealthServer() {
   createServer((request, response) => {
     if (request.url === "/healthz" || request.url === "/") {
@@ -89,13 +102,14 @@ async function reserveJob() {
 }
 
 async function upsertGeneratedAudioFile(job: any, publicUrl: string | null) {
+  const canonicalVoice = canonicalVoiceName(job.voice);
   const payload = {
     kit_id: job.kit_id,
     tone: job.target_tone,
-    name: `${job.voice} - ${job.target_tone}`,
+    name: canonicalVoice,
     r2_key: job.target_r2_key,
     public_url: publicUrl,
-    file_type: "audio/mpeg",
+    file_type: "mp3",
   };
 
   const { data: existing, error: findError } = await supabase
