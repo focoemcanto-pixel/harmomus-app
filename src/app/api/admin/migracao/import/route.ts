@@ -1,7 +1,26 @@
 import { NextResponse } from "next/server";
 import { importMember, type LegacyImportInput } from "@/lib/migration/import-member";
+import { createClient } from "@/lib/supabase/server";
 
 export async function POST(req: Request) {
+  const supabase = await createClient();
+  const { data: userData } = await supabase.auth.getUser();
+  const user = userData.user;
+
+  if (!user) {
+    return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+  }
+
+  const { data: profile } = await (supabase as any)
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (profile?.role !== "admin") {
+    return NextResponse.json({ error: "Acesso negado" }, { status: 403 });
+  }
+
   const body = await req.json();
   const rows = (body?.rows ?? []) as LegacyImportInput[];
 
