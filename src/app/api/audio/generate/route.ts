@@ -43,7 +43,7 @@ function normalizeVoice(value: string | null | undefined) {
   if (normalized.includes("contralto")) return "contralto";
   if (normalized.includes("tenor")) return "tenor";
   if (normalized.includes("todos")) return "todos";
-  return normalized;
+  return "todos";
 }
 
 function parseTargetTones(value: unknown): CanonicalTone[] {
@@ -57,10 +57,6 @@ function parseTargetTones(value: unknown): CanonicalTone[] {
   return [...CHROMATIC_TONES_SHARP];
 }
 
-function fileMatchesVoice(file: SourceAudioFile, voice: string) {
-  return normalizeVoice(file.name) === voice;
-}
-
 function normalizePathPart(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9#-]/g, "");
 }
@@ -71,25 +67,14 @@ function isGeneratedAudioFile(file: SourceAudioFile, kitSlug: string, voice: str
   return key.startsWith(generatedPrefix);
 }
 
-function pickNearestSource(sources: SourceAudioFile[], targetTone: CanonicalTone) {
-  let best: { source: SourceAudioFile; sourceTone: CanonicalTone; shift: number; distance: number } | null = null;
-
-  for (const source of sources) {
-    const sourceTone = normalizeTone(source.tone);
-    if (!sourceTone) continue;
-
-    const shift = getSignedSemitoneDistance(sourceTone, targetTone);
-    if (shift === null || shift === 0) continue;
-
-    const distance = Math.abs(shift);
-    if (distance > MAX_GENERATION_SHIFT) continue;
-
-    if (!best || distance < best.distance) {
-      best = { source, sourceTone, shift, distance };
-    }
-  }
-
-  return best;
+function getTargetsWithinLimit(sourceTone: CanonicalTone, requestedTargetTones: CanonicalTone[]) {
+  return requestedTargetTones
+    .map((targetTone) => {
+      const shift = getSignedSemitoneDistance(sourceTone, targetTone);
+      if (shift === null || shift === 0 || Math.abs(shift) > MAX_GENERATION_SHIFT) return null;
+      return { targetTone, shift };
+    })
+    .filter((item): item is { targetTone: CanonicalTone; shift: number } => Boolean(item));
 }
 
 async function resetOrCreateJob(supabase: any, job: JobPayload) {
@@ -136,19 +121,21 @@ export async function POST(request: Request) {
   };
 
   const sourceAudioFileId = String(body.sourceAudioFileId ?? "").trim();
-  const voice = normalizeVoice(body.voice);
+  const requestedVoice = normalizeVoice(body.voice);
   const requestedTargetTones = parseTargetTones(body.targetTones);
 
   if (!sourceAudioFileId && !body.kitId) {
     return NextResponse.json({ error: "sourceAudioFileId ou kitId é obrigatório." }, { status: 400 });
   }
 
-  if (!voice || !VALID_VOICES.has(voice)) {
+  if (sourceAudioFileId && (!requestedVoice || !VALID_VOICES.has(requestedVoice))) {
     return NextResponse.json({ error: "voice inválido." }, { status: 400 });
   }
 
   let kitId = String(body.kitId ?? "").trim();
   let kitSlug: string | undefined;
+
+  let explicitSource: SourceAudioFile | null = null;
 
   if (sourceAudioFileId) {
     const { data: sourceFile, error: sourceError } = await supabase
@@ -160,8 +147,9 @@ export async function POST(request: Request) {
     if (sourceError) return NextResponse.json({ error: sourceError.message }, { status: 500 });
     if (!sourceFile) return NextResponse.json({ error: "sourceAudioFileId não encontrado." }, { status: 404 });
 
-    kitId = sourceFile.kit_id;
-    kitSlug = (sourceFile as SourceAudioFile)?.kits?.slug ?? undefined;
+    explicitSource = sourceFile as SourceAudioFile;
+    kitId = explicitSource.kit_id;
+    kitSlug = explicitSource.kits?.slug ?? undefined;
   }
 
   const { data: kit, error: kitError } = await supabase
@@ -186,58 +174,66 @@ export async function POST(request: Request) {
 
   if (filesError) return NextResponse.json({ error: filesError.message }, { status: 500 });
 
-  const voiceFiles = ((allKitFiles ?? []) as SourceAudioFile[]).filter((file) => fileMatchesVoice(file, voice));
-  const existingTones = new Set(
-    voiceFiles
-      .map((file) => normalizeTone(file.tone))
-      .filter((tone): tone is CanonicalTone => Boolean(tone)),
-  );
+  const allFiles = (allKitFiles ?? []) as SourceAudioFile[];
+  const candidateSources = explicitSource ? [explicitSource] : allFiles;
 
-  const originalSourceFiles = voiceFiles.filter(
-    (file) => Boolean(file.r2_key) && Boolean(normalizeTone(file.tone)) && !isGeneratedAudioFile(file, kitSlug, voice),
-  );
+  const originalSourceFiles = candidateSources.filter((file) => {
+    const voice = explicitSource ? requestedVoice : normalizeVoice(file.name);
+    return Boolean(file.r2_key) && Boolean(normalizeTone(file.tone)) && !isGeneratedAudioFile(file, kitSlug!, voice);
+  });
 
   if (originalSourceFiles.length === 0) {
-    return NextResponse.json({ error: `Nenhum áudio original encontrado para ${voice}. Os arquivos gerados não podem ser usados como fonte para evitar perda de qualidade em cascata.` }, { status: 400 });
+    return NextResponse.json({ error: "Nenhum áudio original encontrado para gerar tons. Sincronize os áudios originais antes." }, { status: 400 });
   }
 
   const jobsToProcess: JobPayload[] = [];
-  const skipped: Array<{ tone: string; reason: string }> = [];
+  const skipped: Array<{ tone: string; voice?: string; reason: string }> = [];
 
-  for (const targetTone of requestedTargetTones) {
-    if (existingTones.has(targetTone)) {
-      skipped.push({ tone: targetTone, reason: "already-exists" });
+  for (const source of originalSourceFiles) {
+    const sourceTone = normalizeTone(source.tone);
+    if (!sourceTone) continue;
+
+    const voice = explicitSource ? requestedVoice : normalizeVoice(source.name);
+    if (!VALID_VOICES.has(voice)) {
+      skipped.push({ tone: source.tone ?? "", voice, reason: "invalid-voice" });
       continue;
     }
 
-    const best = pickNearestSource(originalSourceFiles, targetTone);
+    const existingTonesForVoice = new Set(
+      allFiles
+        .filter((file) => normalizeVoice(file.name) === voice)
+        .map((file) => normalizeTone(file.tone))
+        .filter((tone): tone is CanonicalTone => Boolean(tone)),
+    );
 
-    if (!best) {
-      skipped.push({ tone: targetTone, reason: "no-original-source-within-2-semitones" });
-      continue;
+    for (const { targetTone, shift } of getTargetsWithinLimit(sourceTone, requestedTargetTones)) {
+      if (existingTonesForVoice.has(targetTone)) {
+        skipped.push({ tone: targetTone, voice, reason: "already-exists" });
+        continue;
+      }
+
+      const target = resolveGeneratedTone({ kitSlug, voice, tone: targetTone, extension: "mp3" });
+      if (!target) {
+        skipped.push({ tone: targetTone, voice, reason: "invalid-target" });
+        continue;
+      }
+
+      jobsToProcess.push({
+        kit_id: kitId,
+        source_audio_file_id: source.id,
+        voice,
+        source_tone: sourceTone,
+        target_tone: targetTone,
+        semitone_shift: shift,
+        source_r2_key: source.r2_key,
+        target_r2_key: target.key,
+        output_file_type: "mp3",
+        status: "pending",
+        error_message: null,
+        started_at: null,
+        completed_at: null,
+      });
     }
-
-    const target = resolveGeneratedTone({ kitSlug, voice, tone: targetTone, extension: "mp3" });
-    if (!target) {
-      skipped.push({ tone: targetTone, reason: "invalid-target" });
-      continue;
-    }
-
-    jobsToProcess.push({
-      kit_id: kitId,
-      source_audio_file_id: best.source.id,
-      voice,
-      source_tone: best.sourceTone,
-      target_tone: targetTone,
-      semitone_shift: best.shift,
-      source_r2_key: best.source.r2_key,
-      target_r2_key: target.key,
-      output_file_type: "mp3",
-      status: "pending",
-      error_message: null,
-      started_at: null,
-      completed_at: null,
-    });
   }
 
   if (jobsToProcess.length === 0) {
