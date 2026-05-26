@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next";
 
-import { GlobalAudioPlayerProvider } from "@/components/public/global-audio-player-provider";
 import { getAdminSettings } from "@/lib/data/admin-settings";
 
 import "./globals.css";
@@ -64,9 +63,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="pt-BR">
-      <body>
-        <GlobalAudioPlayerProvider>{children}</GlobalAudioPlayerProvider>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }
