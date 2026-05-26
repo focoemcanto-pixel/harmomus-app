@@ -19,7 +19,7 @@ function createAudioElement(preload: "metadata" | "auto") {
   const audio = new Audio();
   audio.preload = preload;
   audio.crossOrigin = "anonymous";
-  audio.playsInline = true;
+  audio.setAttribute("playsinline", "true");
   return audio;
 }
 
