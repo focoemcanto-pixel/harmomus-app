@@ -9,7 +9,7 @@ import { LoginRequiredModal } from "@/components/public/login-required-modal";
 import { PremiumKitGateCard } from "@/components/public/premium-kit-gate-card";
 import { UpgradeRequiredModal } from "@/components/public/upgrade-required-modal";
 import { VoiceSelector } from "@/components/public/voice-selector";
-import { useGlobalAudioPlayer } from "@/components/public/global-audio-player-provider";
+import { useKitAudioEngine } from "@/components/public/use-kit-audio-engine";
 import { midiToNoteName } from "@/lib/audio/pitch-analysis";
 import type { PublicKit, PublicKitAudioFile, PublicKitToneGroup, VoiceType } from "@/lib/data/public-kits";
 import { analyzeTargetVoiceTessitura, type TargetVoiceTessituraAnalysis, type VocalRangeType } from "@/lib/music/tessitura";
@@ -141,7 +141,8 @@ function getToneGroup(kit: PublicKit, tone: string): PublicKitToneGroup | null {
 }
 
 export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
-  const { stopPlayback } = useGlobalAudioPlayer();
+  const audioEngine = useKitAudioEngine();
+  const { stopPlayback } = audioEngine;
 
   if (!accessContext?.play?.allowed) {
     return (
@@ -292,6 +293,7 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
 
               <VoiceSelector selectedVoice={selectedVoice} onSelectVoice={handleSelectVoice} />
               <HarmomusPlayer
+                engine={audioEngine}
                 src={selectedFile?.streamUrl ?? null}
                 title={`Tom ${formatToneLabel(selectedTone)} • Voz ${voiceLabel(selectedVoice)}`}
                 canPlay={accessContext.play.allowed && toneResolution.isAvailable}
