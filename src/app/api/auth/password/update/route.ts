@@ -19,6 +19,7 @@ export async function POST(request: Request) {
   const userEmail = data.user?.email?.toLowerCase();
   const formMigration = String(formData.get("migration") ?? "");
   const migration = formMigration === "1";
+  let completedMigration = migration;
 
   if (userEmail) {
     const now = new Date().toISOString();
@@ -26,9 +27,12 @@ export async function POST(request: Request) {
 
     const { data: profile } = await admin
       .from("profiles")
-      .select("requires_password_setup")
+      .select("migrated_from_pms,requires_password_setup")
       .ilike("email", userEmail)
       .maybeSingle();
+
+    const isMigratedProfile = Boolean(profile?.migrated_from_pms);
+    completedMigration = migration || isMigratedProfile;
 
     if (profile?.requires_password_setup) {
       await admin
@@ -37,7 +41,7 @@ export async function POST(request: Request) {
         .ilike("email", userEmail);
     }
 
-    if (migration) {
+    if (completedMigration) {
       await admin
         .from("legacy_members")
         .update({ password_created: true, migrated_at: now })
@@ -45,5 +49,5 @@ export async function POST(request: Request) {
     }
   }
 
-  return NextResponse.redirect(new URL(migration ? "/login?migration=success" : "/login?reset=success", request.url), 303);
+  return NextResponse.redirect(new URL(completedMigration ? "/login?migration=success" : "/login?reset=success", request.url), 303);
 }
