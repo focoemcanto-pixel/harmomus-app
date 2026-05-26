@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { normalizePlan } from "@/lib/access/access-engine";
+import { normalizeTone, sortTonesByChromaticOrder } from "@/lib/music/tones";
 import type { Database } from "@/types/database";
 
 export type UserTier = "guest" | "free" | "plus" | "premium";
@@ -85,12 +86,17 @@ function mapKit(
   files: Database["public"]["Tables"]["kit_audio_files"]["Row"][],
 ): PublicKit {
   const tonesMap = new Map<string, PublicKitToneGroup>();
+
   for (const file of files) {
-    if (!tonesMap.has(file.tone)) tonesMap.set(file.tone, { tone: file.tone, voices: {} });
+    const tone = normalizeTone(file.tone);
+    if (!tone) continue;
+
+    if (!tonesMap.has(tone)) tonesMap.set(tone, { tone, voices: {} });
+
     const voice = normalizeVoice(file.name);
-    tonesMap.get(file.tone)!.voices[voice] = {
+    tonesMap.get(tone)!.voices[voice] = {
       id: file.id,
-      tone: file.tone,
+      tone,
       voice,
       name: file.name,
       audioFileId: file.id,
@@ -114,6 +120,7 @@ function mapKit(
       : requiredPlan?.slug === "plus"
         ? ["plus", "premium"]
         : ["free", "plus", "premium"];
+
   return {
     id: kit.id,
     slug: kit.slug,
@@ -122,14 +129,14 @@ function mapKit(
     coverUrl: kit.cover_url,
     description: kit.description,
     lyrics: kit.lyrics,
-    originalTone: kit.original_tone ?? null,
-    defaultTone: kit.default_tone ?? kit.original_tone ?? null,
+    originalTone: normalizeTone(kit.original_tone ?? "") ?? kit.original_tone ?? null,
+    defaultTone: normalizeTone(kit.default_tone ?? kit.original_tone ?? "") ?? kit.default_tone ?? kit.original_tone ?? null,
     allowPitchShift: kit.allow_pitch_shift ?? true,
     maxPitchShiftSemitones: kit.max_pitch_shift_semitones ?? 2,
     category: category ? { id: category.id, name: category.name, slug: category.slug, description: category.description, cover_url: (category as any).cover_url ?? null } : null,
     requiredPlan: requiredPlan ? { id: requiredPlan.id, name: requiredPlan.name, slug: requiredPlan.slug } : null,
     allowedPlanSlugs,
-    tones: Array.from(tonesMap.values()).sort((a, b) => a.tone.localeCompare(b.tone, "pt-BR")),
+    tones: sortTonesByChromaticOrder(Array.from(tonesMap.keys())).map((tone) => tonesMap.get(tone)!).filter(Boolean),
   };
 }
 
