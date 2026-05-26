@@ -13,11 +13,11 @@ export async function GET(request: Request) {
   const code = url.searchParams.get("code");
   const next = normalizeNext(url.searchParams.get("next"));
 
-  if (!code) return NextResponse.redirect(new URL("/login?error=Link+inv%C3%A1lido+ou+expirado.", request.url), 303);
+  if (!code) return NextResponse.redirect(new URL("/login?error=callback", request.url), 303);
 
   const supabase = await createClient();
   const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-  if (exchangeError) return NextResponse.redirect(new URL("/login?error=Falha+ao+confirmar+e-mail.", request.url), 303);
+  if (exchangeError) return NextResponse.redirect(new URL("/login?error=callback", request.url), 303);
 
   const { data: authUser } = await supabase.auth.getUser();
   const user = authUser.user;
@@ -30,5 +30,5 @@ export async function GET(request: Request) {
     });
   }
 
-  return NextResponse.redirect(new URL(next || "/", request.url), 303);
+  return NextResponse.redirect(new URL(next, request.url), 303);
 }
