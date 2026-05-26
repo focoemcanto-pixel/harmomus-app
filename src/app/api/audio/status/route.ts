@@ -14,10 +14,15 @@ function canonicalVoiceName(value: string | null | undefined) {
   return "todos";
 }
 
+function buildPublicUrl(r2Key: string) {
+  const publicBaseUrl = (process.env.R2_PUBLIC_BASE_URL ?? "").replace(/\/$/, "");
+  return publicBaseUrl ? `${publicBaseUrl}/${r2Key}` : r2Key;
+}
+
 async function reconcileCompletedJobs(supabase: ReturnType<typeof createSupabaseAdminClient>, kitId: string) {
   const { data: completedJobs, error } = await supabase
     .from("audio_generation_jobs")
-    .select("id,kit_id,voice,target_tone,target_r2_key,status")
+    .select("id,kit_id,generated_audio_file_id,voice,target_tone,target_r2_key,status,output_file_type")
     .eq("kit_id", kitId)
     .eq("status", "completed");
 
@@ -36,22 +41,36 @@ async function reconcileCompletedJobs(supabase: ReturnType<typeof createSupabase
       .maybeSingle();
 
     if (findError) throw new Error(findError.message);
-    if (existing?.id) continue;
 
-    const publicBaseUrl = (process.env.R2_PUBLIC_BASE_URL ?? "").replace(/\/$/, "");
-    const publicUrl = publicBaseUrl ? `${publicBaseUrl}/${job.target_r2_key}` : null;
+    let audioFileId = existing?.id as string | undefined;
 
-    const { error: insertError } = await supabase.from("kit_audio_files").insert({
-      kit_id: kitId,
-      tone: job.target_tone,
-      name: canonicalVoiceName(job.voice),
-      r2_key: job.target_r2_key,
-      public_url: publicUrl,
-      file_type: "mp3",
-    });
+    if (!audioFileId) {
+      const { data: inserted, error: insertError } = await supabase
+        .from("kit_audio_files")
+        .insert({
+          kit_id: kitId,
+          tone: job.target_tone,
+          name: canonicalVoiceName(job.voice),
+          r2_key: job.target_r2_key,
+          public_url: buildPublicUrl(job.target_r2_key),
+          file_type: String(job.output_file_type ?? "mp3").replace(/^\./, "") || "mp3",
+        })
+        .select("id")
+        .maybeSingle();
 
-    if (insertError) throw new Error(insertError.message);
-    repaired += 1;
+      if (insertError) throw new Error(insertError.message);
+      audioFileId = inserted?.id as string | undefined;
+      repaired += 1;
+    }
+
+    if (audioFileId && job.generated_audio_file_id !== audioFileId) {
+      const { error: updateError } = await supabase
+        .from("audio_generation_jobs")
+        .update({ generated_audio_file_id: audioFileId })
+        .eq("id", job.id);
+
+      if (updateError) throw new Error(updateError.message);
+    }
   }
 
   return repaired;
@@ -74,21 +93,22 @@ export async function GET(request: Request) {
     return NextResponse.json({ job: data });
   }
 
-  let repaired = 0;
   try {
-    repaired = await reconcileCompletedJobs(supabase, kitId!);
+    const repaired = await reconcileCompletedJobs(supabase, kitId!);
+
+    const { data, error } = await supabase
+      .from("audio_generation_jobs")
+      .select("id,status,voice,source_tone,target_tone,semitone_shift,source_r2_key,target_r2_key,error_message,created_at,started_at,completed_at,updated_at,generated_audio_file_id")
+      .eq("kit_id", kitId)
+      .order("created_at", { ascending: false })
+      .limit(200);
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    return NextResponse.json({ jobs: data ?? [], repaired });
   } catch (repairError) {
+    const message = repairError instanceof Error ? repairError.message : "Falha ao reparar jobs concluídos.";
     console.error("[audio-status] reconcile failed", repairError);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  const { data, error } = await supabase
-    .from("audio_generation_jobs")
-    .select("id,status,voice,source_tone,target_tone,semitone_shift,source_r2_key,target_r2_key,error_message,created_at,started_at,completed_at,updated_at")
-    .eq("kit_id", kitId)
-    .order("created_at", { ascending: false })
-    .limit(200);
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  return NextResponse.json({ jobs: data ?? [], repaired });
 }
