@@ -406,7 +406,9 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
                 </div>
               )}
 
-              <AccessCounter value={accessContext.play.stats?.uniqueKitCount24h ?? 0} limit={accessContext.play.stats?.limit ?? 5} />
+              {accessContext.effectiveSlug === "free" ? (
+                <AccessCounter value={accessContext.play.stats?.uniqueKitCount24h ?? 0} limit={accessContext.play.stats?.limit ?? 3} />
+              ) : null}
             </div>
           </div>
         </div>
