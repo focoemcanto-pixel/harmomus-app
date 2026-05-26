@@ -9,6 +9,7 @@ import { LoginRequiredModal } from "@/components/public/login-required-modal";
 import { PremiumKitGateCard } from "@/components/public/premium-kit-gate-card";
 import { UpgradeRequiredModal } from "@/components/public/upgrade-required-modal";
 import { VoiceSelector } from "@/components/public/voice-selector";
+import { useGlobalAudioPlayer } from "@/components/public/global-audio-player-provider";
 import { midiToNoteName } from "@/lib/audio/pitch-analysis";
 import type { PublicKit, PublicKitAudioFile, PublicKitToneGroup, VoiceType } from "@/lib/data/public-kits";
 import { analyzeTargetVoiceTessitura, type TargetVoiceTessituraAnalysis, type VocalRangeType } from "@/lib/music/tessitura";
@@ -140,6 +141,8 @@ function getToneGroup(kit: PublicKit, tone: string): PublicKitToneGroup | null {
 }
 
 export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
+  const { stopPlayback } = useGlobalAudioPlayer();
+
   if (!accessContext?.play?.allowed) {
     return (
       <PremiumKitGateCard
@@ -224,7 +227,13 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
       return;
     }
 
+    if (normalizeTone(selectedTone) !== normalizedTone) stopPlayback();
     setSelectedTone(normalizedTone);
+  }
+
+  function handleSelectVoice(voice: VoiceType) {
+    if (voice !== selectedVoice) stopPlayback();
+    setSelectedVoice(voice);
   }
 
   return (
@@ -281,42 +290,43 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
                 </div>
               </div>
 
-              <VoiceSelector selectedVoice={selectedVoice} onSelectVoice={setSelectedVoice} />
+              <VoiceSelector selectedVoice={selectedVoice} onSelectVoice={handleSelectVoice} />
               <HarmomusPlayer
                 src={selectedFile?.streamUrl ?? null}
                 title={`Tom ${formatToneLabel(selectedTone)} • Voz ${voiceLabel(selectedVoice)}`}
                 canPlay={accessContext.play.allowed && toneResolution.isAvailable}
                 semitoneShift={semitoneShift}
                 onBlocked={() => {
-                if (accessContext.play.reason === "guest") setLoginOpen(true);
-                else {
-                  if (!toneResolution.isAvailable) {
-                    setUpgradeConfig({
-                      title: "Tom indisponível para este kit.",
-                      message: "Este tom ainda não possui áudio gravado e está fora do limite de modulação configurado.",
-                      ctaLabel: "Entendi",
-                      ctaHref: "#",
-                    });
-                  } else if (accessContext.play.reason === "free_limit") {
-                    setUpgradeConfig({
-                      title: "Você atingiu seu limite gratuito de hoje.",
-                      message: "Assine o Premium e continue estudando sem interrupções.",
-                      ctaLabel: "Liberar acesso com Premium",
-                      ctaHref: "/assinar?plan=premium",
-                    });
-                  } else {
-                    const requiredPlan = accessContext.play.requiredPlan ?? "premium";
-                    const planLabel = requiredPlan === "plus" ? "Plus" : "Premium";
-                    setUpgradeConfig({
-                      title: `Este kit requer plano ${planLabel}.`,
-                      message: "Faça upgrade para desbloquear este conteúdo agora.",
-                      ctaLabel: "Assinar Premium",
-                      ctaHref: "/assinar?plan=premium",
-                    });
+                  if (accessContext.play.reason === "guest") setLoginOpen(true);
+                  else {
+                    if (!toneResolution.isAvailable) {
+                      setUpgradeConfig({
+                        title: "Tom indisponível para este kit.",
+                        message: "Este tom ainda não possui áudio gravado e está fora do limite de modulação configurado.",
+                        ctaLabel: "Entendi",
+                        ctaHref: "#",
+                      });
+                    } else if (accessContext.play.reason === "free_limit") {
+                      setUpgradeConfig({
+                        title: "Você atingiu seu limite gratuito de hoje.",
+                        message: "Assine o Premium e continue estudando sem interrupções.",
+                        ctaLabel: "Liberar acesso com Premium",
+                        ctaHref: "/assinar?plan=premium",
+                      });
+                    } else {
+                      const requiredPlan = accessContext.play.requiredPlan ?? "premium";
+                      const planLabel = requiredPlan === "plus" ? "Plus" : "Premium";
+                      setUpgradeConfig({
+                        title: `Este kit requer plano ${planLabel}.`,
+                        message: "Faça upgrade para desbloquear este conteúdo agora.",
+                        ctaLabel: "Assinar Premium",
+                        ctaHref: "/assinar?plan=premium",
+                      });
+                    }
+                    setUpgradeOpen(true);
                   }
-                  setUpgradeOpen(true);
-                }
-              }} />
+                }}
+              />
 
               {selectedVoice === "todos" ? (
                 <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-xs text-zinc-400">
