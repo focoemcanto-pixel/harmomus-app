@@ -32,21 +32,22 @@ function resolveMinistryPriceId(planSlug: string) {
 async function createStripeCheckoutWithSupabase(supabase: any, userId: string, email: string, planId: string, fallbackOrigin?: string | null) {
   assertStripeReady();
 
-  const { data: plan } = await supabase.from("plans").select("*").eq("id", planId).single();
+  const [{ data: plan }, { data: existing }] = await Promise.all([
+    supabase.from("plans").select("*").eq("id", planId).single(),
+    supabase
+      .from("subscriptions")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
 
   if (!plan) throw new Error("Plano não encontrado.");
   const stripePriceId = resolvePlanPriceId(plan) ?? resolveMinistryPriceId(plan.slug);
   if (["plus", "premium", "ministry_10", "ministry_20", "ministry_40"].includes(plan.slug) && !stripePriceId) {
     throw new Error("Plano sem configuração de pagamento. Configure o Stripe Price ID no ambiente.");
   }
-
-  const { data: existing } = await supabase
-    .from("subscriptions")
-    .select("*")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
 
   const customerId = await getOrCreateCustomer({
     email,
