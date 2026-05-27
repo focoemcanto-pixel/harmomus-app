@@ -7,6 +7,7 @@ export type EnsureUserAccessInput = {
   avatarUrl?: string | null;
   legacyProvider?: string | null;
   legacyUserId?: string | null;
+  selectedPlanSlug?: string | null;
 };
 
 function normalizeEmail(email?: string | null) {
@@ -23,15 +24,23 @@ function normalizeRole(existingRole?: string | null) {
   return "member";
 }
 
-async function getFreePlanId(admin: any) {
+function normalizeSelectedPlanSlug(value?: string | null) {
+  return String(value ?? "free").trim().toLowerCase() || "free";
+}
+
+function isPaidPlan(slug: string) {
+  return slug !== "free";
+}
+
+async function getPlanIdBySlug(admin: any, slug: string) {
   const { data: plan, error } = await admin
     .from("plans")
     .select("id")
-    .eq("slug", "free")
+    .eq("slug", slug)
     .maybeSingle();
 
-  if (error) throw new Error(`Falha ao buscar plano free: ${error.message}`);
-  if (!plan?.id) throw new Error("Plano free não encontrado. Crie o plano com slug 'free' antes de migrar usuários.");
+  if (error) throw new Error(`Falha ao buscar plano ${slug}: ${error.message}`);
+  if (!plan?.id) throw new Error(`Plano ${slug} não encontrado.`);
 
   return plan.id as string;
 }
@@ -76,37 +85,48 @@ async function ensureProfile(admin: any, input: EnsureUserAccessInput) {
   if (error) throw new Error(`Falha ao salvar perfil: ${error.message}`);
 }
 
-async function ensureFreeSubscription(admin: any, userId: string) {
+async function ensureSubscription(admin: any, userId: string, selectedPlanSlug: string) {
   const { data: existingSubscription, error: existingError } = await admin
     .from("subscriptions")
-    .select("id")
+    .select("id,status")
     .eq("user_id", userId)
     .maybeSingle();
 
   if (existingError) throw new Error(`Falha ao verificar assinatura: ${existingError.message}`);
-  if (existingSubscription?.id) return;
 
-  const freePlanId = await getFreePlanId(admin);
+  if (existingSubscription?.id && String(existingSubscription.status ?? "") === "active") {
+    return;
+  }
+
+  const planId = await getPlanIdBySlug(admin, selectedPlanSlug);
   const now = new Date().toISOString();
+  const status = isPaidPlan(selectedPlanSlug) ? "pending" : "active";
 
-  const { error } = await admin.from("subscriptions").insert({
+  const payload = {
     user_id: userId,
-    plan_id: freePlanId,
-    status: "active",
-    gateway: "migration",
+    plan_id: planId,
+    status,
+    gateway: isPaidPlan(selectedPlanSlug) ? "stripe" : "migration",
     migrated_from_pms: false,
-    original_gateway: "harmomus-free",
+    original_gateway: isPaidPlan(selectedPlanSlug) ? "stripe-pending-checkout" : "harmomus-free",
     imported_at: now,
     updated_at: now,
-  });
+  };
 
-  if (error) throw new Error(`Falha ao criar assinatura free: ${error.message}`);
+  const query = existingSubscription?.id
+    ? admin.from("subscriptions").update(payload).eq("id", existingSubscription.id)
+    : admin.from("subscriptions").insert(payload);
+
+  const { error } = await query;
+  if (error) throw new Error(`Falha ao preparar assinatura: ${error.message}`);
 }
 
 export async function ensureUserAccess(input: EnsureUserAccessInput) {
   if (!input.id) throw new Error("Usuário inválido para bootstrap de acesso.");
 
   const admin = createSupabaseAdminClient() as any;
+  const selectedPlanSlug = normalizeSelectedPlanSlug(input.selectedPlanSlug);
+
   await ensureProfile(admin, input);
-  await ensureFreeSubscription(admin, input.id);
+  await ensureSubscription(admin, input.id, selectedPlanSlug);
 }
