@@ -13,6 +13,7 @@ type SourceAudioFile = {
   tone: string | null;
   r2_key: string;
   name: string | null;
+  source_type: "original" | "generated" | null;
   kits?: { slug?: string | null } | null;
 };
 
@@ -55,16 +56,6 @@ function parseTargetTones(value: unknown): CanonicalTone[] {
   }
 
   return [...CHROMATIC_TONES_SHARP];
-}
-
-function normalizePathPart(value: string) {
-  return value.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9#-]/g, "");
-}
-
-function isGeneratedAudioFile(file: SourceAudioFile, kitSlug: string, voice: string) {
-  const key = String(file.r2_key ?? "").trim().toLowerCase();
-  const generatedPrefix = `kits/${normalizePathPart(kitSlug)}/${normalizePathPart(voice)}/`;
-  return key.startsWith(generatedPrefix);
 }
 
 function getTargetsWithinLimit(sourceTone: CanonicalTone, requestedTargetTones: CanonicalTone[]) {
@@ -141,7 +132,7 @@ export async function POST(request: Request) {
   if (sourceAudioFileId) {
     const { data: sourceFile, error: sourceError } = await supabase
       .from("kit_audio_files")
-      .select("id,kit_id,tone,r2_key,name,kits(slug)")
+      .select("id,kit_id,tone,r2_key,name,source_type,kits(slug)")
       .eq("id", sourceAudioFileId)
       .maybeSingle();
 
@@ -170,7 +161,7 @@ export async function POST(request: Request) {
 
   const { data: allKitFiles, error: filesError } = await supabase
     .from("kit_audio_files")
-    .select("id,kit_id,tone,r2_key,name")
+    .select("id,kit_id,tone,r2_key,name,source_type")
     .eq("kit_id", kitId);
 
   if (filesError) return NextResponse.json({ error: filesError.message }, { status: 500 });
@@ -179,8 +170,7 @@ export async function POST(request: Request) {
   const candidateSources = explicitSource ? [explicitSource] : allFiles;
 
   const originalSourceFiles = candidateSources.filter((file) => {
-    const voice = explicitSource ? requestedVoice : normalizeVoice(file.name);
-    return Boolean(file.r2_key) && Boolean(normalizeTone(file.tone)) && !isGeneratedAudioFile(file, kitSlug!, voice);
+    return file.source_type === "original" && Boolean(file.r2_key) && Boolean(normalizeTone(file.tone));
   });
 
   if (originalSourceFiles.length === 0) {

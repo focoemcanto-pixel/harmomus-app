@@ -20,7 +20,7 @@ interface KitPageTemplateProps {
   accessContext: any;
 }
 
-type AudioSource = "original" | "harmomus_ia";
+type AudioSource = "original" | "generated";
 
 type AudioFilesApiFile = {
   id?: string;
@@ -160,7 +160,9 @@ function mapApiTonesToPublicToneGroups(tones: AudioFilesApiTone[]) {
   for (const toneGroup of tones ?? []) {
     const tone = normalizeTone(toneGroup.tone);
     if (!tone) continue;
-    sourceByTone[tone] = toneGroup.source === "harmomus_ia" ? "harmomus_ia" : "original";
+    if (toneGroup.source === "original" || toneGroup.source === "generated") {
+      sourceByTone[tone] = toneGroup.source;
+    }
   }
 
   return { toneGroups, sourceByTone };
@@ -230,7 +232,7 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
   const toneOptions = useMemo(() => {
     return availableTones.map((toneGroup) => {
       const tone = normalizeTone(toneGroup.tone) ?? toneGroup.tone;
-      const source = toneSourceByTone[tone] === "harmomus_ia" ? "harmomus_ia" : "original";
+      const source = toneSourceByTone[tone] === "generated" ? "generated" : "original";
       const isOriginal = source === "original";
       return {
         tone: toneGroup.tone,
@@ -263,7 +265,7 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
   const canPlaySelected = accessContext.play.allowed && Boolean(selectedFile?.streamUrl) && Boolean(getToneGroup(liveKit, selectedTone));
   const semitoneShift = 0;
   const isModulated = false;
-  const selectedToneSource = toneSourceByTone[normalizeTone(selectedTone) ?? selectedTone] === "harmomus_ia" ? "harmomus_ia" : "original";
+  const selectedToneSource = toneSourceByTone[normalizeTone(selectedTone) ?? selectedTone] === "generated" ? "generated" : "original";
   const selectedIsOriginal = selectedToneSource === "original";
   const midiRange = getMidiRange(selectedFile);
   const analysisVoice = toAnalyzableVoice(selectedVoice);
