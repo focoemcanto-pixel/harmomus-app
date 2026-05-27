@@ -26,6 +26,18 @@ type AudioJob = {
   completed_at?: string | null;
 };
 
+type AnalysisJob = {
+  id: string;
+  status: "pending" | "processing" | "completed" | "failed" | string;
+  kit_id: string;
+  audio_file_id: string;
+  analysis_type: string;
+  analysis_logs?: Array<{ message?: string; at?: string }> | null;
+  error_message?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
 const STATUS_STYLES: Record<string, { label: string; icon: string; className: string; dot: string }> = {
   completed: {
     label: "Concluído",
@@ -101,6 +113,10 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
   const [jobError, setJobError] = useState<string | null>(null);
   const [jobs, setJobs] = useState<AudioJob[]>([]);
   const [lastJobRefresh, setLastJobRefresh] = useState<string | null>(null);
+  const [analysisJobs, setAnalysisJobs] = useState<AnalysisJob[]>([]);
+  const [analysisLoadingFileId, setAnalysisLoadingFileId] = useState<string | null>(null);
+  const [analysisSubmitMessage, setAnalysisSubmitMessage] = useState<string | null>(null);
+  const [analysisSubmitError, setAnalysisSubmitError] = useState<string | null>(null);
 
   const VOICE_ORDER = ["todos", "soprano", "contralto", "tenor"] as const;
 
@@ -165,6 +181,7 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
   useEffect(() => {
     void loadSyncedAudios();
     void loadJobs();
+    void loadAnalysisJobs();
   }, [kitId]);
 
   useEffect(() => {
@@ -172,6 +189,7 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
     const interval = window.setInterval(() => {
       void loadSyncedAudios();
       void loadJobs();
+      void loadAnalysisJobs();
     }, 3000);
     return () => window.clearInterval(interval);
   }, [jobs]);
@@ -187,6 +205,43 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
     } else {
       setJobError(data?.error ?? "Falha ao carregar status dos jobs.");
     }
+  }
+
+  async function loadAnalysisJobs() {
+    const response = await fetch(`/api/audio/analyze?kitId=${kitId}`, { cache: "no-store" });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok) {
+      setAnalysisJobs((data.jobs ?? []) as AnalysisJob[]);
+    }
+  }
+
+  async function enqueueAiAnalysis(audioFileId?: string) {
+    if (!audioFileId) return;
+    setAnalysisLoadingFileId(audioFileId);
+    setAnalysisSubmitMessage("criando análise...");
+    setAnalysisSubmitError(null);
+    try {
+      const response = await fetch("/api/audio/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kitId, audioFileId }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.error ?? "erro ao enviar");
+      }
+      setAnalysisSubmitMessage("análise enviada");
+      await loadAnalysisJobs();
+    } catch (submitError) {
+      setAnalysisSubmitError(submitError instanceof Error ? submitError.message : "erro ao enviar");
+    } finally {
+      setAnalysisLoadingFileId(null);
+    }
+  }
+
+  function getAnalysisJobForFile(audioFileId?: string) {
+    if (!audioFileId) return null;
+    return analysisJobs.find((job) => job.audio_file_id === audioFileId) ?? null;
   }
 
   async function generateTonesAutomatically() {
@@ -383,6 +438,8 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
       {error ? <p className="mb-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</p> : null}
       {analysisSummary ? <p className="mb-3 rounded-lg border border-border bg-surface-muted px-3 py-2 text-sm text-muted">Progresso da análise: {analysisSummary.analyzed}/{analysisSummary.total} processadas • {analysisSummary.saved} salvas • {analysisSummary.failed} falharam</p> : null}
       {usedPrefix ? <p className="mb-3 text-xs text-muted">Prefixo usado na sincronização: <span className="font-mono text-foreground">{usedPrefix}</span></p> : null}
+      {analysisSubmitMessage ? <p className="mb-3 rounded-lg border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-sm text-cyan-100">{analysisSubmitMessage}</p> : null}
+      {analysisSubmitError ? <p className="mb-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">{analysisSubmitError}</p> : null}
 
       <div className="mb-5 overflow-hidden rounded-2xl border border-white/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] shadow-[0_18px_60px_rgba(0,0,0,0.28)]">
           <div className="border-b border-white/10 p-4">
@@ -395,7 +452,23 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
               <button type="button" onClick={() => void loadJobs()} className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-zinc-200 transition hover:bg-white/10">
                 Atualizar status
               </button>
+      </div>
+
+      <div className="mb-5 overflow-hidden rounded-2xl border border-cyan-400/20 bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.18),rgba(15,23,42,0.9))] shadow-[0_20px_70px_rgba(8,145,178,0.25)]">
+        <div className="border-b border-cyan-300/20 p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-200">Harmomus IA Analysis</p>
+          <h3 className="mt-1 text-base font-semibold text-white">Status da análise de tessitura via IA</h3>
+          <p className="mt-1 text-xs text-cyan-100/80">Em breve: tessitura, comfort range, notas e recomendações. Por enquanto: status e logs.</p>
+        </div>
+        <div className="grid gap-2 p-3 sm:grid-cols-4">
+          {["pending", "processing", "completed", "failed"].map((status) => (
+            <div key={status} className="rounded-xl border border-cyan-300/20 bg-slate-900/50 p-3">
+              <span className="block text-lg font-semibold text-cyan-100">{analysisJobs.filter((job) => job.status === status).length}</span>
+              <span className="text-[11px] uppercase tracking-wide text-cyan-100/70">{status}</span>
             </div>
+          ))}
+        </div>
+      </div>
 
             <div className="mt-4 h-2 overflow-hidden rounded-full bg-black/40">
               <div className="h-full rounded-full bg-gradient-to-r from-emerald-400 via-cyan-300 to-blue-400 transition-all" style={{ width: `${jobStats.progress}%` }} />
@@ -481,6 +554,22 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
                             <button type="button" onClick={() => void analyzeTessitura(file)} disabled={Boolean(analyzingKey) || analyzingAll} className="rounded-lg border border-gold-500/30 bg-gold-500/10 px-3 py-1.5 text-xs font-medium text-gold-300 hover:bg-gold-500/20 disabled:cursor-not-allowed disabled:opacity-60">
                               {isAnalyzing ? "Analisando..." : "Analisar tessitura"}
                             </button>
+                            <button type="button" onClick={() => void enqueueAiAnalysis(file.id)} disabled={!file.id || Boolean(analysisLoadingFileId)} className="rounded-lg border border-cyan-400/40 bg-cyan-500/10 px-3 py-1.5 text-xs font-medium text-cyan-100 hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60">
+                              {analysisLoadingFileId === file.id ? "criando análise..." : "Analisar Tessitura IA"}
+                            </button>
+                            <div className="min-w-[190px] text-right">
+                              {(() => {
+                                const job = getAnalysisJobForFile(file.id);
+                                if (!job) return <span className="text-[11px] text-cyan-100/70">IA: sem job</span>;
+                                const log = Array.isArray(job.analysis_logs) && job.analysis_logs[0]?.message ? job.analysis_logs[0].message : null;
+                                return (
+                                  <>
+                                    <span className="block text-[11px] font-semibold uppercase tracking-wide text-cyan-100">IA: {job.status}</span>
+                                    <span className="block max-w-[220px] truncate text-[11px] text-cyan-100/70">{job.error_message ?? log ?? "sem logs"}</span>
+                                  </>
+                                );
+                              })()}
+                            </div>
                           </li>
                         );
                       })}

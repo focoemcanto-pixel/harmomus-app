@@ -89,3 +89,41 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }
+
+export async function GET(request: Request) {
+  try {
+    const current = await getCurrentUserAccessContext();
+    if (!current.isAdmin) {
+      return NextResponse.json({ error: "Acesso negado." }, { status: 403 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const kitId = String(searchParams.get("kitId") ?? "").trim();
+    const audioFileId = String(searchParams.get("audioFileId") ?? "").trim();
+
+    if (!kitId) {
+      return NextResponse.json({ error: "kitId é obrigatório." }, { status: 400 });
+    }
+
+    const supabase = createSupabaseAdminClient();
+    let query = supabase
+      .from("audio_analysis_jobs")
+      .select("id,status,kit_id,audio_file_id,analysis_type,analysis_logs,error_message,created_at,updated_at")
+      .eq("kit_id", kitId)
+      .eq("analysis_type", "tessitura")
+      .order("created_at", { ascending: false })
+      .limit(100);
+
+    if (audioFileId) query = query.eq("audio_file_id", audioFileId);
+
+    const { data, error } = await query;
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true, jobs: data ?? [] }, { status: 200 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Erro inesperado ao listar jobs de análise.";
+    return NextResponse.json({ error: message }, { status: 400 });
+  }
+}
