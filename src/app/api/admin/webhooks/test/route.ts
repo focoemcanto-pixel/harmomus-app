@@ -16,8 +16,12 @@ export async function POST(request: Request) {
   if (!WEBHOOK_EVENTS.includes(selectedEvent)) return NextResponse.json({ error: "Evento inválido" }, { status: 400 });
 
   const admin = createSupabaseAdminClient();
-  const { data: endpoint } = await admin.from("webhook_endpoints").select("id,url,secret,retry_enabled,retry_attempts").eq("id", endpointId).maybeSingle();
+  const { data: endpoint } = await admin.from("webhook_endpoints").select("id,url,secret,retry_enabled,retry_attempts,events,active").eq("id", endpointId).maybeSingle();
   if (!endpoint) return NextResponse.json({ error: "Endpoint não encontrado" }, { status: 404 });
+  if (!endpoint.active) return NextResponse.json({ error: "Endpoint inativo." }, { status: 400 });
+  if (!Array.isArray(endpoint.events) || !endpoint.events.includes(selectedEvent)) {
+    return NextResponse.json({ error: "Evento não permitido para este webhook." }, { status: 400 });
+  }
 
   const payload = buildFakePayload(selectedEvent);
   const payloadString = JSON.stringify(payload);
