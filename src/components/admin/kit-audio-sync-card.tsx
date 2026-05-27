@@ -34,6 +34,13 @@ type AnalysisJob = {
   analysis_type: string;
   analysis_logs?: Array<{ message?: string; at?: string }> | null;
   error_message?: string | null;
+  detected_min_note?: number | null;
+  detected_max_note?: number | null;
+  comfort_min_note?: number | null;
+  comfort_max_note?: number | null;
+  dominant_notes?: Array<{ midi?: number; note?: string; occurrences?: number }> | null;
+  vocal_confidence?: number | null;
+  pitch_events_json?: { recommended_tones?: Record<string, { min_midi?: number | null; max_midi?: number | null }> } | null;
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -212,6 +219,22 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
     const data = await response.json().catch(() => ({}));
     if (response.ok) {
       setAnalysisJobs((data.jobs ?? []) as AnalysisJob[]);
+    }
+  }
+
+  async function enqueueAiAnalysisBatch() {
+    setAnalyzingAll(true);
+    setAnalysisSubmitError(null);
+    setAnalysisSubmitMessage("enfileirando análises em massa...");
+    try {
+      for (const file of pendingFiles) {
+        if (!file.id) continue;
+        await enqueueAiAnalysis(file.id);
+      }
+      setAnalysisSubmitMessage("análise em massa enviada");
+      await loadAnalysisJobs();
+    } finally {
+      setAnalyzingAll(false);
     }
   }
 
@@ -425,6 +448,9 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
           <button type="button" onClick={() => void analyzeAllTessituras()} disabled={loading || loadingFiles || analyzingAll || allFiles.length === 0} className="rounded-lg border border-blue-400/40 bg-blue-500/10 px-4 py-2 text-sm font-medium text-blue-200 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60">
             {analyzingAll ? "Analisando todas..." : `Analisar todas${pendingFiles.length > 0 ? ` (${pendingFiles.length})` : ""}`}
           </button>
+          <button type="button" onClick={() => void enqueueAiAnalysisBatch()} disabled={loading || loadingFiles || analyzingAll || pendingFiles.length === 0} className="rounded-lg border border-fuchsia-400/40 bg-fuchsia-500/10 px-4 py-2 text-sm font-medium text-fuchsia-100 transition hover:bg-fuchsia-500/20 disabled:cursor-not-allowed disabled:opacity-60">
+            {analyzingAll ? "Análise IA em massa..." : `Analisar Tessitura IA em Massa${pendingFiles.length > 0 ? ` (${pendingFiles.length})` : ""}`}
+          </button>
           <button type="button" onClick={() => void syncAudios()} disabled={loading || analyzingAll} className="rounded-lg border border-gold-500/40 bg-gold-500/10 px-4 py-2 text-sm font-medium text-gold-300 transition hover:bg-gold-500/20 disabled:cursor-not-allowed disabled:opacity-60">
             {loading ? "Sincronizando..." : "Sincronizar áudios"}
           </button>
@@ -565,6 +591,8 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
                                 return (
                                   <>
                                     <span className="block text-[11px] font-semibold uppercase tracking-wide text-cyan-100">IA: {job.status}</span>
+                                    <span className="block text-[11px] text-cyan-100/80">Tessitura: {job.detected_min_note != null ? midiToNoteName(job.detected_min_note) : "—"} → {job.detected_max_note != null ? midiToNoteName(job.detected_max_note) : "—"}</span>
+                                    <span className="block text-[11px] text-cyan-100/80">Confortável: {job.comfort_min_note != null ? midiToNoteName(job.comfort_min_note) : "—"} → {job.comfort_max_note != null ? midiToNoteName(job.comfort_max_note) : "—"}</span>
                                     <span className="block max-w-[220px] truncate text-[11px] text-cyan-100/70">{job.error_message ?? log ?? "sem logs"}</span>
                                   </>
                                 );
