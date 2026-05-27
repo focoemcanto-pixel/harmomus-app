@@ -31,7 +31,6 @@ function formatBrazilPhone(value?: string | null) {
   return `+55 (${ddd}) ${first}-${last}`;
 }
 
-
 async function saveCommunicationLog(admin: any, input: {
   event: string;
   status: "success" | "failed";
@@ -40,14 +39,14 @@ async function saveCommunicationLog(admin: any, input: {
   errorMessage?: string | null;
 }) {
   try {
-    await admin.from("communication_logs" as never).insert({
-      channel: "webhook",
+    await admin.from("communication_logs").insert({
+      level: input.status === "success" ? "info" : "error",
+      event: input.event,
       provider: "webhook_dispatcher",
-      status: input.status,
-      payload: { event: input.event, ...input.payload },
-      response_payload: input.responsePayload ?? null,
-      error_message: input.errorMessage ?? null,
-    } as never);
+      request: input.payload,
+      response: input.responsePayload ?? null,
+      message: input.errorMessage ?? (input.status === "success" ? "Webhook entregue com sucesso" : "Falha na entrega do webhook"),
+    });
   } catch (error) {
     console.warn("[webhooks] Falha ao salvar communication_logs", error);
   }
@@ -128,7 +127,7 @@ function buildLivePayload(input: DispatchWebhookInput) {
   };
 }
 
-export async function dispatchWebhookEvent(input: DispatchWebhookInput) {
+async function dispatchWebhookEventUnsafe(input: DispatchWebhookInput) {
   if (!WEBHOOK_EVENTS.includes(input.event)) {
     return { dispatched: 0, skipped: true, reason: "unsupported_event" };
   }
@@ -140,6 +139,7 @@ export async function dispatchWebhookEvent(input: DispatchWebhookInput) {
     .eq("active", true);
 
   if (error || !endpoints?.length) {
+    if (error) console.warn("[webhooks] Falha ao buscar endpoints", { event: input.event, error });
     return { dispatched: 0, error: error?.message ?? null };
   }
 
@@ -164,6 +164,8 @@ export async function dispatchWebhookEvent(input: DispatchWebhookInput) {
     for (const retryAttempt of attempts) {
       const start = Date.now();
       try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 10000);
         const response = await fetch(String(endpoint.url), {
           method: "POST",
           headers: {
@@ -174,7 +176,8 @@ export async function dispatchWebhookEvent(input: DispatchWebhookInput) {
             "X-Harmomus-Timestamp": String(timestamp),
           },
           body: payloadString,
-        });
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timeout));
 
         const responseBody = await response.text();
         await saveWebhookLog({
@@ -241,4 +244,13 @@ export async function dispatchWebhookEvent(input: DispatchWebhookInput) {
   }
 
   return { dispatched };
+}
+
+export async function dispatchWebhookEvent(input: DispatchWebhookInput) {
+  try {
+    return await dispatchWebhookEventUnsafe(input);
+  } catch (error) {
+    console.error("[webhooks] Dispatcher falhou sem interromper o fluxo principal", { event: input.event, error });
+    return { dispatched: 0, error: error instanceof Error ? error.message : "Falha desconhecida" };
+  }
 }
