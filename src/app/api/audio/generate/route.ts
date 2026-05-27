@@ -80,7 +80,7 @@ function getTargetsWithinLimit(sourceTone: CanonicalTone, requestedTargetTones: 
 async function resetOrCreateJob(supabase: any, job: JobPayload) {
   const { data: existing, error: findError } = await supabase
     .from("audio_generation_jobs")
-    .select("id")
+    .select("id,status")
     .eq("kit_id", job.kit_id)
     .eq("voice", job.voice)
     .eq("target_tone", job.target_tone)
@@ -90,6 +90,7 @@ async function resetOrCreateJob(supabase: any, job: JobPayload) {
   if (findError) throw new Error(findError.message);
 
   if (existing?.id) {
+    if (String(existing.status ?? "").toLowerCase() === "completed") return null;
     const { data, error } = await supabase
       .from("audio_generation_jobs")
       .update(job)

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { analyzeAudioUrlPitch, midiToNoteName } from "@/lib/audio/pitch-analysis";
+import { getSignedSemitoneDistance, normalizeTone, sortTonesByChromaticOrder } from "@/lib/music/tones";
 import type { KitAudioFile, KitAudioToneGroup } from "@/types/kit-audio";
 
 interface AnalysisSummary {
@@ -97,6 +98,7 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
   const [usedPrefix, setUsedPrefix] = useState<string | null>(null);
   const [hasTessituraColumns, setHasTessituraColumns] = useState(true);
   const [jobLoading, setJobLoading] = useState(false);
+  const [jobError, setJobError] = useState<string | null>(null);
   const [jobs, setJobs] = useState<AudioJob[]>([]);
   const [lastJobRefresh, setLastJobRefresh] = useState<string | null>(null);
 
@@ -121,6 +123,24 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
     const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
     return { total, completed, processing, pending, failed, progress };
   }, [jobs]);
+
+  const sortedToneGroups = useMemo(() => {
+    const sorted = [...tones].sort((a, b) => (normalizeTone(a.tone) ?? a.tone).localeCompare(normalizeTone(b.tone) ?? b.tone));
+    const inferredOriginal = normalizeTone(jobs.find((job) => Boolean(job.source_tone))?.source_tone ?? "") ?? null;
+    if (!inferredOriginal) return sorted;
+
+    return [...sorted].sort((a, b) => {
+      const aTone = normalizeTone(a.tone);
+      const bTone = normalizeTone(b.tone);
+      if (!aTone || !bTone) return 0;
+      if (aTone === inferredOriginal) return -1;
+      if (bTone === inferredOriginal) return 1;
+      const aShift = Math.abs(getSignedSemitoneDistance(inferredOriginal, aTone) ?? 99);
+      const bShift = Math.abs(getSignedSemitoneDistance(inferredOriginal, bTone) ?? 99);
+      if (aShift !== bShift) return aShift - bShift;
+      return sortTonesByChromaticOrder([aTone, bTone])[0] === aTone ? -1 : 1;
+    });
+  }, [tones, jobs]);
 
   async function loadSyncedAudios() {
     setLoadingFiles(true);
@@ -157,11 +177,15 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
   }, [jobs]);
 
   async function loadJobs() {
+    setJobError(null);
     const response = await fetch(`/api/audio/status?kitId=${kitId}`, { cache: "no-store" });
     const data = await response.json().catch(() => ({}));
     if (response.ok) {
       setJobs((data.jobs ?? []) as AudioJob[]);
       setLastJobRefresh(new Date().toISOString());
+      if (data?.error) setJobError(String(data.error));
+    } else {
+      setJobError(data?.error ?? "Falha ao carregar status dos jobs.");
     }
   }
 
@@ -385,12 +409,13 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
             </div>
 
             {lastJobRefresh ? <p className="mt-3 text-[11px] text-muted">Última atualização: {formatTime(lastJobRefresh)}</p> : null}
+            {jobError ? <p className="mt-2 text-[11px] text-red-300">Erro no status: {jobError}</p> : null}
           </div>
 
           <div className="grid gap-2 p-3 sm:grid-cols-2 lg:grid-cols-3">
             {jobs.length === 0 ? (
               <div className="col-span-full rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-muted">
-                Nenhum job encontrado ainda para este kit. Clique em “Gerar tons automaticamente” para criar a fila.
+                Sem jobs ativos ou recentes para este kit.
               </div>
             ) : (
               jobs.map((job) => {
@@ -424,7 +449,7 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
       ) : null}
 
       <div className="space-y-4">
-        {tones.map((toneGroup) => (
+        {sortedToneGroups.map((toneGroup) => (
           <article key={toneGroup.tone} className="rounded-lg border border-border bg-surface-muted p-4">
             <h3 className="mb-2 text-sm font-semibold text-gold-300">Tom {toneGroup.tone}</h3>
             <p className="mb-3 text-xs text-muted">{toneGroup.files.length} arquivo(s)</p>

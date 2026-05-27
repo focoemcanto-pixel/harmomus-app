@@ -175,9 +175,13 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
     }
 
     void hydrateAudioFiles();
+    const interval = window.setInterval(() => {
+      void hydrateAudioFiles();
+    }, 5000);
 
     return () => {
       cancelled = true;
+      window.clearInterval(interval);
     };
   }, [kit.id]);
 
@@ -203,7 +207,7 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
   });
 
   const availableTones = useMemo(
-    () => liveKit.tones.filter((tone) => Array.isArray((tone as PublicKitToneGroup & { files?: unknown[] }).files) && ((tone as PublicKitToneGroup & { files?: unknown[] }).files?.length ?? 0) > 0),
+    () => liveKit.tones.filter((tone) => Object.values(tone.voices ?? {}).some((file) => Boolean(file?.streamUrl))),
     [liveKit.tones],
   );
   const toneOptions = useMemo(() => {
@@ -286,6 +290,12 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
     if (voice !== selectedVoice) stopPlayback();
     setSelectedVoice(voice);
   }
+
+  useEffect(() => {
+    if (!selectedTone || toneOptions.some((tone) => normalizeTone(tone.tone) === normalizeTone(selectedTone))) return;
+    const fallback = toneOptions[0]?.tone;
+    if (fallback) setSelectedTone(fallback);
+  }, [selectedTone, toneOptions]);
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,#1f2840_0%,#06070c_40%)] px-4 py-6 md:px-8 md:py-10">
