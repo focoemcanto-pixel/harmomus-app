@@ -136,6 +136,7 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
     () => allFiles.filter((file) => typeof file.id === "string" && (typeof (file.minMidiNote ?? file.detectedMinMidiNote) !== "number" || typeof (file.maxMidiNote ?? file.detectedMaxMidiNote) !== "number")),
     [allFiles],
   );
+  const filesForAiAnalysis = useMemo(() => allFiles.filter((file) => typeof file.id === "string"), [allFiles]);
 
   const jobStats = useMemo(() => {
     const total = jobs.length;
@@ -227,36 +228,47 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
   }
 
   async function enqueueAiAnalysisBatch() {
+    if (filesForAiAnalysis.length === 0) {
+      setAnalysisSubmitError("Nenhum arquivo elegível para análise IA em massa.");
+      setAnalysisSubmitMessage(null);
+      return;
+    }
+
     setAnalyzingAll(true);
     setAnalysisSubmitError(null);
     setAnalysisSubmitMessage("enfileirando análises em massa...");
-    try {
-      const response = await fetch("/api/audio/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kitId }),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data?.error ?? "erro ao enviar");
-      }
 
-      const createdCount = Number(data?.createdCount ?? 0);
-      const skippedCount = Number(data?.skippedCount ?? 0);
-      setAnalysisSubmitMessage(`análise em massa enviada (${createdCount} criados, ${skippedCount} ignorados)`);
+    let created = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    try {
+      for (const file of filesForAiAnalysis) {
+        if (!file.id) continue;
+        try {
+          const result = await enqueueAiAnalysis(file.id, { silent: true });
+          if (result === "created") created += 1;
+          if (result === "skipped") skipped += 1;
+          if (result === "failed") failed += 1;
+        } catch {
+          failed += 1;
+        }
+      }
       await loadAnalysisJobs();
-      await loadSyncedAudios();
-    } catch (submitError) {
-      setAnalysisSubmitError(submitError instanceof Error ? submitError.message : "erro ao enviar");
+      if (created > 0) {
+        setAnalysisSubmitMessage(`análise em massa enviada • criados: ${created} • já existentes: ${skipped} • falhas: ${failed}`);
+      } else {
+        setAnalysisSubmitMessage(`nenhuma nova análise enviada • criados: ${created} • já existentes: ${skipped} • falhas: ${failed}`);
+      }
     } finally {
       setAnalyzingAll(false);
     }
   }
 
-  async function enqueueAiAnalysis(audioFileId?: string) {
+  async function enqueueAiAnalysis(audioFileId?: string, options?: { silent?: boolean }) {
     if (!audioFileId) return;
     setAnalysisLoadingFileId(audioFileId);
-    setAnalysisSubmitMessage("criando análise...");
+    if (!options?.silent) setAnalysisSubmitMessage("criando análise...");
     setAnalysisSubmitError(null);
     try {
       const response = await fetch("/api/audio/analyze", {
@@ -268,10 +280,14 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
       if (!response.ok) {
         throw new Error(data?.error ?? "erro ao enviar");
       }
-      setAnalysisSubmitMessage("análise enviada");
+      if (!options?.silent) {
+        setAnalysisSubmitMessage(data?.skipped ? "análise já existente na fila" : "análise enviada");
+      }
       await loadAnalysisJobs();
+      return data?.skipped ? "skipped" : "created";
     } catch (submitError) {
       setAnalysisSubmitError(submitError instanceof Error ? submitError.message : "erro ao enviar");
+      return "failed";
     } finally {
       setAnalysisLoadingFileId(null);
     }
@@ -463,8 +479,8 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
           <button type="button" onClick={() => void analyzeAllTessituras()} disabled={loading || loadingFiles || analyzingAll || allFiles.length === 0} className="rounded-lg border border-blue-400/40 bg-blue-500/10 px-4 py-2 text-sm font-medium text-blue-200 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60">
             {analyzingAll ? "Analisando todas..." : `Analisar todas${pendingFiles.length > 0 ? ` (${pendingFiles.length})` : ""}`}
           </button>
-          <button type="button" onClick={() => void enqueueAiAnalysisBatch()} disabled={loading || loadingFiles || analyzingAll || pendingFiles.length === 0} className="rounded-lg border border-fuchsia-400/40 bg-fuchsia-500/10 px-4 py-2 text-sm font-medium text-fuchsia-100 transition hover:bg-fuchsia-500/20 disabled:cursor-not-allowed disabled:opacity-60">
-            {analyzingAll ? "Análise IA em massa..." : `Analisar Tessitura IA em Massa${pendingFiles.length > 0 ? ` (${pendingFiles.length})` : ""}`}
+          <button type="button" onClick={() => void enqueueAiAnalysisBatch()} disabled={loading || loadingFiles || analyzingAll || filesForAiAnalysis.length === 0} className="rounded-lg border border-fuchsia-400/40 bg-fuchsia-500/10 px-4 py-2 text-sm font-medium text-fuchsia-100 transition hover:bg-fuchsia-500/20 disabled:cursor-not-allowed disabled:opacity-60">
+            {analyzingAll ? "Análise IA em massa..." : `Analisar Tessitura IA em Massa${filesForAiAnalysis.length > 0 ? ` (${filesForAiAnalysis.length})` : ""}`}
           </button>
           <button type="button" onClick={() => void syncAudios()} disabled={loading || analyzingAll} className="rounded-lg border border-gold-500/40 bg-gold-500/10 px-4 py-2 text-sm font-medium text-gold-300 transition hover:bg-gold-500/20 disabled:cursor-not-allowed disabled:opacity-60">
             {loading ? "Sincronizando..." : "Sincronizar áudios"}
