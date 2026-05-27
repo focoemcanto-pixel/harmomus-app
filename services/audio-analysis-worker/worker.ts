@@ -9,6 +9,10 @@ import { createClient } from "@supabase/supabase-js";
 import { downloadFromR2 } from "./r2";
 
 const execFileAsync = promisify(execFile);
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const STALE_PROCESSING_MS = 20 * 60 * 1000;
+const DEMUCS_TIMEOUT_MS = 12 * 60 * 1000;
+const BASIC_PITCH_TIMEOUT_MS = 8 * 60 * 1000;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -30,6 +34,28 @@ function midiToNoteName(midi: number): string {
 }
 
 async function reserveJob() {
+  console.info("[audio-analysis-worker] reservando job");
+  await failStaleProcessingJobs();
+
+  const thresholdIso = new Date(Date.now() - STALE_PROCESSING_MS).toISOString();
+  const { data: activeProcessing, error: processingError } = await supabase
+    .from("audio_analysis_jobs")
+    .select("id, started_at")
+    .eq("status", "processing")
+    .gte("started_at", thresholdIso)
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (processingError) throw new Error(processingError.message);
+  if (activeProcessing) {
+    console.info("[audio-analysis-worker] job processing recente encontrado, aguardando", {
+      processing_job_id: activeProcessing.id,
+      started_at: activeProcessing.started_at,
+    });
+    return null;
+  }
+
   const { data: pending, error } = await supabase
     .from("audio_analysis_jobs")
     .select("*")
@@ -54,6 +80,33 @@ async function reserveJob() {
 
   if (lockError) throw new Error(lockError.message);
   return locked ?? null;
+}
+
+async function failStaleProcessingJobs() {
+  const staleThresholdIso = new Date(Date.now() - STALE_PROCESSING_MS).toISOString();
+  const { data: staleJobs, error: staleQueryError } = await supabase
+    .from("audio_analysis_jobs")
+    .select("id")
+    .eq("status", "processing")
+    .lt("started_at", staleThresholdIso);
+
+  if (staleQueryError) throw new Error(staleQueryError.message);
+  if (!staleJobs?.length) return;
+
+  for (const staleJob of staleJobs) {
+    const { error: failError } = await supabase
+      .from("audio_analysis_jobs")
+      .update({
+        status: "failed",
+        error_message: "stale processing timeout",
+        completed_at: new Date().toISOString(),
+      })
+      .eq("id", staleJob.id)
+      .eq("status", "processing");
+
+    if (failError) throw new Error(failError.message);
+    console.warn("[audio-analysis-worker] stale job marcado como failed", { job_id: staleJob.id });
+  }
 }
 
 function percentile(values: number[], ratio: number): number | null {
@@ -87,15 +140,27 @@ function parseBasicPitchCsv(csv: string) {
 
 async function runDemucsAndBasicPitch(sourcePath: string, workingDir: string) {
   const demucsOutDir = join(workingDir, "demucs");
+  console.info("[audio-analysis-worker] iniciando Demucs");
 
-  await execFileAsync("demucs", ["--two-stems", "vocals", "-o", demucsOutDir, sourcePath]);
+  await execFileAsync(
+    "demucs",
+    ["--two-stems", "vocals", "--name", "mdx_extra_q", "--device", "cpu", "-j", "1", "-o", demucsOutDir, sourcePath],
+    {
+      timeout: DEMUCS_TIMEOUT_MS,
+      maxBuffer: 10 * 1024 * 1024,
+      env: { ...process.env, OMP_NUM_THREADS: "1", MKL_NUM_THREADS: "1", OPENBLAS_NUM_THREADS: "1" },
+    },
+  );
+  console.info("[audio-analysis-worker] finalizando Demucs");
 
   const { stdout: findStdout } = await execFileAsync("bash", ["-lc", `find ${JSON.stringify(demucsOutDir)} -type f -name vocals.wav | head -n 1`]);
   const stemPath = findStdout.trim();
   if (!stemPath) throw new Error("Demucs não retornou stem vocal (vocals.wav).");
 
   const basicPitchOut = join(workingDir, "basic-pitch");
-  await execFileAsync("basic-pitch", [basicPitchOut, stemPath]);
+  console.info("[audio-analysis-worker] iniciando BasicPitch");
+  await execFileAsync("basic-pitch", [basicPitchOut, stemPath], { timeout: BASIC_PITCH_TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024 });
+  console.info("[audio-analysis-worker] finalizando BasicPitch");
 
   const { stdout: csvPathStdout } = await execFileAsync("bash", ["-lc", `find ${JSON.stringify(basicPitchOut)} -type f -name '*.csv' | head -n 1`]);
   const csvPath = csvPathStdout.trim();
@@ -146,6 +211,7 @@ async function processJob(job: any) {
   try {
     if (!job.source_r2_key) throw new Error("Job sem source_r2_key.");
 
+    console.info("[audio-analysis-worker] baixando áudio", { job_id: job.id, source_r2_key: job.source_r2_key });
     await downloadFromR2(job.source_r2_key, sourcePath);
     logs.push({ at: new Date().toISOString(), message: "Download do áudio concluído", source_r2_key: job.source_r2_key });
 
@@ -153,6 +219,7 @@ async function processJob(job: any) {
     logs.push({ at: new Date().toISOString(), message: "Demucs + Basic Pitch concluídos", vocal_stem_path: stemPath, notes_detected: notes.length });
 
     const insights = buildInsights(notes);
+    console.info("[audio-analysis-worker] salvando análise", { job_id: job.id, notes_detected: notes.length });
 
     const { error } = await supabase
       .from("audio_analysis_jobs")
@@ -178,8 +245,12 @@ async function processJob(job: any) {
 
     if (error) throw new Error(error.message);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const err = error as NodeJS.ErrnoException & { killed?: boolean; signal?: string };
+    let message = error instanceof Error ? error.message : String(error);
+    if (message.toLowerCase().includes("timed out")) message = `timeout: ${message}`;
+    if (err?.code === "ENOMEM" || message.toLowerCase().includes("out of memory")) message = `memory: ${message}`;
     logs.push({ at: new Date().toISOString(), message: "Falha no processamento", error: message });
+    console.error("[audio-analysis-worker] falha ao processar job", { job_id: job.id, error: message });
 
     await supabase
       .from("audio_analysis_jobs")
@@ -195,21 +266,23 @@ async function main() {
 
   while (true) {
     try {
-      if (!ENABLE_SMART_TESSITURA_ANALYSIS) await new Promise((resolve) => setTimeout(resolve, 3000));
+      if (!ENABLE_SMART_TESSITURA_ANALYSIS) await sleep(3000);
       const job = await reserveJob();
       if (!job) {
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+        await sleep(3000);
         continue;
       }
       await processJob(job);
     } catch (error) {
-      console.error("[audio-analysis-worker] fatal", error);
-      await new Promise((resolve) => setTimeout(resolve, 5000));
+      console.error("[audio-analysis-worker] loop error (continuando)", error);
+      await sleep(5000);
     }
   }
 }
 
 main().catch((error) => {
-  console.error("[audio-analysis-worker] unhandled fatal", error);
-  process.exit(1);
+  console.error("[audio-analysis-worker] erro inesperado no bootstrap (reiniciando loop)", error);
+  setTimeout(() => {
+    void main();
+  }, 5000);
 });
