@@ -1,76 +1,38 @@
-import { readFile, rm } from "node:fs/promises";
-import { createServer } from "node:http";
+import { readFile, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
 import { createClient } from "@supabase/supabase-js";
-import { downloadFromR2, uploadToR2 } from "./r2";
+
 import { collectAudioMetrics, generateAudioWithRubberBand, mp3ToWav, wavToMp3 } from "./generate-audio";
+import { downloadFromR2, uploadToR2 } from "./storage";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? "";
-const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
-const port = Number(process.env.PORT ?? 10000);
-const pollIntervalMs = Number(process.env.AUDIO_WORKER_POLL_INTERVAL_MS ?? 2500);
-const staleProcessingMinutes = Number(process.env.AUDIO_WORKER_STALE_PROCESSING_MINUTES ?? 10);
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-if (!supabaseUrl) throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_URL.");
-if (!serviceRoleKey) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY.");
+if (!supabaseUrl || !supabaseServiceRoleKey) {
+  throw new Error("Missing Supabase environment variables");
+}
 
-const supabase = createClient(supabaseUrl, serviceRoleKey, {
-  auth: { autoRefreshToken: false, persistSession: false },
+const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
+  auth: { persistSession: false },
 });
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-function canonicalVoiceName(value: string) {
+function canonicalVoiceName(value: string | null | undefined) {
   const normalized = String(value ?? "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
 
-  if (normalized.includes("soprano")) return "soprano";
-  if (normalized.includes("contralto")) return "contralto";
-  if (normalized.includes("tenor")) return "tenor";
-  return "todos";
-}
-
-function startHealthServer() {
-  createServer((request, response) => {
-    if (request.url === "/healthz" || request.url === "/") {
-      response.writeHead(200, { "Content-Type": "application/json" });
-      response.end(JSON.stringify({ ok: true, service: "harmomus-audio-generator" }));
-      return;
-    }
-
-    response.writeHead(404, { "Content-Type": "application/json" });
-    response.end(JSON.stringify({ error: "not_found" }));
-  }).listen(port, "0.0.0.0", () => {
-    console.info(`[audio-generator] Health server listening on :${port}`);
-  });
-}
-
-async function recoverStaleProcessingJobs() {
-  const cutoff = new Date(Date.now() - staleProcessingMinutes * 60_000).toISOString();
-
-  const { data, error } = await supabase
-    .from("audio_generation_jobs")
-    .update({ status: "pending", error_message: null, started_at: null })
-    .eq("status", "processing")
-    .lt("started_at", cutoff)
-    .select("id,target_tone");
-
-  if (error) {
-    console.warn(`[audio-generator] Could not recover stale jobs: ${error.message}`);
-    return;
-  }
-
-  if ((data ?? []).length > 0) {
-    console.info(`[audio-generator] Recovered ${data?.length ?? 0} stale processing job(s).`);
-  }
+  if (normalized.includes("soprano")) return "Soprano";
+  if (normalized.includes("contralto")) return "Contralto";
+  if (normalized.includes("tenor")) return "Tenor";
+  return "Todos";
 }
 
 async function reserveJob() {
-  const { data, error } = await supabase
+  const { data: pending, error } = await supabase
     .from("audio_generation_jobs")
     .select("*")
     .eq("status", "pending")
@@ -79,12 +41,16 @@ async function reserveJob() {
     .maybeSingle();
 
   if (error) throw new Error(error.message);
-  if (!data) return null;
+  if (!pending) return null;
 
   const { data: locked, error: lockError } = await supabase
     .from("audio_generation_jobs")
-    .update({ status: "processing", started_at: new Date().toISOString(), error_message: null })
-    .eq("id", data.id)
+    .update({
+      status: "processing",
+      started_at: new Date().toISOString(),
+      attempts: Number(pending.attempts ?? 0) + 1,
+    })
+    .eq("id", pending.id)
     .eq("status", "pending")
     .select("*")
     .maybeSingle();
@@ -109,6 +75,7 @@ async function upsertGeneratedAudioFile(job: any) {
         r2_key: job.target_r2_key,
         public_url: publicUrl,
         file_type: "mp3",
+        source_type: "generated",
       },
       { onConflict: "kit_id,r2_key" },
     )
@@ -163,63 +130,59 @@ async function processJob(job: any) {
     if (updateError) throw new Error(updateError.message);
 
     const totalMs = Date.now() - jobStart;
-    console.info(
-      `[audio-generator] Completed job ${job.id}; audio_file=${audioFile?.id ?? "unknown"}; ` +
-        `timing_ms(total=${totalMs},decode=${decodeMs},rubberband=${rubberbandMs},encode=${encodeMs}); ` +
-        `benchmark(before: bitrate=${beforeMetrics.bitrateKbps ?? "n/a"}kbps loudness=${beforeMetrics.loudnessI ?? "n/a"}LUFS sr=${beforeMetrics.sampleRate ?? "n/a"}Hz | ` +
-        `after: bitrate=${afterMetrics.bitrateKbps ?? "n/a"}kbps loudness=${afterMetrics.loudnessI ?? "n/a"}LUFS sr=${afterMetrics.sampleRate ?? "n/a"}Hz)`,
-    );
+    console.info("[audio-generator] Completed job", {
+      jobId: job.id,
+      audioFileId: audioFile.id,
+      decodeMs,
+      rubberbandMs,
+      encodeMs,
+      totalMs,
+      beforeMetrics,
+      afterMetrics,
+    });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Erro desconhecido";
-    console.error(`[audio-generator] Failed job ${job.id}: ${message}`);
+    const message = error instanceof Error ? error.message : String(error);
 
     await supabase
       .from("audio_generation_jobs")
-      .update({ status: "failed", error_message: message })
+      .update({
+        status: "failed",
+        error_message: message,
+      })
       .eq("id", job.id);
+
+    console.error(`[audio-generator] Job ${job.id} failed`, error);
   } finally {
-    await Promise.all([inputMp3, inputWav, shiftedWav, outputMp3].map((file) => rm(file, { force: true })));
+    await Promise.allSettled([
+      unlink(inputMp3),
+      unlink(inputWav),
+      unlink(shiftedWav),
+      unlink(outputMp3),
+    ]);
   }
 }
 
-async function runQueueForever() {
-  let idleTicks = 0;
-  let lastRecoveryAt = 0;
+async function main() {
+  console.info("[audio-generator] Worker started");
 
-  for (;;) {
+  while (true) {
     try {
-      if (Date.now() - lastRecoveryAt > 60_000) {
-        await recoverStaleProcessingJobs();
-        lastRecoveryAt = Date.now();
-      }
-
       const job = await reserveJob();
 
       if (!job) {
-        idleTicks += 1;
-        if (idleTicks === 1 || idleTicks % 24 === 0) {
-          console.info("[audio-generator] No pending jobs. Waiting...");
-        }
-        await sleep(pollIntervalMs);
+        await new Promise((resolve) => setTimeout(resolve, 3000));
         continue;
       }
 
-      idleTicks = 0;
       await processJob(job);
     } catch (error) {
-      console.error("[audio-generator] Queue loop error", error);
-      await sleep(pollIntervalMs);
+      console.error("[audio-generator] Fatal error", error);
+      await new Promise((resolve) => setTimeout(resolve, 5000));
     }
   }
 }
 
-async function bootstrap() {
-  startHealthServer();
-  console.info("[audio-generator] Worker started");
-  await runQueueForever();
-}
-
-void bootstrap().catch((error) => {
-  console.error("[audio-generator] Fatal bootstrap error", error);
+main().catch((error) => {
+  console.error("[audio-generator] Unhandled fatal error", error);
   process.exit(1);
 });
