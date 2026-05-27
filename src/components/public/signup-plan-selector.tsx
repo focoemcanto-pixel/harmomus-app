@@ -1,7 +1,7 @@
 "use client";
 
 import { Loader2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 type PlanSlug = "free" | "plus" | "premium" | "ministry_10";
 
@@ -85,7 +85,7 @@ function isPaidPlan(plan: PlanSlug) {
 export function SignupPlanSelector({ initialPlan }: { initialPlan: PlanSlug }) {
   const [selectedPlan, setSelectedPlan] = useState<PlanSlug>(initialPlan);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showFallback, setShowFallback] = useState(false);
+  const submitButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const currentPlan = useMemo(
     () => PLAN_CONFIGS.find((plan) => plan.slug === selectedPlan) ?? PLAN_CONFIGS[0],
@@ -96,18 +96,6 @@ export function SignupPlanSelector({ initialPlan }: { initialPlan: PlanSlug }) {
     ? "Abrindo checkout seguro..."
     : "Criando sua conta...";
 
-  useEffect(() => {
-    if (!isSubmitting) {
-      setShowFallback(false);
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      setShowFallback(true);
-    }, 6000);
-
-    return () => window.clearTimeout(timer);
-  }, [isSubmitting]);
 
   return (
     <>
@@ -156,19 +144,25 @@ export function SignupPlanSelector({ initialPlan }: { initialPlan: PlanSlug }) {
               <p className="mt-1 text-xs text-cyan-100/75">
                 Aguarde alguns segundos. Não feche esta página nem clique novamente.
               </p>
-              {showFallback ? (
-                <p className="mt-2 text-xs text-cyan-100">
-                  Ainda processando com segurança. Se demorar mais, volte e tente novamente em instantes.
-                </p>
-              ) : null}
+              
             </div>
           </div>
         </div>
       ) : null}
 
       <button
+        ref={submitButtonRef}
+        type={isPaidPlan(selectedPlan) ? "button" : "submit"}
         disabled={isSubmitting}
-        onClick={() => setIsSubmitting(true)}
+        onClick={() => {
+          setIsSubmitting(true);
+
+          if (!isPaidPlan(selectedPlan)) return;
+
+          window.setTimeout(() => {
+            submitButtonRef.current?.form?.submit();
+          }, 40);
+        }}
         className="h-12 w-full rounded-2xl border border-cyan-300/50 bg-gradient-to-r from-cyan-400 to-violet-500 font-semibold text-slate-950 shadow-[0_18px_50px_rgba(34,211,238,0.25)] transition hover:brightness-110 disabled:cursor-wait disabled:opacity-80 md:col-span-2"
       >
         {isSubmitting ? (
