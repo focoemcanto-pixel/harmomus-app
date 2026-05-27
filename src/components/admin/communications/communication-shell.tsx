@@ -2,14 +2,13 @@ import { ReactNode } from "react";
 import Link from "next/link";
 
 const tabs = [
-  ["Dashboard", "/admin/comunicacao"],
-  ["Campanhas", "/admin/comunicacao/campanhas"],
-  ["Audiência", "/admin/comunicacao/audiencia"],
-  ["Segmentos", "/admin/comunicacao/segmentos"],
+  ["Dashboard", "/admin/comunicacao/dashboard"],
+  ["Campanhas", "/admin/comunicacao/campaigns"],
+  ["Audiência", "/admin/comunicacao/audience"],
   ["Templates", "/admin/comunicacao/templates"],
-  ["Automação", "/admin/comunicacao/automacao"],
+  ["Automações", "/admin/comunicacao/automations"],
   ["WhatsApp", "/admin/comunicacao/whatsapp"],
-  ["E-mails", "/admin/comunicacao/e-mails"],
+  ["E-mails", "/admin/comunicacao/emails"],
   ["Logs", "/admin/comunicacao/logs"],
 ] as const;
 
