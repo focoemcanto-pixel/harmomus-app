@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { ensureUserAccess } from "@/lib/auth/ensure-user-access";
 import { trackMarketingEvent } from "@/lib/communications/events";
 import { formatPhoneBR, normalizePhoneInternational } from "@/lib/communications/phone";
-import { startFastStripeCheckoutForSignup } from "@/lib/data/billing";
+import { startStripeCheckoutForSignup } from "@/lib/data/billing";
 import { createClient } from "@/lib/supabase/server";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
 
@@ -56,31 +56,33 @@ function runSignupSideEffectsAsync(input: {
   utmSource: string;
   utmCampaign: string;
 }) {
-  void Promise.allSettled([
-    trackMarketingEvent(input.supabase as any, {
-      eventType: "signup",
-      channel: "email",
-      metadata: { plan: input.plan, origin: input.origin },
-    }),
-    dispatchWebhookEvent({
-      event: "user.created",
-      source: "auth.signup",
-      recipient: { name: input.fullName, email: input.email, phone: input.phone },
-      data: {
-        plan: input.plan,
-        username: input.username,
-        origin: input.origin,
-        utm_source: input.utmSource,
-        utm_campaign: input.utmCampaign,
-      },
-    }),
-  ]).then((results) => {
-    for (const result of results) {
-      if (result.status === "rejected") {
-        console.error("[signup] Async side effect failed", result.reason);
+  setTimeout(() => {
+    void Promise.allSettled([
+      trackMarketingEvent(input.supabase as any, {
+        eventType: "signup",
+        channel: "email",
+        metadata: { plan: input.plan, origin: input.origin },
+      }),
+      dispatchWebhookEvent({
+        event: "user.created",
+        source: "auth.signup",
+        recipient: { name: input.fullName, email: input.email, phone: input.phone },
+        data: {
+          plan: input.plan,
+          username: input.username,
+          origin: input.origin,
+          utm_source: input.utmSource,
+          utm_campaign: input.utmCampaign,
+        },
+      }),
+    ]).then((results) => {
+      for (const result of results) {
+        if (result.status === "rejected") {
+          console.error("[signup] Async side effect failed", result.reason);
+        }
       }
-    }
-  });
+    });
+  }, 0);
 }
 
 function mapSupabaseError(message: string): { message: string; field: Field } {
@@ -178,37 +180,29 @@ export async function POST(request: Request) {
     return fail("Sua conta foi criada, mas não conseguimos iniciar o checkout automaticamente. Tente entrar e assinar novamente.", "form");
   }
 
-  runSignupSideEffectsAsync({
-    supabase,
-    plan,
-    origin,
-    fullName,
-    email,
-    phone,
-    username,
-    utmSource,
-    utmCampaign,
-  });
-
   if (isPaidPlan(plan)) {
     try {
       const session = await withTimeout(
-        startFastStripeCheckoutForSignup({
-          userId,
-          email,
-          planSlug: plan,
-          fallbackOrigin: origin,
-          fullName,
-          phone,
-          username,
-        }),
-        5000,
-        "startFastStripeCheckoutForSignup",
+        startStripeCheckoutForSignup(userId, email, plan, origin),
+        10000,
+        "startStripeCheckoutForSignup",
       );
+
+      runSignupSideEffectsAsync({
+        supabase,
+        plan,
+        origin,
+        fullName,
+        email,
+        phone,
+        username,
+        utmSource,
+        utmCampaign,
+      });
 
       return NextResponse.redirect(session.url, 303);
     } catch (checkoutError) {
-      console.error("[signup] Failed to start fast checkout after paid signup", checkoutError);
+      console.error("[signup] Failed to start checkout after paid signup", checkoutError);
       return fail(
         checkoutError instanceof Error ? checkoutError.message : "Não foi possível iniciar o checkout agora.",
         "form",
@@ -226,6 +220,18 @@ export async function POST(request: Request) {
     2500,
     "ensureUserAccess",
   );
+
+  runSignupSideEffectsAsync({
+    supabase,
+    plan,
+    origin,
+    fullName,
+    email,
+    phone,
+    username,
+    utmSource,
+    utmCampaign,
+  });
 
   const successUrl = new URL("/cadastro/verifique-email", request.url);
   successUrl.searchParams.set("email", email);
