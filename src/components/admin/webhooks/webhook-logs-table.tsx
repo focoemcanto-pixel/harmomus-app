@@ -1,9 +1,15 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { getWebhookEventLabel, type WebhookLog } from "@/types/webhooks";
 
 export function WebhookLogsTable() {
+  const searchParams = useSearchParams();
   const [logs, setLogs] = useState<WebhookLog[]>([]); const [success, setSuccess] = useState("all"); const [event, setEvent] = useState(""); const [endpoint, setEndpoint] = useState("");
+  useEffect(() => {
+    const endpointId = searchParams.get("endpoint_id");
+    if (endpointId) setEndpoint(endpointId);
+  }, [searchParams]);
   async function load() { const params = new URLSearchParams(); if (success !== "all") params.set("success", success); if (event) params.set("event", event); if (endpoint) params.set("endpoint", endpoint); const res = await fetch(`/api/admin/webhooks/logs?${params.toString()}`); const json = await res.json(); setLogs(json.data ?? []); }
   useEffect(() => { void load(); }, [success, event, endpoint]);
   async function retry(logId: string) { await fetch("/api/admin/webhooks/logs/retry", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ logId }) }); await load(); }

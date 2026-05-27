@@ -50,7 +50,7 @@ const baseForm: FormState = {
   name: "",
   url: "",
   environment: "production",
-  events: [...WEBHOOK_EVENTS],
+  events: [],
   plans: [...WEBHOOK_PLANS],
   retry_enabled: true,
   retry_attempts: 3,
@@ -112,6 +112,14 @@ export function WebhookCenter() {
   );
 
   async function createEndpoint() {
+    if (!form.name.trim() || !form.url.trim()) {
+      setBanner({ type: "error", message: "Informe nome e URL antes de salvar." });
+      return;
+    }
+    if (form.events.length === 0) {
+      setBanner({ type: "error", message: "Selecione ao menos 1 evento." });
+      return;
+    }
     setSaving(true);
     setBanner(null);
     const res = await fetch("/api/admin/webhooks/endpoints", {
@@ -152,7 +160,10 @@ export function WebhookCenter() {
     setTestEvent(defaultEvent);
     setTestResult(null);
     setTestOpen(true);
-    if (!defaultEvent) return;
+    if (!defaultEvent) {
+      setBanner({ type: "error", message: "Este webhook não possui eventos vinculados para teste." });
+      return;
+    }
     const res = await fetch("/api/admin/webhooks/test", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -194,6 +205,7 @@ export function WebhookCenter() {
     await loadEndpoints();
   }
 
+  const eventCount = form.events.length;
   return <section className="space-y-5 text-zinc-100">{/* UI omitted for brevity in source control? no */}
     <div className="rounded-3xl border border-white/10 bg-zinc-950/65 p-6 backdrop-blur-xl">
       <div className="flex items-center justify-between gap-4">
@@ -210,6 +222,7 @@ export function WebhookCenter() {
 
     {drawerOpen && <div className="fixed inset-0 z-50 bg-black/70"><aside className="absolute right-0 top-0 h-full w-full max-w-lg overflow-auto border-l border-white/10 bg-zinc-950/95 p-7"><div className="mb-6 flex items-center justify-between"><h2 className="text-xl font-semibold">Criar webhook</h2><button onClick={() => setDrawerOpen(false)} className="rounded-lg border border-zinc-700 p-2"><X size={16} /></button></div><div className="space-y-4"><input className="w-full rounded-xl border border-zinc-700 bg-zinc-900/70 px-3 py-2 text-sm" placeholder="Nome da integração" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} /><input className="w-full rounded-xl border border-zinc-700 bg-zinc-900/70 px-3 py-2 text-sm" placeholder="URL do Webhook" value={form.url} onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))} />
       <div className="rounded-xl border border-zinc-700/70 bg-zinc-900/60 px-3 py-2 text-sm text-zinc-300">Secret/token será gerado automaticamente pelo Harmomus ao salvar.</div>
+      <p className="text-xs text-zinc-400">Eventos selecionados: {eventCount}</p>
       <div className="space-y-3">{Object.entries(WEBHOOK_EVENT_CATEGORIES).map(([cat, events]) => { const Icon = catIcons[cat as keyof typeof catIcons]; const isOpen = openCats[cat] ?? false; return <div key={cat} className="rounded-xl border border-white/10 bg-zinc-900/30"><button onClick={() => setOpenCats((s) => ({ ...s, [cat]: !isOpen }))} className="flex w-full items-center justify-between px-3 py-2"><div className="flex items-center gap-2 text-sm font-medium"><Icon size={14} className="text-violet-300" />{cat}</div>{isOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button>{isOpen && <div className="flex flex-wrap gap-2 px-3 pb-3">{events.map((ev) => { const active = form.events.includes(ev); return <button key={ev} onClick={() => setForm((f) => ({ ...f, events: active ? f.events.filter((x) => x !== ev) : [...f.events, ev] }))} className={`rounded-full border px-3 py-1.5 text-xs ${active ? "border-emerald-400/40 bg-emerald-500/15 text-emerald-200" : "border-zinc-700 bg-zinc-900/70 text-zinc-300"}`}>{active ? <Check size={12} className="mr-1 inline" /> : null}{getWebhookEventLabel(ev)}</button>; })}</div>}</div>; })}</div>
       <button disabled={saving} onClick={() => void createEndpoint()} className="w-full rounded-xl bg-violet-600 px-4 py-3 text-sm font-semibold hover:bg-violet-500 disabled:opacity-70">{saving ? <span className="inline-flex items-center gap-2"><Loader2 size={14} className="animate-spin" />Salvando...</span> : "Salvar webhook"}</button></div></aside></div>}
 
