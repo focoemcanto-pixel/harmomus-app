@@ -29,6 +29,23 @@ function resolveMinistryPriceId(planSlug: string) {
   return null;
 }
 
+async function getPlanBySlug(admin: any, planSlug: string) {
+  const normalizedPlanSlug = String(planSlug ?? "").trim().toLowerCase();
+  const { data: plan, error } = await admin
+    .from("plans")
+    .select("id,slug,stripe_price_id,trial_days")
+    .eq("slug", normalizedPlanSlug)
+    .maybeSingle();
+
+  if (error) throw new Error(`Falha ao buscar plano: ${error.message}`);
+  if (!plan?.id || plan.slug === "free") throw new Error("Plano inválido para checkout.");
+
+  const stripePriceId = resolvePlanPriceId(plan) ?? resolveMinistryPriceId(plan.slug);
+  if (!stripePriceId) throw new Error("Plano sem configuração de pagamento. Configure o Stripe Price ID no ambiente.");
+
+  return { ...plan, stripePriceId };
+}
+
 async function createStripeCheckoutWithSupabase(supabase: any, userId: string, email: string, planId: string, fallbackOrigin?: string | null) {
   assertStripeReady();
 
@@ -86,18 +103,41 @@ export async function startStripeCheckout(userId: string, email: string, planId:
 
 export async function startStripeCheckoutForSignup(userId: string, email: string, planSlug: string, fallbackOrigin?: string | null) {
   const supabase = createSupabaseAdminClient() as any;
-  const normalizedPlanSlug = String(planSlug ?? "").trim().toLowerCase();
-
-  const { data: plan, error } = await supabase
-    .from("plans")
-    .select("id,slug")
-    .eq("slug", normalizedPlanSlug)
-    .maybeSingle();
-
-  if (error) throw new Error(`Falha ao buscar plano: ${error.message}`);
-  if (!plan?.id || plan.slug === "free") throw new Error("Plano inválido para checkout.");
-
+  const plan = await getPlanBySlug(supabase, planSlug);
   return createStripeCheckoutWithSupabase(supabase, userId, email, plan.id, fallbackOrigin);
+}
+
+export async function startFastStripeCheckoutForSignup(input: {
+  userId: string;
+  email: string;
+  planSlug: string;
+  fallbackOrigin?: string | null;
+  fullName?: string | null;
+  phone?: string | null;
+  username?: string | null;
+}) {
+  assertStripeReady();
+
+  const admin = createSupabaseAdminClient() as any;
+  const plan = await getPlanBySlug(admin, input.planSlug);
+  const base = resolveAppUrl(input.fallbackOrigin);
+
+  return createCheckoutSession({
+    customerEmail: input.email,
+    priceId: plan.stripePriceId,
+    successUrl: `${base}/checkout/sucesso?session_id={CHECKOUT_SESSION_ID}`,
+    cancelUrl: `${base}/checkout/cancelado`,
+    trialDays: plan.trial_days,
+    metadata: {
+      user_id: input.userId,
+      email: input.email,
+      plan_slug: plan.slug,
+      full_name: input.fullName ?? undefined,
+      phone: input.phone ?? undefined,
+      username: input.username ?? undefined,
+      source: "paid_signup",
+    },
+  });
 }
 
 export async function createPortal(userId: string, email: string, fallbackOrigin?: string | null) {
