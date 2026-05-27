@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 
 import { createClient } from "@supabase/supabase-js";
 
@@ -12,6 +12,7 @@ const HEARTBEAT_INTERVAL_MS = 15 * 1000;
 const STALE_PROCESSING_MS = 2 * 60 * 1000;
 const DEMUCS_TIMEOUT_MS = 12 * 60 * 1000;
 const BASIC_PITCH_TIMEOUT_MS = 8 * 60 * 1000;
+const KILL_GRACE_MS = 2_000;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -109,6 +110,12 @@ async function failStaleProcessingJobs() {
   }
 }
 
+async function killDescendants(pid: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    execFile("bash", ["-lc", `pkill -9 -P ${pid} || true`], () => resolve());
+  });
+}
+
 async function runSubprocess(command: string, args: string[], timeoutMs: number, timeoutLogLabel: string, extraEnv?: Record<string, string>) {
   return await new Promise<{ stdout: string; stderr: string; exitCode: number | null }>((resolve, reject) => {
     let stdout = "";
@@ -121,10 +128,17 @@ async function runSubprocess(command: string, args: string[], timeoutMs: number,
       env: { ...process.env, ...extraEnv },
     });
 
+    const rejectTimeout = () => {
+      if (settled) return;
+      settled = true;
+      reject(new Error(`timeout ${timeoutLogLabel}: processo excedeu ${timeoutMs}ms`));
+    };
+
     const timeoutHandle = setTimeout(() => {
       timedOut = true;
       console.error(`[audio-analysis-worker] timeout ${timeoutLogLabel}`, { pid: child.pid, timeout_ms: timeoutMs });
       if (child.pid) {
+        void killDescendants(child.pid);
         try {
           process.kill(-child.pid, "SIGKILL");
           console.warn("[audio-analysis-worker] processo morto", { pid: child.pid, tree: true, signal: "SIGKILL" });
@@ -137,6 +151,7 @@ async function runSubprocess(command: string, args: string[], timeoutMs: number,
           }
         }
       }
+      setTimeout(rejectTimeout, KILL_GRACE_MS);
     }, timeoutMs);
 
     child.stdout?.on("data", (chunk: Buffer | string) => {
@@ -163,10 +178,7 @@ async function runSubprocess(command: string, args: string[], timeoutMs: number,
       settled = true;
       clearTimeout(timeoutHandle);
       console.info("[audio-analysis-worker] subprocess finalizado", { command, exit_code: code, signal });
-      if (timedOut) {
-        reject(new Error(`timeout ${timeoutLogLabel}: processo excedeu ${timeoutMs}ms`));
-        return;
-      }
+      if (timedOut) return;
       if (code !== 0) {
         reject(new Error(`${command} exited with code ${String(code)} signal ${String(signal)} stderr: ${stderr.slice(-4000)}`));
         return;
@@ -322,14 +334,14 @@ async function processJob(job: any) {
   } catch (error) {
     const err = error as NodeJS.ErrnoException & { killed?: boolean; signal?: string };
     let message = error instanceof Error ? error.message : String(error);
-    if (message.toLowerCase().includes("timed out")) message = `timeout: ${message}`;
+    if (message.toLowerCase().includes("timed out") || message.toLowerCase().includes("timeout")) message = `timeout: ${message}`;
     if (err?.code === "ENOMEM" || message.toLowerCase().includes("out of memory")) message = `memory: ${message}`;
     logs.push({ at: new Date().toISOString(), message: "Falha no processamento", error: message });
     console.error("[audio-analysis-worker] falha ao processar job", { job_id: job.id, error: message });
 
     await supabase
       .from("audio_analysis_jobs")
-      .update({ status: "failed", error_message: message, analysis_logs: logs })
+      .update({ status: "failed", error_message: message, analysis_logs: logs, completed_at: new Date().toISOString() })
       .eq("id", job.id);
   } finally {
     clearInterval(heartbeat);
