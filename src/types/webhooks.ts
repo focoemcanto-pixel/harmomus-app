@@ -47,8 +47,43 @@ export const WEBHOOK_EVENT_CATEGORIES = {
   PLATAFORMA: ["repertoire.sent", "kit.downloaded", "playlist.created", "favorite.added"],
 } as const;
 
+export const WEBHOOK_EVENT_LABELS: Record<string, string> = {
+  "subscription.created": "Assinatura iniciada",
+  "subscription.renewed": "Assinatura renovada",
+  "subscription.canceled": "Assinatura cancelada",
+  "subscription.upgraded": "Upgrade de assinatura",
+  "subscription.downgraded": "Downgrade de assinatura",
+  "subscription.payment_failed": "Falha de pagamento da assinatura",
+  "checkout.started": "Checkout iniciado",
+  "checkout.abandoned": "Checkout abandonado",
+  "checkout.completed": "Checkout concluído",
+  "payment.approved": "Pagamento aprovado",
+  "payment.refunded": "Pagamento estornado",
+  "payment.chargeback": "Pagamento contestado",
+  "user.created": "Usuário criado",
+  "user.login": "Login realizado",
+  "user.password_reset": "Senha redefinida",
+  "user.migrated": "Usuário migrado",
+  "repertoire.sent": "Repertório enviado",
+  "kit.downloaded": "Download de kit",
+  "playlist.created": "Playlist criada",
+  "favorite.added": "Favorito adicionado",
+};
+
 export const WEBHOOK_EVENTS = Object.values(WEBHOOK_EVENT_CATEGORIES).flat() as readonly string[];
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
+export const WEBHOOK_CATEGORY_ICONS = {
+  ASSINATURAS: "CreditCard",
+  CHECKOUT: "ShoppingCart",
+  PAGAMENTOS: "Wallet",
+  USUÁRIOS: "Users",
+  PLATAFORMA: "Sparkles",
+} as const;
+
 export const WEBHOOK_PLANS = ["free", "plus", "premium", "ministry"] as const;
 export type WebhookPlan = (typeof WEBHOOK_PLANS)[number];
+
+export function getWebhookEventLabel(eventKey: string): string {
+  return WEBHOOK_EVENT_LABELS[eventKey] ?? eventKey;
+}
