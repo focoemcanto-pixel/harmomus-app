@@ -29,8 +29,7 @@ RUN pip install \
     torchvision \
     --index-url https://download.pytorch.org/whl/cpu
 
-RUN pip install \
-    diffq \
+RUN pip install --no-cache-dir \
     demucs \
     basic-pitch
 
