@@ -108,7 +108,7 @@ export async function GET(request: Request) {
     const supabase = createSupabaseAdminClient();
     let query = supabase
       .from("audio_analysis_jobs")
-      .select("id,status,kit_id,audio_file_id,analysis_type,analysis_logs,error_message,created_at,updated_at")
+      .select("id,status,kit_id,audio_file_id,analysis_type,analysis_logs,error_message,detected_min_note,detected_max_note,comfort_min_note,comfort_max_note,dominant_notes,vocal_confidence,pitch_events_json,created_at,updated_at")
       .eq("kit_id", kitId)
       .eq("analysis_type", "tessitura")
       .order("created_at", { ascending: false })
