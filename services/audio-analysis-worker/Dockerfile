@@ -5,18 +5,23 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     python3 \
+    python3-venv \
     python3-pip \
  && rm -rf /var/lib/apt/lists/*
 
-RUN python3 -m pip install --upgrade pip
+RUN python3 -m venv /opt/venv
 
-RUN python3 -m pip install \
+ENV PATH="/opt/venv/bin:$PATH"
+
+RUN pip install --upgrade pip
+
+RUN pip install \
     torch \
     torchaudio \
     torchvision \
     --index-url https://download.pytorch.org/whl/cpu
 
-RUN python3 -m pip install \
+RUN pip install \
     diffq \
     demucs \
     basic-pitch
