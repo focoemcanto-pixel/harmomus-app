@@ -14,6 +14,18 @@ type BatchError = {
 };
 
 const ENABLE_SMART_TESSITURA_ANALYSIS = String(process.env.ENABLE_SMART_TESSITURA_ANALYSIS ?? "false").toLowerCase() === "true";
+const VOICES = ["todos", "soprano", "contralto", "tenor"] as const;
+
+function deriveVoice(value: string | null | undefined) {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  const match = VOICES.find((voice) => normalized.includes(voice));
+  return match ?? "todos";
+}
 
 export async function POST(request: Request) {
   try {
@@ -35,7 +47,7 @@ export async function POST(request: Request) {
 
     const { data: files, error: filesError } = await supabase
       .from("kit_audio_files")
-      .select("id,kit_id,name,tone,r2_key,voice")
+      .select("id,kit_id,name,tone,r2_key")
       .eq("kit_id", kitId)
       .order("created_at", { ascending: true });
 
@@ -69,7 +81,7 @@ export async function POST(request: Request) {
       .map((file) => ({
         kit_id: kitId,
         audio_file_id: file.id,
-        voice: file.voice ?? file.name ?? null,
+        voice: deriveVoice(file.name),
         tone: file.tone ?? null,
         status: "pending",
         analysis_type: "tessitura",
