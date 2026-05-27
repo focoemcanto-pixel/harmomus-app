@@ -10,9 +10,6 @@ log "which python: $(which python)"
 log "which pip: $(which pip)"
 log "which demucs: $(which demucs)"
 
-log "Verificando pacote diffq instalado"
-pip freeze | grep -i '^diffq=='
-
 check_import() {
   local module="$1"
   log "Testando import de ${module}"
@@ -22,7 +19,6 @@ check_import() {
   fi
 }
 
-check_import diffq
 check_import demucs
 check_import basic_pitch
 
