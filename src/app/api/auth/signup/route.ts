@@ -29,6 +29,60 @@ function isPaidPlan(plan: PlanSlug) {
   return plan !== "free";
 }
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timeout after ${timeoutMs}ms`)), timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
+
+function runSignupSideEffectsAsync(input: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  plan: PlanSlug;
+  origin: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  username: string;
+  utmSource: string;
+  utmCampaign: string;
+}) {
+  void Promise.allSettled([
+    trackMarketingEvent(input.supabase as any, {
+      eventType: "signup",
+      channel: "email",
+      metadata: { plan: input.plan, origin: input.origin },
+    }),
+    dispatchWebhookEvent({
+      event: "user.created",
+      source: "auth.signup",
+      recipient: { name: input.fullName, email: input.email, phone: input.phone },
+      data: {
+        plan: input.plan,
+        username: input.username,
+        origin: input.origin,
+        utm_source: input.utmSource,
+        utm_campaign: input.utmCampaign,
+      },
+    }),
+  ]).then((results) => {
+    for (const result of results) {
+      if (result.status === "rejected") {
+        console.error("[signup] Async side effect failed", result.reason);
+      }
+    }
+  });
+}
+
 function mapSupabaseError(message: string): { message: string; field: Field } {
   const lower = message.toLowerCase();
   if (lower.includes("already") || lower.includes("registered") || lower.includes("exists") || lower.includes("duplicate")) {
@@ -79,6 +133,8 @@ export async function POST(request: Request) {
   const confirmPassword = String(formData.get("confirm_password") ?? "");
   const plan = String(formData.get("plan") ?? "free").toLowerCase() as PlanSlug;
   const redirectTo = safeRedirect(String(formData.get("redirect") ?? ""));
+  const utmSource = String(formData.get("utm_source") ?? "");
+  const utmCampaign = String(formData.get("utm_campaign") ?? "");
   const base = { plan, redirectTo, fullName, username, email, phone: phoneMasked };
   const fail = (message: string, field: Field) => buildErrorRedirect(request, { ...base, message, field });
 
@@ -105,8 +161,8 @@ export async function POST(request: Request) {
         phone,
         plan_slug: plan,
         origin,
-        utm_source: String(formData.get("utm_source") ?? ""),
-        utm_campaign: String(formData.get("utm_campaign") ?? ""),
+        utm_source: utmSource,
+        utm_campaign: utmCampaign,
       },
     },
   });
@@ -122,38 +178,32 @@ export async function POST(request: Request) {
     return fail("Sua conta foi criada, mas não conseguimos iniciar o checkout automaticamente. Tente entrar e assinar novamente.", "form");
   }
 
-  await ensureUserAccess({
-    id: userId,
-    email,
-    fullName,
-    selectedPlanSlug: plan,
-  });
-
-  const sideEffects = await Promise.allSettled([
-    trackMarketingEvent(supabase as any, { eventType: "signup", channel: "email", metadata: { plan, origin } }),
-    dispatchWebhookEvent({
-      event: "user.created",
-      source: "auth.signup",
-      recipient: { name: fullName, email, phone },
-      data: {
-        plan,
-        username,
-        origin,
-        utm_source: String(formData.get("utm_source") ?? ""),
-        utm_campaign: String(formData.get("utm_campaign") ?? ""),
-      },
+  await withTimeout(
+    ensureUserAccess({
+      id: userId,
+      email,
+      fullName,
+      selectedPlanSlug: plan,
     }),
-  ]);
+    2500,
+    "ensureUserAccess",
+  );
 
-  for (const result of sideEffects) {
-    if (result.status === "rejected") {
-      console.error("[signup] Post-signup side effect failed without blocking flow", result.reason);
-    }
-  }
+  runSignupSideEffectsAsync({
+    supabase,
+    plan,
+    origin,
+    fullName,
+    email,
+    phone,
+    username,
+    utmSource,
+    utmCampaign,
+  });
 
   if (isPaidPlan(plan)) {
     try {
-      const session = await startStripeCheckoutForSignup(userId, email, plan, origin);
+      const session = await withTimeout(startStripeCheckoutForSignup(userId, email, plan, origin), 7000, "startStripeCheckoutForSignup");
       return NextResponse.redirect(session.url, 303);
     } catch (checkoutError) {
       console.error("[signup] Failed to start checkout after paid signup", checkoutError);
