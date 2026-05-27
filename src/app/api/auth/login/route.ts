@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { trackMarketingEvent } from "@/lib/communications/events";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -56,6 +57,7 @@ export async function POST(request: Request) {
   }
 
   const user = data.user;
+  if (user?.id) await trackMarketingEvent(supabase as any, { userId: user.id, eventType: "login" });
 
   if (user?.id) {
     const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();

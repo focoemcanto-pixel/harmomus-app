@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BarChart3, CreditCard, Database, LayoutDashboard, Library, MessageSquareText, PanelTop, Settings, Sparkles, Tags, Users, Waves, Webhook } from "lucide-react";
+import { BarChart3, CreditCard, Database, LayoutDashboard, Library, MessageSquareText, PanelTop, Settings, Sparkles, Tags, Users, Waves, Webhook, Send } from "lucide-react";
 
 const items = [
   { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
@@ -16,6 +16,16 @@ const items = [
   { label: "Solicitações", href: "/admin/harmomus-premium/solicitacoes", icon: MessageSquareText, child: true },
   { label: "Migração", href: "/admin/migracao", icon: Database },
   { label: "Webhooks", href: "/admin/webhooks", icon: Webhook },
+  { label: "Comunicação", href: "/admin/comunicacao", icon: Send },
+  { label: "Dashboard Comunicação", href: "/admin/comunicacao", icon: Send, child: true },
+  { label: "Campanhas", href: "/admin/comunicacao/campanhas", icon: Send, child: true },
+  { label: "Audiência", href: "/admin/comunicacao/audiencia", icon: Send, child: true },
+  { label: "Segmentos", href: "/admin/comunicacao/segmentos", icon: Send, child: true },
+  { label: "Templates", href: "/admin/comunicacao/templates", icon: Send, child: true },
+  { label: "Automação", href: "/admin/comunicacao/automacao", icon: Send, child: true },
+  { label: "WhatsApp", href: "/admin/comunicacao/whatsapp", icon: Send, child: true },
+  { label: "E-mails", href: "/admin/comunicacao/e-mails", icon: Send, child: true },
+  { label: "Logs", href: "/admin/comunicacao/logs", icon: Send, child: true },
   { label: "Configurações", href: "/admin/configuracoes", icon: Settings },
 ];
 
