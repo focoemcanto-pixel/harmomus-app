@@ -192,6 +192,30 @@ async function dispatchStripeWebhookEvent(supabase: any, event: StripeEvent, con
       trial_ends_at: context.trialEndsAt,
     },
   });
+
+  if (context.planSlug === "premium" && ["active", "trialing"].includes(context.status)) {
+    try {
+      await dispatchWebhookEvent({
+        event: "plan.premium_activated",
+        source: "stripe.subscription",
+        recipient: {
+          name: profile?.full_name ?? null,
+          email: profile?.email ?? context.customerEmail,
+          phone: profile?.phone ?? null,
+        },
+        data: {
+          user_id: context.userId,
+          plan: context.planSlug,
+          status: context.status,
+          activated_at: new Date().toISOString(),
+          stripe_event_type: event.type,
+        },
+      });
+    } catch (webhookError) {
+      console.error("[stripe.webhook] plan.premium_activated falhou", webhookError);
+    }
+  }
+
 }
 
 export async function POST(req: Request) {

@@ -1,4 +1,5 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
 
 export const PREMIUM_MONTHLY_REQUEST_LIMIT = 5;
 export type PremiumRequestType = "song" | "tone";
@@ -73,7 +74,7 @@ export async function createPremiumRequest({
   }
 
   const supabase = createSupabaseAdminClient() as any;
-  const { error } = await supabase.from("premium_requests").insert({
+  const payload = {
     user_id: userId,
     type,
     kit_slug: kitSlug || null,
@@ -85,9 +86,16 @@ export async function createPremiumRequest({
     voice: voice || null,
     notes: notes || null,
     status: "pending",
-  });
+  };
+  const { error } = await supabase.from("premium_requests").insert(payload);
 
   if (error) throw new Error(error.message);
+
+  try {
+    await dispatchWebhookEvent({ event: "repertoire.submitted", source: "premium.request", data: payload });
+  } catch (webhookError) {
+    console.warn("[premium-requests] webhook repertoire.submitted falhou", webhookError);
+  }
 
   const nextUsage = await getPremiumRequestUsage(userId);
   return { allowed: true as const, usage: nextUsage };

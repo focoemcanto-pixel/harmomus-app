@@ -5,6 +5,7 @@ import { resolveKitAccess } from "@/lib/access/access-rules";
 import type { PublicKit } from "@/lib/data/public-kits";
 import { getAudioStream } from "@/lib/r2/get-audio-stream";
 import { createClient } from "@/lib/supabase/server";
+import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
 
 export const runtime = "nodejs";
 
@@ -162,6 +163,27 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     status: "allowed",
     reason: "ok",
   });
+
+  try {
+    await dispatchWebhookEvent({
+      event: "kit.downloaded",
+      source: "audio.stream",
+      recipient: {
+        name: context.profile?.full_name ?? null,
+        email: context.profile?.email ?? null,
+        phone: context.profile?.phone ?? null,
+      },
+      data: {
+        kit: { id: kit.id, slug: kit.slug, nome: kit.name },
+        categoria: kit.required_plan ?? null,
+        usuario: { id: context.profile?.id ?? null, email: context.profile?.email ?? null },
+        arquivo: { id: audioFile.id, nome: audioFile.name, tom: audioFile.tone },
+        downloaded_at: new Date().toISOString(),
+      },
+    });
+  } catch (webhookError) {
+    console.warn("[audio] webhook kit.downloaded falhou", webhookError);
+  }
 
   return new Response(streamBody.transformToWebStream(), { status, headers });
 }

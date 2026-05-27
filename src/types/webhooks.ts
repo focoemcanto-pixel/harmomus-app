@@ -32,46 +32,8 @@ export interface WebhookLog {
   error_message: string | null;
 }
 
-export const WEBHOOK_EVENT_CATEGORIES = {
-  ASSINATURAS: [
-    "subscription.created",
-    "subscription.renewed",
-    "subscription.canceled",
-    "subscription.upgraded",
-    "subscription.downgraded",
-    "subscription.payment_failed",
-  ],
-  CHECKOUT: ["checkout.started", "checkout.abandoned", "checkout.completed"],
-  PAGAMENTOS: ["payment.approved", "payment.refunded", "payment.chargeback"],
-  USUÁRIOS: ["user.created", "user.login", "user.password_reset", "user.migrated"],
-  PLATAFORMA: ["repertoire.sent", "kit.downloaded", "playlist.created", "favorite.added"],
-} as const;
-
-export const WEBHOOK_EVENT_LABELS: Record<string, string> = {
-  "subscription.created": "Assinatura iniciada",
-  "subscription.renewed": "Assinatura renovada",
-  "subscription.canceled": "Assinatura cancelada",
-  "subscription.upgraded": "Upgrade de assinatura",
-  "subscription.downgraded": "Downgrade de assinatura",
-  "subscription.payment_failed": "Falha de pagamento da assinatura",
-  "checkout.started": "Checkout iniciado",
-  "checkout.abandoned": "Checkout abandonado",
-  "checkout.completed": "Checkout concluído",
-  "payment.approved": "Pagamento aprovado",
-  "payment.refunded": "Pagamento estornado",
-  "payment.chargeback": "Pagamento contestado",
-  "user.created": "Usuário criado",
-  "user.login": "Login realizado",
-  "user.password_reset": "Senha redefinida",
-  "user.migrated": "Usuário migrado",
-  "repertoire.sent": "Repertório enviado",
-  "kit.downloaded": "Download de kit",
-  "playlist.created": "Playlist criada",
-  "favorite.added": "Favorito adicionado",
-};
-
-export const WEBHOOK_EVENTS = Object.values(WEBHOOK_EVENT_CATEGORIES).flat() as readonly string[];
-export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
+import { WEBHOOK_EVENT_CATEGORIES, WEBHOOK_EVENT_LABELS, WEBHOOK_EVENTS, type WebhookEvent } from "@/types/webhook-events";
+export { WEBHOOK_EVENT_CATEGORIES, WEBHOOK_EVENT_LABELS, WEBHOOK_EVENTS, type WebhookEvent };
 
 export const WEBHOOK_CATEGORY_ICONS = {
   ASSINATURAS: "CreditCard",

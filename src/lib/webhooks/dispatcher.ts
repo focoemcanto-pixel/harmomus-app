@@ -31,6 +31,28 @@ function formatBrazilPhone(value?: string | null) {
   return `+55 (${ddd}) ${first}-${last}`;
 }
 
+
+async function saveCommunicationLog(admin: any, input: {
+  event: string;
+  status: "success" | "failed";
+  payload: Record<string, unknown>;
+  responsePayload?: Record<string, unknown> | null;
+  errorMessage?: string | null;
+}) {
+  try {
+    await admin.from("communication_logs" as never).insert({
+      channel: "webhook",
+      provider: "webhook_dispatcher",
+      status: input.status,
+      payload: { event: input.event, ...input.payload },
+      response_payload: input.responsePayload ?? null,
+      error_message: input.errorMessage ?? null,
+    } as never);
+  } catch (error) {
+    console.warn("[webhooks] Falha ao salvar communication_logs", error);
+  }
+}
+
 function buildLivePayload(input: DispatchWebhookInput) {
   const phoneDigits = normalizePhone(input.recipient?.phone);
   const phoneDisplay = formatBrazilPhone(phoneDigits);
@@ -174,8 +196,17 @@ export async function dispatchWebhookEvent(input: DispatchWebhookInput) {
           error_message: null,
         });
 
+        await saveCommunicationLog(admin, {
+          event: input.event,
+          status: response.ok ? "success" : "failed",
+          payload,
+          responsePayload: { status: response.status, body: responseBody.slice(0, 1000), endpoint_id: endpoint.id },
+          errorMessage: response.ok ? null : `Webhook retornou status ${response.status}`,
+        });
+
         if (response.ok) break;
       } catch (error) {
+        console.error("[webhooks] Erro no disparo de webhook", { event: input.event, endpointId: endpoint.id, retryAttempt, error });
         await saveWebhookLog({
           endpoint_id: endpoint.id,
           event: input.event,
@@ -193,6 +224,14 @@ export async function dispatchWebhookEvent(input: DispatchWebhookInput) {
           duration_ms: Date.now() - start,
           retry_attempt: retryAttempt,
           error_message: error instanceof Error ? error.message : "Falha desconhecida",
+        });
+
+        await saveCommunicationLog(admin, {
+          event: input.event,
+          status: "failed",
+          payload,
+          responsePayload: null,
+          errorMessage: error instanceof Error ? error.message : "Falha desconhecida",
         });
       }
     }
