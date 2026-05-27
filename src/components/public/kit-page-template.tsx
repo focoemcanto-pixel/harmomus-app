@@ -48,6 +48,10 @@ type AudioFilesApiTone = {
   files?: AudioFilesApiFile[];
 };
 
+function normalizeAudioSource(value: unknown): AudioSource {
+  return value === "generated" ? "generated" : "original";
+}
+
 function voiceLabel(voice: string) {
   const map: Record<string, string> = {
     todos: "Todos",
@@ -134,6 +138,7 @@ function mapApiTonesToPublicToneGroups(tones: AudioFilesApiTone[]) {
       if (!id) continue;
 
       const voice = normalizeVoice(file.voice ?? file.name);
+      const source = normalizeAudioSource(file.source);
       group.voices[voice] = {
         id,
         tone,
@@ -142,6 +147,8 @@ function mapApiTonesToPublicToneGroups(tones: AudioFilesApiTone[]) {
         audioFileId: id,
         streamUrl: file.streamUrl ?? `/api/audio/${id}`,
         fileType: file.fileType ?? file.file_type ?? "mp3",
+        source,
+        isGenerated: source === "generated",
         minMidiNote: file.minMidiNote ?? null,
         maxMidiNote: file.maxMidiNote ?? null,
         detectedMinMidiNote: file.detectedMinMidiNote ?? null,
@@ -154,25 +161,13 @@ function mapApiTonesToPublicToneGroups(tones: AudioFilesApiTone[]) {
     groups.set(tone, group);
   }
 
-  const toneGroups = sortTonesByChromaticOrder(Array.from(groups.keys())).map((tone) => groups.get(tone)!).filter(Boolean);
-  const sourceByTone: Record<string, AudioSource> = {};
-
-  for (const toneGroup of tones ?? []) {
-    const tone = normalizeTone(toneGroup.tone);
-    if (!tone) continue;
-    if (toneGroup.source === "original" || toneGroup.source === "generated") {
-      sourceByTone[tone] = toneGroup.source;
-    }
-  }
-
-  return { toneGroups, sourceByTone };
+  return sortTonesByChromaticOrder(Array.from(groups.keys())).map((tone) => groups.get(tone)!).filter(Boolean);
 }
 
 export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
   const audioEngine = useKitAudioEngine();
   const { stopPlayback } = audioEngine;
   const [liveKit, setLiveKit] = useState<PublicKit>(kit);
-  const [toneSourceByTone, setToneSourceByTone] = useState<Record<string, AudioSource>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -183,11 +178,10 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
         const data = await response.json().catch(() => null);
         if (!response.ok || !data?.tones) return;
 
-        const { toneGroups, sourceByTone } = mapApiTonesToPublicToneGroups(data.tones as AudioFilesApiTone[]);
+        const toneGroups = mapApiTonesToPublicToneGroups(data.tones as AudioFilesApiTone[]);
         if (cancelled || toneGroups.length === 0) return;
 
         setLiveKit((current) => ({ ...current, tones: toneGroups }));
-        setToneSourceByTone(sourceByTone);
       } catch (error) {
         console.warn("[KitPageTemplate] Could not hydrate live audio files", error);
       }
@@ -231,9 +225,8 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
   );
   const toneOptions = useMemo(() => {
     return availableTones.map((toneGroup) => {
-      const tone = normalizeTone(toneGroup.tone) ?? toneGroup.tone;
-      const source = toneSourceByTone[tone] === "generated" ? "generated" : "original";
-      const isOriginal = source === "original";
+      const files = Object.values(toneGroup.voices ?? {}).filter(Boolean) as PublicKitAudioFile[];
+      const isOriginal = files.some((file) => file.source === "original");
       return {
         tone: toneGroup.tone,
         label: formatToneLabel(toneGroup.tone),
@@ -242,7 +235,7 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
         sourceLabel: isOriginal ? "Original" : "Harmomus IA",
       };
     });
-  }, [availableTones, toneSourceByTone]);
+  }, [availableTones]);
   const tracksForSelectedVoice = useMemo(
     () => liveKit.tones.flatMap((toneGroup) => {
       const preferred = toneGroup.voices[selectedVoice] ?? toneGroup.voices.todos;
@@ -265,8 +258,7 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
   const canPlaySelected = accessContext.play.allowed && Boolean(selectedFile?.streamUrl) && Boolean(getToneGroup(liveKit, selectedTone));
   const semitoneShift = 0;
   const isModulated = false;
-  const selectedToneSource = toneSourceByTone[normalizeTone(selectedTone) ?? selectedTone] === "generated" ? "generated" : "original";
-  const selectedIsOriginal = selectedToneSource === "original";
+  const selectedIsOriginal = selectedFile?.source !== "generated";
   const midiRange = getMidiRange(selectedFile);
   const analysisVoice = toAnalyzableVoice(selectedVoice);
 
