@@ -1,6 +1,7 @@
 import { canSavePlaylist } from "@/lib/access/access-engine";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
 import { createClient } from "@/lib/supabase/server";
 
 const MAX_KITS = 20;
@@ -272,6 +273,17 @@ export async function createPlaylist({ name, kitIds }: { name: string; kitIds: s
   const items = filtered.map((kit_id, idx) => ({ playlist_id: playlist.id, kit_id, position: idx + 1 }));
   const { error: itemErr } = await supabase.from("playlist_items").insert(items);
   if (itemErr) throw new Error(itemErr.message);
+
+  try {
+    await dispatchWebhookEvent({
+      event: "playlist.created",
+      source: "playlist.create",
+      data: { playlist_id: playlist.id, playlist_slug: playlist.slug, kit_count: items.length, user_id: user.id },
+    });
+  } catch (error) {
+    console.warn("[playlists] webhook playlist.created falhou", error);
+  }
+
   return playlist;
 }
 
@@ -286,6 +298,21 @@ export async function addKitToPlaylist(playlistId: string, kitId: string) {
   const { count } = await supabase.from("playlist_items").select("id", { count: "exact", head: true }).eq("playlist_id", playlistId);
   if ((count ?? 0) >= MAX_KITS) throw new Error("Limite de 20 kits atingido.");
   await supabase.from("playlist_items").insert({ playlist_id: playlistId, kit_id: kitId, position: (count ?? 0) + 1 });
+
+  try {
+    await dispatchWebhookEvent({
+      event: "playlist.updated",
+      source: "playlist.add_kit",
+      data: { playlist_id: playlistId, kit_id: kitId, action: "add" },
+    });
+    await dispatchWebhookEvent({
+      event: "favorite.added",
+      source: "playlist.add_kit",
+      data: { playlist_id: playlistId, kit_id: kitId },
+    });
+  } catch (error) {
+    console.warn("[playlists] webhook playlist.updated/favorite.added falhou", error);
+  }
 }
 
 export async function removeKitFromPlaylist(playlistId: string, kitId: string) {

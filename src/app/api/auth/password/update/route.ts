@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
 
 export async function POST(request: Request) {
   const formData = await request.formData();
@@ -27,7 +28,7 @@ export async function POST(request: Request) {
 
     const { data: profile } = await admin
       .from("profiles")
-      .select("migrated_from_pms,requires_password_setup")
+      .select("full_name,email,phone,migrated_from_pms,requires_password_setup")
       .ilike("email", userEmail)
       .maybeSingle();
 
@@ -46,6 +47,23 @@ export async function POST(request: Request) {
         .from("legacy_members")
         .update({ password_created: true, migrated_at: now })
         .ilike("email", userEmail);
+    }
+
+    try {
+      await dispatchWebhookEvent({
+        event: "user.password_reset",
+        source: completedMigration ? "migration.password_setup" : "auth.password_reset",
+        recipient: { name: profile?.full_name ?? null, email: profile?.email ?? userEmail, phone: profile?.phone ?? null },
+        data: {
+          nome: profile?.full_name ?? null,
+          email: profile?.email ?? userEmail,
+          telefone: profile?.phone ?? null,
+          migrated_user: completedMigration,
+          password_reset_at: now,
+        },
+      });
+    } catch (webhookError) {
+      console.error("[auth.password.update] webhook user.password_reset falhou", webhookError);
     }
   }
 
