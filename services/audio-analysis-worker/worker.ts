@@ -1,16 +1,15 @@
 import { mkdtemp, readFile, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { spawn } from "node:child_process";
 
 import { createClient } from "@supabase/supabase-js";
 
 import { downloadFromR2 } from "./r2";
 
-const execFileAsync = promisify(execFile);
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const STALE_PROCESSING_MS = 20 * 60 * 1000;
+const HEARTBEAT_INTERVAL_MS = 15 * 1000;
+const STALE_PROCESSING_MS = 2 * 60 * 1000;
 const DEMUCS_TIMEOUT_MS = 12 * 60 * 1000;
 const BASIC_PITCH_TIMEOUT_MS = 8 * 60 * 1000;
 
@@ -40,10 +39,10 @@ async function reserveJob() {
   const thresholdIso = new Date(Date.now() - STALE_PROCESSING_MS).toISOString();
   const { data: activeProcessing, error: processingError } = await supabase
     .from("audio_analysis_jobs")
-    .select("id, started_at")
+    .select("id, started_at, updated_at")
     .eq("status", "processing")
-    .gte("started_at", thresholdIso)
-    .order("started_at", { ascending: false })
+    .gte("updated_at", thresholdIso)
+    .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
@@ -52,6 +51,7 @@ async function reserveJob() {
     console.info("[audio-analysis-worker] job processing recente encontrado, aguardando", {
       processing_job_id: activeProcessing.id,
       started_at: activeProcessing.started_at,
+      updated_at: activeProcessing.updated_at,
     });
     return null;
   }
@@ -86,9 +86,9 @@ async function failStaleProcessingJobs() {
   const staleThresholdIso = new Date(Date.now() - STALE_PROCESSING_MS).toISOString();
   const { data: staleJobs, error: staleQueryError } = await supabase
     .from("audio_analysis_jobs")
-    .select("id")
+    .select("id, updated_at")
     .eq("status", "processing")
-    .lt("started_at", staleThresholdIso);
+    .lt("updated_at", staleThresholdIso);
 
   if (staleQueryError) throw new Error(staleQueryError.message);
   if (!staleJobs?.length) return;
@@ -98,15 +98,82 @@ async function failStaleProcessingJobs() {
       .from("audio_analysis_jobs")
       .update({
         status: "failed",
-        error_message: "stale processing timeout",
+        error_message: "stale processing heartbeat timeout",
         completed_at: new Date().toISOString(),
       })
       .eq("id", staleJob.id)
       .eq("status", "processing");
 
     if (failError) throw new Error(failError.message);
-    console.warn("[audio-analysis-worker] stale job marcado como failed", { job_id: staleJob.id });
+    console.warn("[audio-analysis-worker] stale processing detectado e marcado como failed", { job_id: staleJob.id, updated_at: staleJob.updated_at });
   }
+}
+
+async function runSubprocess(command: string, args: string[], timeoutMs: number, timeoutLogLabel: string, extraEnv?: Record<string, string>) {
+  return await new Promise<{ stdout: string; stderr: string; exitCode: number | null }>((resolve, reject) => {
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    let settled = false;
+    const child = spawn(command, args, {
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, ...extraEnv },
+    });
+
+    const timeoutHandle = setTimeout(() => {
+      timedOut = true;
+      console.error(`[audio-analysis-worker] timeout ${timeoutLogLabel}`, { pid: child.pid, timeout_ms: timeoutMs });
+      if (child.pid) {
+        try {
+          process.kill(-child.pid, "SIGKILL");
+          console.warn("[audio-analysis-worker] processo morto", { pid: child.pid, tree: true, signal: "SIGKILL" });
+        } catch {
+          try {
+            child.kill("SIGKILL");
+            console.warn("[audio-analysis-worker] processo morto", { pid: child.pid, tree: false, signal: "SIGKILL" });
+          } catch {
+            // noop
+          }
+        }
+      }
+    }, timeoutMs);
+
+    child.stdout?.on("data", (chunk: Buffer | string) => {
+      const text = typeof chunk === "string" ? chunk : chunk.toString();
+      stdout += text;
+      console.info("[audio-analysis-worker] subprocess stdout", { command, chunk: text.slice(-1000) });
+    });
+
+    child.stderr?.on("data", (chunk: Buffer | string) => {
+      const text = typeof chunk === "string" ? chunk : chunk.toString();
+      stderr += text;
+      console.error("[audio-analysis-worker] subprocess stderr", { command, chunk: text.slice(-1000) });
+    });
+
+    child.on("error", (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutHandle);
+      reject(error);
+    });
+
+    child.on("close", (code, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutHandle);
+      console.info("[audio-analysis-worker] subprocess finalizado", { command, exit_code: code, signal });
+      if (timedOut) {
+        reject(new Error(`timeout ${timeoutLogLabel}: processo excedeu ${timeoutMs}ms`));
+        return;
+      }
+      if (code !== 0) {
+        reject(new Error(`${command} exited with code ${String(code)} signal ${String(signal)} stderr: ${stderr.slice(-4000)}`));
+        return;
+      }
+      resolve({ stdout, stderr, exitCode: code });
+    });
+  });
 }
 
 function percentile(values: number[], ratio: number): number | null {
@@ -142,27 +209,25 @@ async function runDemucsAndBasicPitch(sourcePath: string, workingDir: string) {
   const demucsOutDir = join(workingDir, "demucs");
   console.info("[audio-analysis-worker] iniciando Demucs");
 
-  await execFileAsync(
+  await runSubprocess(
     "demucs",
     ["--two-stems", "vocals", "--name", "mdx_extra_q", "--device", "cpu", "-j", "1", "-o", demucsOutDir, sourcePath],
-    {
-      timeout: DEMUCS_TIMEOUT_MS,
-      maxBuffer: 10 * 1024 * 1024,
-      env: { ...process.env, OMP_NUM_THREADS: "1", MKL_NUM_THREADS: "1", OPENBLAS_NUM_THREADS: "1" },
-    },
+    DEMUCS_TIMEOUT_MS,
+    "demucs",
+    { OMP_NUM_THREADS: "1", MKL_NUM_THREADS: "1", OPENBLAS_NUM_THREADS: "1" },
   );
   console.info("[audio-analysis-worker] finalizando Demucs");
 
-  const { stdout: findStdout } = await execFileAsync("bash", ["-lc", `find ${JSON.stringify(demucsOutDir)} -type f -name vocals.wav | head -n 1`]);
+  const { stdout: findStdout } = await runSubprocess("bash", ["-lc", `find ${JSON.stringify(demucsOutDir)} -type f -name vocals.wav | head -n 1`], 15000, "find-demucs");
   const stemPath = findStdout.trim();
   if (!stemPath) throw new Error("Demucs não retornou stem vocal (vocals.wav).");
 
   const basicPitchOut = join(workingDir, "basic-pitch");
   console.info("[audio-analysis-worker] iniciando BasicPitch");
-  await execFileAsync("basic-pitch", [basicPitchOut, stemPath], { timeout: BASIC_PITCH_TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024 });
+  await runSubprocess("basic-pitch", [basicPitchOut, stemPath], BASIC_PITCH_TIMEOUT_MS, "basicpitch");
   console.info("[audio-analysis-worker] finalizando BasicPitch");
 
-  const { stdout: csvPathStdout } = await execFileAsync("bash", ["-lc", `find ${JSON.stringify(basicPitchOut)} -type f -name '*.csv' | head -n 1`]);
+  const { stdout: csvPathStdout } = await runSubprocess("bash", ["-lc", `find ${JSON.stringify(basicPitchOut)} -type f -name '*.csv' | head -n 1`], 15000, "find-basicpitch-csv");
   const csvPath = csvPathStdout.trim();
   if (!csvPath) throw new Error("Basic Pitch não gerou CSV.");
 
@@ -207,6 +272,16 @@ async function processJob(job: any) {
   const logs: Array<Record<string, unknown>> = [];
 
   logs.push({ at: new Date().toISOString(), message: "FASE 3 worker iniciado" });
+  const heartbeat = setInterval(() => {
+    void supabase
+      .from("audio_analysis_jobs")
+      .update({ updated_at: new Date().toISOString() })
+      .eq("id", job.id)
+      .eq("status", "processing")
+      .then(({ error }) => {
+        if (error) console.error("[audio-analysis-worker] heartbeat update failed", { job_id: job.id, error: error.message });
+      });
+  }, HEARTBEAT_INTERVAL_MS);
 
   try {
     if (!job.source_r2_key) throw new Error("Job sem source_r2_key.");
@@ -257,6 +332,7 @@ async function processJob(job: any) {
       .update({ status: "failed", error_message: message, analysis_logs: logs })
       .eq("id", job.id);
   } finally {
+    clearInterval(heartbeat);
     await Promise.allSettled([unlink(sourcePath), rm(workspace, { recursive: true, force: true })]);
   }
 }
