@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { downloadFromR2, uploadToR2 } from "./r2";
-import { generateAudioWithRubberBand, mp3ToWav, wavToMp3 } from "./generate-audio";
+import { collectAudioMetrics, generateAudioWithRubberBand, mp3ToWav, wavToMp3 } from "./generate-audio";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? "";
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -127,14 +127,30 @@ async function processJob(job: any) {
   const outputMp3 = `${base}-output.mp3`;
 
   try {
+    const jobStart = Date.now();
     console.info(`[audio-generator] Processing job ${job.id}: ${job.voice} ${job.source_tone} -> ${job.target_tone}`);
 
+    if (Math.abs(Number(job.semitone_shift)) > 2) {
+      throw new Error(`Rejected shift outside ±2 semitones: ${job.semitone_shift}`);
+    }
+
     await downloadFromR2(job.source_r2_key, inputMp3);
+
+    const beforeMetrics = await collectAudioMetrics(inputMp3);
+    const decodeStart = Date.now();
     await mp3ToWav(inputMp3, inputWav);
+    const decodeMs = Date.now() - decodeStart;
+
+    const rubberbandStart = Date.now();
     await generateAudioWithRubberBand(inputWav, shiftedWav, Number(job.semitone_shift));
+    const rubberbandMs = Date.now() - rubberbandStart;
+
+    const encodeStart = Date.now();
     await wavToMp3(shiftedWav, outputMp3);
+    const encodeMs = Date.now() - encodeStart;
 
     const outputBytes = await readFile(outputMp3);
+    const afterMetrics = await collectAudioMetrics(outputMp3);
     await uploadToR2(job.target_r2_key, outputBytes);
 
     const audioFile = await upsertGeneratedAudioFile(job);
@@ -146,7 +162,13 @@ async function processJob(job: any) {
 
     if (updateError) throw new Error(updateError.message);
 
-    console.info(`[audio-generator] Completed job ${job.id}; audio_file=${audioFile?.id ?? "unknown"}`);
+    const totalMs = Date.now() - jobStart;
+    console.info(
+      `[audio-generator] Completed job ${job.id}; audio_file=${audioFile?.id ?? "unknown"}; ` +
+        `timing_ms(total=${totalMs},decode=${decodeMs},rubberband=${rubberbandMs},encode=${encodeMs}); ` +
+        `benchmark(before: bitrate=${beforeMetrics.bitrateKbps ?? "n/a"}kbps loudness=${beforeMetrics.loudnessI ?? "n/a"}LUFS sr=${beforeMetrics.sampleRate ?? "n/a"}Hz | ` +
+        `after: bitrate=${afterMetrics.bitrateKbps ?? "n/a"}kbps loudness=${afterMetrics.loudnessI ?? "n/a"}LUFS sr=${afterMetrics.sampleRate ?? "n/a"}Hz)`,
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro desconhecido";
     console.error(`[audio-generator] Failed job ${job.id}: ${message}`);
