@@ -22,7 +22,11 @@ function buildPublicUrl(r2Key: string) {
 function normalizeStatus(value: string | null | undefined) {
   const raw = String(value ?? "").toLowerCase().trim();
   if (!raw) return "pending";
-  if (["queued", "pending", "processing", "completed", "failed", "cancelled"].includes(raw)) return raw;
+  if (["queued", "pending", "processing", "completed", "failed", "cancelled"].includes(raw)) {
+    if (raw === "queued") return "pending";
+    if (raw === "cancelled") return "failed";
+    return raw;
+  }
   return "pending";
 }
 
@@ -91,8 +95,8 @@ async function listJobs(supabase: ReturnType<typeof createSupabaseAdminClient>, 
     .from("audio_generation_jobs")
     .select("id,status,voice,source_tone,target_tone,semitone_shift,source_r2_key,target_r2_key,error_message,created_at,started_at,completed_at,updated_at")
     .eq("kit_id", kitId)
-    .order("created_at", { ascending: false })
-    .limit(200);
+    .order("updated_at", { ascending: false })
+    .limit(500);
 }
 
 export async function GET(request: Request) {
