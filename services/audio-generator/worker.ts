@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createClient } from "@supabase/supabase-js";
 
 import { collectAudioMetrics, generateAudioWithRubberBand, mp3ToWav, wavToMp3 } from "./generate-audio";
-import { downloadFromR2, uploadToR2 } from "./storage";
+import { downloadFromR2, uploadToR2 } from "./r2";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
