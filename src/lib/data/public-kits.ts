@@ -5,6 +5,7 @@ import type { Database } from "@/types/database";
 
 export type UserTier = "guest" | "free" | "plus" | "premium";
 export type VoiceType = "todos" | "tenor" | "contralto" | "soprano";
+export type AudioSourceType = "original" | "generated";
 
 export interface PublicKitAudioFile {
   id: string;
@@ -14,6 +15,8 @@ export interface PublicKitAudioFile {
   audioFileId: string;
   streamUrl: string;
   fileType: string;
+  source: AudioSourceType;
+  isGenerated: boolean;
   minMidiNote: number | null;
   maxMidiNote: number | null;
   detectedMinMidiNote: number | null;
@@ -70,6 +73,10 @@ function normalizeVoice(value: string): VoiceType {
   return "todos";
 }
 
+function normalizeAudioSource(value: unknown): AudioSourceType {
+  return value === "generated" ? "generated" : "original";
+}
+
 function getAudioStreamUrl(file: Database["public"]["Tables"]["kit_audio_files"]["Row"]) {
   return `/api/audio/${file.id}`;
 }
@@ -94,6 +101,7 @@ function mapKit(
     if (!tonesMap.has(tone)) tonesMap.set(tone, { tone, voices: {} });
 
     const voice = normalizeVoice(file.name);
+    const source = normalizeAudioSource((file as any).source_type);
     tonesMap.get(tone)!.voices[voice] = {
       id: file.id,
       tone,
@@ -102,6 +110,8 @@ function mapKit(
       audioFileId: file.id,
       streamUrl: getAudioStreamUrl(file),
       fileType: file.file_type,
+      source,
+      isGenerated: source === "generated",
       minMidiNote: (file as any).min_midi_note ?? null,
       maxMidiNote: (file as any).max_midi_note ?? null,
       detectedMinMidiNote: (file as any).detected_min_midi_note ?? null,
