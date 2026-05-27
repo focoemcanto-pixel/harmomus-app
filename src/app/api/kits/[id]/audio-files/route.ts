@@ -11,7 +11,6 @@ export const revalidate = 0;
 type CompletedAudioJob = {
   id: string;
   kit_id: string;
-  generated_audio_file_id?: string | null;
   voice: string | null;
   target_tone: string | null;
   target_r2_key: string | null;
@@ -25,6 +24,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
 
     await reconcileGeneratedAudioFiles(supabase, id);
 
+    const generatedKeys = await getGeneratedAudioKeys(supabase, id);
     const { files, hasTessituraColumns } = await getAudioFiles(supabase, id);
 
     const grouped = new Map<string, any[]>();
@@ -32,6 +32,8 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       const tone = normalizeTone(file.tone);
       if (!tone) continue;
 
+      const r2Key = String(file.r2_key ?? "").trim();
+      const source = generatedKeys.has(r2Key) ? "harmomus_ia" : "original";
       const list = grouped.get(tone) ?? [];
       list.push({
         id: file.id,
@@ -42,6 +44,8 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
         tone,
         voice: normalizeVoice(file.name),
         fileType: file.file_type,
+        source,
+        isGenerated: source === "harmomus_ia",
         minMidiNote: file.min_midi_note ?? null,
         maxMidiNote: file.max_midi_note ?? null,
         detectedMinMidiNote: file.detected_min_midi_note ?? null,
@@ -56,6 +60,8 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       hasTessituraColumns,
       tones: Array.from(grouped.entries()).map(([tone, toneFiles]) => ({
         tone,
+        source: toneFiles.some((file) => file.source === "original") ? "original" : "harmomus_ia",
+        isGenerated: !toneFiles.some((file) => file.source === "original"),
         files: toneFiles,
       })),
     });
@@ -65,15 +71,29 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   }
 }
 
-async function reconcileGeneratedAudioFiles(supabase: any, kitId: string) {
-  const { data: jobs, error } = await supabase
+async function getGeneratedAudioKeys(supabase: any, kitId: string) {
+  const { data, error } = await supabase
     .from("audio_generation_jobs")
-    .select("id,kit_id,generated_audio_file_id,voice,target_tone,target_r2_key,output_file_type")
+    .select("target_r2_key")
     .eq("kit_id", kitId)
     .eq("status", "completed");
 
   if (error) {
-    // Ambientes antigos podem ainda não ter a tabela de jobs. A lista de áudios deve continuar funcionando.
+    console.warn("[audio-files] Could not load generated audio keys", { kitId, error });
+    return new Set<string>();
+  }
+
+  return new Set((data ?? []).map((job: any) => String(job.target_r2_key ?? "").trim()).filter(Boolean));
+}
+
+async function reconcileGeneratedAudioFiles(supabase: any, kitId: string) {
+  const { data: jobs, error } = await supabase
+    .from("audio_generation_jobs")
+    .select("id,kit_id,voice,target_tone,target_r2_key,output_file_type")
+    .eq("kit_id", kitId)
+    .eq("status", "completed");
+
+  if (error) {
     console.warn("[audio-files] Could not reconcile generated audio jobs", { kitId, error });
     return;
   }
@@ -98,39 +118,21 @@ async function reconcileGeneratedAudioFiles(supabase: any, kitId: string) {
       continue;
     }
 
-    let audioFileId = existing?.id as string | undefined;
+    if (existing?.id) continue;
 
-    if (!audioFileId) {
-      const { data: inserted, error: insertError } = await supabase
-        .from("kit_audio_files")
-        .insert({
-          kit_id: kitId,
-          tone,
-          name: voice,
-          r2_key: r2Key,
-          public_url: r2Key,
-          file_type: fileType,
-        })
-        .select("id")
-        .maybeSingle();
+    const { error: insertError } = await supabase
+      .from("kit_audio_files")
+      .insert({
+        kit_id: kitId,
+        tone,
+        name: voice,
+        r2_key: r2Key,
+        public_url: r2Key,
+        file_type: fileType,
+      });
 
-      if (insertError) {
-        console.error("[audio-files] Could not insert generated audio file", { kitId, jobId: job.id, error: insertError });
-        continue;
-      }
-
-      audioFileId = inserted?.id as string | undefined;
-    }
-
-    if (audioFileId && job.generated_audio_file_id !== audioFileId) {
-      const { error: updateJobError } = await supabase
-        .from("audio_generation_jobs")
-        .update({ generated_audio_file_id: audioFileId })
-        .eq("id", job.id);
-
-      if (updateJobError) {
-        console.warn("[audio-files] Could not link generated audio file to job", { kitId, jobId: job.id, error: updateJobError });
-      }
+    if (insertError) {
+      console.error("[audio-files] Could not insert generated audio file", { kitId, jobId: job.id, error: insertError });
     }
   }
 }
