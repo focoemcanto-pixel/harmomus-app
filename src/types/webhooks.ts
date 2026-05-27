@@ -13,6 +13,7 @@ export interface WebhookEndpoint {
   created_by: string | null;
   events: string[];
   last_triggered_at: string | null;
+  secret?: string;
 }
 
 export interface WebhookLog {
@@ -31,12 +32,23 @@ export interface WebhookLog {
   error_message: string | null;
 }
 
-export const WEBHOOK_EVENTS = [
-  "subscription.created","subscription.renewed","subscription.canceled","subscription.upgraded","subscription.downgraded",
-  "purchase.completed","payment.failed","payment.refunded",
-  "campaign.started","campaign.completed","promotion.applied","lead.created",
-  "member.created","member.deleted","member.migrated","login.created","kit.downloaded",
-  "contract.signed","escala.confirmed","repertoire.submitted",
-] as const;
+export const WEBHOOK_EVENT_CATEGORIES = {
+  ASSINATURAS: [
+    "subscription.created",
+    "subscription.renewed",
+    "subscription.canceled",
+    "subscription.upgraded",
+    "subscription.downgraded",
+    "subscription.payment_failed",
+  ],
+  CHECKOUT: ["checkout.started", "checkout.abandoned", "checkout.completed"],
+  PAGAMENTOS: ["payment.approved", "payment.refunded", "payment.chargeback"],
+  USUÁRIOS: ["user.created", "user.login", "user.password_reset", "user.migrated"],
+  PLATAFORMA: ["repertoire.sent", "kit.downloaded", "playlist.created", "favorite.added"],
+} as const;
 
+export const WEBHOOK_EVENTS = Object.values(WEBHOOK_EVENT_CATEGORIES).flat() as readonly string[];
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
+
+export const WEBHOOK_PLANS = ["free", "plus", "premium", "ministry"] as const;
+export type WebhookPlan = (typeof WEBHOOK_PLANS)[number];

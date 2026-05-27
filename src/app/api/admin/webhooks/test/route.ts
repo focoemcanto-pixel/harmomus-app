@@ -11,6 +11,7 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   const endpointId = String(body?.endpointId ?? "");
   const selectedEvent = String(body?.event ?? "") as WebhookEvent;
+  const previewOnly = Boolean(body?.previewOnly);
 
   if (!WEBHOOK_EVENTS.includes(selectedEvent)) return NextResponse.json({ error: "Evento inválido" }, { status: 400 });
 
@@ -24,7 +25,15 @@ export async function POST(request: Request) {
   const signature = signWebhookPayload(payloadString, String(endpoint.secret), timestamp);
   const deliveryId = payload.id;
 
-  const attempts = endpoint.retry_enabled ? [0, 1, 2, 3] : [0];
+
+  if (previewOnly) {
+    return NextResponse.json({ payload, delivery_id: deliveryId, signature, headers: {
+      "X-Harmomus-Event": selectedEvent,
+      "X-Harmomus-Signature": signature,
+      "X-Harmomus-Delivery": deliveryId,
+    } });
+  }
+  const attempts = endpoint.retry_enabled ? Array.from({ length: Math.max(1, Number(endpoint.retry_attempts ?? 1)) }, (_, i) => i) : [0];
   let lastResult: { ok: boolean; status: number; response: string; duration: number; error?: string } = { ok: false, status: 0, response: "", duration: 0 };
 
   for (const retryAttempt of attempts) {
@@ -43,11 +52,11 @@ export async function POST(request: Request) {
       });
       const responseBody = await response.text();
       lastResult = { ok: response.ok, status: response.status, response: responseBody.slice(0, 5000), duration: Date.now() - start };
-      await saveWebhookLog({ endpoint_id: endpoint.id, event: selectedEvent, delivery_id: deliveryId, status: response.status, success: response.ok, request_headers: {"X-Harmomus-Event":selectedEvent,"X-Harmomus-Delivery":deliveryId,"X-Harmomus-Timestamp":String(timestamp)}, request_body: payload, response_body: lastResult.response, duration_ms: lastResult.duration, retry_attempt: retryAttempt, error_message: null });
+      await saveWebhookLog({ endpoint_id: endpoint.id, event: selectedEvent, delivery_id: deliveryId, status: response.status, success: response.ok, request_headers: {"X-Harmomus-Event":selectedEvent,"X-Harmomus-Delivery":deliveryId,"X-Harmomus-Timestamp":String(timestamp),"X-Harmomus-Signature":signature}, request_body: payload, response_body: lastResult.response, duration_ms: lastResult.duration, retry_attempt: retryAttempt, error_message: null });
       if (response.ok) break;
     } catch (error) {
       lastResult = { ok: false, status: 0, response: "", duration: Date.now() - start, error: error instanceof Error ? error.message : "Falha desconhecida" };
-      await saveWebhookLog({ endpoint_id: endpoint.id, event: selectedEvent, delivery_id: deliveryId, status: 0, success: false, request_headers: {"X-Harmomus-Event":selectedEvent,"X-Harmomus-Delivery":deliveryId,"X-Harmomus-Timestamp":String(timestamp)}, request_body: payload, response_body: null, duration_ms: lastResult.duration, retry_attempt: retryAttempt, error_message: lastResult.error });
+      await saveWebhookLog({ endpoint_id: endpoint.id, event: selectedEvent, delivery_id: deliveryId, status: 0, success: false, request_headers: {"X-Harmomus-Event":selectedEvent,"X-Harmomus-Delivery":deliveryId,"X-Harmomus-Timestamp":String(timestamp),"X-Harmomus-Signature":signature}, request_body: payload, response_body: null, duration_ms: lastResult.duration, retry_attempt: retryAttempt, error_message: lastResult.error });
     }
   }
 
