@@ -192,14 +192,18 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
   }, [kitId]);
 
   useEffect(() => {
-    if (!jobs.some((job) => job.status === "pending" || job.status === "processing")) return;
+    const hasGenerationInFlight = jobs.some((job) => job.status === "pending" || job.status === "processing");
+    const hasAnalysisInFlight = analysisJobs.some((job) => job.status === "pending" || job.status === "processing");
+    if (!hasGenerationInFlight && !hasAnalysisInFlight) return;
+
     const interval = window.setInterval(() => {
       void loadSyncedAudios();
       void loadJobs();
       void loadAnalysisJobs();
     }, 3000);
+
     return () => window.clearInterval(interval);
-  }, [jobs]);
+  }, [jobs, analysisJobs]);
 
   async function loadJobs() {
     setJobError(null);
@@ -227,12 +231,23 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
     setAnalysisSubmitError(null);
     setAnalysisSubmitMessage("enfileirando análises em massa...");
     try {
-      for (const file of pendingFiles) {
-        if (!file.id) continue;
-        await enqueueAiAnalysis(file.id);
+      const response = await fetch("/api/audio/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kitId }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.error ?? "erro ao enviar");
       }
-      setAnalysisSubmitMessage("análise em massa enviada");
+
+      const createdCount = Number(data?.createdCount ?? 0);
+      const skippedCount = Number(data?.skippedCount ?? 0);
+      setAnalysisSubmitMessage(`análise em massa enviada (${createdCount} criados, ${skippedCount} ignorados)`);
       await loadAnalysisJobs();
+      await loadSyncedAudios();
+    } catch (submitError) {
+      setAnalysisSubmitError(submitError instanceof Error ? submitError.message : "erro ao enviar");
     } finally {
       setAnalyzingAll(false);
     }
