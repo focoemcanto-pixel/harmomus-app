@@ -1,5 +1,6 @@
 "use client";
 
+import { Loader2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
 type PlanSlug = "free" | "plus" | "premium" | "ministry_10";
@@ -77,13 +78,22 @@ const PLAN_CONFIGS: PlanConfig[] = [
   },
 ];
 
+function isPaidPlan(plan: PlanSlug) {
+  return plan !== "free";
+}
+
 export function SignupPlanSelector({ initialPlan }: { initialPlan: PlanSlug }) {
   const [selectedPlan, setSelectedPlan] = useState<PlanSlug>(initialPlan);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const currentPlan = useMemo(
     () => PLAN_CONFIGS.find((plan) => plan.slug === selectedPlan) ?? PLAN_CONFIGS[0],
     [selectedPlan],
   );
+
+  const loadingText = isPaidPlan(selectedPlan)
+    ? "Abrindo checkout seguro..."
+    : "Criando sua conta...";
 
   return (
     <>
@@ -98,8 +108,9 @@ export function SignupPlanSelector({ initialPlan }: { initialPlan: PlanSlug }) {
               <button
                 key={plan.slug}
                 type="button"
+                disabled={isSubmitting}
                 onClick={() => setSelectedPlan(plan.slug)}
-                className={`rounded-xl border p-3 text-left transition-all duration-300 ${
+                className={`rounded-xl border p-3 text-left transition-all duration-300 disabled:cursor-not-allowed disabled:opacity-60 ${
                   isSelected
                     ? "border-cyan-300 bg-cyan-400/15 shadow-[0_0_25px_rgba(34,211,238,0.25)]"
                     : "border-white/20 bg-white/[0.03] hover:border-white/40"
@@ -122,8 +133,33 @@ export function SignupPlanSelector({ initialPlan }: { initialPlan: PlanSlug }) {
         </div>
       </div>
 
-      <button className="h-12 w-full rounded-2xl border border-cyan-300/50 bg-gradient-to-r from-cyan-400 to-violet-500 font-semibold text-slate-950 shadow-[0_18px_50px_rgba(34,211,238,0.25)] transition hover:brightness-110 md:col-span-2">
-        {currentPlan.cta}
+      {isSubmitting ? (
+        <div className="md:col-span-2 rounded-2xl border border-cyan-300/30 bg-cyan-400/10 p-4 text-sm text-cyan-50">
+          <div className="flex items-center gap-3">
+            <Loader2 className="h-5 w-5 animate-spin text-cyan-200" />
+            <div>
+              <p className="font-semibold">{loadingText}</p>
+              <p className="mt-1 text-xs text-cyan-100/75">
+                Aguarde alguns segundos. Não feche esta página nem clique novamente.
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <button
+        disabled={isSubmitting}
+        onClick={() => setIsSubmitting(true)}
+        className="h-12 w-full rounded-2xl border border-cyan-300/50 bg-gradient-to-r from-cyan-400 to-violet-500 font-semibold text-slate-950 shadow-[0_18px_50px_rgba(34,211,238,0.25)] transition hover:brightness-110 disabled:cursor-wait disabled:opacity-80 md:col-span-2"
+      >
+        {isSubmitting ? (
+          <span className="inline-flex items-center justify-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            {loadingText}
+          </span>
+        ) : (
+          currentPlan.cta
+        )}
       </button>
     </>
   );
