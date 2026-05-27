@@ -193,14 +193,18 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
   }, [kitId]);
 
   useEffect(() => {
-    if (!jobs.some((job) => job.status === "pending" || job.status === "processing")) return;
+    const hasGenerationInFlight = jobs.some((job) => job.status === "pending" || job.status === "processing");
+    const hasAnalysisInFlight = analysisJobs.some((job) => job.status === "pending" || job.status === "processing");
+    if (!hasGenerationInFlight && !hasAnalysisInFlight) return;
+
     const interval = window.setInterval(() => {
       void loadSyncedAudios();
       void loadJobs();
       void loadAnalysisJobs();
     }, 3000);
+
     return () => window.clearInterval(interval);
-  }, [jobs]);
+  }, [jobs, analysisJobs]);
 
   async function loadJobs() {
     setJobError(null);
