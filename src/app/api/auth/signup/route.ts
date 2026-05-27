@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { ensureUserAccess } from "@/lib/auth/ensure-user-access";
 import { trackMarketingEvent } from "@/lib/communications/events";
 import { formatPhoneBR, normalizePhoneInternational } from "@/lib/communications/phone";
-import { startStripeCheckoutForSignup } from "@/lib/data/billing";
+import { startFastStripeCheckoutForSignup } from "@/lib/data/billing";
 import { createClient } from "@/lib/supabase/server";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
 
@@ -178,17 +178,6 @@ export async function POST(request: Request) {
     return fail("Sua conta foi criada, mas não conseguimos iniciar o checkout automaticamente. Tente entrar e assinar novamente.", "form");
   }
 
-  await withTimeout(
-    ensureUserAccess({
-      id: userId,
-      email,
-      fullName,
-      selectedPlanSlug: plan,
-    }),
-    2500,
-    "ensureUserAccess",
-  );
-
   runSignupSideEffectsAsync({
     supabase,
     plan,
@@ -203,16 +192,40 @@ export async function POST(request: Request) {
 
   if (isPaidPlan(plan)) {
     try {
-      const session = await withTimeout(startStripeCheckoutForSignup(userId, email, plan, origin), 7000, "startStripeCheckoutForSignup");
+      const session = await withTimeout(
+        startFastStripeCheckoutForSignup({
+          userId,
+          email,
+          planSlug: plan,
+          fallbackOrigin: origin,
+          fullName,
+          phone,
+          username,
+        }),
+        5000,
+        "startFastStripeCheckoutForSignup",
+      );
+
       return NextResponse.redirect(session.url, 303);
     } catch (checkoutError) {
-      console.error("[signup] Failed to start checkout after paid signup", checkoutError);
+      console.error("[signup] Failed to start fast checkout after paid signup", checkoutError);
       return fail(
         checkoutError instanceof Error ? checkoutError.message : "Não foi possível iniciar o checkout agora.",
         "form",
       );
     }
   }
+
+  await withTimeout(
+    ensureUserAccess({
+      id: userId,
+      email,
+      fullName,
+      selectedPlanSlug: plan,
+    }),
+    2500,
+    "ensureUserAccess",
+  );
 
   const successUrl = new URL("/cadastro/verifique-email", request.url);
   successUrl.searchParams.set("email", email);
