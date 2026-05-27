@@ -6,6 +6,13 @@ export type AudioMetrics = {
   loudnessI: number | null;
 };
 
+export type PitchShiftMethod = "rubberband-cli" | "ffmpeg-rubberband" | "ffmpeg-asetrate";
+
+export type PitchShiftResult = {
+  method: PitchShiftMethod;
+  logs: string[];
+};
+
 function runCommand(command: string, args: string[]) {
   return new Promise<void>((resolve, reject) => {
     console.info(`[audio-generator] running ${command} ${args.join(" ")}`);
@@ -69,25 +76,33 @@ export async function mp3ToWav(inputMp3: string, outputWav: string) {
   ]);
 }
 
-export async function generateAudioWithRubberBand(inputWav: string, outputWav: string, semitoneShift: number) {
+export async function isolateAudioPitchShift(inputWav: string, outputWav: string, semitoneShift: number): Promise<PitchShiftResult> {
   if (Math.abs(semitoneShift) > 2) {
     throw new Error(`Semitone shift out of allowed range (±2): ${semitoneShift}`);
   }
 
+  const logs: string[] = [];
+  const enableRubberband = String(process.env.ENABLE_RUBBERBAND ?? "true").toLowerCase() === "true";
+  const quality = String(process.env.RUBBERBAND_QUALITY ?? "fine").toLowerCase();
   const ratio = 2 ** (semitoneShift / 12);
+  const rubberbandQualityFlag = quality === "fine" ? "--fine" : "--fast";
 
-  // Rubber Band CLI versions vary a lot between Linux images. Keep this option set conservative.
-  // Invalid HQ flags can make the worker look "dead" because every job fails before producing output.
-  const usedRubberbandCli = await tryCommand("rubberband", [
-    "--fine",
-    "--formant",
-    "--pitch",
-    String(ratio),
-    inputWav,
-    outputWav,
-  ]);
+  logs.push("separando áudio");
+  logs.push("modulando");
+  logs.push("preservando formantes");
 
-  if (usedRubberbandCli) return;
+  if (enableRubberband) {
+    const usedRubberbandCli = await tryCommand("rubberband", [
+      rubberbandQualityFlag,
+      "--formant",
+      "--pitch",
+      String(ratio),
+      inputWav,
+      outputWav,
+    ]);
+
+    if (usedRubberbandCli) return { method: "rubberband-cli", logs };
+  }
 
   const usedFfmpegRubberband = await tryCommand("ffmpeg", [
     "-y",
@@ -104,7 +119,7 @@ export async function generateAudioWithRubberBand(inputWav: string, outputWav: s
     outputWav,
   ]);
 
-  if (usedFfmpegRubberband) return;
+  if (usedFfmpegRubberband) return { method: "ffmpeg-rubberband", logs };
 
   const sampleRate = 48000;
   const tempo = 1 / ratio;
@@ -123,6 +138,8 @@ export async function generateAudioWithRubberBand(inputWav: string, outputWav: s
     "pcm_f32le",
     outputWav,
   ]);
+
+  return { method: "ffmpeg-asetrate", logs };
 }
 
 export async function wavToMp3(inputWav: string, outputMp3: string) {

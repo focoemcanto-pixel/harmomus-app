@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { createClient } from "@supabase/supabase-js";
 
-import { collectAudioMetrics, generateAudioWithRubberBand, mp3ToWav, wavToMp3 } from "./generate-audio";
+import { collectAudioMetrics, isolateAudioPitchShift, mp3ToWav, wavToMp3 } from "./generate-audio";
 import { downloadFromR2, uploadToR2 } from "./r2";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -17,6 +17,9 @@ if (!supabaseUrl || !supabaseServiceRoleKey) {
 const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
   auth: { persistSession: false },
 });
+
+const processOnlyNewJobs = String(process.env.PROCESS_ONLY_NEW_JOBS ?? "true").toLowerCase() === "true";
+const workerStartIso = new Date().toISOString();
 
 function canonicalVoiceName(value: string | null | undefined) {
   const normalized = String(value ?? "")
@@ -32,13 +35,18 @@ function canonicalVoiceName(value: string | null | undefined) {
 }
 
 async function reserveJob() {
-  const { data: pending, error } = await supabase
+  let query = supabase
     .from("audio_generation_jobs")
     .select("*")
     .eq("status", "pending")
     .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
+    .limit(1);
+
+  if (processOnlyNewJobs) {
+    query = query.gte("created_at", workerStartIso);
+  }
+
+  const { data: pending, error } = await query.maybeSingle();
 
   if (error) throw new Error(error.message);
   if (!pending) return null;
@@ -102,6 +110,7 @@ async function processJob(job: any) {
     }
 
     await downloadFromR2(job.source_r2_key, inputMp3);
+    console.info("[audio-generator] separando áudio");
 
     const beforeMetrics = await collectAudioMetrics(inputMp3);
     const decodeStart = Date.now();
@@ -109,22 +118,31 @@ async function processJob(job: any) {
     const decodeMs = Date.now() - decodeStart;
 
     const rubberbandStart = Date.now();
-    await generateAudioWithRubberBand(inputWav, shiftedWav, Number(job.semitone_shift));
+    const pitchShift = await isolateAudioPitchShift(inputWav, shiftedWav, Number(job.semitone_shift));
     const rubberbandMs = Date.now() - rubberbandStart;
 
+    console.info("[audio-generator] exportando mp3");
     const encodeStart = Date.now();
     await wavToMp3(shiftedWav, outputMp3);
     const encodeMs = Date.now() - encodeStart;
 
     const outputBytes = await readFile(outputMp3);
     const afterMetrics = await collectAudioMetrics(outputMp3);
+    console.info("[audio-generator] upload R2");
     await uploadToR2(job.target_r2_key, outputBytes);
 
     const audioFile = await upsertGeneratedAudioFile(job);
 
     const { error: updateError } = await supabase
       .from("audio_generation_jobs")
-      .update({ status: "completed", completed_at: new Date().toISOString(), error_message: null })
+      .update({
+        status: "completed",
+        completed_at: new Date().toISOString(),
+        error_message: null,
+        processing_method: pitchShift.method,
+        processing_ms: rubberbandMs,
+        processing_logs: [...pitchShift.logs, "exportando mp3", "upload R2", "concluído"].join(" | "),
+      })
       .eq("id", job.id);
 
     if (updateError) throw new Error(updateError.message);
@@ -135,11 +153,13 @@ async function processJob(job: any) {
       audioFileId: audioFile.id,
       decodeMs,
       rubberbandMs,
+      processingMethod: pitchShift.method,
       encodeMs,
       totalMs,
       beforeMetrics,
       afterMetrics,
     });
+    console.info("[audio-generator] concluído");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 
