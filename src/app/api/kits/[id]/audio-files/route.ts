@@ -21,7 +21,8 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       const tone = normalizeTone(file.tone);
       if (!tone) continue;
 
-      const source = resolveSourceType(file.source_type);
+      const source = file.source_type;
+      if (!isAudioSourceType(source)) continue;
       const list = grouped.get(tone) ?? [];
       list.push({
         id: file.id,
@@ -33,7 +34,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
         voice: normalizeVoice(file.name),
         fileType: file.file_type,
         source,
-        isGenerated: source === "harmomus_ia",
+        isGenerated: source === "generated",
         minMidiNote: file.min_midi_note ?? null,
         maxMidiNote: file.max_midi_note ?? null,
         detectedMinMidiNote: file.detected_min_midi_note ?? null,
@@ -48,7 +49,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       hasTessituraColumns,
       tones: Array.from(grouped.entries()).map(([tone, toneFiles]) => ({
         tone,
-        source: toneFiles.some((file) => file.source === "original") ? "original" : "harmomus_ia",
+        source: toneFiles.some((file) => file.source === "original") ? "original" : "generated",
         isGenerated: !toneFiles.some((file) => file.source === "original"),
         files: toneFiles,
       })),
@@ -77,8 +78,8 @@ async function getAudioFiles(supabase: any, kitId: string) {
 }
 
 
-function resolveSourceType(sourceType: string | null | undefined): "original" | "harmomus_ia" {
-  return sourceType === "harmomus_ia" ? "harmomus_ia" : "original";
+function isAudioSourceType(sourceType: string | null | undefined): sourceType is "original" | "generated" {
+  return sourceType === "original" || sourceType === "generated";
 }
 
 function normalizeTone(value: string | null | undefined) {

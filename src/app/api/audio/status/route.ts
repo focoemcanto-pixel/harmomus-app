@@ -51,7 +51,7 @@ function parseJobs(rawJobs: any[]) {
 async function reconcileCompletedJobs(supabase: ReturnType<typeof createSupabaseAdminClient>, kitId: string) {
   const { data: completedJobs, error } = await supabase
     .from("audio_generation_jobs")
-    .select("id,kit_id,voice,target_tone,target_r2_key,status,output_file_type")
+    .select("id,kit_id,voice,target_tone,target_r2_key,status,output_file_type,source_audio_file_id")
     .eq("kit_id", kitId)
     .eq("status", "completed");
 
@@ -81,6 +81,8 @@ async function reconcileCompletedJobs(supabase: ReturnType<typeof createSupabase
         r2_key: job.target_r2_key,
         public_url: buildPublicUrl(job.target_r2_key),
         file_type: String(job.output_file_type ?? "mp3").replace(/^\./, "") || "mp3",
+        source_type: "generated",
+        generated_from_file_id: job.source_audio_file_id ?? null,
       });
 
     if (insertError) throw new Error(insertError.message);
