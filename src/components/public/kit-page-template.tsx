@@ -151,16 +151,6 @@ function mapApiTonesToPublicToneGroups(tones: AudioFilesApiTone[]): PublicKitTon
   return sortTonesByChromaticOrder(Array.from(groups.keys())).map((tone) => groups.get(tone)!).filter(Boolean);
 }
 
-function isOriginalTone(tone: string | null | undefined, kit: PublicKit) {
-  const normalizedTone = normalizeTone(tone ?? "");
-  const originalTone = normalizeTone(kit.originalTone) ?? normalizeTone(kit.defaultTone) ?? null;
-  return Boolean(normalizedTone && originalTone && normalizedTone === originalTone);
-}
-
-function toneSourceLabel(tone: string, kit: PublicKit) {
-  return isOriginalTone(tone, kit) ? "Original" : "Harmomus IA";
-}
-
 export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
   const audioEngine = useKitAudioEngine();
   const { stopPlayback } = audioEngine;
@@ -203,6 +193,14 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
     );
   }
   const realToneOptions = useMemo(() => sortTonesByChromaticOrder(liveKit.tones.map((tone) => tone.tone)), [liveKit.tones]);
+  const displayOriginalTone = useMemo(() => {
+    return (
+      normalizeTone(liveKit.originalTone) ??
+      normalizeTone(liveKit.defaultTone) ??
+      normalizeTone(realToneOptions[0]) ??
+      null
+    );
+  }, [liveKit.originalTone, liveKit.defaultTone, realToneOptions]);
   const initialTone = normalizeTone(liveKit.defaultTone) ?? normalizeTone(liveKit.originalTone) ?? realToneOptions[0] ?? "";
 
   const [selectedTone, setSelectedTone] = useState<string>(initialTone);
@@ -221,14 +219,20 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
     [liveKit.tones],
   );
   const toneOptions = useMemo(() => {
-    return availableTones.map((toneGroup) => ({
+    return availableTones.map((toneGroup) => {
+      const isOriginal = Boolean(
+        displayOriginalTone &&
+        normalizeTone(toneGroup.tone) === displayOriginalTone,
+      );
+      return {
       tone: toneGroup.tone,
       label: formatToneLabel(toneGroup.tone),
-      isOriginal: isOriginalTone(toneGroup.tone, liveKit),
+      isOriginal,
       isAvailable: true,
-      sourceLabel: toneSourceLabel(toneGroup.tone, liveKit),
-    }));
-  }, [availableTones, liveKit]);
+      sourceLabel: isOriginal ? "Original" : "Harmomus IA",
+      };
+    });
+  }, [availableTones, displayOriginalTone]);
   const tracksForSelectedVoice = useMemo(
     () => liveKit.tones.flatMap((toneGroup) => {
       const preferred = toneGroup.voices[selectedVoice] ?? toneGroup.voices.todos;
@@ -251,7 +255,10 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
   const canPlaySelected = accessContext.play.allowed && Boolean(selectedFile?.streamUrl) && Boolean(getToneGroup(liveKit, selectedTone));
   const semitoneShift = 0;
   const isModulated = false;
-  const selectedIsOriginal = isOriginalTone(selectedTone, liveKit);
+  const selectedIsOriginal = Boolean(
+    displayOriginalTone &&
+    normalizeTone(selectedTone) === displayOriginalTone,
+  );
   const midiRange = getMidiRange(selectedFile);
   const analysisVoice = toAnalyzableVoice(selectedVoice);
 
