@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import type { WebhookEvent } from "@/types/webhooks";
+import { getWebhookEventLabel, type WebhookEvent } from "@/types/webhooks";
 
 export function generateWebhookSecret() {
   return `whsec_${crypto.randomBytes(24).toString("hex")}`;
@@ -12,19 +12,40 @@ export function signWebhookPayload(payload: string, secret: string, timestamp: n
   return `t=${timestamp},v1=${signature}`;
 }
 
-export function buildFakePayload(event: WebhookEvent) {
+export function normalizeTestPhone(value: string) {
+  return value.replace(/[\s()\-*]/g, "").replace(/\D/g, "");
+}
+
+export function buildFakePayload(event: WebhookEvent, testPhone: string) {
   return {
-    id: `evt_${crypto.randomUUID()}`,
     event,
+    event_label: getWebhookEventLabel(event),
+    test: true,
+    delivery_id: `evt_test_${crypto.randomUUID()}`,
     created_at: new Date().toISOString(),
-    mode: "live",
-    source: "harmomus",
+    phone: testPhone,
+    number: testPhone,
+    to: testPhone,
+    message: "Teste de webhook enviado pelo Harmomus.",
+    text: "Teste de webhook enviado pelo Harmomus.",
+    recipient: {
+      name: "Cliente Teste",
+      email: "cliente.teste@harmomus.com",
+      phone: testPhone,
+      whatsapp: testPhone,
+    },
+    customer: {
+      name: "Cliente Teste",
+      email: "cliente.teste@harmomus.com",
+      phone: testPhone,
+      whatsapp: testPhone,
+    },
     data: {
-      company: { id: "org_harmomus", tenant: "harmomus-prod", region: "sa-east-1" },
-      member: { id: "mem_123", email: "member@harmomus.com", name: "Membro Harmomus" },
-      subscription: { id: "sub_123", status: "active", plan: "premium", renewal_at: new Date(Date.now() + 7 * 86400000).toISOString() },
-      payment: { id: "pay_123", amount: 3900, currency: "BRL", status: event.includes("failed") ? "failed" : "approved" },
-      metadata: { request_id: crypto.randomUUID(), origin: "admin-console", schema_version: "2026-05" },
+      id: `test_order_${crypto.randomUUID()}`,
+      plan: "Premium",
+      amount: 3990,
+      currency: "BRL",
+      status: event.includes("failed") ? "failed" : "approved",
     },
   };
 }
