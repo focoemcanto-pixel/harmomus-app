@@ -12,6 +12,10 @@ function normalizeNext(raw: string | null) {
   return raw;
 }
 
+function isPaidPlan(planSlug: string) {
+  return planSlug !== "free";
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const tokenHash = url.searchParams.get("token_hash");
@@ -29,36 +33,61 @@ export async function GET(request: Request) {
   });
 
   if (error) {
+    console.error("[auth.confirm] verifyOtp failed", error);
     return NextResponse.redirect(new URL("/login?error=callback", request.url), 303);
   }
 
   const { data: authUser } = await supabase.auth.getUser();
   const user = authUser.user;
 
+  let redirectPath = next;
+
   if (user?.id) {
+    const fullName = String(user.user_metadata?.full_name ?? "").trim() || user.email || "";
+    const planSlug = String(user.user_metadata?.plan_slug ?? "free").toLowerCase();
+
     await ensureUserAccess({
       id: user.id,
       email: user.email,
-      fullName: String(user.user_metadata?.full_name ?? "").trim() || user.email || "",
+      fullName,
+      selectedPlanSlug: planSlug,
     });
 
-    const fullName = String(user.user_metadata?.full_name ?? "").trim() || user.email || "";
-    const planSlug = String(user.user_metadata?.plan_slug ?? "").toLowerCase();
+    if (type === "signup" && isPaidPlan(planSlug)) {
+      redirectPath = `/api/billing/checkout?plan=${encodeURIComponent(planSlug)}`;
+    }
 
     try {
       await dispatchWebhookEvent({
         event: "user.email_confirmed",
         source: "auth.email_confirmation",
-        recipient: { name: fullName, email: user.email ?? null, phone: String(user.user_metadata?.phone ?? "") || null },
-        data: { user_id: user.id, email_confirmed_at: new Date().toISOString(), type },
+        recipient: {
+          name: fullName,
+          email: user.email ?? null,
+          phone: String(user.user_metadata?.phone ?? "") || null,
+        },
+        data: {
+          user_id: user.id,
+          email_confirmed_at: new Date().toISOString(),
+          type,
+          plan: planSlug,
+        },
       });
 
       if (type === "signup" && planSlug === "free") {
         await dispatchWebhookEvent({
           event: "plan.free_activated",
           source: "auth.signup_confirmed",
-          recipient: { name: fullName, email: user.email ?? null, phone: String(user.user_metadata?.phone ?? "") || null },
-          data: { user_id: user.id, plan: "free", activated_at: new Date().toISOString() },
+          recipient: {
+            name: fullName,
+            email: user.email ?? null,
+            phone: String(user.user_metadata?.phone ?? "") || null,
+          },
+          data: {
+            user_id: user.id,
+            plan: "free",
+            activated_at: new Date().toISOString(),
+          },
         });
       }
     } catch (webhookError) {
@@ -66,5 +95,5 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.redirect(new URL(next, request.url), 303);
+  return NextResponse.redirect(new URL(redirectPath, request.url), 303);
 }
