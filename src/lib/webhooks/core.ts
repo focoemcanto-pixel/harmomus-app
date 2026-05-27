@@ -20,10 +20,11 @@ export function buildFakePayload(event: WebhookEvent) {
     mode: "live",
     source: "harmomus",
     data: {
+      company: { id: "org_harmomus", tenant: "harmomus-prod", region: "sa-east-1" },
       member: { id: "mem_123", email: "member@harmomus.com", name: "Membro Harmomus" },
-      subscription: { id: "sub_123", status: "active", plan: "premium" },
-      payment: { id: "pay_123", amount: 3900, currency: "BRL", status: event === "payment.failed" ? "failed" : "paid" },
-      campaign: { id: "camp_123", name: "Launch Week", applied: event === "promotion.applied" },
+      subscription: { id: "sub_123", status: "active", plan: "premium", renewal_at: new Date(Date.now() + 7 * 86400000).toISOString() },
+      payment: { id: "pay_123", amount: 3900, currency: "BRL", status: event.includes("failed") ? "failed" : "approved" },
+      metadata: { request_id: crypto.randomUUID(), origin: "admin-console", schema_version: "2026-05" },
     },
   };
 }
