@@ -1,0 +1,13 @@
+{
+  "name": "audio-analysis-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx worker.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "latest",
+    "@supabase/supabase-js": "latest",
+    "tsx": "latest"
+  }
+}
