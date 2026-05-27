@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
-import { buildFakePayload, saveWebhookLog, signWebhookPayload } from "@/lib/webhooks/core";
+import { buildFakePayload, normalizeTestPhone, saveWebhookLog, signWebhookPayload } from "@/lib/webhooks/core";
 import { WEBHOOK_EVENTS, type WebhookEvent } from "@/types/webhooks";
 
 export async function POST(request: Request) {
@@ -9,11 +9,15 @@ export async function POST(request: Request) {
   if (!current.isAdmin) return NextResponse.json({ error: "Acesso negado" }, { status: 403 });
 
   const body = await request.json().catch(() => null);
-  const endpointId = String(body?.endpointId ?? "");
+  const endpointId = String(body?.endpoint_id ?? body?.endpointId ?? "");
   const selectedEvent = String(body?.event ?? "") as WebhookEvent;
+  const rawTestPhone = String(body?.test_phone ?? "");
   const previewOnly = Boolean(body?.previewOnly);
 
   if (!WEBHOOK_EVENTS.includes(selectedEvent)) return NextResponse.json({ error: "Evento inválido" }, { status: 400 });
+  const testPhone = normalizeTestPhone(rawTestPhone);
+  if (!testPhone) return NextResponse.json({ error: "Informe um número de teste para validar este webhook." }, { status: 400 });
+  if (testPhone.length < 12) return NextResponse.json({ error: "Número de teste inválido. Use DDI + DDD + número, apenas dígitos." }, { status: 400 });
 
   const admin = createSupabaseAdminClient();
   const { data: endpoint } = await admin.from("webhook_endpoints").select("id,url,secret,retry_enabled,retry_attempts,events,active").eq("id", endpointId).maybeSingle();
@@ -23,11 +27,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Evento não permitido para este webhook." }, { status: 400 });
   }
 
-  const payload = buildFakePayload(selectedEvent);
+  const payload = buildFakePayload(selectedEvent, testPhone);
   const payloadString = JSON.stringify(payload);
   const timestamp = Math.floor(Date.now() / 1000);
   const signature = signWebhookPayload(payloadString, String(endpoint.secret), timestamp);
-  const deliveryId = payload.id;
+  const deliveryId = payload.delivery_id;
 
 
   if (previewOnly) {

@@ -11,7 +11,12 @@ export async function GET() {
   if (!current.isAdmin) return NextResponse.json({ error: "Acesso negado" }, { status: 403 });
   const admin = createSupabaseAdminClient();
   const { data, error } = await admin.from("webhook_endpoints").select("id,created_at,updated_at,name,url,environment,active,retry_enabled,retry_attempts,created_by,events,last_triggered_at").order("created_at", { ascending: false });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    if (error.code === "42P01") {
+      return NextResponse.json({ error: "Banco de webhooks ainda não configurado. Aplique a migration." }, { status: 500 });
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
   return NextResponse.json({ data: data ?? [] });
 }
 
