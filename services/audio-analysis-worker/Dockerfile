@@ -2,22 +2,28 @@ FROM node:22-bookworm
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     python3 \
     python3-pip \
-    python3-venv \
  && rm -rf /var/lib/apt/lists/*
 
-RUN python3 -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+RUN python3 -m pip install --upgrade pip
 
-RUN pip install --upgrade pip
-RUN pip install demucs basic-pitch
+RUN python3 -m pip install \
+    torch \
+    torchaudio \
+    torchvision \
+    --index-url https://download.pytorch.org/whl/cpu
+
+RUN python3 -m pip install \
+    diffq \
+    demucs \
+    basic-pitch
 
 COPY package*.json ./
 RUN npm install
 
 COPY . .
 
-CMD ["npm", "start"]
+CMD ["./startup.sh"]
