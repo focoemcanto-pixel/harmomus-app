@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { trackMarketingEvent } from "@/lib/communications/events";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
 
 function normalizeRedirect(raw: string) {
   if (!raw || !raw.startsWith("/")) return "/";
@@ -29,10 +30,10 @@ export async function POST(request: Request) {
       // Já existe perfil na plataforma nova: segue fluxo normal de login.
     } else {
       const { data: legacyMember } = await admin
-      .from("legacy_members")
-      .select("email,legacy_plan_slug,legacy_status,migrated,password_created")
-      .ilike("email", email)
-      .maybeSingle();
+        .from("legacy_members")
+        .select("email,legacy_plan_slug,legacy_status,migrated,password_created")
+        .ilike("email", email)
+        .maybeSingle();
 
       if (
         legacyMember &&
@@ -40,6 +41,18 @@ export async function POST(request: Request) {
         String(legacyMember.legacy_status ?? "").toLowerCase() === "active" &&
         (!legacyMember.migrated || !legacyMember.password_created)
       ) {
+        await dispatchWebhookEvent({
+          event: "user.migrated",
+          source: "legacy.migration",
+          recipient: {
+            email,
+          },
+          data: {
+            legacy_plan_slug: legacyMember.legacy_plan_slug,
+            legacy_status: legacyMember.legacy_status,
+          },
+        });
+
         const url = new URL("/definir-senha-migrada", request.url);
         url.searchParams.set("email", email);
         return NextResponse.redirect(url, 303);
@@ -57,10 +70,29 @@ export async function POST(request: Request) {
   }
 
   const user = data.user;
-  if (user?.id) await trackMarketingEvent(supabase as any, { userId: user.id, eventType: "login" });
-
   if (user?.id) {
-    const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+    await trackMarketingEvent(supabase as any, { userId: user.id, eventType: "login" });
+
+    const admin = createSupabaseAdminClient() as any;
+    const { data: profile } = await admin
+      .from("profiles")
+      .select("full_name,email,phone,role")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    await dispatchWebhookEvent({
+      event: "user.login",
+      source: "auth.login",
+      recipient: {
+        name: profile?.full_name ?? null,
+        email: profile?.email ?? user.email,
+        phone: profile?.phone ?? null,
+      },
+      data: {
+        user_id: user.id,
+        email: user.email,
+      },
+    });
 
     if (String((profile as any)?.role ?? "").trim().toLowerCase() === "admin") {
       return NextResponse.redirect(new URL("/admin", request.url), 303);
