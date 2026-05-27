@@ -8,12 +8,10 @@ export type AudioMetrics = {
 
 function runCommand(command: string, args: string[]) {
   return new Promise<void>((resolve, reject) => {
+    console.info(`[audio-generator] running ${command} ${args.join(" ")}`);
     const child = spawn(command, args, { stdio: "inherit" });
 
-    child.once("error", (error) => {
-      reject(error);
-    });
-
+    child.once("error", (error) => reject(error));
     child.once("exit", (code) => {
       if (code === 0) resolve();
       else reject(new Error(`${command} failed: ${code}`));
@@ -48,13 +46,27 @@ async function tryCommand(command: string, args: string[]) {
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn(`[audio-generator] ${command} unavailable or failed: ${message}`);
+    console.warn(`[audio-generator] ${command} unavailable or failed, trying fallback: ${message}`);
     return false;
   }
 }
 
 export async function mp3ToWav(inputMp3: string, outputWav: string) {
-  await runCommand("ffmpeg", ["-y", "-i", inputMp3, "-ar", "48000", "-ac", "2", "-c:a", "pcm_f32le", outputWav]);
+  await runCommand("ffmpeg", [
+    "-y",
+    "-i",
+    inputMp3,
+    "-vn",
+    "-ar",
+    "48000",
+    "-ac",
+    "2",
+    "-sample_fmt",
+    "flt",
+    "-c:a",
+    "pcm_f32le",
+    outputWav,
+  ]);
 }
 
 export async function generateAudioWithRubberBand(inputWav: string, outputWav: string, semitoneShift: number) {
@@ -64,13 +76,11 @@ export async function generateAudioWithRubberBand(inputWav: string, outputWav: s
 
   const ratio = 2 ** (semitoneShift / 12);
 
+  // Rubber Band CLI versions vary a lot between Linux images. Keep this option set conservative.
+  // Invalid HQ flags can make the worker look "dead" because every job fails before producing output.
   const usedRubberbandCli = await tryCommand("rubberband", [
     "--fine",
     "--formant",
-    "--pitch-hq",
-    "--window-long",
-    "--channels-together",
-    "--smoothing",
     "--pitch",
     String(ratio),
     inputWav,
@@ -84,9 +94,11 @@ export async function generateAudioWithRubberBand(inputWav: string, outputWav: s
     "-i",
     inputWav,
     "-af",
-    `rubberband=pitch=${ratio}:formant=preserved:transients=crisp:window=long:channels=together`,
+    `rubberband=pitch=${ratio}:formant=preserved:transients=crisp:window=long` ,
     "-ar",
     "48000",
+    "-sample_fmt",
+    "flt",
     "-c:a",
     "pcm_f32le",
     outputWav,
@@ -97,7 +109,7 @@ export async function generateAudioWithRubberBand(inputWav: string, outputWav: s
   const sampleRate = 48000;
   const tempo = 1 / ratio;
 
-  console.warn("[audio-generator] Falling back to ffmpeg asetrate/atempo pitch shift. For best quality, deploy this service with Docker and rubberband-cli.");
+  console.warn("[audio-generator] Falling back to ffmpeg asetrate/atempo pitch shift. Install rubberband-cli for best quality.");
 
   await runCommand("ffmpeg", [
     "-y",
@@ -105,6 +117,8 @@ export async function generateAudioWithRubberBand(inputWav: string, outputWav: s
     inputWav,
     "-af",
     `asetrate=${sampleRate}*${ratio},aresample=${sampleRate},atempo=${tempo},alimiter=limit=0.95`,
+    "-sample_fmt",
+    "flt",
     "-c:a",
     "pcm_f32le",
     outputWav,
@@ -117,7 +131,7 @@ export async function wavToMp3(inputWav: string, outputMp3: string) {
     "-i",
     inputWav,
     "-af",
-    "loudnorm=I=-14:TP=-1.0:LRA=11,alimiter=limit=0.98",
+    "alimiter=limit=0.98",
     "-codec:a",
     "libmp3lame",
     "-b:a",
@@ -127,37 +141,29 @@ export async function wavToMp3(inputWav: string, outputMp3: string) {
 }
 
 export async function collectAudioMetrics(inputAudio: string): Promise<AudioMetrics> {
-  const ffprobeOutput = await runCommandCapture("ffprobe", [
-    "-v",
-    "error",
-    "-select_streams",
-    "a:0",
-    "-show_entries",
-    "stream=sample_rate,bit_rate",
-    "-of",
-    "default=noprint_wrappers=1:nokey=0",
-    inputAudio,
-  ]);
+  try {
+    const ffprobeOutput = await runCommandCapture("ffprobe", [
+      "-v",
+      "error",
+      "-select_streams",
+      "a:0",
+      "-show_entries",
+      "stream=sample_rate,bit_rate",
+      "-of",
+      "default=noprint_wrappers=1:nokey=0",
+      inputAudio,
+    ]);
 
-  const srMatch = ffprobeOutput.match(/sample_rate=(\d+)/);
-  const brMatch = ffprobeOutput.match(/bit_rate=(\d+)/);
+    const srMatch = ffprobeOutput.match(/sample_rate=(\d+)/);
+    const brMatch = ffprobeOutput.match(/bit_rate=(\d+)/);
 
-  const loudnormOutput = await runCommandCapture("ffmpeg", [
-    "-hide_banner",
-    "-i",
-    inputAudio,
-    "-af",
-    "loudnorm=I=-14:TP=-1.0:LRA=11:print_format=summary",
-    "-f",
-    "null",
-    "-",
-  ]);
-
-  const inputIMatch = loudnormOutput.match(/Input Integrated:\s*(-?\d+(?:\.\d+)?)\s*LUFS/i);
-
-  return {
-    sampleRate: srMatch ? Number(srMatch[1]) : null,
-    bitrateKbps: brMatch ? Math.round(Number(brMatch[1]) / 1000) : null,
-    loudnessI: inputIMatch ? Number(inputIMatch[1]) : null,
-  };
+    return {
+      sampleRate: srMatch ? Number(srMatch[1]) : null,
+      bitrateKbps: brMatch ? Math.round(Number(brMatch[1]) / 1000) : null,
+      loudnessI: null,
+    };
+  } catch (error) {
+    console.warn("[audio-generator] Could not collect audio metrics", error);
+    return { sampleRate: null, bitrateKbps: null, loudnessI: null };
+  }
 }
