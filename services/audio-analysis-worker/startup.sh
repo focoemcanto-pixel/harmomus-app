@@ -6,8 +6,9 @@ log() {
 }
 
 log "Validando ambiente Python para Demucs/Basic Pitch"
-log "which python3: $(which python3)"
-log "which demucs: $(which demucs || echo 'demucs not found')"
+log "which python: $(which python)"
+log "which pip: $(which pip)"
+log "which demucs: $(which demucs)"
 
 log "Verificando pacote diffq instalado"
 pip freeze | grep -i '^diffq=='
@@ -15,7 +16,7 @@ pip freeze | grep -i '^diffq=='
 check_import() {
   local module="$1"
   log "Testando import de ${module}"
-  if ! python3 -c "import ${module}; print('${module} ok')"; then
+  if ! python -c "import ${module}; print('${module} ok')"; then
     log "ERRO: falha ao importar ${module}. Abortando startup."
     exit 1
   fi
