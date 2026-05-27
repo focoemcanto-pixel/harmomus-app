@@ -151,6 +151,16 @@ function mapApiTonesToPublicToneGroups(tones: AudioFilesApiTone[]): PublicKitTon
   return sortTonesByChromaticOrder(Array.from(groups.keys())).map((tone) => groups.get(tone)!).filter(Boolean);
 }
 
+function isOriginalTone(tone: string | null | undefined, kit: PublicKit) {
+  const normalizedTone = normalizeTone(tone ?? "");
+  const originalTone = normalizeTone(kit.originalTone) ?? normalizeTone(kit.defaultTone) ?? null;
+  return Boolean(normalizedTone && originalTone && normalizedTone === originalTone);
+}
+
+function toneSourceLabel(tone: string, kit: PublicKit) {
+  return isOriginalTone(tone, kit) ? "Original" : "Harmomus IA";
+}
+
 export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
   const audioEngine = useKitAudioEngine();
   const { stopPlayback } = audioEngine;
@@ -211,14 +221,14 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
     [liveKit.tones],
   );
   const toneOptions = useMemo(() => {
-    const originalTone = normalizeTone(liveKit.originalTone) ?? normalizeTone(liveKit.defaultTone) ?? null;
     return availableTones.map((toneGroup) => ({
       tone: toneGroup.tone,
       label: formatToneLabel(toneGroup.tone),
-      isOriginal: Boolean(originalTone && toneGroup.tone === originalTone),
+      isOriginal: isOriginalTone(toneGroup.tone, liveKit),
       isAvailable: true,
+      sourceLabel: toneSourceLabel(toneGroup.tone, liveKit),
     }));
-  }, [availableTones, liveKit.originalTone, liveKit.defaultTone]);
+  }, [availableTones, liveKit]);
   const tracksForSelectedVoice = useMemo(
     () => liveKit.tones.flatMap((toneGroup) => {
       const preferred = toneGroup.voices[selectedVoice] ?? toneGroup.voices.todos;
@@ -241,6 +251,7 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
   const canPlaySelected = accessContext.play.allowed && Boolean(selectedFile?.streamUrl) && Boolean(getToneGroup(liveKit, selectedTone));
   const semitoneShift = 0;
   const isModulated = false;
+  const selectedIsOriginal = isOriginalTone(selectedTone, liveKit);
   const midiRange = getMidiRange(selectedFile);
   const analysisVoice = toAnalyzableVoice(selectedVoice);
 
@@ -318,7 +329,7 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
               <div className="rounded-xl border border-white/10 bg-black/20 p-3">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <p className="text-xs font-medium uppercase tracking-[0.16em] text-zinc-400">Modular tom</p>
-                  <span className="rounded-full border border-emerald-400/20 px-2 py-1 text-[11px] text-emerald-200">Arquivos reais</span>
+                  <span className="rounded-full border border-violet-400/30 bg-violet-500/10 px-2 py-1 text-[11px] font-semibold text-violet-100">Harmomus IA + arquivos reais</span>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {toneOptions.map((option) => {
@@ -336,8 +347,12 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
                         }`}
                       >
                         <span className="block font-medium">{option.label}</span>
-                        <span className="mt-0.5 block text-[10px] text-zinc-400">
-                          {option.isAvailable ? (option.isOriginal ? "Original" : "Disponível") : "Indisponível"}
+                        <span className={`mt-0.5 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                          option.isOriginal
+                            ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-200"
+                            : "border-violet-300/30 bg-violet-500/15 text-violet-100"
+                        }`}>
+                          {option.sourceLabel}
                         </span>
                       </button>
                     );
@@ -385,12 +400,24 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
               />
 
               {selectedVoice === "todos" ? (
-                <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-xs text-zinc-400">
-                  A faixa “Todos” é a referência completa do arranjo. A leitura de tessitura inteligente aparece quando houver arquivos reais gerados para os demais tons.
+                <div className={`rounded-xl border px-4 py-3 text-xs ${
+                  selectedIsOriginal
+                    ? "border-white/10 bg-black/20 text-zinc-400"
+                    : "border-violet-400/20 bg-violet-500/10 text-violet-100/90"
+                }`}>
+                  {selectedIsOriginal
+                    ? "A faixa “Todos” é a referência completa do arranjo. A leitura de tessitura inteligente aparece quando houver arquivos reais gerados para os demais tons."
+                    : "Harmomus IA: este tom foi gerado automaticamente a partir do arranjo original para estudo vocal. A reprodução usa arquivo real processado, não modulação em tempo real."}
                 </div>
               ) : selectedFile ? (
-                <div className="rounded-xl border border-emerald-400/15 bg-emerald-400/5 px-4 py-3 text-xs text-emerald-100/80">
-                  Arquivo real disponível para {voiceLabel(selectedVoice)} em {formatToneLabel(selectedTone)}. A reprodução não usa modulação em tempo real.
+                <div className={`rounded-xl border px-4 py-3 text-xs ${
+                  selectedIsOriginal
+                    ? "border-emerald-400/15 bg-emerald-400/5 text-emerald-100/80"
+                    : "border-violet-400/20 bg-violet-500/10 text-violet-100/90"
+                }`}>
+                  {selectedIsOriginal
+                    ? `Arquivo real original disponível para ${voiceLabel(selectedVoice)} em ${formatToneLabel(selectedTone)}.`
+                    : `Harmomus IA: ${voiceLabel(selectedVoice)} em ${formatToneLabel(selectedTone)} foi modulado inteligentemente a partir do tom original e salvo como arquivo real para estudo.`}
                 </div>
               ) : (
                 <div className="rounded-xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-xs text-amber-100/90">
