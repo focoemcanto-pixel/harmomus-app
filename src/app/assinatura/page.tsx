@@ -19,7 +19,9 @@ const STATUS_LABELS: Record<string, string> = {
   incomplete_expired: "Expirada",
 };
 
-function formatDate(value?: string | number | null) {
+type BillingDateValue = string | number | null | undefined;
+
+function formatDate(value?: BillingDateValue) {
   if (!value) return "Não informado";
   const date = typeof value === "number" ? new Date(value * 1000) : new Date(value);
   if (Number.isNaN(date.getTime())) return "Não informado";
@@ -84,9 +86,9 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
   let invoices: any[] = [];
   let paymentMethodLabel = customerId ? "Não cadastrado" : "Não vinculado";
   let billingCycle = "Não informado";
-  let nextBillingDate = context.subscription?.next_billing_at ?? context.subscription?.current_period_end ?? null;
-  let periodEndDate = context.subscription?.current_period_end ?? null;
-  let trialEndDate: string | number | null = context.subscription?.trial_ends_at ?? null;
+  let nextBillingDate: BillingDateValue = context.subscription?.next_billing_at ?? context.subscription?.current_period_end ?? null;
+  let periodEndDate: BillingDateValue = context.subscription?.current_period_end ?? null;
+  let trialEndDate: BillingDateValue = context.subscription?.trial_ends_at ?? null;
   let stripeSubscription: any = null;
 
   if (customerId && process.env.STRIPE_SECRET_KEY) {
