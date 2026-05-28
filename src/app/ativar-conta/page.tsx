@@ -12,7 +12,7 @@ export default function AtivarContaPage() {
     const supabase = createClient();
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=/assinatura` },
+      options: { emailRedirectTo: `${window.location.origin}/auth/confirm?next=/assinatura` },
     });
     setFeedback(error ? error.message : "Enviamos seu magic link para ativação da conta migrada.");
   }
