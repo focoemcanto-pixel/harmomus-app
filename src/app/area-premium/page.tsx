@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Crown, Headphones, MessageCircle, Music2, Send, Sparkles, Star, Trophy, Wand2 } from "lucide-react";
+import { Crown, Headphones, MessageCircle, Music2, Sparkles, Star, Trophy } from "lucide-react";
 
+import { PremiumSongRequestForm } from "@/components/public/premium-song-request-form";
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { PremiumToneRequestForm } from "@/components/public/premium-tone-request-form";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
@@ -140,7 +141,7 @@ export default async function AreaPremiumPage({
             </PremiumPanel>
 
             <div className="space-y-6">
-              {canSubmitPremiumRequests(context) ? <PremiumForm title="Solicitar nova música" icon={<Music2 />} button="Enviar solicitação" fields={["Nome da música *", "Artista original *", "Link de referência", "Observações"]} /> : <EmptyState text="No seu ministério, apenas owner/manager podem enviar solicitações premium." />}
+              {canSubmitPremiumRequests(context) ? <PremiumSongRequestForm /> : <EmptyState text="No seu ministério, apenas owner/manager podem enviar solicitações premium." />}
               {canSubmitPremiumRequests(context) ? <PremiumToneRequestForm kits={toneRequestKits} initialKitSlug={requestedKitSlug} initialKitName={requestedKitName} /> : null}
               <PremiumForm title="Enviar feedback" icon={<MessageCircle />} button="Enviar feedback" fields={["Tipo *", "Mensagem *", "Email opcional"]} />
             </div>
@@ -165,5 +166,5 @@ function EmptyState({ text }: { text: string }) {
 }
 
 function PremiumForm({ title, icon, fields, button }: { title: string; icon: React.ReactNode; fields: string[]; button: string }) {
-  return <form className="rounded-[2rem] border border-emerald-400/20 bg-[#161918]/90 p-6"><h3 className="mb-5 flex items-center gap-3 text-2xl font-black text-white">{icon}{title}</h3><div className="grid gap-4">{fields.map((field) => <label key={field} className="block text-sm font-bold text-zinc-200">{field}<input className="mt-2 h-12 w-full rounded-2xl border border-white/15 bg-white/[0.06] px-4 text-white outline-none ring-emerald-300/40 focus:ring" placeholder={field.replace(" *", "")} /></label>)}</div><button type="button" className="mt-5 inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-400 to-cyan-300 font-black uppercase tracking-[0.16em] text-black"><Send size={18} />{button}</button></form>;
+  return <form className="rounded-[2rem] border border-emerald-400/20 bg-[#161918]/90 p-6"><h3 className="mb-5 flex items-center gap-3 text-2xl font-black text-white">{icon}{title}</h3><div className="grid gap-4">{fields.map((field) => <label key={field} className="block text-sm font-bold text-zinc-200">{field}<input className="mt-2 h-12 w-full rounded-2xl border border-white/15 bg-white/[0.06] px-4 text-white outline-none ring-emerald-300/40 focus:ring" placeholder={field.replace(" *", "")} /></label>)}</div><button type="button" className="mt-5 inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-400 to-cyan-300 font-black uppercase tracking-[0.16em] text-black">{button}</button></form>;
 }
