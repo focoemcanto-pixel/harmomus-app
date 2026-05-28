@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { NextResponse } from "next/server";
 
+import { ensureMinistryForSubscription } from "@/lib/data/ministry";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getStripeSubscription } from "@/lib/stripe/client";
 import { mapStripeStatus } from "@/lib/stripe/status";
@@ -16,6 +17,7 @@ type SyncedSubscriptionContext = {
   status: string;
   customerId: string | null;
   subscriptionId: string | null;
+  localSubscriptionId: string | null;
   stripePriceId: string | null;
   customerEmail: string | null;
   currentPeriodEnd: string | null;
@@ -159,8 +161,8 @@ async function saveSubscriptionByUserId(supabase: any, payload: Record<string, u
   if (existingError) return { data: null, error: existingError };
 
   const response = existing?.id
-    ? await supabase.from("subscriptions").update(payload).eq("id", existing.id).select()
-    : await supabase.from("subscriptions").insert({ ...payload, created_at: new Date().toISOString() }).select();
+    ? await supabase.from("subscriptions").update(payload).eq("id", existing.id).select("id")
+    : await supabase.from("subscriptions").insert({ ...payload, created_at: new Date().toISOString() }).select("id");
 
   if (response.error) console.error("[stripe.webhook] Falha ao salvar assinatura", response.error);
   return response;
@@ -176,6 +178,15 @@ async function downgradeToFree(supabase: any, userId: string, patch: Record<stri
     plan_id: freePlan.id,
     ...patch,
   });
+
+  const { error: ministryError } = await supabase
+    .from("ministries")
+    .update({ status: "canceled", updated_at: new Date().toISOString() })
+    .eq("owner_id", userId);
+
+  if (ministryError && ministryError.code !== "42P01") {
+    console.error("[stripe.webhook] Falha ao cancelar ministério", ministryError);
+  }
 }
 
 function mapStripeEventToWebhookEvent(eventType: string, status: string) {
@@ -270,7 +281,7 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
       updated_at: new Date().toISOString(),
     });
 
-    return { userId, planSlug: "free", status: "canceled", customerId, subscriptionId: syncedSubscriptionId, stripePriceId, customerEmail, currentPeriodEnd, trialEndsAt };
+    return { userId, planSlug: "free", status: "canceled", customerId, subscriptionId: syncedSubscriptionId, localSubscriptionId: null, stripePriceId, customerEmail, currentPeriodEnd, trialEndsAt };
   }
 
   const plan = await getPlanByStripePriceId(supabase, stripePriceId, metadataPlanSlug);
@@ -299,7 +310,24 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
 
   if (saveResponse.error) return null;
 
-  return { userId, planSlug: plan.slug ?? null, status, customerId, subscriptionId: syncedSubscriptionId, stripePriceId, customerEmail, currentPeriodEnd, trialEndsAt };
+  const localSubscriptionId = saveResponse.data?.[0]?.id ?? null;
+
+  try {
+    await ensureMinistryForSubscription({
+      userId,
+      planSlug: plan.slug ?? null,
+      subscriptionId: localSubscriptionId,
+      stripeCustomerId: customerId,
+      stripeSubscriptionId: syncedSubscriptionId,
+      status,
+      currentPeriodEnd,
+      trialEndsAt,
+    });
+  } catch (ministryError) {
+    console.error("[stripe.webhook] Falha ao sincronizar central ministerial", ministryError);
+  }
+
+  return { userId, planSlug: plan.slug ?? null, status, customerId, subscriptionId: syncedSubscriptionId, localSubscriptionId, stripePriceId, customerEmail, currentPeriodEnd, trialEndsAt };
 }
 
 async function dispatchStripeWebhookEvent(supabase: any, event: StripeEvent, context: SyncedSubscriptionContext) {
