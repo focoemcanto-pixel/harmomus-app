@@ -5,6 +5,7 @@ import { PublicAppShell } from "@/components/public/public-app-shell";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { getCurrentUserPlaylists } from "@/lib/data/playlists";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 
 async function deletePlaylist(formData: FormData) {
   "use server";
@@ -13,21 +14,30 @@ async function deletePlaylist(formData: FormData) {
   if (!playlistId) return;
 
   const context = await getCurrentUserAccessContext();
-  if (context.isGuest || !context.profile?.id) return;
+  if (context.isGuest || !(context.effectiveSlug === "plus" || context.effectiveSlug === "premium")) return;
+
+  const authClient = await createClient();
+  const { data: auth } = await authClient.auth.getUser();
+  const user = auth.user;
+  if (!user) return;
 
   const supabase = createSupabaseAdminClient() as any;
 
-  const { data: playlist } = await supabase
+  const { data: playlist, error: playlistError } = await supabase
     .from("playlists")
     .select("id")
     .eq("id", playlistId)
-    .eq("user_id", context.profile.id)
+    .eq("user_id", user.id)
     .maybeSingle();
 
+  if (playlistError) throw new Error(playlistError.message);
   if (!playlist) return;
 
-  await supabase.from("playlist_items").delete().eq("playlist_id", playlistId);
-  await supabase.from("playlists").delete().eq("id", playlistId);
+  const { error: itemsError } = await supabase.from("playlist_items").delete().eq("playlist_id", playlist.id);
+  if (itemsError) throw new Error(itemsError.message);
+
+  const { error: deleteError } = await supabase.from("playlists").delete().eq("id", playlist.id).eq("user_id", user.id);
+  if (deleteError) throw new Error(deleteError.message);
 
   redirect("/minhas-playlists");
 }
@@ -39,6 +49,12 @@ export default async function MinhasPlaylistsPage() {
   if (!(context.effectiveSlug === "plus" || context.effectiveSlug === "premium")) redirect("/assinatura");
 
   const playlists = await getCurrentUserPlaylists();
+  const publicBaseUrl = (
+    process.env.NEXT_PUBLIC_SITE_URL ??
+    process.env.NEXT_PUBLIC_APP_URL ??
+    process.env.APP_BASE_URL ??
+    ""
+  ).replace(/\/$/, "");
 
   return (
     <PublicAppShell>
@@ -81,7 +97,8 @@ export default async function MinhasPlaylistsPage() {
             <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
               {playlists.map((playlist) => {
                 const shareUrl = `/playlist/${playlist.slug}`;
-                const whatsappShare = `https://wa.me/?text=${encodeURIComponent(`Ouça minha playlist no Harmomus: https://harmomus-app.focoemcanto.workers.dev${shareUrl}`)}`;
+                const absoluteShareUrl = publicBaseUrl ? `${publicBaseUrl}${shareUrl}` : shareUrl;
+                const whatsappShare = `https://wa.me/?text=${encodeURIComponent(`Ouça minha playlist no Harmomus: ${absoluteShareUrl}`)}`;
 
                 return (
                   <div
