@@ -68,7 +68,7 @@ export async function POST(request: Request) {
       .eq("kit_id", kitId)
       .eq("analysis_type", "tessitura")
       .in("audio_file_id", fileIds)
-      .in("status", ["pending", "processing"]);
+      .in("status", ["pending", "processing", "completed"]);
 
     if (existingJobsError) {
       return NextResponse.json({ error: existingJobsError.message }, { status: 500 });
@@ -121,6 +121,7 @@ export async function POST(request: Request) {
         autoAnalysisEnabled: ENABLE_SMART_TESSITURA_ANALYSIS,
         createdCount,
         skippedCount: targetFiles.length - createdCount,
+        skipped: createdCount === 0,
         errors,
       },
       { status: 200 },

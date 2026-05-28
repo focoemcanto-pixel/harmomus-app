@@ -45,6 +45,7 @@ function midiToNoteName(midi: number): string {
 
 async function reserveJob() {
   console.info("[audio-analysis-worker] reservando job");
+  await enforceSingleProcessingJob();
   await recoverStaleProcessingJobs();
 
   const { data: pending, error } = await supabase
@@ -71,6 +72,38 @@ async function reserveJob() {
 
   if (lockError) throw new Error(lockError.message);
   return locked ?? null;
+}
+
+async function enforceSingleProcessingJob() {
+  const { data: processingJobs, error } = await supabase
+    .from("audio_analysis_jobs")
+    .select("id,created_at,started_at")
+    .eq("status", "processing")
+    .order("started_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error(error.message);
+  if (!processingJobs || processingJobs.length <= 1) return;
+
+  const [keep, ...staleJobs] = processingJobs;
+  const staleIds = staleJobs.map((job) => job.id);
+  const staleReason = `stale processing slot cleanup: kept ${keep.id} and failed ${staleIds.length} older processing job(s)`;
+
+  const { error: failError } = await supabase
+    .from("audio_analysis_jobs")
+    .update({
+      status: "failed",
+      error_message: staleReason,
+      completed_at: new Date().toISOString(),
+    })
+    .in("id", staleIds)
+    .eq("status", "processing");
+
+  if (failError) throw new Error(failError.message);
+  console.warn("[audio-analysis-worker] processamento concorrente detectado; jobs antigos marcados como stale", {
+    keep_job_id: keep.id,
+    stale_job_ids: staleIds,
+  });
 }
 
 async function recoverStaleProcessingJobs() {
@@ -269,21 +302,7 @@ async function processJob(job: any) {
     logs.push({ at: new Date().toISOString(), message: "Download do áudio concluído", source_r2_key: job.source_r2_key });
 
     const normalizedVoice = normalizeVoice(job.voice);
-    if (IGNORED_ANALYSIS_LABELS.has(normalizedVoice)) {
-      logs.push({ at: new Date().toISOString(), message: "Arquivo ignorado para análise de tessitura", voice: normalizedVoice, reason: "ignored-label" });
-      await supabase
-        .from("audio_analysis_jobs")
-        .update({
-          status: "completed",
-          analysis_method: "ignored",
-          analysis_logs: logs,
-          error_message: null,
-          completed_at: new Date().toISOString(),
-        })
-        .eq("id", job.id);
-      console.info("[audio-analysis-worker] arquivo ignorado", { job_id: job.id, voice: normalizedVoice });
-      return;
-    }
+    if (IGNORED_ANALYSIS_LABELS.has(normalizedVoice)) throw new Error(`voice '${normalizedVoice}' não é elegível para análise de tessitura`);
 
     if (!DIRECT_VOICES.has(normalizedVoice)) {
       throw new Error(`Voice inválida para análise de tessitura: ${String(job.voice ?? "")}`);
@@ -295,6 +314,9 @@ async function processJob(job: any) {
     logs.push({ at: new Date().toISOString(), message: "Análise de tessitura concluída", analysis_mode: analysisMode, voice: normalizedVoice, notes_detected: notes.length, avg_pitch_midi });
 
     const insights = buildInsights(notes);
+    if (insights.minMidi === null || insights.maxMidi === null) {
+      throw new Error("no pitch detected");
+    }
     console.info("[audio-analysis-worker] salvando análise", { job_id: job.id, analysis_mode: analysisMode, voice: normalizedVoice, pitch_medio_midi: avg_pitch_midi, min_midi: insights.minMidi, max_midi: insights.maxMidi, confidence: insights.confidence });
 
     const { error } = await supabase

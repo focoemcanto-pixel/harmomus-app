@@ -136,7 +136,10 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
     () => allFiles.filter((file) => typeof file.id === "string" && (typeof (file.minMidiNote ?? file.detectedMinMidiNote) !== "number" || typeof (file.maxMidiNote ?? file.detectedMaxMidiNote) !== "number")),
     [allFiles],
   );
-  const filesForAiAnalysis = useMemo(() => allFiles.filter((file) => typeof file.id === "string"), [allFiles]);
+  const filesForAiAnalysis = useMemo(
+    () => allFiles.filter((file) => typeof file.id === "string" && file.voice !== "todos"),
+    [allFiles],
+  );
 
   const jobStats = useMemo(() => {
     const total = jobs.length;
