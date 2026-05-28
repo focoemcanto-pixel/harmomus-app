@@ -192,6 +192,7 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
 
 export default async function CheckoutSucesso({ searchParams }: CheckoutSuccessProps) {
   const resolvedSearchParams = await searchParams;
+  const sessionId = resolvedSearchParams?.session_id ?? null;
   const sync = await syncCheckoutSession(resolvedSearchParams?.session_id);
   const planName = sync.planSlug === "plus" ? "Plus" : sync.planSlug === "premium" ? "Premium" : "Plus/Premium";
   const firstSignupFlow = sync.onboardingStatus === "pending_email_confirmation";
@@ -217,7 +218,7 @@ export default async function CheckoutSucesso({ searchParams }: CheckoutSuccessP
 
         {firstSignupFlow ? (
           <div className="mt-6">
-            <EmailConfirmationState variant="premium" email={sync.customerEmail ?? ""} allowEmailEdit allowResend />
+            <EmailConfirmationState variant="premium" email={sync.customerEmail ?? ""} allowEmailEdit allowResend sessionId={sessionId} />
           </div>
         ) : null}
 
