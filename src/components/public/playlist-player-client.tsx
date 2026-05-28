@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getPitchEngine, type PitchPlaybackController } from "@/lib/audio/pitch-engine";
-import { midiToNoteName } from "@/lib/audio/pitch-analysis";
+import { midiToBrazilianNote } from "@/lib/audio/pitch-analysis";
 
 import type { PlaylistKitSummary, PlaylistTrackVoice, PublicPlaylist } from "@/lib/data/playlists";
 import { analyzeTessitura } from "@/lib/music/tessitura";
@@ -49,8 +49,8 @@ function findTrack(kit: PlaylistKitSummary, tone: string, voice: PlaylistTrackVo
   return kit.tracks.find((track) => track.tone === tone && track.voice === voice) ?? kit.tracks.find((track) => track.tone === tone) ?? kit.tracks[0] ?? null;
 }
 
-function toneStatusLabel(isReal: boolean) {
-  return isReal ? "gravado" : "Harmomus AI";
+function toneStatusLabel(source: "original" | "generated" | null | undefined) {
+  return source === "original" ? "Original" : "Harmomus IA";
 }
 
 function tessituraStatusLabel(status: string) {
@@ -274,7 +274,8 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
     return <main className="min-h-screen bg-[radial-gradient(circle_at_top,#1f2840_0%,#06070c_40%)] p-6 text-white">Playlist vazia.</main>;
   }
 
-  const isSelectedToneReal = realToneOptions.includes(selectedTone);
+  const selectedSource = currentTrack?.sourceType ?? null;
+  const isSelectedToneReal = selectedSource === "original";
   const canPlaySelectedTone = Boolean(playableTrack?.streamUrl);
   const trackMidiRange = getTrackMidiRange(currentTrack);
 
@@ -329,8 +330,8 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
                       className="h-11 w-full rounded-xl border border-white/15 bg-black/30 px-3 text-sm text-white outline-none"
                     >
                       {toneOptions.map((tone) => {
-                        const isReal = realToneOptions.includes(tone);
-                        return <option key={tone} value={tone}>{tone} • {toneStatusLabel(isReal)}</option>;
+                        const track = currentKit?.tracks.find((item) => item.tone === tone && (item.voice === selectedVoice || !selectedVoice)) ?? currentKit?.tracks.find((item) => item.tone === tone) ?? null;
+                        return <option key={tone} value={tone}>{tone} • {toneStatusLabel(track?.sourceType)}</option>;
                       })}
                     </select>
                   </label>
@@ -366,7 +367,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
                     </div>
                     <p className="mt-2 text-zinc-300">{tessituraAnalysis.message}</p>
                     <p className="mt-1 text-zinc-500">
-                      Faixa original: {trackMidiRange ? `${midiToNoteName(trackMidiRange.min)} → ${midiToNoteName(trackMidiRange.max)}` : "não analisada"} • Após ajuste: {midiToNoteName(tessituraAnalysis.targetMidiRange.min)} → {midiToNoteName(tessituraAnalysis.targetMidiRange.max)}
+                      Faixa original: {trackMidiRange ? `${midiToBrazilianNote(trackMidiRange.min)} → ${midiToBrazilianNote(trackMidiRange.max)}` : "não analisada"} • Após ajuste: {midiToBrazilianNote(tessituraAnalysis.targetMidiRange.min)} → {midiToBrazilianNote(tessituraAnalysis.targetMidiRange.max)}
                     </p>
                   </div>
                 ) : currentTrack ? (
@@ -408,7 +409,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
                   <button onClick={() => setReplayAtEnd((v) => !v)} className={`rounded-full border px-4 py-2 text-sm ${replayAtEnd ? "border-gold-300 text-gold-300" : "border-white/20 text-zinc-200"}`}>
                     Replay {replayAtEnd ? "ON" : "OFF"}
                   </button>
-                  {!isSelectedToneReal ? <span className="text-xs text-zinc-400">Harmomus AI com pitch shifting em tempo real.</span> : null}
+                  <span className="text-xs text-zinc-400">{isSelectedToneReal ? "Original" : "Harmomus IA"}</span>
                   <Link href="/minhas-playlists" className="ml-auto rounded-full border border-white/20 px-4 py-2 text-sm text-zinc-100">
                     Sair da playlist
                   </Link>

@@ -1,6 +1,6 @@
-import { midiToNoteName } from "@/lib/music/notes";
+import { midiToBrazilianNote, midiToNoteName, spnToBrazilianNote } from "@/lib/music/notes";
 
-export { midiToNoteName };
+export { midiToBrazilianNote, midiToNoteName, spnToBrazilianNote };
 
 export interface PitchAnalysisFrame {
   time: number;

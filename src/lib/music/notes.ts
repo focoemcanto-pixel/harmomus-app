@@ -4,3 +4,11 @@ export function midiToNoteName(midi: number): string {
   const octave = Math.floor(midi / 12) - 1;
   return `${note}${octave}`;
 }
+
+export function spnToBrazilianNote(note: string): string {
+  return note.replace(/(-?\d+)$/, (octave) => String(Number(octave) - 1));
+}
+
+export function midiToBrazilianNote(midi: number): string {
+  return spnToBrazilianNote(midiToNoteName(midi));
+}

@@ -10,7 +10,7 @@ import { PremiumKitGateCard } from "@/components/public/premium-kit-gate-card";
 import { UpgradeRequiredModal } from "@/components/public/upgrade-required-modal";
 import { VoiceSelector } from "@/components/public/voice-selector";
 import { useKitAudioEngine } from "@/components/public/use-kit-audio-engine";
-import { midiToNoteName } from "@/lib/audio/pitch-analysis";
+import { midiToBrazilianNote } from "@/lib/audio/pitch-analysis";
 import type { PublicKit, PublicKitAudioFile, PublicKitToneGroup, VoiceType } from "@/lib/data/public-kits";
 import { analyzeTargetVoiceTessitura, type TargetVoiceTessituraAnalysis, type VocalRangeType } from "@/lib/music/tessitura";
 import { formatToneLabel, normalizeTone, resolveToneTrack, sortTonesByChromaticOrder } from "@/lib/music/tones";

@@ -6,6 +6,8 @@ export interface KitAudioFile {
   tone: string;
   voice: "todos" | "soprano" | "contralto" | "tenor";
   fileType: string;
+  source: "original" | "generated";
+  isGenerated: boolean;
   minMidiNote?: number | null;
   maxMidiNote?: number | null;
   detectedMinMidiNote?: number | null;
@@ -16,5 +18,7 @@ export interface KitAudioFile {
 
 export interface KitAudioToneGroup {
   tone: string;
+  source: "original" | "generated";
+  isGenerated: boolean;
   files: KitAudioFile[];
 }

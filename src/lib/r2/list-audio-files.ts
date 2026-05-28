@@ -66,7 +66,7 @@ async function listByPrefix(prefix: string): Promise<KitAudioToneGroup[]> {
     const name = dotIndex > 0 ? filename.slice(0, dotIndex) : filename;
     const fileType = dotIndex > 0 ? filename.slice(dotIndex + 1).toLowerCase() : "unknown";
 
-    const file: KitAudioFile = { tone, voice, name, key, url: buildPublicUrl(key), fileType };
+    const file: KitAudioFile = { tone, voice, name, key, url: buildPublicUrl(key), fileType, source: "original", isGenerated: false };
 
     if (!groups.has(tone)) groups.set(tone, []);
     groups.get(tone)?.push(file);
@@ -76,6 +76,8 @@ async function listByPrefix(prefix: string): Promise<KitAudioToneGroup[]> {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([tone, files]) => ({
       tone,
+      source: files.some((file) => file.source === "original") ? "original" : "generated",
+      isGenerated: !files.some((file) => file.source === "original"),
       files: files.sort((a, b) => a.name.localeCompare(b.name)),
     }));
 }

@@ -53,7 +53,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
         isGenerated: !toneFiles.some((file) => file.source === "original"),
         files: toneFiles,
       })),
-    });
+    }, { headers: { "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro inesperado ao buscar áudios.";
     return NextResponse.json({ error: message }, { status: 400 });
