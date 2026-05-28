@@ -6,8 +6,8 @@ alter table public.audio_analysis_jobs
   add column if not exists vocal_confidence numeric,
   add column if not exists pitch_events_json jsonb;
 
-comment on column public.audio_analysis_jobs.detected_min_note is 'Nota MIDI mínima detectada na linha vocal principal (Demucs + Basic Pitch).';
-comment on column public.audio_analysis_jobs.detected_max_note is 'Nota MIDI máxima detectada na linha vocal principal (Demucs + Basic Pitch).';
+comment on column public.audio_analysis_jobs.detected_min_note is 'Nota MIDI mínima detectada na linha vocal principal (pipeline leve de tessitura).';
+comment on column public.audio_analysis_jobs.detected_max_note is 'Nota MIDI máxima detectada na linha vocal principal (pipeline leve de tessitura).';
 comment on column public.audio_analysis_jobs.comfort_min_note is 'Limite inferior confortável detectado automaticamente.';
 comment on column public.audio_analysis_jobs.comfort_max_note is 'Limite superior confortável detectado automaticamente.';
 comment on column public.audio_analysis_jobs.vocal_confidence is 'Confiança agregada da análise vocal principal.';
