@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { analyzeAudioUrlPitch, midiToNoteName } from "@/lib/audio/pitch-analysis";
-import { VOCAL_RANGES, type TessituraStatus, type VocalRangeType } from "@/lib/music/tessitura";
+import { analyzeAudioUrlPitch, midiToBrazilianNote } from "@/lib/audio/pitch-analysis";
+import { classifyOfficialVoiceRange, OFFICIAL_VOCAL_RANGES, type VocalRangeType } from "@/lib/music/tessitura";
 import { getSignedSemitoneDistance, normalizeTone, sortTonesByChromaticOrder } from "@/lib/music/tones";
 import type { KitAudioFile, KitAudioToneGroup } from "@/types/kit-audio";
 
@@ -53,10 +53,10 @@ type AnalysisJob = {
   completed_at?: string | null;
 };
 
-type RecommendationLevel = "comfortable" | "attention" | "risky" | "incomplete";
+type RecommendationLevel = "safe" | "attention" | "risky" | "incomplete";
 
 const RECOMMENDATION_BADGES: Record<RecommendationLevel, { label: string; className: string }> = {
-  comfortable: { label: "Confortável", className: "border-emerald-400/40 bg-emerald-500/15 text-emerald-100" },
+  safe: { label: "Seguro", className: "border-emerald-400/40 bg-emerald-500/15 text-emerald-100" },
   attention: { label: "Atenção", className: "border-amber-400/40 bg-amber-500/15 text-amber-100" },
   risky: { label: "Arriscado", className: "border-red-400/40 bg-red-500/15 text-red-100" },
   incomplete: { label: "Análise incompleta", className: "border-zinc-400/30 bg-zinc-500/10 text-zinc-200" },
@@ -85,7 +85,7 @@ function hasCompleteAiAnalysis(job: AnalysisJob) {
 
 function formatMidiRange(min?: number | null, max?: number | null) {
   if (typeof min !== "number" || typeof max !== "number") return "— → —";
-  return `${midiToNoteName(min)} → ${midiToNoteName(max)}`;
+  return `${midiToBrazilianNote(min)} → ${midiToBrazilianNote(max)}`;
 }
 
 function formatAiConfidence(value?: number | null) {
@@ -94,16 +94,22 @@ function formatAiConfidence(value?: number | null) {
   return `${Math.round(normalized * 100)}%`;
 }
 
-function classifyVoiceComfortRange(voice: KitAudioFile["voice"], min?: number | null, max?: number | null): { level: RecommendationLevel; status: TessituraStatus | "incomplete" } {
-  if (typeof min !== "number" || typeof max !== "number") return { level: "incomplete", status: "incomplete" };
-  if (voice === "todos") return { level: "incomplete", status: "incomplete" };
+function getVoiceRecommendation(voice: KitAudioFile["voice"], mainMin?: number | null, mainMax?: number | null) {
+  if (voice === "todos") return null;
+  return classifyOfficialVoiceRange(voice as VocalRangeType, mainMin, mainMax);
+}
 
-  const range = VOCAL_RANGES[voice as VocalRangeType];
-  if (!range) return { level: "incomplete", status: "incomplete" };
+function getRecommendationBadgeLevel(voice: KitAudioFile["voice"], mainMin?: number | null, mainMax?: number | null): RecommendationLevel {
+  const recommendation = getVoiceRecommendation(voice, mainMin, mainMax);
+  return recommendation?.level ?? "incomplete";
+}
 
-  if (min >= range.comfortable.minMidi && max <= range.comfortable.maxMidi) return { level: "comfortable", status: "comfortable" };
-  if (min >= range.extended.minMidi && max <= range.extended.maxMidi) return { level: "attention", status: "extended" };
-  return { level: "risky", status: max <= range.extreme.maxMidi && min >= range.extreme.minMidi ? "extreme" : "unsafe" };
+function formatOfficialRange(voice: KitAudioFile["voice"], type: "comfortable" | "absolute") {
+  if (voice === "todos") return null;
+  const range = OFFICIAL_VOCAL_RANGES[voice as Exclude<VocalRangeType, "baritono">];
+  if (!range) return null;
+  const zone = type === "comfortable" ? range.comfortable : range.absolute;
+  return `${midiToBrazilianNote(zone.minMidi)} → ${midiToBrazilianNote(zone.maxMidi)}`;
 }
 
 const STATUS_STYLES: Record<string, { label: string; icon: string; className: string; dot: string }> = {
@@ -190,7 +196,7 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
 
   const allFiles = useMemo(() => tones.flatMap((tone) => tone.files), [tones]);
   const generatedTones = useMemo(
-    () => tones.filter((tone) => (tone as any).generated || tone.files?.some((file: any) => file.generated)),
+    () => tones.filter((tone) => tone.source === "generated" || tone.files?.some((file) => file.source === "generated")),
     [tones],
   );
   const pendingFiles = useMemo(
@@ -521,7 +527,7 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
 
     if (typeof min !== "number" || typeof max !== "number") return "Não analisado";
 
-    return `${midiToNoteName(min)} → ${midiToNoteName(max)}`;
+    return `${midiToBrazilianNote(min)} → ${midiToBrazilianNote(max)}`;
   }
 
   function formatConfidence(file: KitAudioFile) {
@@ -535,6 +541,7 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
         <div>
           <h2 className="text-base font-semibold text-foreground">Áudios do R2</h2>
           <p className="text-sm text-muted">Sincronize, carregue e analise a tessitura de cada voz por tom.</p>
+          <p className="mt-1 text-[11px] text-muted">Notação exibida no padrão brasileiro</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={() => void loadSyncedAudios()} disabled={loadingFiles || loading || analyzingAll} className="rounded-lg border border-border bg-surface-muted px-4 py-2 text-sm font-medium text-muted transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60">
@@ -653,10 +660,9 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
                   .map((file) => {
                     const job = getAnalysisJobForFile(file.id);
                     if (!job) return null;
-                    const comfortRange = getJobMidiRange(job, "comfort");
+                    const detectedRange = getJobMidiRange(job, "detected");
                     const isIncomplete = job.status === "completed" && !hasCompleteAiAnalysis(job);
-                    const recommendation = classifyVoiceComfortRange(file.voice, comfortRange.min, comfortRange.max);
-                    const badge = RECOMMENDATION_BADGES[isIncomplete ? "incomplete" : recommendation.level];
+                    const badge = RECOMMENDATION_BADGES[isIncomplete ? "incomplete" : getRecommendationBadgeLevel(file.voice, detectedRange.min, detectedRange.max)];
 
                     return (
                       <span key={`${toneGroup.tone}-${file.id ?? file.key}-recommendation`} className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${badge.className}`}>
@@ -686,6 +692,7 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
                             <div>
                               <span className="block font-medium text-foreground">{file.name}</span>
                               <span className="text-muted">.{file.fileType}</span>
+                              <span className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${file.source === "original" ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-200" : "border-violet-300/30 bg-violet-500/15 text-violet-100"}`}>{file.source === "original" ? "Original" : "Harmomus IA"}</span>
                             </div>
                             <div className="text-right">
                               <span className="block text-foreground">{formatTessitura(file)}</span>
@@ -709,19 +716,21 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
                                 const detectedRange = getJobMidiRange(job, "detected");
                                 const comfortRange = getJobMidiRange(job, "comfort");
                                 const isIncomplete = isAiIncomplete;
-                                const recommendation = classifyVoiceComfortRange(file.voice, comfortRange.min, comfortRange.max);
-                                const badge = RECOMMENDATION_BADGES[isIncomplete ? "incomplete" : recommendation.level];
+                                const recommendation = getVoiceRecommendation(file.voice, detectedRange.min, detectedRange.max);
+                                const badge = RECOMMENDATION_BADGES[isIncomplete ? "incomplete" : recommendation?.level ?? "incomplete"];
                                 const confidence = formatAiConfidence(job.vocal_confidence);
 
                                 return (
                                   <>
                                     <span className="block text-[11px] font-semibold uppercase tracking-wide text-cyan-100">IA: {isIncomplete ? "análise incompleta" : job.status}</span>
-                                    <span className="block text-[11px] text-cyan-100/80">Tessitura: {formatMidiRange(detectedRange.min, detectedRange.max)}</span>
-                                    <span className="block text-[11px] text-cyan-100/80">Confortável: {formatMidiRange(comfortRange.min, comfortRange.max)}</span>
+                                    <span className="block text-[11px] text-cyan-100/80">Tessitura principal: {formatMidiRange(detectedRange.min, detectedRange.max)}</span>
+                                    <span className="block text-[11px] text-cyan-100/80">Região confortável detectada: {formatMidiRange(comfortRange.min, comfortRange.max)}</span>
+                                    {file.voice !== "todos" ? <span className="block text-[11px] text-cyan-100/80">Range por voz: {formatOfficialRange(file.voice, "comfortable") ?? "—"}</span> : null}
+                                    {recommendation && !isIncomplete ? <span className="block max-w-[220px] text-[11px] text-cyan-100/80">Motivo: {recommendation.reason}</span> : null}
                                     {confidence ? <span className="block text-[11px] text-cyan-100/80">Confiança: {confidence}</span> : null}
                                     {job.analysis_method ? <span className="block text-[11px] text-cyan-100/80">Método: {job.analysis_method}</span> : null}
                                     <span className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${badge.className}`}>{badge.label}</span>
-                                    <span className="block max-w-[220px] truncate text-[11px] text-cyan-100/70">{job.error_message ?? (isIncomplete ? "completed sem min/max/comfort; reanálise liberada" : log ?? "sem logs")}</span>
+                                    <span className="block max-w-[220px] truncate text-[11px] text-cyan-100/70">{job.error_message ?? (isIncomplete ? "análise incompleta; reanálise liberada" : log ?? "sem logs")}</span>
                                   </>
                                 );
                               })()}

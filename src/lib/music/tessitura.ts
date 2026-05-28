@@ -2,6 +2,7 @@ import { getSignedSemitoneDistance, normalizeTone } from "@/lib/music/tones";
 
 export type VocalRangeType = "tenor" | "contralto" | "soprano" | "baritono";
 export type TessituraStatus = "comfortable" | "extended" | "extreme" | "unsafe";
+export type VocalRiskLevel = "safe" | "attention" | "risky";
 
 export interface VocalZone {
   minMidi: number;
@@ -15,6 +16,22 @@ export interface VocalRange {
   extended: VocalZone;
   extreme: VocalZone;
   preferredOctaveShift: 0 | -12 | 12;
+}
+
+export interface OfficialVocalRange {
+  type: Exclude<VocalRangeType, "baritono">;
+  label: string;
+  absolute: VocalZone;
+  comfortable: VocalZone;
+  warningMarginSemitones: number;
+}
+
+export interface VocalRangeRecommendation {
+  level: VocalRiskLevel;
+  label: "Seguro" | "Atenção" | "Arriscado";
+  overflowSemitones: number;
+  outsideAbsoluteRange: boolean;
+  reason: string;
 }
 
 export interface TessituraAnalysis {
@@ -47,6 +64,30 @@ export interface TargetVoiceTessituraAnalysis {
 }
 
 const DEFAULT_TESSITURA_TOLERANCE_SEMITONES = 1;
+
+export const OFFICIAL_VOCAL_RANGES: Record<Exclude<VocalRangeType, "baritono">, OfficialVocalRange> = {
+  tenor: {
+    type: "tenor",
+    label: "Tenor",
+    absolute: { minMidi: 48, maxMidi: 72 },
+    comfortable: { minMidi: 53, maxMidi: 67 },
+    warningMarginSemitones: 2,
+  },
+  contralto: {
+    type: "contralto",
+    label: "Contralto",
+    absolute: { minMidi: 50, maxMidi: 74 },
+    comfortable: { minMidi: 53, maxMidi: 71 },
+    warningMarginSemitones: 2,
+  },
+  soprano: {
+    type: "soprano",
+    label: "Soprano",
+    absolute: { minMidi: 57, maxMidi: 77 },
+    comfortable: { minMidi: 60, maxMidi: 72 },
+    warningMarginSemitones: 2,
+  },
+};
 
 export const VOCAL_RANGES: Record<VocalRangeType, VocalRange> = {
   baritono: {
@@ -258,3 +299,38 @@ export function analyzeTessitura({
     message: messageMap[classification.status],
   };
 }
+export function classifyOfficialVoiceRange(
+  voice: VocalRangeType,
+  mainMinMidi?: number | null,
+  mainMaxMidi?: number | null,
+): VocalRangeRecommendation | null {
+  if (voice === "baritono" || typeof mainMinMidi !== "number" || typeof mainMaxMidi !== "number") return null;
+
+  const range = OFFICIAL_VOCAL_RANGES[voice];
+  const belowComfort = Math.max(0, range.comfortable.minMidi - mainMinMidi);
+  const aboveComfort = Math.max(0, mainMaxMidi - range.comfortable.maxMidi);
+  const overflowSemitones = Math.max(belowComfort, aboveComfort);
+  const outsideAbsoluteRange = mainMinMidi < range.absolute.minMidi || mainMaxMidi > range.absolute.maxMidi;
+
+  if (!outsideAbsoluteRange && overflowSemitones === 0) {
+    return {
+      level: "safe",
+      label: "Seguro",
+      overflowSemitones,
+      outsideAbsoluteRange,
+      reason: "range principal dentro da zona confortável",
+    };
+  }
+
+  const direction = aboveComfort > belowComfort ? "acima" : belowComfort > aboveComfort ? "abaixo" : "fora";
+  const reason = outsideAbsoluteRange
+    ? `fora da extensão absoluta de ${range.label}`
+    : `passa ${overflowSemitones} semitom${overflowSemitones === 1 ? "" : "s"} ${direction} da zona confortável`;
+
+  if (!outsideAbsoluteRange && overflowSemitones <= range.warningMarginSemitones) {
+    return { level: "attention", label: "Atenção", overflowSemitones, outsideAbsoluteRange, reason };
+  }
+
+  return { level: "risky", label: "Arriscado", overflowSemitones, outsideAbsoluteRange, reason };
+}
+

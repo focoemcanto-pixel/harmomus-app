@@ -42,6 +42,8 @@ export interface PlaylistKitSummary {
     detectedMaxMidiNote: number | null;
     tessituraConfidence: number | null;
     tessituraSource: "manual" | "auto" | "hybrid";
+    sourceType: "original" | "generated";
+    isGenerated: boolean;
   }[];
 }
 
@@ -192,7 +194,7 @@ async function getPlaylistItems(supabase: any, playlistId: string) {
 async function getAudioFilesForPlaylist(supabase: any, kitIds: string[]) {
   if (!kitIds.length) return [];
 
-  const baseSelect = "id, kit_id, tone, name, file_type";
+  const baseSelect = "id, kit_id, tone, name, file_type, source_type";
   const tessituraSelect = `${baseSelect}, min_midi_note, max_midi_note, detected_min_midi_note, detected_max_midi_note, tessitura_confidence, tessitura_source`;
 
   const { data, error } = await supabase.from("kit_audio_files").select(tessituraSelect).in("kit_id", kitIds);
@@ -276,6 +278,8 @@ export async function getPlaylistBySlug(slug: string): Promise<PublicPlaylist | 
           detectedMaxMidiNote: file.detected_max_midi_note ?? null,
           tessituraConfidence: file.tessitura_confidence ?? null,
           tessituraSource: file.tessitura_source ?? "manual",
+          sourceType: file.source_type === "generated" ? "generated" : "original",
+          isGenerated: file.source_type === "generated",
         })),
       })),
   };
