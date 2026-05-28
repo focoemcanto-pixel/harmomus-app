@@ -196,18 +196,55 @@ export default async function MinhasPlaylistsPage() {
                     key={playlist.id}
                     className="group overflow-hidden rounded-3xl border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] transition hover:border-cyan-400/30 hover:bg-white/[0.08]"
                   >
-                    <Link href={shareUrl}>
+                    {playlist.isPublic ? (
+                      <Link href={shareUrl}>
+                        <div className="relative aspect-[16/9] overflow-hidden border-b border-white/5 bg-black/30">
+                          {playlist.covers.length > 0 ? (
+                            <div className="grid h-full w-full grid-cols-2 grid-rows-2 gap-[1px] bg-white/5">
+                              {playlist.covers.map((cover) => (
+                                <div key={cover.id} className="relative overflow-hidden bg-black/30">
+                                  {cover.cover_url ? (
+                                    <img
+                                      src={cover.cover_url}
+                                      alt={cover.name}
+                                      className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+                                    />
+                                  ) : (
+                                    <div className="flex h-full w-full items-center justify-center bg-white/5 text-xs text-zinc-500">
+                                      Sem capa
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="flex h-full items-center justify-center text-zinc-500">
+                              Playlist vazia
+                            </div>
+                          )}
+
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent" />
+
+                          <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between gap-3">
+                            <div>
+                              <p className="text-xs uppercase tracking-[0.2em] text-zinc-300">Playlist pública</p>
+                              <h2 className="mt-1 text-2xl font-semibold leading-tight">{playlist.name}</h2>
+                            </div>
+
+                            <div className="rounded-full border border-white/10 bg-black/40 px-3 py-1 text-sm text-zinc-100 backdrop-blur">
+                              {playlist.kitCount} kits
+                            </div>
+                          </div>
+                        </div>
+                      </Link>
+                    ) : (
                       <div className="relative aspect-[16/9] overflow-hidden border-b border-white/5 bg-black/30">
                         {playlist.covers.length > 0 ? (
-                          <div className="grid h-full w-full grid-cols-2 grid-rows-2 gap-[1px] bg-white/5">
+                          <div className="grid h-full w-full grid-cols-2 grid-rows-2 gap-[1px] bg-white/5 opacity-70">
                             {playlist.covers.map((cover) => (
                               <div key={cover.id} className="relative overflow-hidden bg-black/30">
                                 {cover.cover_url ? (
-                                  <img
-                                    src={cover.cover_url}
-                                    alt={cover.name}
-                                    className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
-                                  />
+                                  <img src={cover.cover_url} alt={cover.name} className="h-full w-full object-cover" />
                                 ) : (
                                   <div className="flex h-full w-full items-center justify-center bg-white/5 text-xs text-zinc-500">
                                     Sem capa
@@ -217,19 +254,15 @@ export default async function MinhasPlaylistsPage() {
                             ))}
                           </div>
                         ) : (
-                          <div className="flex h-full items-center justify-center text-zinc-500">
-                            Playlist vazia
-                          </div>
+                          <div className="flex h-full items-center justify-center text-zinc-500">Playlist vazia</div>
                         )}
 
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/25 to-black/20" />
 
                         <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between gap-3">
                           <div>
-                            <p className="text-xs uppercase tracking-[0.2em] text-zinc-300">
-                              {playlist.isPublic ? "Playlist pública" : "Playlist privada"}
-                            </p>
-                            <h2 className="mt-1 text-2xl font-semibold leading-tight">{playlist.name}</h2>
+                            <p className="text-xs uppercase tracking-[0.2em] text-zinc-400">Playlist privada</p>
+                            <h2 className="mt-1 text-2xl font-semibold leading-tight text-zinc-100">{playlist.name}</h2>
                           </div>
 
                           <div className="rounded-full border border-white/10 bg-black/40 px-3 py-1 text-sm text-zinc-100 backdrop-blur">
@@ -237,7 +270,7 @@ export default async function MinhasPlaylistsPage() {
                           </div>
                         </div>
                       </div>
-                    </Link>
+                    )}
 
                     <div className="space-y-4 p-5">
                       <ManagePlaylistKitsList
@@ -256,12 +289,21 @@ export default async function MinhasPlaylistsPage() {
                         </span>
 
                         <div className="flex flex-wrap items-center justify-end gap-2">
-                          <Link
-                            href={shareUrl}
-                            className="rounded-lg border border-cyan-400/20 bg-cyan-400/10 px-2 py-1 text-[11px] font-medium text-cyan-200 transition hover:bg-cyan-400/20"
-                          >
-                            Abrir
-                          </Link>
+                          {playlist.isPublic ? (
+                            <Link
+                              href={shareUrl}
+                              className="rounded-lg border border-cyan-400/20 bg-cyan-400/10 px-2 py-1 text-[11px] font-medium text-cyan-200 transition hover:bg-cyan-400/20"
+                            >
+                              Abrir
+                            </Link>
+                          ) : (
+                            <span
+                              className="cursor-not-allowed rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-medium text-zinc-500"
+                              title="Torne a playlist pública para abrir o link público"
+                            >
+                              Link privado
+                            </span>
+                          )}
 
                           <RenamePlaylistForm
                             playlistId={playlist.id}
