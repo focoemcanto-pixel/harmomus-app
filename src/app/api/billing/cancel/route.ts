@@ -1,5 +1,77 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+
 import { getCurrentUser } from "@/lib/auth/current-user";
-import { cancelSubscription } from "@/lib/stripe/client";
-export async function POST(req: Request){const user=await getCurrentUser(); if(!user) return NextResponse.redirect(new URL('/login',req.url)); const supabase=(await createClient()) as any; const {data:sub}=await supabase.from('subscriptions').select('*').eq('user_id',user.id).order('created_at',{ascending:false}).limit(1).single(); if(sub?.stripe_subscription_id) await cancelSubscription(sub.stripe_subscription_id); await supabase.from('subscriptions').update({status:'canceled',auto_renew:false,canceled_at:new Date().toISOString()}).eq('id',sub.id); return NextResponse.redirect(new URL('/assinatura',req.url));}
+import { createClient } from "@/lib/supabase/server";
+import { cancelSubscriptionAtPeriodEnd } from "@/lib/stripe/client";
+
+function appUrl(path: string, req: Request) {
+  return new URL(path, process.env.NEXT_PUBLIC_APP_URL || req.url);
+}
+
+export async function POST(req: Request) {
+  try {
+    const user = await getCurrentUser();
+
+    if (!user) {
+      return NextResponse.redirect(appUrl("/login", req), 303);
+    }
+
+    const supabase = (await createClient()) as any;
+
+    const { data: subscription } = await supabase
+      .from("subscriptions")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!subscription?.stripe_subscription_id) {
+      return NextResponse.redirect(
+        appUrl(
+          "/assinatura?error=Nenhuma assinatura ativa encontrada",
+          req,
+        ),
+        303,
+      );
+    }
+
+    const stripeSubscription = await cancelSubscriptionAtPeriodEnd(
+      subscription.stripe_subscription_id,
+    );
+
+    await supabase
+      .from("subscriptions")
+      .update({
+        cancel_at_period_end: true,
+        auto_renew: false,
+        current_period_end: stripeSubscription.current_period_end
+          ? new Date(
+              stripeSubscription.current_period_end * 1000,
+            ).toISOString()
+          : null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", subscription.id);
+
+    return NextResponse.redirect(
+      appUrl(
+        "/assinatura?error=Assinatura programada para cancelamento no fim do ciclo.",
+        req,
+      ),
+      303,
+    );
+  } catch (error) {
+    return NextResponse.redirect(
+      appUrl(
+        `/assinatura?error=${encodeURIComponent(
+          error instanceof Error
+            ? error.message
+            : "Erro ao cancelar assinatura",
+        )}`,
+        req,
+      ),
+      303,
+    );
+  }
+}

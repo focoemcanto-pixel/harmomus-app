@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { PublicAppShell } from "@/components/public/public-app-shell";
+import { CancelSubscriptionButton } from "./cancel-subscription-button";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { getCustomerPaymentMethods, getStripeSubscription, listCustomerInvoices } from "@/lib/stripe/client";
 import { getPlans } from "@/lib/data/plans";
@@ -47,6 +48,11 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
   let invoices: any[] = [];
   let paymentMethodLabel = "Não informado";
   let billingCycle = "Não informado";
+
+  let nextBillingDate =
+    context.subscription?.next_billing_at ??
+    context.subscription?.current_period_end ??
+    null;
   if (customerId && process.env.STRIPE_SECRET_KEY) {
     const [invoiceResponse, paymentMethodsResponse, stripeSubscription] = await Promise.all([
       listCustomerInvoices(customerId, 12).catch(() => ({ data: [] })),
@@ -57,6 +63,13 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
     const card = paymentMethodsResponse?.data?.[0]?.card;
     paymentMethodLabel = card ? `${String(card.brand ?? "Cartão").toUpperCase()} •••• ${card.last4}` : "Não cadastrado";
     const interval = stripeSubscription?.items?.data?.[0]?.price?.recurring?.interval;
+
+    if (!nextBillingDate && stripeSubscription?.current_period_end) {
+      nextBillingDate = new Date(
+        stripeSubscription.current_period_end * 1000,
+      ).toISOString();
+    }
+
     billingCycle = interval === "year" ? "Anual" : interval === "month" ? "Mensal" : "Não informado";
   }
 
@@ -70,7 +83,7 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
           <div className="mt-8 grid gap-4 md:grid-cols-4">
             <div className="rounded-2xl border border-white/15 bg-white/5 p-4"><p className="text-xs uppercase tracking-[0.12em] text-zinc-300">Plano atual</p><p className="mt-2 text-2xl font-semibold">{currentPlan}</p></div>
             <div className="rounded-2xl border border-white/15 bg-white/5 p-4"><p className="text-xs uppercase tracking-[0.12em] text-zinc-300">Status da assinatura</p><p className="mt-2 text-xl font-semibold text-emerald-300">{STATUS_LABELS[status] ?? status}</p></div>
-            <div className="rounded-2xl border border-white/15 bg-white/5 p-4"><p className="text-xs uppercase tracking-[0.12em] text-zinc-300">Próxima cobrança</p><p className="mt-2 text-xl font-semibold">{formatDate(context.subscription?.next_billing_at)}</p></div>
+            <div className="rounded-2xl border border-white/15 bg-white/5 p-4"><p className="text-xs uppercase tracking-[0.12em] text-zinc-300">Próxima cobrança</p><p className="mt-2 text-xl font-semibold">{formatDate(nextBillingDate)}</p></div>
             <div className="rounded-2xl border border-white/15 bg-white/5 p-4"><p className="text-xs uppercase tracking-[0.12em] text-zinc-300">Método de pagamento</p><p className="mt-2 text-xl font-semibold">{paymentMethodLabel}</p></div>
           </div>
 
@@ -96,7 +109,7 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
                         <td className="px-3 py-3">{currentPlan}</td>
                         <td className="px-3 py-3">{invoiceStatusLabel(invoice.status)}</td>
                         <td className="px-3 py-3">{paymentMethodLabel}</td>
-                        <td className="px-3 py-3">{formatDate(context.subscription?.next_billing_at)}</td>
+                        <td className="px-3 py-3">{formatDate(nextBillingDate)}</td>
                         <td className="px-3 py-3">{billingCycle}</td>
                         <td className="px-3 py-3">{invoice.invoice_pdf ? <a className="rounded-lg border border-cyan-300/40 px-3 py-2 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/10" href={invoice.invoice_pdf} target="_blank">Baixar recibo</a> : <span className="text-zinc-500">Indisponível</span>}</td>
                       </tr>
@@ -112,7 +125,7 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
             <div className="mt-4 flex flex-wrap gap-3">
               <form action="/api/billing/portal" method="post"><button className="rounded-xl bg-gradient-to-r from-cyan-300 to-blue-400 px-5 py-3 text-sm font-semibold text-slate-900">Abrir portal Stripe</button></form>
               <a href="/assinar?plan=premium" className="rounded-xl border border-fuchsia-300/50 bg-fuchsia-500/10 px-5 py-3 text-sm font-semibold text-fuchsia-100">Trocar plano</a>
-              <form action="/api/billing/cancel" method="post"><button className="rounded-xl border border-red-400/40 bg-red-500/10 px-5 py-3 text-sm font-semibold text-red-200">Cancelar assinatura</button></form>
+              <form action="/api/billing/cancel" method="post"><CancelSubscriptionButton /></form>
             </div>
           </div>
 
