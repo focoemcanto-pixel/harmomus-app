@@ -4,7 +4,7 @@ import { PublicAppShell } from "@/components/public/public-app-shell";
 import { SignupPlanSelector } from "@/components/public/signup-plan-selector";
 import { getAdminSettings } from "@/lib/data/admin-settings";
 
-const PLAN_OPTIONS = ["free", "plus", "premium", "ministry_10"] as const;
+const PLAN_OPTIONS = ["free", "plus", "premium", "ministry_10", "ministry_20", "ministry_40"] as const;
 type PlanSlug = (typeof PLAN_OPTIONS)[number];
 type Field = "form" | "full_name" | "username" | "email" | "phone" | "password" | "confirm_password";
 
@@ -41,7 +41,13 @@ export default async function CadastroPage({ searchParams }: { searchParams: Pro
   const headline = settings.home.headline || "Prepare sua voz. Honre seu chamado.";
   const selectedPlan = (PLAN_OPTIONS.includes((params.plan ?? "").toLowerCase() as PlanSlug) ? (params.plan ?? "free").toLowerCase() : "free") as PlanSlug;
   const redirectPath = safeRedirect(String(params.redirect ?? ""));
-  const error = params.error ? decodeURIComponent(params.error) : "";
+
+  let error = params.error ? decodeURIComponent(params.error) : "";
+
+  if (error.includes("For security purposes")) {
+    error = "Você tentou novamente muito rápido. Aguarde alguns segundos e tente novamente.";
+  }
+
   const field = (["form", "full_name", "username", "email", "phone", "password", "confirm_password"].includes(String(params.field ?? "")) ? String(params.field) : "form") as Field;
   const defaults = { fullName: String(params.full_name ?? ""), username: String(params.username ?? ""), email: String(params.email ?? ""), phone: String(params.phone ?? "") };
 
@@ -61,7 +67,14 @@ export default async function CadastroPage({ searchParams }: { searchParams: Pro
             <div><label className="mb-2 block text-sm text-zinc-200">Telefone / WhatsApp</label><input name="phone" required defaultValue={defaults.phone} placeholder="(11) 99999-9999" className={inputClass("phone", field)} /><FieldError name="phone" field={field} error={error} /></div>
             <div><label className="mb-2 block text-sm text-zinc-200">Senha</label><input name="password" type="password" required className={inputClass("password", field)} /><FieldError name="password" field={field} error={error} /></div>
             <div><label className="mb-2 block text-sm text-zinc-200">Confirmar senha</label><input name="confirm_password" type="password" required className={inputClass("confirm_password", field)} /><FieldError name="confirm_password" field={field} error={error} /></div>
-            {error && field === "form" ? <p className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200 md:col-span-2">{error}</p> : null}
+
+            {error && field === "form" ? (
+              <div className="rounded-2xl border border-rose-400/30 bg-gradient-to-r from-rose-500/15 to-red-500/10 px-4 py-4 text-sm text-rose-100 shadow-[0_0_30px_rgba(244,63,94,0.12)] md:col-span-2">
+                <p className="font-semibold">Ops! Não conseguimos continuar.</p>
+                <p className="mt-1 text-rose-100/90">{error}</p>
+              </div>
+            ) : null}
+
             <SignupPlanSelector initialPlan={selectedPlan} />
           </form>
           <p className="mt-5 text-center text-sm text-zinc-300">Já tem conta? <Link href="/login" className="text-cyan-200 hover:text-cyan-100">Entrar</Link></p>
