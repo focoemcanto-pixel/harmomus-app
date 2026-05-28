@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { DeletePlaylistButton } from "@/components/public/delete-playlist-button";
 import { PlaylistVisibilityToggle } from "@/components/public/playlist-visibility-toggle";
 import { PublicAppShell } from "@/components/public/public-app-shell";
+import { RenamePlaylistForm } from "@/components/public/rename-playlist-form";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { getCurrentUserPlaylists } from "@/lib/data/playlists";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -24,7 +25,7 @@ async function validatePlaylistOwnership(playlistId: string) {
 
   const { data: playlist, error } = await supabase
     .from("playlists")
-    .select("id, user_id, is_public")
+    .select("id, user_id, is_public, name, slug")
     .eq("id", playlistId)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -33,6 +34,34 @@ async function validatePlaylistOwnership(playlistId: string) {
   if (!playlist) return null;
 
   return { playlist, supabase, user };
+}
+
+async function renamePlaylist(formData: FormData) {
+  "use server";
+
+  const playlistId = String(formData.get("playlistId") ?? "");
+  const name = String(formData.get("name") ?? "").trim();
+
+  if (!playlistId || !name) return;
+
+  const validated = await validatePlaylistOwnership(playlistId);
+  if (!validated) return;
+
+  const { playlist, supabase, user } = validated;
+
+  if (playlist.name === name) {
+    redirect("/minhas-playlists");
+  }
+
+  const { error } = await supabase
+    .from("playlists")
+    .update({ name })
+    .eq("id", playlist.id)
+    .eq("user_id", user.id);
+
+  if (error) throw new Error(error.message);
+
+  redirect("/minhas-playlists");
 }
 
 async function updatePlaylistVisibility(formData: FormData) {
@@ -213,6 +242,12 @@ export default async function MinhasPlaylistsPage() {
                           >
                             Abrir
                           </Link>
+
+                          <RenamePlaylistForm
+                            playlistId={playlist.id}
+                            playlistName={playlist.name}
+                            renamePlaylistAction={renamePlaylist}
+                          />
 
                           <PlaylistVisibilityToggle
                             playlistId={playlist.id}
