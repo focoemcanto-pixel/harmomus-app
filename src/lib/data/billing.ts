@@ -58,7 +58,14 @@ async function getPlanById(supabase: any, planId: string) {
   return { ...plan, stripePriceId };
 }
 
-async function createStripeCheckoutWithSupabase(supabase: any, userId: string, email: string, planId: string, fallbackOrigin?: string | null) {
+async function createStripeCheckoutWithSupabase(
+  supabase: any,
+  userId: string,
+  email: string,
+  planId: string,
+  fallbackOrigin?: string | null,
+  metadata?: Record<string, string | null | undefined>,
+) {
   assertStripeReady();
 
   const [{ data: existing }, plan] = await Promise.all([
@@ -99,6 +106,12 @@ async function createStripeCheckoutWithSupabase(supabase: any, userId: string, e
     successUrl: `${base}/checkout/sucesso?session_id={CHECKOUT_SESSION_ID}`,
     cancelUrl: `${base}/checkout/cancelado`,
     trialDays: plan.trial_days,
+    metadata: {
+      user_id: userId,
+      email,
+      plan_slug: plan.slug,
+      ...metadata,
+    },
   });
 }
 
@@ -110,7 +123,9 @@ export async function startStripeCheckout(userId: string, email: string, planId:
 export async function startStripeCheckoutForSignup(userId: string, email: string, planSlug: string, fallbackOrigin?: string | null) {
   const supabase = createSupabaseAdminClient() as any;
   const plan = await getPlanBySlug(supabase, planSlug);
-  return createStripeCheckoutWithSupabase(supabase, userId, email, plan.id, fallbackOrigin);
+  return createStripeCheckoutWithSupabase(supabase, userId, email, plan.id, fallbackOrigin, {
+    source: "paid_signup",
+  });
 }
 
 export async function startFastStripeCheckoutForSignup(input: {
