@@ -19,11 +19,9 @@ const STATUS_LABELS: Record<string, string> = {
   incomplete_expired: "Expirada",
 };
 
-type BillingDateValue = string | number | null | undefined;
-
-function formatDate(value?: BillingDateValue) {
+function formatDate(value?: string | null) {
   if (!value) return "Não informado";
-  const date = typeof value === "number" ? new Date(value * 1000) : new Date(value);
+  const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Não informado";
   return date.toLocaleDateString("pt-BR");
 }
@@ -51,19 +49,42 @@ function billingCycleLabel(interval?: string | null) {
   return "Não informado";
 }
 
-function getSubscriptionTimestamp(subscription: any, key: string) {
-  const value = subscription?.[key];
-  return typeof value === "number" ? value : null;
+function stripeTimestampToIso(value: unknown) {
+  return typeof value === "number" ? new Date(value * 1000).toISOString() : null;
 }
 
-function dedupeInvoices(invoices: any[]) {
+function getStripeId(value: unknown) {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object" && "id" in value) return String((value as { id?: unknown }).id ?? "") || null;
+  return null;
+}
+
+function getInvoiceSubscriptionId(invoice: any) {
+  return getStripeId(invoice.subscription) ?? getStripeId(invoice.parent?.subscription_details?.subscription) ?? null;
+}
+
+function normalizeInvoices(invoices: any[], currentSubscriptionId?: string | null) {
   const seen = new Set<string>();
-  return invoices.filter((invoice) => {
-    const key = String(invoice.id ?? invoice.number ?? `${invoice.created}-${invoice.total}-${invoice.status}`);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  return invoices
+    .filter((invoice) => {
+      const invoiceSubscriptionId = getInvoiceSubscriptionId(invoice);
+      if (currentSubscriptionId && invoiceSubscriptionId && invoiceSubscriptionId !== currentSubscriptionId) return false;
+      return true;
+    })
+    .filter((invoice) => {
+      const total = Number(invoice.total ?? invoice.amount_paid ?? 0);
+      const isZeroTrialInvoice = total === 0 && String(invoice.billing_reason ?? "").includes("subscription_create");
+      if (isZeroTrialInvoice && seen.has("trial-zero-invoice")) return false;
+
+      const key = isZeroTrialInvoice
+        ? "trial-zero-invoice"
+        : String(invoice.id ?? invoice.number ?? `${invoice.created}-${invoice.total}-${invoice.status}`);
+
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 6);
 }
 
 function getInvoiceUrl(invoice: any) {
@@ -86,20 +107,18 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
   let invoices: any[] = [];
   let paymentMethodLabel = customerId ? "Não cadastrado" : "Não vinculado";
   let billingCycle = "Não informado";
-  let nextBillingDate: BillingDateValue = context.subscription?.next_billing_at ?? context.subscription?.current_period_end ?? null;
-  let periodEndDate: BillingDateValue = context.subscription?.current_period_end ?? null;
-  let trialEndDate: BillingDateValue = context.subscription?.trial_ends_at ?? null;
-  let stripeSubscription: any = null;
+  let nextBillingDate: string | null = context.subscription?.next_billing_at ?? context.subscription?.current_period_end ?? null;
+  let periodEndDate: string | null = context.subscription?.current_period_end ?? null;
+  let trialEndDate: string | null = context.subscription?.trial_ends_at ?? null;
 
   if (customerId && process.env.STRIPE_SECRET_KEY) {
-    const [invoiceResponse, paymentMethodsResponse, fetchedStripeSubscription] = await Promise.all([
+    const [invoiceResponse, paymentMethodsResponse, stripeSubscription] = await Promise.all([
       listCustomerInvoices(customerId, 24).catch(() => ({ data: [] })),
       getCustomerPaymentMethods(customerId, 1).catch(() => ({ data: [] })),
       subscriptionId ? getStripeSubscription(subscriptionId).catch(() => null) : Promise.resolve(null),
     ]);
 
-    stripeSubscription = fetchedStripeSubscription;
-    invoices = dedupeInvoices(Array.isArray(invoiceResponse?.data) ? invoiceResponse.data : []);
+    invoices = normalizeInvoices(Array.isArray(invoiceResponse?.data) ? invoiceResponse.data : [], subscriptionId);
 
     const card = paymentMethodsResponse?.data?.[0]?.card;
     paymentMethodLabel = card ? `${String(card.brand ?? "Cartão").toUpperCase()} •••• ${card.last4}` : "Não cadastrado";
@@ -107,19 +126,19 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
     const interval = stripeSubscription?.items?.data?.[0]?.price?.recurring?.interval;
     billingCycle = billingCycleLabel(interval);
 
-    const currentPeriodEnd = getSubscriptionTimestamp(stripeSubscription, "current_period_end");
-    const trialEnd = getSubscriptionTimestamp(stripeSubscription, "trial_end");
+    const currentPeriodEndIso = stripeTimestampToIso(stripeSubscription?.current_period_end);
+    const trialEndIso = stripeTimestampToIso(stripeSubscription?.trial_end);
 
-    if (currentPeriodEnd) {
-      nextBillingDate = currentPeriodEnd;
-      periodEndDate = currentPeriodEnd;
+    if (currentPeriodEndIso) {
+      nextBillingDate = currentPeriodEndIso;
+      periodEndDate = currentPeriodEndIso;
     }
 
-    if (trialEnd) {
-      trialEndDate = trialEnd;
+    if (trialEndIso) {
+      trialEndDate = trialEndIso;
       if (status === "trialing") {
-        nextBillingDate = trialEnd;
-        periodEndDate = trialEnd;
+        nextBillingDate = trialEndIso;
+        periodEndDate = trialEndIso;
       }
     }
   }
@@ -187,7 +206,7 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
                       const invoiceUrl = getInvoiceUrl(invoice);
                       return (
                         <tr key={invoice.id}>
-                          <td className="px-3 py-3">{formatDate(invoice.created)}</td>
+                          <td className="px-3 py-3">{formatDate(stripeTimestampToIso(invoice.created))}</td>
                           <td className="px-3 py-3">{formatAmount(invoice.amount_paid ?? invoice.total, invoice.currency)}</td>
                           <td className="px-3 py-3">{currentPlan}</td>
                           <td className="px-3 py-3">{invoiceStatusLabel(invoice.status)}</td>
