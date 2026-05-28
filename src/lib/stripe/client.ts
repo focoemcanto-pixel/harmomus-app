@@ -79,10 +79,39 @@ export async function createCheckoutSession(input: {
 }
 
 export async function getCheckoutSession(sessionId: string) {
+  console.log("[stripe.client.getCheckoutSession] iniciando busca", { session_id: sessionId });
+
   const query = new URLSearchParams({
     "expand[]": "subscription",
   });
-  return stripe<any>(`/checkout/sessions/${encodeURIComponent(sessionId)}?${query.toString()}`, undefined, "GET");
+
+  try {
+    const session = await stripe<any>(`/checkout/sessions/${encodeURIComponent(sessionId)}?${query.toString()}`, undefined, "GET");
+
+    console.log("[stripe.client.getCheckoutSession] sessão Stripe encontrada", {
+      session_id: sessionId,
+      session_mode: session?.mode ?? null,
+      session_customer: typeof session?.customer === "string" ? session.customer : session?.customer?.id ?? null,
+      session_subscription: typeof session?.subscription === "string" ? session.subscription : session?.subscription?.id ?? null,
+      session_customer_email: session?.customer_email ?? session?.customer_details?.email ?? null,
+      session_metadata: session?.metadata ?? null,
+      metadata_user_id: session?.metadata?.user_id ?? null,
+      metadata_email: session?.metadata?.email ?? null,
+    });
+
+    if (!session?.metadata?.user_id) {
+      console.error("[stripe.client.getCheckoutSession] USER_ID_MISSING", { session_id: sessionId, session_metadata: session?.metadata ?? null });
+    }
+
+    if (!session?.subscription) {
+      console.error("[stripe.client.getCheckoutSession] SESSION_SUBSCRIPTION_NULL", { session_id: sessionId });
+    }
+
+    return session;
+  } catch (error) {
+    console.error("[stripe.client.getCheckoutSession] erro ao buscar sessão Stripe", { session_id: sessionId, error });
+    throw error;
+  }
 }
 
 export async function createCustomerPortalSession(customerId: string, returnUrl: string) {
@@ -128,7 +157,35 @@ export async function getCustomerPaymentMethods(customerId: string, limit = 3) {
 }
 
 export async function getStripeSubscription(subscriptionId: string) {
-  return stripe<any>(`/subscriptions/${encodeURIComponent(subscriptionId)}`, undefined, "GET");
+  console.log("[stripe.client.getStripeSubscription] iniciando busca", { subscription_id: subscriptionId });
+
+  try {
+    const subscription = await stripe<any>(`/subscriptions/${encodeURIComponent(subscriptionId)}`, undefined, "GET");
+
+    console.log("[stripe.client.getStripeSubscription] subscription encontrada no Stripe", {
+      subscription_encontrada_no_stripe: Boolean(subscription?.id),
+      stripe_status: subscription?.status ?? null,
+      customer_id: typeof subscription?.customer === "string" ? subscription.customer : subscription?.customer?.id ?? null,
+      subscription_id: subscription?.id ?? subscriptionId,
+      price_id: subscription?.items?.data?.[0]?.price?.id ?? null,
+      current_period_end: subscription?.current_period_end ? new Date(subscription.current_period_end * 1000).toISOString() : null,
+      metadata: subscription?.metadata ?? null,
+      metadata_user_id: subscription?.metadata?.user_id ?? null,
+      metadata_email: subscription?.metadata?.email ?? null,
+    });
+
+    if (!subscription?.metadata?.user_id) {
+      console.error("[stripe.client.getStripeSubscription] USER_ID_MISSING", {
+        subscription_id: subscription?.id ?? subscriptionId,
+        metadata: subscription?.metadata ?? null,
+      });
+    }
+
+    return subscription;
+  } catch (error) {
+    console.error("[stripe.client.getStripeSubscription] erro ao buscar subscription Stripe", { subscription_id: subscriptionId, error });
+    throw error;
+  }
 }
 
 export function getPriceByPlan(plan: Pick<Plan, "slug" | "stripe_price_id">) {
