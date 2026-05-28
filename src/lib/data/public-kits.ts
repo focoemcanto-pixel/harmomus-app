@@ -15,6 +15,7 @@ export interface PublicKitAudioFile {
   audioFileId: string;
   streamUrl: string;
   fileType: string;
+  source_type: AudioSourceType;
   source: AudioSourceType;
   isGenerated: boolean;
   minMidiNote: number | null;
@@ -110,6 +111,7 @@ function mapKit(
       audioFileId: file.id,
       streamUrl: getAudioStreamUrl(file),
       fileType: file.file_type,
+      source_type: source,
       source,
       isGenerated: source === "generated",
       minMidiNote: (file as any).min_midi_note ?? null,

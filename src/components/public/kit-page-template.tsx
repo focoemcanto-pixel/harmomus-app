@@ -37,12 +37,14 @@ type AudioFilesApiFile = {
   detectedMaxMidiNote?: number | null;
   tessituraConfidence?: number | null;
   tessituraSource?: "manual" | "auto" | "hybrid";
+  source_type?: AudioSource;
   source?: AudioSource;
   isGenerated?: boolean;
 };
 
 type AudioFilesApiTone = {
   tone: string;
+  source_type?: AudioSource;
   source?: AudioSource;
   isGenerated?: boolean;
   files?: AudioFilesApiFile[];
@@ -138,7 +140,7 @@ function mapApiTonesToPublicToneGroups(tones: AudioFilesApiTone[]) {
       if (!id) continue;
 
       const voice = normalizeVoice(file.voice ?? file.name);
-      const source = normalizeAudioSource(file.source);
+      const source = normalizeAudioSource(file.source_type);
       group.voices[voice] = {
         id,
         tone,
@@ -147,6 +149,7 @@ function mapApiTonesToPublicToneGroups(tones: AudioFilesApiTone[]) {
         audioFileId: id,
         streamUrl: file.streamUrl ?? `/api/audio/${id}`,
         fileType: file.fileType ?? file.file_type ?? "mp3",
+        source_type: source,
         source,
         isGenerated: source === "generated",
         minMidiNote: file.minMidiNote ?? null,
@@ -168,6 +171,10 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
   const audioEngine = useKitAudioEngine();
   const { stopPlayback } = audioEngine;
   const [liveKit, setLiveKit] = useState<PublicKit>(kit);
+
+  useEffect(() => {
+    setLiveKit(kit);
+  }, [kit]);
 
   useEffect(() => {
     let cancelled = false;
@@ -225,17 +232,20 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
   );
   const toneOptions = useMemo(() => {
     return availableTones.map((toneGroup) => {
-      const files = Object.values(toneGroup.voices ?? {}).filter(Boolean) as PublicKitAudioFile[];
-      const isOriginal = files.some((file) => file.source === "original");
+      const selectedToneFile = toneGroup.voices[selectedVoice]
+        ?? toneGroup.voices.todos
+        ?? (Object.values(toneGroup.voices ?? {}).filter(Boolean)[0] as PublicKitAudioFile | undefined);
+      const sourceType = normalizeAudioSource(selectedToneFile?.source_type);
+
       return {
         tone: toneGroup.tone,
         label: formatToneLabel(toneGroup.tone),
-        isOriginal,
+        sourceType,
         isAvailable: true,
-        sourceLabel: isOriginal ? "Original" : "Harmomus IA",
+        sourceLabel: sourceType === "generated" ? "Harmomus IA" : "Original",
       };
     });
-  }, [availableTones]);
+  }, [availableTones, selectedVoice]);
   const tracksForSelectedVoice = useMemo(
     () => liveKit.tones.flatMap((toneGroup) => {
       const preferred = toneGroup.voices[selectedVoice] ?? toneGroup.voices.todos;
@@ -258,7 +268,8 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
   const canPlaySelected = accessContext.play.allowed && Boolean(selectedFile?.streamUrl) && Boolean(getToneGroup(liveKit, selectedTone));
   const semitoneShift = 0;
   const isModulated = false;
-  const selectedIsOriginal = selectedFile?.source !== "generated";
+  const selectedSourceType = normalizeAudioSource(selectedFile?.source_type);
+  const selectedIsOriginal = selectedSourceType === "original";
   const midiRange = getMidiRange(selectedFile);
   const analysisVoice = toAnalyzableVoice(selectedVoice);
 
@@ -355,7 +366,7 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
                       >
                         <span className="block font-medium">{option.label}</span>
                         <span className={`mt-0.5 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-                          option.isOriginal
+                          option.sourceType === "original"
                             ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-200"
                             : "border-violet-300/30 bg-violet-500/15 text-violet-100"
                         }`}>
