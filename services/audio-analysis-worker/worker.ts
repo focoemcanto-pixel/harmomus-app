@@ -14,6 +14,8 @@ const DEMUCS_TIMEOUT_MS = 12 * 60 * 1000;
 const DEFAULT_DEMUCS_MODEL = "htdemucs";
 const BASIC_PITCH_TIMEOUT_MS = 8 * 60 * 1000;
 const KILL_GRACE_MS = 2_000;
+const MAX_CONCURRENT_ANALYSIS = Number(process.env.MAX_CONCURRENT_ANALYSIS ?? "1");
+const DEMUCS_CACHE_DIR = process.env.DEMUCS_CACHE_DIR ?? "/opt/demucs-cache";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -26,6 +28,16 @@ if (!supabaseUrl || !supabaseServiceRoleKey) {
 const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
   auth: { persistSession: false },
 });
+
+function currentMemorySnapshot() {
+  const toMb = (value: number) => Number((value / 1024 / 1024).toFixed(2));
+  const mem = process.memoryUsage();
+  return {
+    rss_mb: toMb(mem.rss),
+    heap_used_mb: toMb(mem.heapUsed),
+    external_mb: toMb(mem.external),
+  };
+}
 
 function midiToNoteName(midi: number): string {
   const names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
@@ -220,7 +232,7 @@ async function runDemucsAndBasicPitch(sourcePath: string, workingDir: string) {
         ["--two-stems", "vocals", "--name", model, "--device", "cpu", "-j", "1", "-o", demucsOutDir, sourcePath],
         DEMUCS_TIMEOUT_MS,
         `demucs-${model}`,
-        { OMP_NUM_THREADS: "1", MKL_NUM_THREADS: "1", OPENBLAS_NUM_THREADS: "1" },
+        { OMP_NUM_THREADS: "1", MKL_NUM_THREADS: "1", OPENBLAS_NUM_THREADS: "1", DEMUCS_CACHE: DEMUCS_CACHE_DIR, XDG_CACHE_HOME: DEMUCS_CACHE_DIR },
       );
       usedModel = model;
       console.info("[audio-analysis-worker] Demucs finalizado", { used_model: usedModel, elapsed_ms: Date.now() - demucsStartedAt });
@@ -286,6 +298,7 @@ function buildInsights(notes: Array<{ start_s: number; end_s: number; pitch_midi
 }
 
 async function processJob(job: any) {
+  const jobStartedAt = Date.now();
   const workspace = await mkdtemp(join(tmpdir(), `analysis-${job.id}-`));
   const sourcePath = join(workspace, "source.audio");
   const logs: Array<Record<string, unknown>> = [];
@@ -303,6 +316,7 @@ async function processJob(job: any) {
   }, HEARTBEAT_INTERVAL_MS);
 
   try {
+    console.info("[audio-analysis-worker] análise iniciada", { job_id: job.id, voice: job.voice ?? null, memory: currentMemorySnapshot() });
     if (!job.source_r2_key) throw new Error("Job sem source_r2_key.");
 
     console.info("[audio-analysis-worker] baixando áudio", { job_id: job.id, source_r2_key: job.source_r2_key });
@@ -338,13 +352,14 @@ async function processJob(job: any) {
       .eq("id", job.id);
 
     if (error) throw new Error(error.message);
+    console.info("[audio-analysis-worker] análise concluída", { job_id: job.id, voice: job.voice ?? null, elapsed_ms: Date.now() - jobStartedAt, memory: currentMemorySnapshot() });
   } catch (error) {
     const err = error as NodeJS.ErrnoException & { killed?: boolean; signal?: string };
     let message = error instanceof Error ? error.message : String(error);
     if (message.toLowerCase().includes("timed out") || message.toLowerCase().includes("timeout")) message = `timeout: ${message}`;
     if (err?.code === "ENOMEM" || message.toLowerCase().includes("out of memory")) message = `memory: ${message}`;
     logs.push({ at: new Date().toISOString(), message: "Falha no processamento", error: message });
-    console.error("[audio-analysis-worker] falha ao processar job", { job_id: job.id, error: message });
+    console.error("[audio-analysis-worker] falha ao processar job", { job_id: job.id, voice: job.voice ?? null, elapsed_ms: Date.now() - jobStartedAt, error: message, memory: currentMemorySnapshot() });
 
     await supabase
       .from("audio_analysis_jobs")
@@ -357,7 +372,10 @@ async function processJob(job: any) {
 }
 
 async function main() {
-  console.info("[audio-analysis-worker] started", { ENABLE_SMART_TESSITURA_ANALYSIS });
+  if (MAX_CONCURRENT_ANALYSIS !== 1) {
+    console.warn("[audio-analysis-worker] MAX_CONCURRENT_ANALYSIS inválido para este worker; forçando execução serial", { configured: MAX_CONCURRENT_ANALYSIS, enforced: 1 });
+  }
+  console.info("[audio-analysis-worker] started", { ENABLE_SMART_TESSITURA_ANALYSIS, MAX_CONCURRENT_ANALYSIS: 1, demucs_cache_dir: DEMUCS_CACHE_DIR });
 
   while (true) {
     try {

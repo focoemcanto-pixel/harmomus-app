@@ -14,7 +14,7 @@ type BatchError = {
 };
 
 const ENABLE_SMART_TESSITURA_ANALYSIS = String(process.env.ENABLE_SMART_TESSITURA_ANALYSIS ?? "false").toLowerCase() === "true";
-const VOICES = ["todos", "soprano", "contralto", "tenor"] as const;
+const VOICES = ["soprano", "contralto", "tenor"] as const;
 
 function deriveVoice(value: string | null | undefined) {
   const normalized = String(value ?? "")
@@ -24,7 +24,7 @@ function deriveVoice(value: string | null | undefined) {
     .replace(/[\u0300-\u036f]/g, "");
 
   const match = VOICES.find((voice) => normalized.includes(voice));
-  return match ?? "todos";
+  return match ?? null;
 }
 
 export async function POST(request: Request) {
@@ -78,10 +78,13 @@ export async function POST(request: Request) {
 
     const jobsToInsert = targetFiles
       .filter((file) => !existingByFileId.has(String(file.id)))
-      .map((file) => ({
+      .flatMap((file) => {
+        const voice = deriveVoice(file.name);
+        if (!voice) return [];
+        return [{
         kit_id: kitId,
         audio_file_id: file.id,
-        voice: deriveVoice(file.name),
+        voice,
         tone: file.tone ?? null,
         status: "pending",
         analysis_type: "tessitura",
@@ -93,7 +96,8 @@ export async function POST(request: Request) {
             autoEnabled: ENABLE_SMART_TESSITURA_ANALYSIS,
           },
         ],
-      }));
+      }];
+      });
 
     let createdCount = 0;
     const errors: BatchError[] = [];
