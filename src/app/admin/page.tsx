@@ -8,6 +8,7 @@ const cards = [
   { label: "Planos", helper: "Gerencie hierarquia de acesso.", href: "/admin/planos" },
   { label: "Membros", helper: "Controle assinantes e acesso.", href: "/admin/membros" },
   { label: "Assinaturas/Billing", helper: "Acompanhe pagamentos e planos.", href: "/admin/billing" },
+  { label: "Solicitações Premium", helper: "Gerencie pedidos reais de músicas e tons.", href: "/admin/solicitacoes" },
   { label: "Migração", helper: "Importe base de assinaturas.", href: "/admin/migracao" },
   { label: "Configurações", helper: "Ajustes da central administrativa.", href: "/admin/configuracoes" },
 ];
