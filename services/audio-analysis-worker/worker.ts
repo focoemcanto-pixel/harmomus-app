@@ -11,6 +11,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const HEARTBEAT_INTERVAL_MS = 15 * 1000;
 const STALE_PROCESSING_MS = 10 * 60 * 1000;
 const DEMUCS_TIMEOUT_MS = 12 * 60 * 1000;
+const DEFAULT_DEMUCS_MODEL = "htdemucs";
 const BASIC_PITCH_TIMEOUT_MS = 8 * 60 * 1000;
 const KILL_GRACE_MS = 2_000;
 
@@ -199,11 +200,17 @@ function parseBasicPitchCsv(csv: string) {
 
 async function runDemucsAndBasicPitch(sourcePath: string, workingDir: string) {
   const demucsOutDir = join(workingDir, "demucs");
-  const demucsModels = ["mdx_extra", "htdemucs"] as const;
-  const selectedModel = demucsModels[0];
-  console.info("[audio-analysis-worker] Demucs modelo selecionado", { selected_model: selectedModel });
+  const configuredDemucsModel = (process.env.DEMUCS_MODEL ?? DEFAULT_DEMUCS_MODEL).trim() || DEFAULT_DEMUCS_MODEL;
+  const fallbackDemucsModel = "htdemucs";
+  const demucsModels = [configuredDemucsModel, fallbackDemucsModel].filter((model, idx, arr) => arr.indexOf(model) === idx);
 
-  let usedModel: (typeof demucsModels)[number] | null = null;
+  console.info("[audio-analysis-worker] Demucs usado apenas para análise de tessitura, não para áudio final", {
+    configured_model: configuredDemucsModel,
+    fallback_model: fallbackDemucsModel,
+    attempts: demucsModels,
+  });
+
+  let usedModel: string | null = null;
   const demucsStartedAt = Date.now();
   for (const model of demucsModels) {
     try {
@@ -227,7 +234,7 @@ async function runDemucsAndBasicPitch(sourcePath: string, workingDir: string) {
     }
   }
   if (!usedModel) {
-    throw new Error("Demucs falhou para todos os modelos configurados: mdx_extra, htdemucs.");
+    throw new Error(`Demucs falhou para todos os modelos configurados: ${demucsModels.join(", ")}.`);
   }
 
   const { stdout: findStdout } = await runSubprocess("bash", ["-lc", `find ${JSON.stringify(demucsOutDir)} -type f -name vocals.wav | head -n 1`], 15000, "find-demucs");
