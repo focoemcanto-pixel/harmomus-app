@@ -16,6 +16,7 @@ const BASIC_PITCH_TIMEOUT_MS = 8 * 60 * 1000;
 const KILL_GRACE_MS = 2_000;
 const MAX_CONCURRENT_ANALYSIS = Number(process.env.MAX_CONCURRENT_ANALYSIS ?? "1");
 const DEMUCS_CACHE_DIR = process.env.DEMUCS_CACHE_DIR ?? "/opt/demucs-cache";
+const ENABLE_DEMUCS_ANALYSIS = String(process.env.ENABLE_DEMUCS_ANALYSIS ?? "false").toLowerCase() === "true";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -210,6 +211,20 @@ function parseBasicPitchCsv(csv: string) {
   });
 }
 
+async function runBasicPitch(sourcePath: string, workingDir: string) {
+  const basicPitchOut = join(workingDir, "basic-pitch");
+  console.info("[audio-analysis-worker] iniciando BasicPitch", { analysis_mode: "basicpitch-direct" });
+  await runSubprocess("basic-pitch", [basicPitchOut, sourcePath], BASIC_PITCH_TIMEOUT_MS, "basicpitch");
+  console.info("[audio-analysis-worker] finalizando BasicPitch", { analysis_mode: "basicpitch-direct" });
+
+  const { stdout: csvPathStdout } = await runSubprocess("bash", ["-lc", `find ${JSON.stringify(basicPitchOut)} -type f -name '*.csv' | head -n 1`], 15000, "find-basicpitch-csv");
+  const csvPath = csvPathStdout.trim();
+  if (!csvPath) throw new Error("Basic Pitch não gerou CSV.");
+
+  const csv = await readFile(csvPath, "utf-8");
+  return { stemPath: sourcePath, notes: parseBasicPitchCsv(csv) };
+}
+
 async function runDemucsAndBasicPitch(sourcePath: string, workingDir: string) {
   const demucsOutDir = join(workingDir, "demucs");
   const configuredDemucsModel = (process.env.DEMUCS_MODEL ?? DEFAULT_DEMUCS_MODEL).trim() || DEFAULT_DEMUCS_MODEL;
@@ -253,17 +268,8 @@ async function runDemucsAndBasicPitch(sourcePath: string, workingDir: string) {
   const stemPath = findStdout.trim();
   if (!stemPath) throw new Error("Demucs não retornou stem vocal (vocals.wav).");
 
-  const basicPitchOut = join(workingDir, "basic-pitch");
-  console.info("[audio-analysis-worker] iniciando BasicPitch");
-  await runSubprocess("basic-pitch", [basicPitchOut, stemPath], BASIC_PITCH_TIMEOUT_MS, "basicpitch");
-  console.info("[audio-analysis-worker] finalizando BasicPitch");
-
-  const { stdout: csvPathStdout } = await runSubprocess("bash", ["-lc", `find ${JSON.stringify(basicPitchOut)} -type f -name '*.csv' | head -n 1`], 15000, "find-basicpitch-csv");
-  const csvPath = csvPathStdout.trim();
-  if (!csvPath) throw new Error("Basic Pitch não gerou CSV.");
-
-  const csv = await readFile(csvPath, "utf-8");
-  return { stemPath, notes: parseBasicPitchCsv(csv) };
+  const analysis = await runBasicPitch(stemPath, workingDir);
+  return { stemPath, notes: analysis.notes };
 }
 
 function buildInsights(notes: Array<{ start_s: number; end_s: number; pitch_midi: number; confidence: number }>) {
@@ -297,6 +303,18 @@ function buildInsights(notes: Array<{ start_s: number; end_s: number; pitch_midi
   return { minMidi, maxMidi, comfortMin, comfortMax, dominant, confidence: Number(confidence.toFixed(4)), contour, occasionalPeaks, recommend };
 }
 
+
+function normalizeVoice(value: string | null | undefined) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+}
+
+const DIRECT_VOICES = new Set(["soprano", "contralto", "tenor"]);
+const IGNORED_ANALYSIS_LABELS = new Set(["todos", "mix", "completo"]);
+
 async function processJob(job: any) {
   const jobStartedAt = Date.now();
   const workspace = await mkdtemp(join(tmpdir(), `analysis-${job.id}-`));
@@ -323,17 +341,42 @@ async function processJob(job: any) {
     await downloadFromR2(job.source_r2_key, sourcePath);
     logs.push({ at: new Date().toISOString(), message: "Download do áudio concluído", source_r2_key: job.source_r2_key });
 
-    const { stemPath, notes } = await runDemucsAndBasicPitch(sourcePath, workspace);
-    logs.push({ at: new Date().toISOString(), message: "Demucs + Basic Pitch concluídos", vocal_stem_path: stemPath, notes_detected: notes.length });
+    const normalizedVoice = normalizeVoice(job.voice);
+    if (IGNORED_ANALYSIS_LABELS.has(normalizedVoice)) {
+      logs.push({ at: new Date().toISOString(), message: "Arquivo ignorado para análise de tessitura", voice: normalizedVoice, reason: "ignored-label" });
+      await supabase
+        .from("audio_analysis_jobs")
+        .update({
+          status: "completed",
+          analysis_method: "ignored",
+          analysis_logs: logs,
+          error_message: null,
+          completed_at: new Date().toISOString(),
+        })
+        .eq("id", job.id);
+      console.info("[audio-analysis-worker] arquivo ignorado", { job_id: job.id, voice: normalizedVoice });
+      return;
+    }
+
+    if (!DIRECT_VOICES.has(normalizedVoice)) {
+      throw new Error(`Voice inválida para análise de tessitura: ${String(job.voice ?? "")}`);
+    }
+
+    const analysisMode = ENABLE_DEMUCS_ANALYSIS ? "demucs+basicpitch" : "basicpitch-direct";
+    const { stemPath, notes } = ENABLE_DEMUCS_ANALYSIS
+      ? await runDemucsAndBasicPitch(sourcePath, workspace)
+      : await runBasicPitch(sourcePath, workspace);
+
+    logs.push({ at: new Date().toISOString(), message: "Análise de tessitura concluída", analysis_mode: analysisMode, voice: normalizedVoice, vocal_stem_path: stemPath, notes_detected: notes.length });
 
     const insights = buildInsights(notes);
-    console.info("[audio-analysis-worker] salvando análise", { job_id: job.id, notes_detected: notes.length });
+    console.info("[audio-analysis-worker] salvando análise", { job_id: job.id, analysis_mode: analysisMode, voice: normalizedVoice, notes_detected: notes.length, comfort_range: [insights.comfortMin, insights.comfortMax] });
 
     const { error } = await supabase
       .from("audio_analysis_jobs")
       .update({
         status: "completed",
-        analysis_method: "demucs+basic-pitch-v1",
+        analysis_method: analysisMode,
         detected_min_note: insights.minMidi,
         detected_max_note: insights.maxMidi,
         comfort_min_note: insights.comfortMin,
@@ -352,7 +395,7 @@ async function processJob(job: any) {
       .eq("id", job.id);
 
     if (error) throw new Error(error.message);
-    console.info("[audio-analysis-worker] análise concluída", { job_id: job.id, voice: job.voice ?? null, elapsed_ms: Date.now() - jobStartedAt, memory: currentMemorySnapshot() });
+    console.info("[audio-analysis-worker] análise concluída", { job_id: job.id, analysis_mode: analysisMode, voice: normalizedVoice, notes_detected: notes.length, detected_range: [insights.minMidi, insights.maxMidi], comfort_range: [insights.comfortMin, insights.comfortMax], elapsed_ms: Date.now() - jobStartedAt, memory: currentMemorySnapshot() });
   } catch (error) {
     const err = error as NodeJS.ErrnoException & { killed?: boolean; signal?: string };
     let message = error instanceof Error ? error.message : String(error);
@@ -375,7 +418,7 @@ async function main() {
   if (MAX_CONCURRENT_ANALYSIS !== 1) {
     console.warn("[audio-analysis-worker] MAX_CONCURRENT_ANALYSIS inválido para este worker; forçando execução serial", { configured: MAX_CONCURRENT_ANALYSIS, enforced: 1 });
   }
-  console.info("[audio-analysis-worker] started", { ENABLE_SMART_TESSITURA_ANALYSIS, MAX_CONCURRENT_ANALYSIS: 1, demucs_cache_dir: DEMUCS_CACHE_DIR });
+  console.info("[audio-analysis-worker] started", { ENABLE_SMART_TESSITURA_ANALYSIS, ENABLE_DEMUCS_ANALYSIS, MAX_CONCURRENT_ANALYSIS: 1, demucs_cache_dir: DEMUCS_CACHE_DIR });
 
   while (true) {
     try {
