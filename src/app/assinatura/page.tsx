@@ -49,6 +49,25 @@ function billingCycleLabel(interval?: string | null) {
   return "Não informado";
 }
 
+function getSubscriptionTimestamp(subscription: any, key: string) {
+  const value = subscription?.[key];
+  return typeof value === "number" ? value : null;
+}
+
+function dedupeInvoices(invoices: any[]) {
+  const seen = new Set<string>();
+  return invoices.filter((invoice) => {
+    const key = String(invoice.id ?? invoice.number ?? `${invoice.created}-${invoice.total}-${invoice.status}`);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function getInvoiceUrl(invoice: any) {
+  return invoice.hosted_invoice_url ?? invoice.invoice_pdf ?? null;
+}
+
 export default async function AssinaturaPage({ searchParams }: { searchParams?: Promise<{ error?: string }> }) {
   const [context, params] = await Promise.all([getCurrentUserAccessContext(), searchParams]);
   if (context.isGuest) redirect("/login");
@@ -65,20 +84,20 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
   let invoices: any[] = [];
   let paymentMethodLabel = customerId ? "Não cadastrado" : "Não vinculado";
   let billingCycle = "Não informado";
-  let nextBillingDate =
-    context.subscription?.next_billing_at ??
-    context.subscription?.current_period_end ??
-    null;
+  let nextBillingDate = context.subscription?.next_billing_at ?? context.subscription?.current_period_end ?? null;
   let periodEndDate = context.subscription?.current_period_end ?? null;
+  let trialEndDate: string | number | null = context.subscription?.trial_ends_at ?? null;
+  let stripeSubscription: any = null;
 
   if (customerId && process.env.STRIPE_SECRET_KEY) {
-    const [invoiceResponse, paymentMethodsResponse, stripeSubscription] = await Promise.all([
-      listCustomerInvoices(customerId, 12).catch(() => ({ data: [] })),
+    const [invoiceResponse, paymentMethodsResponse, fetchedStripeSubscription] = await Promise.all([
+      listCustomerInvoices(customerId, 24).catch(() => ({ data: [] })),
       getCustomerPaymentMethods(customerId, 1).catch(() => ({ data: [] })),
       subscriptionId ? getStripeSubscription(subscriptionId).catch(() => null) : Promise.resolve(null),
     ]);
 
-    invoices = Array.isArray(invoiceResponse?.data) ? invoiceResponse.data : [];
+    stripeSubscription = fetchedStripeSubscription;
+    invoices = dedupeInvoices(Array.isArray(invoiceResponse?.data) ? invoiceResponse.data : []);
 
     const card = paymentMethodsResponse?.data?.[0]?.card;
     paymentMethodLabel = card ? `${String(card.brand ?? "Cartão").toUpperCase()} •••• ${card.last4}` : "Não cadastrado";
@@ -86,12 +105,20 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
     const interval = stripeSubscription?.items?.data?.[0]?.price?.recurring?.interval;
     billingCycle = billingCycleLabel(interval);
 
-    if (!nextBillingDate && stripeSubscription?.current_period_end) {
-      nextBillingDate = stripeSubscription.current_period_end;
+    const currentPeriodEnd = getSubscriptionTimestamp(stripeSubscription, "current_period_end");
+    const trialEnd = getSubscriptionTimestamp(stripeSubscription, "trial_end");
+
+    if (currentPeriodEnd) {
+      nextBillingDate = currentPeriodEnd;
+      periodEndDate = currentPeriodEnd;
     }
 
-    if (!periodEndDate && stripeSubscription?.current_period_end) {
-      periodEndDate = new Date(stripeSubscription.current_period_end * 1000).toISOString();
+    if (trialEnd) {
+      trialEndDate = trialEnd;
+      if (status === "trialing") {
+        nextBillingDate = trialEnd;
+        periodEndDate = trialEnd;
+      }
     }
   }
 
@@ -100,6 +127,12 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
     : ["active", "trialing"].includes(status)
       ? "Renovação automática ativa"
       : "Renovação não confirmada";
+
+  const nextBillingLabel = cancelAtPeriodEnd
+    ? "Não renova"
+    : status === "trialing"
+      ? `Após teste: ${formatDate(trialEndDate ?? nextBillingDate)}`
+      : formatDate(nextBillingDate);
 
   return (
     <PublicAppShell>
@@ -123,13 +156,14 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
           <div className="mt-8 grid gap-4 md:grid-cols-4">
             <div className="rounded-2xl border border-white/15 bg-white/5 p-4"><p className="text-xs uppercase tracking-[0.12em] text-zinc-300">Plano atual</p><p className="mt-2 text-2xl font-semibold">{currentPlan}</p></div>
             <div className="rounded-2xl border border-white/15 bg-white/5 p-4"><p className="text-xs uppercase tracking-[0.12em] text-zinc-300">Status da assinatura</p><p className="mt-2 text-xl font-semibold text-emerald-300">{STATUS_LABELS[status] ?? status}</p></div>
-            <div className="rounded-2xl border border-white/15 bg-white/5 p-4"><p className="text-xs uppercase tracking-[0.12em] text-zinc-300">Próxima cobrança</p><p className="mt-2 text-xl font-semibold">{cancelAtPeriodEnd ? "Não renova" : formatDate(nextBillingDate)}</p></div>
+            <div className="rounded-2xl border border-white/15 bg-white/5 p-4"><p className="text-xs uppercase tracking-[0.12em] text-zinc-300">Próxima cobrança</p><p className="mt-2 text-xl font-semibold">{nextBillingLabel}</p></div>
             <div className="rounded-2xl border border-white/15 bg-white/5 p-4"><p className="text-xs uppercase tracking-[0.12em] text-zinc-300">Método de pagamento</p><p className="mt-2 text-xl font-semibold">{paymentMethodLabel}</p></div>
           </div>
 
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div className="mt-4 grid gap-4 md:grid-cols-3">
             <div className="rounded-2xl border border-white/15 bg-white/5 p-4"><p className="text-xs uppercase tracking-[0.12em] text-zinc-300">Ciclo</p><p className="mt-2 text-xl font-semibold">{billingCycle}</p></div>
             <div className="rounded-2xl border border-white/15 bg-white/5 p-4"><p className="text-xs uppercase tracking-[0.12em] text-zinc-300">Renovação</p><p className="mt-2 text-xl font-semibold">{renewalStatus}</p></div>
+            <div className="rounded-2xl border border-white/15 bg-white/5 p-4"><p className="text-xs uppercase tracking-[0.12em] text-zinc-300">Fim do teste</p><p className="mt-2 text-xl font-semibold">{status === "trialing" ? formatDate(trialEndDate) : "—"}</p></div>
           </div>
 
           {params?.error ? <p className="mt-4 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">{params.error}</p> : null}
@@ -147,18 +181,21 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/10 text-zinc-100">
-                    {invoices.map((invoice) => (
-                      <tr key={invoice.id}>
-                        <td className="px-3 py-3">{formatDate(invoice.created)}</td>
-                        <td className="px-3 py-3">{formatAmount(invoice.amount_paid ?? invoice.total, invoice.currency)}</td>
-                        <td className="px-3 py-3">{currentPlan}</td>
-                        <td className="px-3 py-3">{invoiceStatusLabel(invoice.status)}</td>
-                        <td className="px-3 py-3">{paymentMethodLabel}</td>
-                        <td className="px-3 py-3">{cancelAtPeriodEnd ? "Não renova" : formatDate(nextBillingDate)}</td>
-                        <td className="px-3 py-3">{billingCycle}</td>
-                        <td className="px-3 py-3">{invoice.invoice_pdf ? <a className="rounded-lg border border-cyan-300/40 px-3 py-2 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/10" href={invoice.invoice_pdf} target="_blank">Baixar recibo</a> : <span className="text-zinc-500">Indisponível</span>}</td>
-                      </tr>
-                    ))}
+                    {invoices.map((invoice) => {
+                      const invoiceUrl = getInvoiceUrl(invoice);
+                      return (
+                        <tr key={invoice.id}>
+                          <td className="px-3 py-3">{formatDate(invoice.created)}</td>
+                          <td className="px-3 py-3">{formatAmount(invoice.amount_paid ?? invoice.total, invoice.currency)}</td>
+                          <td className="px-3 py-3">{currentPlan}</td>
+                          <td className="px-3 py-3">{invoiceStatusLabel(invoice.status)}</td>
+                          <td className="px-3 py-3">{paymentMethodLabel}</td>
+                          <td className="px-3 py-3">{nextBillingLabel}</td>
+                          <td className="px-3 py-3">{billingCycle}</td>
+                          <td className="px-3 py-3">{invoiceUrl ? <a className="rounded-lg border border-cyan-300/40 px-3 py-2 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/10" href={invoiceUrl} target="_blank" rel="noreferrer">Abrir fatura</a> : <span className="text-zinc-500">Indisponível</span>}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
