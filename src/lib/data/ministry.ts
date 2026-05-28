@@ -117,3 +117,42 @@ export async function ensureMinistryForSubscription(input: {
 
   return ministry;
 }
+
+export async function getOwnedMinistry(userId: string) {
+  const admin = createSupabaseAdminClient() as any;
+
+  const { data, error } = await admin
+    .from("ministries")
+    .select("*")
+    .eq("owner_id", userId)
+    .maybeSingle();
+
+  if (error) throw new Error(`Falha ao buscar ministério: ${error.message}`);
+  return data ?? null;
+}
+
+export async function getMinistryMembers(ministryId: string) {
+  const admin = createSupabaseAdminClient() as any;
+
+  const { data, error } = await admin
+    .from("ministry_members")
+    .select("*, profile:profiles(id,full_name,email)")
+    .eq("ministry_id", ministryId)
+    .neq("status", "removed")
+    .order("created_at", { ascending: true });
+
+  if (error) throw new Error(`Falha ao buscar membros: ${error.message}`);
+  return data ?? [];
+}
+
+export async function getMinistryDashboard(userId: string) {
+  const ministry = await getOwnedMinistry(userId);
+  if (!ministry) return { ministry: null, members: [], activeSeats: 0, pendingSeats: 0, remainingSeats: 0 };
+
+  const members = await getMinistryMembers(ministry.id);
+  const activeSeats = members.filter((member: any) => ["active", "pending"].includes(String(member.status))).length;
+  const pendingSeats = members.filter((member: any) => String(member.status) === "pending").length;
+  const remainingSeats = Math.max(0, Number(ministry.seat_limit ?? 0) - activeSeats);
+
+  return { ministry, members, activeSeats, pendingSeats, remainingSeats };
+}
