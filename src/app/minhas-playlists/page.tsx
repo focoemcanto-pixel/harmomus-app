@@ -2,11 +2,62 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { DeletePlaylistButton } from "@/components/public/delete-playlist-button";
+import { PlaylistVisibilityToggle } from "@/components/public/playlist-visibility-toggle";
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { getCurrentUserPlaylists } from "@/lib/data/playlists";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+
+async function validatePlaylistOwnership(playlistId: string) {
+  const context = await getCurrentUserAccessContext();
+  if (context.isGuest || !(context.effectiveSlug === "plus" || context.effectiveSlug === "premium")) {
+    return null;
+  }
+
+  const authClient = await createClient();
+  const { data: auth } = await authClient.auth.getUser();
+  const user = auth.user;
+  if (!user) return null;
+
+  const supabase = createSupabaseAdminClient() as any;
+
+  const { data: playlist, error } = await supabase
+    .from("playlists")
+    .select("id, user_id, is_public")
+    .eq("id", playlistId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  if (!playlist) return null;
+
+  return { playlist, supabase, user };
+}
+
+async function updatePlaylistVisibility(formData: FormData) {
+  "use server";
+
+  const playlistId = String(formData.get("playlistId") ?? "");
+  const isPublic = String(formData.get("isPublic") ?? "false") === "true";
+
+  if (!playlistId) return;
+
+  const validated = await validatePlaylistOwnership(playlistId);
+  if (!validated) return;
+
+  const { playlist, supabase, user } = validated;
+
+  const { error } = await supabase
+    .from("playlists")
+    .update({ is_public: isPublic })
+    .eq("id", playlist.id)
+    .eq("user_id", user.id);
+
+  if (error) throw new Error(error.message);
+
+  redirect("/minhas-playlists");
+}
 
 async function deletePlaylist(formData: FormData) {
   "use server";
@@ -14,25 +65,10 @@ async function deletePlaylist(formData: FormData) {
   const playlistId = String(formData.get("playlistId") ?? "");
   if (!playlistId) return;
 
-  const context = await getCurrentUserAccessContext();
-  if (context.isGuest || !(context.effectiveSlug === "plus" || context.effectiveSlug === "premium")) return;
+  const validated = await validatePlaylistOwnership(playlistId);
+  if (!validated) return;
 
-  const authClient = await createClient();
-  const { data: auth } = await authClient.auth.getUser();
-  const user = auth.user;
-  if (!user) return;
-
-  const supabase = createSupabaseAdminClient() as any;
-
-  const { data: playlist, error: playlistError } = await supabase
-    .from("playlists")
-    .select("id")
-    .eq("id", playlistId)
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  if (playlistError) throw new Error(playlistError.message);
-  if (!playlist) return;
+  const { playlist, supabase, user } = validated;
 
   const { error: itemsError } = await supabase.from("playlist_items").delete().eq("playlist_id", playlist.id);
   if (itemsError) throw new Error(itemsError.message);
@@ -177,6 +213,12 @@ export default async function MinhasPlaylistsPage() {
                           >
                             Abrir
                           </Link>
+
+                          <PlaylistVisibilityToggle
+                            playlistId={playlist.id}
+                            isPublic={playlist.isPublic}
+                            updateVisibilityAction={updatePlaylistVisibility}
+                          />
 
                           <a
                             href={whatsappShare}
