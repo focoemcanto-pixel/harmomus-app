@@ -97,6 +97,7 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
     const planSlug = getPlanSlugFromPrice(priceId);
     const customerId = getCustomerIdFromSession(session);
     const customerEmail = getCustomerEmailFromSession(session);
+    const metadataUserId = String(session?.metadata?.user_id ?? "").trim() || null;
 
     const supabase = await createClient();
     const { data: auth } = await supabase.auth.getUser();
@@ -114,7 +115,7 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
       return { synced: false, planSlug, error: `Plano ${planSlug} não encontrado no banco.`, onboardingStatus: "pending_email_confirmation", customerEmail, confirmationEmailResent };
     }
 
-    const userId = loggedUserId ?? (await findUserIdByCustomerOrEmail(admin, customerId, customerEmail));
+    const userId = metadataUserId ?? loggedUserId ?? (await findUserIdByCustomerOrEmail(admin, customerId, customerEmail));
 
     if (!userId) {
       return { synced: false, planSlug, error: "Usuário não localizado para sincronizar assinatura.", onboardingStatus: "pending_email_confirmation", customerEmail, confirmationEmailResent };
