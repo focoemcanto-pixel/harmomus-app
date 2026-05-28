@@ -17,6 +17,7 @@ type SyncCheckoutResult = {
   error: string | null;
   requiresEmailConfirmation: boolean;
   customerEmail: string | null;
+  hasLoggedSession: boolean;
 };
 
 function getPlanSlugFromPrice(priceId: string | null) {
@@ -65,7 +66,7 @@ async function findUserIdByCustomerOrEmail(admin: any, customerId: string | null
 
 async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResult> {
   if (!sessionId) {
-    return { synced: false, planSlug: null, error: "Sessão não informada.", requiresEmailConfirmation: false, customerEmail: null };
+    return { synced: false, planSlug: null, error: "Sessão não informada.", requiresEmailConfirmation: true, customerEmail: null, hasLoggedSession: false };
   }
 
   try {
@@ -76,24 +77,26 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
     const customerId = getCustomerIdFromSession(session);
     const customerEmail = getCustomerEmailFromSession(session);
 
+    const supabase = await createClient();
+    const { data: auth } = await supabase.auth.getUser();
+    const loggedUserId = auth.user?.id ?? null;
+    const hasLoggedSession = Boolean(loggedUserId);
+
     if (!planSlug) {
-      return { synced: false, planSlug: null, error: "Plano não identificado pelo Price ID do Stripe.", requiresEmailConfirmation: false, customerEmail };
+      return { synced: false, planSlug: null, error: "Plano não identificado pelo Price ID do Stripe.", requiresEmailConfirmation: !hasLoggedSession, customerEmail, hasLoggedSession };
     }
 
     const admin = createSupabaseAdminClient() as any;
     const { data: plan } = await admin.from("plans").select("id, slug").eq("slug", planSlug).maybeSingle();
 
     if (!plan?.id) {
-      return { synced: false, planSlug, error: `Plano ${planSlug} não encontrado no banco.`, requiresEmailConfirmation: false, customerEmail };
+      return { synced: false, planSlug, error: `Plano ${planSlug} não encontrado no banco.`, requiresEmailConfirmation: !hasLoggedSession, customerEmail, hasLoggedSession };
     }
 
-    const supabase = await createClient();
-    const { data: auth } = await supabase.auth.getUser();
-    const loggedUserId = auth.user?.id ?? null;
     const userId = loggedUserId ?? (await findUserIdByCustomerOrEmail(admin, customerId, customerEmail));
 
     if (!userId) {
-      return { synced: false, planSlug, error: "Usuário não localizado para sincronizar assinatura.", requiresEmailConfirmation: true, customerEmail };
+      return { synced: false, planSlug, error: "Usuário não localizado para sincronizar assinatura.", requiresEmailConfirmation: true, customerEmail, hasLoggedSession };
     }
 
     const status = mapStripeStatus(subscription?.status ?? "active");
@@ -127,23 +130,25 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
       : await admin.from("subscriptions").insert(payload);
 
     if (result.error) {
-      return { synced: false, planSlug, error: result.error.message, requiresEmailConfirmation: !loggedUserId, customerEmail };
+      return { synced: false, planSlug, error: result.error.message, requiresEmailConfirmation: !hasLoggedSession, customerEmail, hasLoggedSession };
     }
 
     return {
       synced: true,
       planSlug,
       error: null,
-      requiresEmailConfirmation: !loggedUserId,
+      requiresEmailConfirmation: !hasLoggedSession,
       customerEmail,
+      hasLoggedSession,
     };
   } catch (error) {
     return {
       synced: false,
       planSlug: null,
       error: error instanceof Error ? error.message : "Erro desconhecido.",
-      requiresEmailConfirmation: false,
+      requiresEmailConfirmation: true,
       customerEmail: null,
+      hasLoggedSession: false,
     };
   }
 }
@@ -152,7 +157,7 @@ export default async function CheckoutSucesso({ searchParams }: CheckoutSuccessP
   const resolvedSearchParams = await searchParams;
   const sync = await syncCheckoutSession(resolvedSearchParams?.session_id);
   const planName = sync.planSlug === "plus" ? "Plus" : sync.planSlug === "premium" ? "Premium" : "Plus/Premium";
-  const firstSignupFlow = sync.requiresEmailConfirmation;
+  const firstSignupFlow = sync.requiresEmailConfirmation || !sync.hasLoggedSession;
 
   return (
     <main className="min-h-screen bg-zinc-950 p-6 text-white">
@@ -175,7 +180,7 @@ export default async function CheckoutSucesso({ searchParams }: CheckoutSuccessP
 
         {firstSignupFlow ? (
           <div className="mt-6 rounded-2xl border border-cyan-400/30 bg-cyan-500/10 p-5 text-sm text-cyan-50">
-            <h2 className="text-base font-semibold text-cyan-100">Próximo passo obrigatório</h2>
+            <h2 className="text-base font-semibold text-cyan-100">Confirme seu e-mail para acessar</h2>
             <p className="mt-2 text-cyan-50/90">
               Enviamos um e-mail de confirmação para {sync.customerEmail ? <strong>{sync.customerEmail}</strong> : "o e-mail usado no cadastro"}. Abra sua caixa de entrada, clique em confirmar e-mail e depois faça seu primeiro login.
             </p>
