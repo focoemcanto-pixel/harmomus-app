@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { analyzeAudioUrlPitch, midiToNoteName } from "@/lib/audio/pitch-analysis";
+import { VOCAL_RANGES, type TessituraStatus, type VocalRangeType } from "@/lib/music/tessitura";
 import { getSignedSemitoneDistance, normalizeTone, sortTonesByChromaticOrder } from "@/lib/music/tones";
 import type { KitAudioFile, KitAudioToneGroup } from "@/types/kit-audio";
 
@@ -34,16 +35,76 @@ type AnalysisJob = {
   analysis_type: string;
   analysis_logs?: Array<{ message?: string; at?: string }> | null;
   error_message?: string | null;
+  detected_min_midi?: number | null;
+  detected_max_midi?: number | null;
+  comfort_min_midi?: number | null;
+  comfort_max_midi?: number | null;
   detected_min_note?: number | null;
   detected_max_note?: number | null;
   comfort_min_note?: number | null;
   comfort_max_note?: number | null;
   dominant_notes?: Array<{ midi?: number; note?: string; occurrences?: number }> | null;
+  recommended_tones?: Record<string, { min_midi?: number | null; max_midi?: number | null }> | null;
+  analysis_method?: string | null;
   vocal_confidence?: number | null;
   pitch_events_json?: { recommended_tones?: Record<string, { min_midi?: number | null; max_midi?: number | null }> } | null;
   created_at?: string | null;
   updated_at?: string | null;
+  completed_at?: string | null;
 };
+
+type RecommendationLevel = "comfortable" | "attention" | "risky" | "incomplete";
+
+const RECOMMENDATION_BADGES: Record<RecommendationLevel, { label: string; className: string }> = {
+  comfortable: { label: "Confortável", className: "border-emerald-400/40 bg-emerald-500/15 text-emerald-100" },
+  attention: { label: "Atenção", className: "border-amber-400/40 bg-amber-500/15 text-amber-100" },
+  risky: { label: "Arriscado", className: "border-red-400/40 bg-red-500/15 text-red-100" },
+  incomplete: { label: "Análise incompleta", className: "border-zinc-400/30 bg-zinc-500/10 text-zinc-200" },
+};
+
+function getJobMidiRange(job: AnalysisJob, prefix: "detected" | "comfort") {
+  if (prefix === "detected") {
+    return {
+      min: job.detected_min_note ?? job.detected_min_midi ?? null,
+      max: job.detected_max_note ?? job.detected_max_midi ?? null,
+    };
+  }
+
+  return {
+    min: job.comfort_min_note ?? job.comfort_min_midi ?? null,
+    max: job.comfort_max_note ?? job.comfort_max_midi ?? null,
+  };
+}
+
+function hasCompleteAiAnalysis(job: AnalysisJob) {
+  const detected = getJobMidiRange(job, "detected");
+  const comfort = getJobMidiRange(job, "comfort");
+
+  return [detected.min, detected.max, comfort.min, comfort.max].every((value) => typeof value === "number");
+}
+
+function formatMidiRange(min?: number | null, max?: number | null) {
+  if (typeof min !== "number" || typeof max !== "number") return "— → —";
+  return `${midiToNoteName(min)} → ${midiToNoteName(max)}`;
+}
+
+function formatAiConfidence(value?: number | null) {
+  if (typeof value !== "number") return null;
+  const normalized = value > 1 ? value / 100 : value;
+  return `${Math.round(normalized * 100)}%`;
+}
+
+function classifyVoiceComfortRange(voice: KitAudioFile["voice"], min?: number | null, max?: number | null): { level: RecommendationLevel; status: TessituraStatus | "incomplete" } {
+  if (typeof min !== "number" || typeof max !== "number") return { level: "incomplete", status: "incomplete" };
+  if (voice === "todos") return { level: "incomplete", status: "incomplete" };
+
+  const range = VOCAL_RANGES[voice as VocalRangeType];
+  if (!range) return { level: "incomplete", status: "incomplete" };
+
+  if (min >= range.comfortable.minMidi && max <= range.comfortable.maxMidi) return { level: "comfortable", status: "comfortable" };
+  if (min >= range.extended.minMidi && max <= range.extended.maxMidi) return { level: "attention", status: "extended" };
+  return { level: "risky", status: max <= range.extreme.maxMidi && min >= range.extreme.minMidi ? "extreme" : "unsafe" };
+}
 
 const STATUS_STYLES: Record<string, { label: string; icon: string; className: string; dot: string }> = {
   completed: {
@@ -284,7 +345,7 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
         throw new Error(data?.error ?? "erro ao enviar");
       }
       if (!options?.silent) {
-        setAnalysisSubmitMessage(data?.skipped ? "análise já existente na fila" : "análise enviada");
+        setAnalysisSubmitMessage(data?.requeuedIncompleteCount ? "análise incompleta reenfileirada" : data?.skipped ? "análise já existente na fila" : "análise enviada");
       }
       await loadAnalysisJobs();
       return data?.skipped ? "skipped" : "created";
@@ -584,7 +645,27 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
       <div className="space-y-4">
         {sortedToneGroups.map((toneGroup) => (
           <article key={toneGroup.tone} className="rounded-lg border border-border bg-surface-muted p-4">
-            <h3 className="mb-2 text-sm font-semibold text-gold-300">Tom {toneGroup.tone}</h3>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-gold-300">Tom {toneGroup.tone}</h3>
+              <div className="flex flex-wrap justify-end gap-1">
+                {toneGroup.files
+                  .filter((file) => file.voice !== "todos")
+                  .map((file) => {
+                    const job = getAnalysisJobForFile(file.id);
+                    if (!job) return null;
+                    const comfortRange = getJobMidiRange(job, "comfort");
+                    const isIncomplete = job.status === "completed" && !hasCompleteAiAnalysis(job);
+                    const recommendation = classifyVoiceComfortRange(file.voice, comfortRange.min, comfortRange.max);
+                    const badge = RECOMMENDATION_BADGES[isIncomplete ? "incomplete" : recommendation.level];
+
+                    return (
+                      <span key={`${toneGroup.tone}-${file.id ?? file.key}-recommendation`} className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${badge.className}`}>
+                        {file.voice}: {badge.label}
+                      </span>
+                    );
+                  })}
+              </div>
+            </div>
             <p className="mb-3 text-xs text-muted">{toneGroup.files.length} arquivo(s)</p>
             <div className="space-y-3">
               {VOICE_ORDER.map((voice) => {
@@ -597,6 +678,8 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
                       {voiceFiles.map((file) => {
                         const confidence = formatConfidence(file);
                         const isAnalyzing = analyzingKey === file.id;
+                        const aiJob = getAnalysisJobForFile(file.id);
+                        const isAiIncomplete = aiJob?.status === "completed" && !hasCompleteAiAnalysis(aiJob);
 
                         return (
                           <li key={file.key} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border/60 px-3 py-2 text-xs">
@@ -615,19 +698,30 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
                               {isAnalyzing ? "Analisando..." : "Analisar tessitura"}
                             </button>
                             <button type="button" onClick={() => void enqueueAiAnalysis(file.id)} disabled={!file.id || Boolean(analysisLoadingFileId)} className="rounded-lg border border-cyan-400/40 bg-cyan-500/10 px-3 py-1.5 text-xs font-medium text-cyan-100 hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60">
-                              {analysisLoadingFileId === file.id ? "criando análise..." : "Analisar Tessitura IA"}
+                              {analysisLoadingFileId === file.id ? "criando análise..." : isAiIncomplete ? "Reanalisar Tessitura IA" : "Analisar Tessitura IA"}
                             </button>
                             <div className="min-w-[190px] text-right">
                               {(() => {
-                                const job = getAnalysisJobForFile(file.id);
+                                const job = aiJob;
                                 if (!job) return <span className="text-[11px] text-cyan-100/70">IA: sem job</span>;
+
                                 const log = Array.isArray(job.analysis_logs) && job.analysis_logs[0]?.message ? job.analysis_logs[0].message : null;
+                                const detectedRange = getJobMidiRange(job, "detected");
+                                const comfortRange = getJobMidiRange(job, "comfort");
+                                const isIncomplete = isAiIncomplete;
+                                const recommendation = classifyVoiceComfortRange(file.voice, comfortRange.min, comfortRange.max);
+                                const badge = RECOMMENDATION_BADGES[isIncomplete ? "incomplete" : recommendation.level];
+                                const confidence = formatAiConfidence(job.vocal_confidence);
+
                                 return (
                                   <>
-                                    <span className="block text-[11px] font-semibold uppercase tracking-wide text-cyan-100">IA: {job.status}</span>
-                                    <span className="block text-[11px] text-cyan-100/80">Tessitura: {job.detected_min_note != null ? midiToNoteName(job.detected_min_note) : "—"} → {job.detected_max_note != null ? midiToNoteName(job.detected_max_note) : "—"}</span>
-                                    <span className="block text-[11px] text-cyan-100/80">Confortável: {job.comfort_min_note != null ? midiToNoteName(job.comfort_min_note) : "—"} → {job.comfort_max_note != null ? midiToNoteName(job.comfort_max_note) : "—"}</span>
-                                    <span className="block max-w-[220px] truncate text-[11px] text-cyan-100/70">{job.error_message ?? log ?? "sem logs"}</span>
+                                    <span className="block text-[11px] font-semibold uppercase tracking-wide text-cyan-100">IA: {isIncomplete ? "análise incompleta" : job.status}</span>
+                                    <span className="block text-[11px] text-cyan-100/80">Tessitura: {formatMidiRange(detectedRange.min, detectedRange.max)}</span>
+                                    <span className="block text-[11px] text-cyan-100/80">Confortável: {formatMidiRange(comfortRange.min, comfortRange.max)}</span>
+                                    {confidence ? <span className="block text-[11px] text-cyan-100/80">Confiança: {confidence}</span> : null}
+                                    {job.analysis_method ? <span className="block text-[11px] text-cyan-100/80">Método: {job.analysis_method}</span> : null}
+                                    <span className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${badge.className}`}>{badge.label}</span>
+                                    <span className="block max-w-[220px] truncate text-[11px] text-cyan-100/70">{job.error_message ?? (isIncomplete ? "completed sem min/max/comfort; reanálise liberada" : log ?? "sem logs")}</span>
                                   </>
                                 );
                               })()}

@@ -13,8 +13,31 @@ type BatchError = {
   message: string;
 };
 
+type ExistingAnalysisJob = {
+  id: string;
+  audio_file_id: string;
+  status: string;
+  detected_min_midi?: number | null;
+  detected_max_midi?: number | null;
+  comfort_min_midi?: number | null;
+  comfort_max_midi?: number | null;
+  detected_min_note?: number | null;
+  detected_max_note?: number | null;
+  comfort_min_note?: number | null;
+  comfort_max_note?: number | null;
+};
+
 const ENABLE_SMART_TESSITURA_ANALYSIS = String(process.env.ENABLE_SMART_TESSITURA_ANALYSIS ?? "false").toLowerCase() === "true";
 const VOICES = ["soprano", "contralto", "tenor"] as const;
+
+function hasCompleteAnalysis(job: ExistingAnalysisJob) {
+  const detectedMin = job.detected_min_note ?? job.detected_min_midi;
+  const detectedMax = job.detected_max_note ?? job.detected_max_midi;
+  const comfortMin = job.comfort_min_note ?? job.comfort_min_midi;
+  const comfortMax = job.comfort_max_note ?? job.comfort_max_midi;
+
+  return [detectedMin, detectedMax, comfortMin, comfortMax].every((value) => typeof value === "number");
+}
 
 function deriveVoice(value: string | null | undefined) {
   const normalized = String(value ?? "")
@@ -64,7 +87,7 @@ export async function POST(request: Request) {
     const fileIds = targetFiles.map((file) => file.id);
     const { data: existingJobs, error: existingJobsError } = await supabase
       .from("audio_analysis_jobs")
-      .select("id,audio_file_id,status")
+      .select("id,audio_file_id,status,detected_min_midi,detected_max_midi,comfort_min_midi,comfort_max_midi,detected_min_note,detected_max_note,comfort_min_note,comfort_max_note")
       .eq("kit_id", kitId)
       .eq("analysis_type", "tessitura")
       .in("audio_file_id", fileIds)
@@ -74,29 +97,49 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: existingJobsError.message }, { status: 500 });
     }
 
-    const existingByFileId = new Set((existingJobs ?? []).map((job) => String(job.audio_file_id)));
+    const existingByFileId = new Map((existingJobs ?? []).map((job) => [String(job.audio_file_id), job as ExistingAnalysisJob]));
+    const incompleteCompletedJobs = (existingJobs ?? []).filter((job) => job.status === "completed" && !hasCompleteAnalysis(job as ExistingAnalysisJob));
+
+    if (incompleteCompletedJobs.length > 0) {
+      const { error: resetError } = await supabase
+        .from("audio_analysis_jobs")
+        .update({
+          status: "pending",
+          error_message: null,
+          analysis_logs: [{ message: "Job reenfileirado: análise completed sem min/max/comfort preenchidos", at: new Date().toISOString() }],
+          started_at: null,
+          completed_at: null,
+        })
+        .in("id", incompleteCompletedJobs.map((job) => job.id));
+
+      if (resetError) {
+        return NextResponse.json({ error: resetError.message }, { status: 500 });
+      }
+    }
 
     const jobsToInsert = targetFiles
       .filter((file) => !existingByFileId.has(String(file.id)))
       .flatMap((file) => {
         const voice = deriveVoice(file.name);
         if (!voice) return [];
-        return [{
-        kit_id: kitId,
-        audio_file_id: file.id,
-        voice,
-        tone: file.tone ?? null,
-        status: "pending",
-        analysis_type: "tessitura",
-        source_r2_key: file.r2_key ?? null,
-        analysis_logs: [
+        return [
           {
-            message: "Job criado via endpoint manual /api/audio/analyze",
-            at: new Date().toISOString(),
-            autoEnabled: ENABLE_SMART_TESSITURA_ANALYSIS,
+            kit_id: kitId,
+            audio_file_id: file.id,
+            voice,
+            tone: file.tone ?? null,
+            status: "pending",
+            analysis_type: "tessitura",
+            source_r2_key: file.r2_key ?? null,
+            analysis_logs: [
+              {
+                message: "Job criado via endpoint manual /api/audio/analyze",
+                at: new Date().toISOString(),
+                autoEnabled: ENABLE_SMART_TESSITURA_ANALYSIS,
+              },
+            ],
           },
-        ],
-      }];
+        ];
       });
 
     let createdCount = 0;
@@ -120,8 +163,9 @@ export async function POST(request: Request) {
         success: true,
         autoAnalysisEnabled: ENABLE_SMART_TESSITURA_ANALYSIS,
         createdCount,
-        skippedCount: targetFiles.length - createdCount,
-        skipped: createdCount === 0,
+        skippedCount: Math.max(0, targetFiles.length - createdCount - incompleteCompletedJobs.length),
+        requeuedIncompleteCount: incompleteCompletedJobs.length,
+        skipped: createdCount === 0 && incompleteCompletedJobs.length === 0,
         errors,
       },
       { status: 200 },
@@ -150,7 +194,7 @@ export async function GET(request: Request) {
     const supabase = createSupabaseAdminClient();
     let query = supabase
       .from("audio_analysis_jobs")
-      .select("id,status,kit_id,audio_file_id,analysis_type,analysis_logs,error_message,detected_min_note,detected_max_note,comfort_min_note,comfort_max_note,dominant_notes,vocal_confidence,pitch_events_json,created_at,updated_at")
+      .select("id,status,kit_id,audio_file_id,voice,tone,analysis_type,analysis_logs,error_message,analysis_method,detected_min_midi,detected_max_midi,comfort_min_midi,comfort_max_midi,detected_min_note,detected_max_note,comfort_min_note,comfort_max_note,dominant_notes,recommended_tones,vocal_confidence,pitch_events_json,created_at,updated_at,completed_at")
       .eq("kit_id", kitId)
       .eq("analysis_type", "tessitura")
       .order("created_at", { ascending: false })
@@ -163,7 +207,15 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, jobs: data ?? [] }, { status: 200 });
+    const jobs = (data ?? []).map((job) => ({
+      ...job,
+      detected_min_note: job.detected_min_note ?? job.detected_min_midi ?? null,
+      detected_max_note: job.detected_max_note ?? job.detected_max_midi ?? null,
+      comfort_min_note: job.comfort_min_note ?? job.comfort_min_midi ?? null,
+      comfort_max_note: job.comfort_max_note ?? job.comfort_max_midi ?? null,
+    }));
+
+    return NextResponse.json({ success: true, jobs }, { status: 200 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro inesperado ao listar jobs de análise.";
     return NextResponse.json({ error: message }, { status: 400 });
