@@ -5,10 +5,9 @@ log() {
   echo "[audio-analysis-worker][startup] $*"
 }
 
-log "Validando ambiente Python para Demucs/Basic Pitch"
+log "Validando ambiente Python para librosa/pyin"
 log "which python: $(which python)"
 log "which pip: $(which pip)"
-log "which demucs: $(which demucs)"
 
 check_import() {
   local module="$1"
@@ -19,8 +18,8 @@ check_import() {
   fi
 }
 
-check_import demucs
-check_import basic_pitch
+check_import librosa
+check_import numpy
 
 log "Ambiente validado com sucesso; iniciando worker"
 exec npm start
