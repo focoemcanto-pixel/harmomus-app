@@ -18,6 +18,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python3 -m venv /opt/venv
 
 ENV PATH="/opt/venv/bin:$PATH"
+ENV DEMUCS_CACHE_DIR="/opt/demucs-cache"
+ENV DEMUCS_CACHE="/opt/demucs-cache"
+ENV XDG_CACHE_HOME="/opt/demucs-cache"
 
 RUN pip install --upgrade pip
 
@@ -32,6 +35,10 @@ RUN pip install \
 RUN pip install --no-cache-dir \
     demucs \
     basic-pitch
+
+RUN mkdir -p "${DEMUCS_CACHE_DIR}" \
+ && demucs --list-models \
+ && python -c "from demucs.pretrained import get_model; get_model('htdemucs')"
 
 COPY package*.json ./
 RUN npm install
