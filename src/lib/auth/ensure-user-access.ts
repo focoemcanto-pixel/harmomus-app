@@ -52,7 +52,7 @@ async function ensureProfile(admin: any, input: EnsureUserAccessInput) {
 
   const { data: existingProfile, error: existingError } = await admin
     .from("profiles")
-    .select("id, role")
+    .select("id, role, onboarding_status, onboarding_step")
     .eq("id", input.id)
     .maybeSingle();
 
@@ -66,6 +66,11 @@ async function ensureProfile(admin: any, input: EnsureUserAccessInput) {
     role: normalizeRole(existingProfile?.role),
     updated_at: now,
   };
+
+  if (!existingProfile?.id) {
+    payload.onboarding_status = "pending_email_confirmation";
+    payload.onboarding_step = "signup_started";
+  }
 
   if (isPaidPlan(normalizeSelectedPlanSlug(input.selectedPlanSlug))) {
     payload.onboarding_status = "pending_email_confirmation";
