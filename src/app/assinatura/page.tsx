@@ -60,6 +60,7 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
   const subscriptionId = context.subscription?.stripe_subscription_id;
   const cancelAtPeriodEnd = Boolean((context.subscription as any)?.cancel_at_period_end);
   const hasStripeLink = Boolean(customerId && subscriptionId);
+  const hasUnsyncedPremium = context.plan?.slug === "premium" && (status === "pending" || !hasStripeLink);
 
   let invoices: any[] = [];
   let paymentMethodLabel = customerId ? "Não cadastrado" : "Não vinculado";
@@ -107,9 +108,9 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
           <p className="text-xs uppercase tracking-[0.22em] text-cyan-200">Painel de assinatura</p>
           <h1 className="mt-3 text-3xl font-semibold md:text-4xl">Status real da sua assinatura</h1>
 
-          {!hasStripeLink && context.effectiveSlug !== "free" ? (
+          {hasUnsyncedPremium ? (
             <div className="mt-6 rounded-2xl border border-amber-400/30 bg-amber-500/10 p-4 text-sm text-amber-100">
-              Seu plano está liberado no Harmomus, mas a assinatura ainda não está totalmente vinculada ao Stripe. Por isso, data de renovação, método de pagamento e recibos podem aparecer incompletos.
+              Sua assinatura ainda não foi sincronizada com o Stripe. Aguarde alguns instantes ou entre em contato.
             </div>
           ) : null}
 

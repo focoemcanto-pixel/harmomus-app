@@ -3,7 +3,7 @@ import Link from "next/link";
 import { EmailConfirmationState } from "@/components/auth/email-confirmation-state";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { getCheckoutSession } from "@/lib/stripe/client";
+import { getCheckoutSession, getStripeSubscription } from "@/lib/stripe/client";
 import { mapStripeStatus } from "@/lib/stripe/status";
 
 const WHATSAPP_PREMIUM_URL = "https://chat.whatsapp.com/FNU6Xl5t6qD0VfGA2EQ0IW?mode=gi_t";
@@ -39,10 +39,18 @@ function getPlanSlugFromPrice(priceId: string | null) {
   return null;
 }
 
-function getCustomerIdFromSession(session: any) {
-  if (typeof session?.customer === "string") return session.customer;
-  if (session?.customer?.id) return String(session.customer.id);
+function getStripeId(value: unknown) {
+  if (typeof value === "string") return normalize(value);
+  if (value && typeof value === "object" && "id" in value) return normalize((value as { id?: unknown }).id);
   return null;
+}
+
+function getCustomerIdFromSession(session: any) {
+  return getStripeId(session?.customer);
+}
+
+function getSubscriptionIdFromSession(session: any) {
+  return getStripeId(session?.subscription);
 }
 
 function getCustomerEmailFromSession(session: any) {
@@ -69,11 +77,6 @@ async function resendSignupConfirmation(supabase: any, email: string | null) {
   return true;
 }
 
-async function findUserIdByEmail(admin: any, email: string | null) {
-  if (!email) return null;
-  const { data } = await admin.from("profiles").select("id").ilike("email", email).maybeSingle();
-  return data?.id ?? null;
-}
 
 async function findProfileForCheckout(admin: any, userId: string | null, email: string | null) {
   if (userId) {
@@ -104,16 +107,16 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
 
   try {
     const session = await getCheckoutSession(sessionId);
-    const subscription = session.subscription && typeof session.subscription === "object" ? session.subscription : null;
-    const priceId = subscription?.items?.data?.[0]?.price?.id ?? null;
+    const subscriptionId = getSubscriptionIdFromSession(session);
+    const embeddedSubscription = session.subscription && typeof session.subscription === "object" ? session.subscription : null;
+    const subscription = subscriptionId ? await getStripeSubscription(subscriptionId) : embeddedSubscription;
+    const priceId = normalize(subscription?.items?.data?.[0]?.price?.id);
     const planSlug = normalize(subscription?.metadata?.plan_slug)?.toLowerCase() ?? normalize(session?.metadata?.plan_slug)?.toLowerCase() ?? getPlanSlugFromPrice(priceId);
-    const metadataUserId = normalize(subscription?.metadata?.user_id) ?? normalize(session?.metadata?.user_id);
-    const customerId = getCustomerIdFromSession(session);
-    const customerEmail = getCustomerEmailFromSession(session);
+    const metadataUserId = normalize(session?.metadata?.user_id) ?? normalize(subscription?.metadata?.user_id);
+    const customerId = getStripeId(subscription?.customer) ?? getCustomerIdFromSession(session);
+    const customerEmail = normalizeEmail(session?.metadata?.email) ?? getCustomerEmailFromSession(session);
 
     const supabase = await createClient();
-    const { data: auth } = await supabase.auth.getUser();
-    const loggedUserId = auth.user?.id ?? null;
     let confirmationEmailResent = false;
 
     if (!planSlug) {
@@ -127,11 +130,15 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
       return { synced: false, planSlug, error: `Plano ${planSlug} não encontrado no banco.`, onboardingStatus: "pending_email_confirmation", customerEmail, confirmationEmailResent };
     }
 
-    const profile = await findProfileForCheckout(admin, metadataUserId ?? loggedUserId, customerEmail);
-    const userId = profile?.id ?? metadataUserId ?? loggedUserId ?? (await findUserIdByEmail(admin, customerEmail));
+    if (!subscription?.id) {
+      if (customerEmail) confirmationEmailResent = await resendSignupConfirmation(supabase, customerEmail);
+      return { synced: false, planSlug, error: null, onboardingStatus: "pending_email_confirmation", customerEmail, confirmationEmailResent };
+    }
+
+    const profile = await findProfileForCheckout(admin, metadataUserId, customerEmail);
     const onboardingStatus = String(profile?.onboarding_status ?? "pending_email_confirmation");
 
-    if (!profile?.id || !userId) {
+    if (!profile?.id) {
       if (customerEmail) confirmationEmailResent = await resendSignupConfirmation(supabase, customerEmail);
       return {
         synced: false,
@@ -143,32 +150,33 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
       };
     }
 
-    const status = mapStripeStatus(subscription?.status ?? "active");
-    const currentPeriodEnd = subscription?.current_period_end ? new Date(subscription.current_period_end * 1000).toISOString() : null;
-    const trialEndsAt = subscription?.trial_end ? new Date(subscription.trial_end * 1000).toISOString() : null;
+    const status = mapStripeStatus(subscription.status ?? "incomplete");
+    const currentPeriodEnd = subscription.current_period_end ? new Date(subscription.current_period_end * 1000).toISOString() : null;
+    const trialEndsAt = subscription.trial_end ? new Date(subscription.trial_end * 1000).toISOString() : null;
+    const now = new Date().toISOString();
 
     const payload = {
-      user_id: userId,
+      user_id: profile.id,
       plan_id: plan.id,
       status,
       gateway: "stripe",
       stripe_customer_id: customerId,
       gateway_customer_id: customerId,
-      stripe_subscription_id: subscription?.id ?? null,
-      gateway_subscription_id: subscription?.id ?? null,
+      stripe_subscription_id: subscription.id,
+      gateway_subscription_id: subscription.id,
       stripe_price_id: priceId,
       current_period_end: currentPeriodEnd,
       trial_ends_at: trialEndsAt,
       next_billing_at: currentPeriodEnd,
-      auto_renew: !Boolean(subscription?.cancel_at_period_end),
+      auto_renew: !Boolean(subscription.cancel_at_period_end),
       last_webhook_event: "checkout.success_page_sync",
-      updated_at: new Date().toISOString(),
+      updated_at: now,
     };
 
     const { data: existing } = await admin
       .from("subscriptions")
       .select("id")
-      .eq("user_id", userId)
+      .eq("user_id", profile.id)
       .maybeSingle();
 
     const result = existing?.id
@@ -183,8 +191,8 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
 
     await admin
       .from("profiles")
-      .update({ onboarding_step: "checkout_completed", updated_at: new Date().toISOString() })
-      .eq("id", userId);
+      .update({ onboarding_step: "checkout_completed", updated_at: now })
+      .eq("id", profile.id);
 
     if (onboardingStatus === "pending_email_confirmation" && customerEmail) {
       confirmationEmailResent = await resendSignupConfirmation(supabase, customerEmail);
@@ -210,6 +218,7 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
     };
   }
 }
+
 
 export default async function CheckoutSucesso({ searchParams }: CheckoutSuccessProps) {
   const resolvedSearchParams = await searchParams;

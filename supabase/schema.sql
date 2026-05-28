@@ -35,7 +35,7 @@ create table if not exists public.subscriptions (
   user_id uuid not null references public.profiles(id) on delete cascade,
   plan_id uuid not null references public.plans(id) on delete restrict,
   legacy_pms_subscription_id text,
-  status text not null default 'pending' check (status in ('active', 'overdue', 'canceled', 'expired', 'pending')),
+  status text not null default 'pending' check (status in ('active', 'trialing', 'overdue', 'canceled', 'expired', 'pending')),
   starts_at timestamptz,
   current_period_end timestamptz,
   trial_ends_at timestamptz,

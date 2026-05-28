@@ -51,10 +51,15 @@ export async function getCurrentProfile() {
   return await findProfileForUser(supabase, data.user);
 }
 
-function isSubscriptionUsable(subscription: Subscription | null | undefined) {
+function hasStripeLink(subscription: Subscription | null | undefined) {
+  return Boolean(subscription?.stripe_subscription_id && subscription?.stripe_customer_id);
+}
+
+function isSubscriptionUsable(subscription: Subscription | null | undefined, planSlug?: string | null) {
   if (!subscription) return false;
   const status = String(subscription.status ?? "").toLowerCase();
   if (!["active", "trialing"].includes(status)) return false;
+  if (planSlug === "premium" && !hasStripeLink(subscription)) return false;
   const periodEnd = (subscription as any).current_period_end
     ? new Date((subscription as any).current_period_end).getTime()
     : Number.POSITIVE_INFINITY;
@@ -84,8 +89,8 @@ export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessCo
   const typedSubscription = (subscription as Subscription | null) ?? null;
   const plan = (plans ?? []).find((p: Plan) => p.id === typedSubscription?.plan_id) ?? null;
   const ministryActive = ministryMembership?.ministry && ["active", "trialing"].includes(String(ministryMembership.ministry.status ?? "").toLowerCase());
-  const usableSubscription = isSubscriptionUsable(typedSubscription);
   const paidPlanSlug = normalizeEffectivePlanSlug(plan?.slug);
+  const usableSubscription = isSubscriptionUsable(typedSubscription, paidPlanSlug);
 
   const effectiveSlug: EffectivePlanSlug = ministryActive
     ? "premium"
@@ -98,7 +103,7 @@ export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessCo
     profile,
     plan,
     subscription: typedSubscription,
-    hierarchyLevel: effectiveSlug === "premium" ? 3 : plan?.hierarchy_level ?? (effectiveSlug === "plus" ? 2 : 1),
+    hierarchyLevel: effectiveSlug === "premium" ? 3 : effectiveSlug === "plus" ? 2 : 1,
     isGuest: false,
     isAdmin: normalizeRole(profile?.role) === "admin",
     ministry: ministryActive

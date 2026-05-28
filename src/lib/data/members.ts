@@ -169,16 +169,51 @@ export async function reactivateMemberSubscription(userId: string): Promise<void
   await updateMemberSubscription(userId, { status: "active", auto_renew: true });
 }
 
+function normalizeEmail(value: unknown) {
+  return String(value ?? "").trim().toLowerCase() || null;
+}
+
+async function deleteIfIds(supabase: any, table: string, column: string, ids: string[]) {
+  const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
+  if (!uniqueIds.length) return;
+  await supabase.from(table).delete().in(column, uniqueIds);
+}
+
 export async function deleteMember(userId: string): Promise<void> {
   const supabase = createSupabaseAdminClient() as any;
-  const safeDeletes = [
-    supabase.from("subscriptions").delete().eq("user_id", userId),
-    supabase.from("playlist_items").delete().eq("user_id", userId),
-    supabase.from("playlists").delete().eq("user_id", userId),
-    supabase.from("profiles").delete().eq("id", userId),
-  ];
+  const [{ data: profile }, authResult] = await Promise.all([
+    supabase.from("profiles").select("id,email").eq("id", userId).maybeSingle(),
+    supabase.auth.admin.getUserById(userId),
+  ]);
 
-  await Promise.allSettled(safeDeletes);
+  const email = normalizeEmail(profile?.email ?? authResult?.data?.user?.email);
+  const { data: duplicateProfiles } = email
+    ? await supabase.from("profiles").select("id,email").ilike("email", email)
+    : { data: [] };
+  const userIds = Array.from(new Set([userId, ...((duplicateProfiles ?? []).map((item: any) => item.id).filter(Boolean))]));
+
+  const { data: playlists } = await supabase
+    .from("playlists")
+    .select("id")
+    .in("user_id", userIds.length ? userIds : [userId]);
+  const playlistIds = (playlists ?? []).map((playlist: any) => playlist.id).filter(Boolean);
+
+  await deleteIfIds(supabase, "playlist_items", "playlist_id", playlistIds);
+
+  await Promise.allSettled([
+    deleteIfIds(supabase, "kit_access_logs", "user_id", userIds),
+    deleteIfIds(supabase, "audio_access_logs", "user_id", userIds),
+    deleteIfIds(supabase, "marketing_events", "user_id", userIds),
+    deleteIfIds(supabase, "communication_logs", "user_id", userIds),
+    deleteIfIds(supabase, "communication_campaigns", "created_by", userIds),
+    deleteIfIds(supabase, "ministry_members", "user_id", userIds),
+    deleteIfIds(supabase, "ministry_activity_logs", "actor_user_id", userIds),
+    deleteIfIds(supabase, "subscriptions", "user_id", userIds),
+    deleteIfIds(supabase, "playlists", "user_id", userIds),
+    email ? supabase.from("ministry_invites").delete().ilike("email", email) : Promise.resolve(),
+    deleteIfIds(supabase, "profiles", "id", userIds),
+  ]);
+
   const { error } = await supabase.auth.admin.deleteUser(userId);
   if (error) throw new Error(`Falha ao excluir usuário Auth: ${error.message}`);
 }
