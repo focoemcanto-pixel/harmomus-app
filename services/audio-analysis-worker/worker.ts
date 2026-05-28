@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, unlink } from "node:fs/promises";
+import { mkdtemp, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile, spawn } from "node:child_process";
@@ -10,13 +10,9 @@ import { downloadFromR2 } from "./r2";
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const HEARTBEAT_INTERVAL_MS = 15 * 1000;
 const STALE_PROCESSING_MS = 10 * 60 * 1000;
-const DEMUCS_TIMEOUT_MS = 12 * 60 * 1000;
-const DEFAULT_DEMUCS_MODEL = "htdemucs";
-const BASIC_PITCH_TIMEOUT_MS = 8 * 60 * 1000;
+const PYIN_TIMEOUT_MS = 4 * 60 * 1000;
 const KILL_GRACE_MS = 2_000;
 const MAX_CONCURRENT_ANALYSIS = Number(process.env.MAX_CONCURRENT_ANALYSIS ?? "1");
-const DEMUCS_CACHE_DIR = process.env.DEMUCS_CACHE_DIR ?? "/opt/demucs-cache";
-const ENABLE_DEMUCS_ANALYSIS = String(process.env.ENABLE_DEMUCS_ANALYSIS ?? "false").toLowerCase() === "true";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -189,87 +185,18 @@ function percentile(values: number[], ratio: number): number | null {
   return sorted[index] ?? null;
 }
 
-function parseBasicPitchCsv(csv: string) {
-  const lines = csv.split(/\r?\n/).filter(Boolean);
-  if (lines.length <= 1) return [] as Array<{ start_s: number; end_s: number; pitch_midi: number; confidence: number }>;
-
-  const header = lines[0]!.split(",").map((v) => v.trim());
-  const getIndex = (name: string) => header.findIndex((h) => h === name);
-  const startIdx = getIndex("start_s");
-  const endIdx = getIndex("end_s");
-  const midiIdx = getIndex("pitch_midi");
-  const confidenceIdx = getIndex("velocity");
-
-  return lines.slice(1).flatMap((line) => {
-    const cols = line.split(",");
-    const start_s = Number(cols[startIdx]);
-    const end_s = Number(cols[endIdx]);
-    const pitch_midi = Math.round(Number(cols[midiIdx]));
-    const confidence = Number.isFinite(Number(cols[confidenceIdx])) ? Number(cols[confidenceIdx]) : 0.8;
-    if (!Number.isFinite(start_s) || !Number.isFinite(end_s) || !Number.isFinite(pitch_midi)) return [];
-    return [{ start_s, end_s, pitch_midi, confidence }];
-  });
-}
-
-async function runBasicPitch(sourcePath: string, workingDir: string) {
-  const basicPitchOut = join(workingDir, "basic-pitch");
-  console.info("[audio-analysis-worker] iniciando BasicPitch", { analysis_mode: "basicpitch-direct" });
-  await runSubprocess("basic-pitch", [basicPitchOut, sourcePath], BASIC_PITCH_TIMEOUT_MS, "basicpitch");
-  console.info("[audio-analysis-worker] finalizando BasicPitch", { analysis_mode: "basicpitch-direct" });
-
-  const { stdout: csvPathStdout } = await runSubprocess("bash", ["-lc", `find ${JSON.stringify(basicPitchOut)} -type f -name '*.csv' | head -n 1`], 15000, "find-basicpitch-csv");
-  const csvPath = csvPathStdout.trim();
-  if (!csvPath) throw new Error("Basic Pitch não gerou CSV.");
-
-  const csv = await readFile(csvPath, "utf-8");
-  return { stemPath: sourcePath, notes: parseBasicPitchCsv(csv) };
-}
-
-async function runDemucsAndBasicPitch(sourcePath: string, workingDir: string) {
-  const demucsOutDir = join(workingDir, "demucs");
-  const configuredDemucsModel = (process.env.DEMUCS_MODEL ?? DEFAULT_DEMUCS_MODEL).trim() || DEFAULT_DEMUCS_MODEL;
-  const fallbackDemucsModel = "htdemucs";
-  const demucsModels = [configuredDemucsModel, fallbackDemucsModel].filter((model, idx, arr) => arr.indexOf(model) === idx);
-
-  console.info("[audio-analysis-worker] Demucs usado apenas para análise de tessitura, não para áudio final", {
-    configured_model: configuredDemucsModel,
-    fallback_model: fallbackDemucsModel,
-    attempts: demucsModels,
-  });
-
-  let usedModel: string | null = null;
-  const demucsStartedAt = Date.now();
-  for (const model of demucsModels) {
-    try {
-      console.info("[audio-analysis-worker] iniciando Demucs", { model });
-      await runSubprocess(
-        "demucs",
-        ["--two-stems", "vocals", "--name", model, "--device", "cpu", "-j", "1", "-o", demucsOutDir, sourcePath],
-        DEMUCS_TIMEOUT_MS,
-        `demucs-${model}`,
-        { OMP_NUM_THREADS: "1", MKL_NUM_THREADS: "1", OPENBLAS_NUM_THREADS: "1", DEMUCS_CACHE: DEMUCS_CACHE_DIR, XDG_CACHE_HOME: DEMUCS_CACHE_DIR },
-      );
-      usedModel = model;
-      console.info("[audio-analysis-worker] Demucs finalizado", { used_model: usedModel, elapsed_ms: Date.now() - demucsStartedAt });
-      break;
-    } catch (error) {
-      console.warn("[audio-analysis-worker] falha no Demucs, tentando fallback", {
-        attempted_model: model,
-        elapsed_ms: Date.now() - demucsStartedAt,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-  if (!usedModel) {
-    throw new Error(`Demucs falhou para todos os modelos configurados: ${demucsModels.join(", ")}.`);
-  }
-
-  const { stdout: findStdout } = await runSubprocess("bash", ["-lc", `find ${JSON.stringify(demucsOutDir)} -type f -name vocals.wav | head -n 1`], 15000, "find-demucs");
-  const stemPath = findStdout.trim();
-  if (!stemPath) throw new Error("Demucs não retornou stem vocal (vocals.wav).");
-
-  const analysis = await runBasicPitch(stemPath, workingDir);
-  return { stemPath, notes: analysis.notes };
+async function runLibrosaPyin(sourcePath: string) {
+  console.info("[audio-analysis-worker] iniciando librosa.pyin", { analysis_mode: "librosa-pyin-direct" });
+  const scriptPath = join(process.cwd(), "scripts", "analyze_pyin.py");
+  const { stdout } = await runSubprocess("python", [scriptPath, sourcePath], PYIN_TIMEOUT_MS, "librosa-pyin");
+  const payload = JSON.parse(stdout) as {
+    notes: Array<{ start_s: number; end_s: number; pitch_midi: number; confidence: number }>;
+    avg_pitch_midi: number | null;
+    frames: number;
+    voiced_frames: number;
+  };
+  console.info("[audio-analysis-worker] finalizando librosa.pyin", { analysis_mode: "librosa-pyin-direct", frames: payload.frames, voiced_frames: payload.voiced_frames, avg_pitch_midi: payload.avg_pitch_midi });
+  return payload;
 }
 
 function buildInsights(notes: Array<{ start_s: number; end_s: number; pitch_midi: number; confidence: number }>) {
@@ -362,15 +289,13 @@ async function processJob(job: any) {
       throw new Error(`Voice inválida para análise de tessitura: ${String(job.voice ?? "")}`);
     }
 
-    const analysisMode = ENABLE_DEMUCS_ANALYSIS ? "demucs+basicpitch" : "basicpitch-direct";
-    const { stemPath, notes } = ENABLE_DEMUCS_ANALYSIS
-      ? await runDemucsAndBasicPitch(sourcePath, workspace)
-      : await runBasicPitch(sourcePath, workspace);
+    const analysisMode = "librosa-pyin-direct";
+    const { notes, avg_pitch_midi } = await runLibrosaPyin(sourcePath);
 
-    logs.push({ at: new Date().toISOString(), message: "Análise de tessitura concluída", analysis_mode: analysisMode, voice: normalizedVoice, vocal_stem_path: stemPath, notes_detected: notes.length });
+    logs.push({ at: new Date().toISOString(), message: "Análise de tessitura concluída", analysis_mode: analysisMode, voice: normalizedVoice, notes_detected: notes.length, avg_pitch_midi });
 
     const insights = buildInsights(notes);
-    console.info("[audio-analysis-worker] salvando análise", { job_id: job.id, analysis_mode: analysisMode, voice: normalizedVoice, notes_detected: notes.length, comfort_range: [insights.comfortMin, insights.comfortMax] });
+    console.info("[audio-analysis-worker] salvando análise", { job_id: job.id, analysis_mode: analysisMode, voice: normalizedVoice, pitch_medio_midi: avg_pitch_midi, min_midi: insights.minMidi, max_midi: insights.maxMidi, confidence: insights.confidence });
 
     const { error } = await supabase
       .from("audio_analysis_jobs")
@@ -418,7 +343,7 @@ async function main() {
   if (MAX_CONCURRENT_ANALYSIS !== 1) {
     console.warn("[audio-analysis-worker] MAX_CONCURRENT_ANALYSIS inválido para este worker; forçando execução serial", { configured: MAX_CONCURRENT_ANALYSIS, enforced: 1 });
   }
-  console.info("[audio-analysis-worker] started", { ENABLE_SMART_TESSITURA_ANALYSIS, ENABLE_DEMUCS_ANALYSIS, MAX_CONCURRENT_ANALYSIS: 1, demucs_cache_dir: DEMUCS_CACHE_DIR });
+  console.info("[audio-analysis-worker] started", { ENABLE_SMART_TESSITURA_ANALYSIS, MAX_CONCURRENT_ANALYSIS: 1, analysis_pipeline: "librosa-pyin-direct" });
 
   while (true) {
     try {
