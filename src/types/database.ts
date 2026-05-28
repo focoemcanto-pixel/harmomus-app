@@ -267,6 +267,8 @@ export interface Database {
           r2_key: string;
           public_url: string;
           file_type: string;
+          source_type: "original" | "generated";
+          generated_from_file_id: string | null;
           min_midi_note: number | null;
           max_midi_note: number | null;
           detected_min_midi_note: number | null;
@@ -284,6 +286,8 @@ export interface Database {
           r2_key: string;
           public_url: string;
           file_type: string;
+          source_type?: "original" | "generated";
+          generated_from_file_id?: string | null;
           min_midi_note?: number | null;
           max_midi_note?: number | null;
           detected_min_midi_note?: number | null;

@@ -221,6 +221,7 @@ export async function importR2Kits(): Promise<R2KitImportResult> {
             r2_key: file.key,
             public_url: buildPublicUrl(file.key),
             file_type: parsed.fileType,
+            source_type: "original",
           };
         });
 
