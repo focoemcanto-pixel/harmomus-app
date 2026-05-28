@@ -79,24 +79,47 @@ async function resendSignupConfirmation(supabase: any, email: string | null) {
 
 
 async function findProfileForCheckout(admin: any, userId: string | null, email: string | null) {
+  console.log("[checkout.success.findProfileForCheckout] buscando profile", { metadata_user_id: userId, metadata_email: email });
+
   if (userId) {
-    const { data } = await admin
+    const response = await admin
       .from("profiles")
       .select("id,email,onboarding_status")
       .eq("id", userId)
       .maybeSingle();
-    if (data?.id) return data;
+
+    console.log("[checkout.success.findProfileForCheckout] resultado por user_id", {
+      profile_encontrado: Boolean(response.data?.id),
+      profile: response.data ?? null,
+      supabase_error: response.error ?? null,
+      supabase_response: response,
+    });
+
+    if (response.error) console.error("[checkout.success.findProfileForCheckout] erro Supabase por user_id", response);
+    if (response.data?.id) return response.data;
+  } else {
+    console.error("[checkout.success.findProfileForCheckout] USER_ID_MISSING", { metadata_email: email });
   }
 
   if (email) {
-    const { data } = await admin
+    const response = await admin
       .from("profiles")
       .select("id,email,onboarding_status")
       .ilike("email", email)
       .maybeSingle();
-    if (data?.id) return data;
+
+    console.log("[checkout.success.findProfileForCheckout] resultado por email", {
+      profile_encontrado: Boolean(response.data?.id),
+      profile: response.data ?? null,
+      supabase_error: response.error ?? null,
+      supabase_response: response,
+    });
+
+    if (response.error) console.error("[checkout.success.findProfileForCheckout] erro Supabase por email", response);
+    if (response.data?.id) return response.data;
   }
 
+  console.error("[checkout.success.findProfileForCheckout] PROFILE_NOT_FOUND", { metadata_user_id: userId, metadata_email: email });
   return null;
 }
 
@@ -106,15 +129,45 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
   }
 
   try {
+    console.log("[checkout.success.syncCheckoutSession] início", { session_id: sessionId });
+
     const session = await getCheckoutSession(sessionId);
     const subscriptionId = getSubscriptionIdFromSession(session);
     const embeddedSubscription = session.subscription && typeof session.subscription === "object" ? session.subscription : null;
+
+    console.log("[checkout.success.syncCheckoutSession] sessão Stripe recebida", {
+      session_id: sessionId,
+      session_mode: session?.mode ?? null,
+      session_customer: getCustomerIdFromSession(session),
+      session_subscription: subscriptionId,
+      session_customer_email: session?.customer_email ?? session?.customer_details?.email ?? null,
+      session_metadata: session?.metadata ?? null,
+      metadata_user_id: session?.metadata?.user_id ?? null,
+      metadata_email: session?.metadata?.email ?? null,
+    });
+
+    if (!session?.metadata?.user_id) console.error("[checkout.success.syncCheckoutSession] USER_ID_MISSING", { session_id: sessionId, metadata: session?.metadata ?? null });
+    if (!subscriptionId && !embeddedSubscription?.id) console.error("[checkout.success.syncCheckoutSession] SESSION_SUBSCRIPTION_NULL", { session_id: sessionId, session_subscription: session?.subscription ?? null });
+
     const subscription = subscriptionId ? await getStripeSubscription(subscriptionId) : embeddedSubscription;
     const priceId = normalize(subscription?.items?.data?.[0]?.price?.id);
     const planSlug = normalize(subscription?.metadata?.plan_slug)?.toLowerCase() ?? normalize(session?.metadata?.plan_slug)?.toLowerCase() ?? getPlanSlugFromPrice(priceId);
     const metadataUserId = normalize(session?.metadata?.user_id) ?? normalize(subscription?.metadata?.user_id);
     const customerId = getStripeId(subscription?.customer) ?? getCustomerIdFromSession(session);
     const customerEmail = normalizeEmail(session?.metadata?.email) ?? getCustomerEmailFromSession(session);
+
+    console.log("[checkout.success.syncCheckoutSession] dados extraídos para sincronização", {
+      session_id: sessionId,
+      subscription_encontrada_no_stripe: Boolean(subscription?.id),
+      stripe_status: subscription?.status ?? null,
+      customer_id: customerId,
+      subscription_id: subscription?.id ?? subscriptionId ?? null,
+      price_id: priceId,
+      current_period_end: subscription?.current_period_end ? new Date(subscription.current_period_end * 1000).toISOString() : null,
+      metadata_user_id: metadataUserId,
+      metadata_email: customerEmail,
+      subscription_metadata: subscription?.metadata ?? null,
+    });
 
     const supabase = await createClient();
     let confirmationEmailResent = false;
@@ -124,13 +177,18 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
     }
 
     const admin = createSupabaseAdminClient() as any;
-    const { data: plan } = await admin.from("plans").select("id, slug").eq("slug", planSlug).maybeSingle();
+    const planResponse = await admin.from("plans").select("id, slug").eq("slug", planSlug).maybeSingle();
+    const { data: plan } = planResponse;
+
+    console.log("[checkout.success.syncCheckoutSession] plano resolvido", { plan_slug: planSlug, plan: plan ?? null, supabase_error: planResponse.error ?? null, supabase_response: planResponse });
+    if (planResponse.error) console.error("[checkout.success.syncCheckoutSession] erro Supabase ao buscar plano", planResponse);
 
     if (!plan?.id) {
       return { synced: false, planSlug, error: `Plano ${planSlug} não encontrado no banco.`, onboardingStatus: "pending_email_confirmation", customerEmail, confirmationEmailResent };
     }
 
     if (!subscription?.id) {
+      console.error("[checkout.success.syncCheckoutSession] SESSION_SUBSCRIPTION_NULL", { session_id: sessionId, session_subscription: session?.subscription ?? null });
       if (customerEmail) confirmationEmailResent = await resendSignupConfirmation(supabase, customerEmail);
       return { synced: false, planSlug, error: null, onboardingStatus: "pending_email_confirmation", customerEmail, confirmationEmailResent };
     }
@@ -173,26 +231,38 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
       updated_at: now,
     };
 
-    const { data: existing } = await admin
+    console.log("[checkout.success.syncCheckoutSession] payload salvo no banco", payload);
+
+    const existingResponse = await admin
       .from("subscriptions")
       .select("id")
       .eq("user_id", profile.id)
       .maybeSingle();
+    const { data: existing } = existingResponse;
+
+    console.log("[checkout.success.syncCheckoutSession] assinatura local existente", { existing: existing ?? null, supabase_error: existingResponse.error ?? null, supabase_response: existingResponse });
+    if (existingResponse.error) console.error("[checkout.success.syncCheckoutSession] erro Supabase ao buscar assinatura local", existingResponse);
 
     const result = existing?.id
-      ? await admin.from("subscriptions").update(payload).eq("id", existing.id)
-      : await admin.from("subscriptions").insert(payload);
+      ? await admin.from("subscriptions").update(payload).eq("id", existing.id).select()
+      : await admin.from("subscriptions").insert(payload).select();
+
+    console.log("[checkout.success.syncCheckoutSession] resposta Supabase ao salvar assinatura", result);
 
     if (result.error) {
-      console.error("[checkout.success] Falha ao sincronizar assinatura", result.error);
+      console.error("[checkout.success] Falha ao sincronizar assinatura", result);
       if (customerEmail) confirmationEmailResent = await resendSignupConfirmation(supabase, customerEmail);
       return { synced: false, planSlug, error: null, onboardingStatus: "pending_email_confirmation", customerEmail, confirmationEmailResent };
     }
 
-    await admin
+    const profileUpdateResponse = await admin
       .from("profiles")
       .update({ onboarding_step: "checkout_completed", updated_at: now })
-      .eq("id", profile.id);
+      .eq("id", profile.id)
+      .select("id,email,onboarding_status,onboarding_step");
+
+    console.log("[checkout.success.syncCheckoutSession] resposta Supabase ao atualizar profile", profileUpdateResponse);
+    if (profileUpdateResponse.error) console.error("[checkout.success.syncCheckoutSession] erro Supabase ao atualizar profile", profileUpdateResponse);
 
     if (onboardingStatus === "pending_email_confirmation" && customerEmail) {
       confirmationEmailResent = await resendSignupConfirmation(supabase, customerEmail);
