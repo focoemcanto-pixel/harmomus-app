@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Crown, Mail, ShieldCheck, Sparkles, Users } from "lucide-react";
+import { Crown, Mail, ShieldCheck, Sparkles, Trash2, Users } from "lucide-react";
 
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { getCurrentUserAccessContext, isMinistryManager } from "@/lib/auth/current-user";
@@ -51,6 +51,8 @@ export default async function MinisterioPage() {
     ministryRole: context.ministry.role,
     effectiveSlug: context.effectiveSlug,
   });
+
+  const canManage = isMinistryManager(context);
 
   return (
     <PublicAppShell>
@@ -123,7 +125,7 @@ export default async function MinisterioPage() {
                 </Link>
               </div>
 
-              {isMinistryManager(context) ? (
+              {canManage ? (
                 <form action="/api/ministerio/invite" method="post" className="mt-6 space-y-3">
                   <input
                     name="name"
@@ -181,6 +183,16 @@ export default async function MinisterioPage() {
                       <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-zinc-200">
                         {statusLabel(member.status)}
                       </span>
+
+                      {canManage && member.role !== "owner" ? (
+                        <form action="/api/ministerio/remove" method="post">
+                          <input type="hidden" name="member_id" value={member.id} />
+
+                          <button className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-rose-300/20 bg-rose-500/10 text-rose-100 transition hover:bg-rose-500/20">
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </form>
+                      ) : null}
                     </div>
                   </div>
                 ))}
