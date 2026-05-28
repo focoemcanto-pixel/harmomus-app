@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Send, Wand2 } from "lucide-react";
+import { Loader2, Send, Wand2 } from "lucide-react";
 
 type KitOption = {
   id: string;
@@ -25,7 +25,8 @@ export function PremiumToneRequestForm({
   const [tone, setTone] = useState("");
   const [voice, setVoice] = useState("");
   const [notes, setNotes] = useState("");
-  const [sent, setSent] = useState(false);
+  const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const suggestions = useMemo(() => {
     const query = music.trim().toLowerCase();
@@ -40,8 +41,41 @@ export function PremiumToneRequestForm({
     setSelectedKitSlug(kit.slug);
   }
 
-  function submit() {
-    setSent(true);
+  async function submit() {
+    setStatus(null);
+
+    if (!music.trim() || !tone.trim()) {
+      setStatus({ type: "error", message: "Informe a música e o tom desejado." });
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    const response = await fetch("/api/premium-requests", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        request_type: "tone",
+        song_name: music,
+        kit_slug: selectedKitSlug,
+        desired_tone: tone,
+        voice_part: voice,
+        notes,
+      }),
+    });
+
+    const result = await response.json().catch(() => ({}));
+    setIsSubmitting(false);
+
+    if (!response.ok) {
+      setStatus({ type: "error", message: result.error ?? "Não foi possível enviar o pedido." });
+      return;
+    }
+
+    setTone("");
+    setVoice("");
+    setNotes("");
+    setStatus({ type: "success", message: "Pedido de tom enviado com sucesso. Você poderá acompanhar a produção pelo Harmomus." });
   }
 
   return (
@@ -56,7 +90,7 @@ export function PremiumToneRequestForm({
             onChange={(event) => {
               setMusic(event.target.value);
               setSelectedKitSlug("");
-              setSent(false);
+              setStatus(null);
             }}
             className="mt-2 h-12 w-full rounded-2xl border border-white/15 bg-white/[0.06] px-4 text-white outline-none ring-emerald-300/40 focus:ring"
             placeholder="Digite o nome do kit"
@@ -86,23 +120,30 @@ export function PremiumToneRequestForm({
 
         <label className="block text-sm font-bold text-zinc-200">
           Tom desejado *
-          <input value={tone} onChange={(e) => { setTone(e.target.value); setSent(false); }} className="mt-2 h-12 w-full rounded-2xl border border-white/15 bg-white/[0.06] px-4 text-white outline-none ring-emerald-300/40 focus:ring" placeholder="Ex: C, D, Eb, F#" />
+          <input value={tone} onChange={(e) => { setTone(e.target.value); setStatus(null); }} className="mt-2 h-12 w-full rounded-2xl border border-white/15 bg-white/[0.06] px-4 text-white outline-none ring-emerald-300/40 focus:ring" placeholder="Ex: C, D, Eb, F#" />
         </label>
 
         <label className="block text-sm font-bold text-zinc-200">
           Voz/nipe
-          <input value={voice} onChange={(e) => { setVoice(e.target.value); setSent(false); }} className="mt-2 h-12 w-full rounded-2xl border border-white/15 bg-white/[0.06] px-4 text-white outline-none ring-emerald-300/40 focus:ring" placeholder="Ex: todos, soprano, tenor, contralto" />
+          <input value={voice} onChange={(e) => { setVoice(e.target.value); setStatus(null); }} className="mt-2 h-12 w-full rounded-2xl border border-white/15 bg-white/[0.06] px-4 text-white outline-none ring-emerald-300/40 focus:ring" placeholder="Ex: todos, soprano, tenor, contralto" />
         </label>
 
         <label className="block text-sm font-bold text-zinc-200">
           Observações
-          <input value={notes} onChange={(e) => { setNotes(e.target.value); setSent(false); }} className="mt-2 h-12 w-full rounded-2xl border border-white/15 bg-white/[0.06] px-4 text-white outline-none ring-emerald-300/40 focus:ring" placeholder="Observações" />
+          <input value={notes} onChange={(e) => { setNotes(e.target.value); setStatus(null); }} className="mt-2 h-12 w-full rounded-2xl border border-white/15 bg-white/[0.06] px-4 text-white outline-none ring-emerald-300/40 focus:ring" placeholder="Observações" />
         </label>
       </div>
 
-      {sent ? <p className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-3 text-sm text-emerald-100">Pedido registrado na tela. Em seguida conectaremos essa solicitação ao painel administrativo.</p> : null}
+      {status ? (
+        <p className={`mt-4 rounded-2xl border p-3 text-sm ${status.type === "success" ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-100" : "border-rose-400/20 bg-rose-500/10 text-rose-100"}`}>
+          {status.message}
+        </p>
+      ) : null}
 
-      <button type="button" onClick={submit} className="mt-5 inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-400 to-cyan-300 font-black uppercase tracking-[0.16em] text-black"><Send size={18} />Enviar pedido de tom</button>
+      <button type="button" onClick={submit} disabled={isSubmitting} className="mt-5 inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-400 to-cyan-300 font-black uppercase tracking-[0.16em] text-black disabled:cursor-wait disabled:opacity-70">
+        {isSubmitting ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+        {isSubmitting ? "Enviando..." : "Enviar pedido de tom"}
+      </button>
     </form>
   );
 }
