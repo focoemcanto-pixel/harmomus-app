@@ -11,7 +11,6 @@ type MinistryRow = {
   status: string | null;
   seat_limit: number | null;
   stripe_subscription_id: string | null;
-  profiles?: { full_name?: string | null; email?: string | null } | null;
 };
 
 async function getMinistries(): Promise<{ data: MinistryRow[]; error: string | null }> {
@@ -19,7 +18,7 @@ async function getMinistries(): Promise<{ data: MinistryRow[]; error: string | n
     const supabase = createSupabaseAdminClient() as any;
     const { data, error } = await supabase
       .from("ministries")
-      .select("*, profiles:profiles!ministries_owner_user_id_fkey(full_name,email)")
+      .select("*")
       .order("created_at", { ascending: false });
 
     if (error) return { data: [], error: error.message };
@@ -45,7 +44,6 @@ export default async function AdminPlanosMinisteriaisPage() {
         <div className="rounded-2xl border border-amber-400/30 bg-amber-500/10 p-5 text-sm text-amber-100">
           <p className="font-semibold">Não foi possível carregar os dados agora.</p>
           <p className="mt-1 text-amber-100/80">{error}</p>
-          <p className="mt-3 text-amber-100/70">Verifique se as migrations ministeriais foram aplicadas e se a variável SUPABASE_SERVICE_ROLE_KEY está configurada no ambiente de produção.</p>
         </div>
       ) : null}
 
@@ -67,7 +65,7 @@ export default async function AdminPlanosMinisteriaisPage() {
               {data.map((ministry) => (
                 <tr key={ministry.id} className="border-t border-white/10">
                   <td className="px-4 py-4 font-semibold text-white">{ministry.name ?? "Sem nome"}</td>
-                  <td className="px-4 py-4 text-zinc-300">{ministry.profiles?.full_name ?? ministry.profiles?.email ?? "-"}</td>
+                  <td className="px-4 py-4 text-zinc-300">—</td>
                   <td className="px-4 py-4 text-zinc-300">{ministry.plan_type ?? "-"}</td>
                   <td className="px-4 py-4"><span className="rounded-full bg-white/10 px-3 py-1 text-xs text-zinc-200">{ministry.status ?? "-"}</span></td>
                   <td className="px-4 py-4 text-zinc-300">-/{ministry.seat_limit ?? "-"}</td>
