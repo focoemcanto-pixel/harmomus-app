@@ -5,31 +5,22 @@ import { ensureUserAccess } from "@/lib/auth/ensure-user-access";
 import { createClient } from "@/lib/supabase/server";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
 
-const ALLOWED_TYPES = new Set<EmailOtpType>(["signup", "recovery", "magiclink", "email_change"]);
-
-function normalizeNext(raw: string | null) {
-  if (!raw || !raw.startsWith("/")) return "/";
-  return raw;
-}
-
-function isPaidPlan(planSlug: string) {
-  return planSlug !== "free";
-}
+const ALLOWED_TYPES = new Set(["signup", "email"]);
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const tokenHash = url.searchParams.get("token_hash");
-  const type = url.searchParams.get("type") as EmailOtpType | null;
-  const next = normalizeNext(url.searchParams.get("next"));
+  const type = url.searchParams.get("type");
 
   if (!tokenHash || !type || !ALLOWED_TYPES.has(type)) {
     return NextResponse.redirect(new URL("/login?error=callback", request.url), 303);
   }
 
+  const otpType = (type === "email" ? "signup" : type) as EmailOtpType;
   const supabase = await createClient();
   const { error } = await supabase.auth.verifyOtp({
     token_hash: tokenHash,
-    type,
+    type: otpType,
   });
 
   if (error) {
@@ -40,7 +31,7 @@ export async function GET(request: Request) {
   const { data: authUser } = await supabase.auth.getUser();
   const user = authUser.user;
 
-  let redirectPath = next;
+  let redirectPath = "/login?confirmed=1";
 
   if (user?.id) {
     const fullName = String(user.user_metadata?.full_name ?? "").trim() || user.email || "";
@@ -62,10 +53,6 @@ export async function GET(request: Request) {
       })
       .eq("id", user.id);
 
-    if (type === "signup" && isPaidPlan(planSlug)) {
-      redirectPath = `/api/billing/checkout?plan=${encodeURIComponent(planSlug)}`;
-    }
-
     try {
       await dispatchWebhookEvent({
         event: "user.email_confirmed",
@@ -77,12 +64,12 @@ export async function GET(request: Request) {
         },
         data: {
           user_id: user.id,
-          type,
+          type: otpType,
           plan: planSlug,
         },
       });
 
-      if (type === "signup" && planSlug === "free") {
+      if (otpType === "signup" && planSlug === "free") {
         await dispatchWebhookEvent({
           event: "plan.free_activated",
           source: "auth.signup_confirmed",
