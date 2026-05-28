@@ -68,7 +68,7 @@ export default function AuthConfirmPage() {
       const userId = data.user?.id;
 
       if (userId) {
-        await supabase
+        await (supabase as any)
           .from("profiles")
           .update({
             onboarding_status: "email_confirmed",
