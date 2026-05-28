@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "crypto";
 import { NextResponse } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
+import { getStripeSubscription } from "@/lib/stripe/client";
 import { mapStripeStatus } from "@/lib/stripe/status";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
 
@@ -90,23 +91,36 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
 
   const customerId = object.customer ?? null;
   const subscriptionId = object.subscription ?? (String(object.id ?? "").startsWith("sub_") ? object.id : null);
+  const fullSubscription =
+    event.type === "checkout.session.completed" && subscriptionId ? await getStripeSubscription(subscriptionId) : object;
   const stripePriceId =
-    object.items?.data?.[0]?.price?.id ?? object.lines?.data?.[0]?.price?.id ?? object.plan?.id ?? object.price?.id ?? null;
+    fullSubscription?.items?.data?.[0]?.price?.id ??
+    object.items?.data?.[0]?.price?.id ??
+    object.lines?.data?.[0]?.price?.id ??
+    object.plan?.id ??
+    object.price?.id ??
+    null;
   const customerEmail = object.customer_details?.email ?? object.customer_email ?? object.email ?? null;
+  const metadataUserId =
+    String(object.metadata?.user_id ?? object.subscription_details?.metadata?.user_id ?? "").trim() || null;
 
-  const userId = await ensureUserIdByCustomerOrEmail(supabase, customerId, customerEmail);
+  const userId = metadataUserId ?? (await ensureUserIdByCustomerOrEmail(supabase, customerId, customerEmail));
   if (!userId) return null;
 
-  const status = mapStripeStatus(object.status ?? (event.type === "invoice.payment_failed" ? "past_due" : "active"));
-  const currentPeriodEnd = object.current_period_end ? new Date(object.current_period_end * 1000).toISOString() : null;
-  const trialEndsAt = object.trial_end ? new Date(object.trial_end * 1000).toISOString() : null;
+  const status = mapStripeStatus(fullSubscription?.status ?? object.status ?? "active");
+  const currentPeriodEnd = fullSubscription?.current_period_end
+    ? new Date(fullSubscription.current_period_end * 1000).toISOString()
+    : null;
+  const trialEndsAt = fullSubscription?.trial_end ? new Date(fullSubscription.trial_end * 1000).toISOString() : null;
 
   if (event.type === "customer.subscription.deleted") {
     await downgradeToFree(supabase, userId, {
       status: "canceled",
       gateway: "stripe",
       stripe_customer_id: customerId,
+      gateway_customer_id: customerId,
       stripe_subscription_id: subscriptionId,
+      gateway_subscription_id: subscriptionId,
       stripe_price_id: stripePriceId,
       current_period_end: currentPeriodEnd,
       trial_ends_at: trialEndsAt,
@@ -139,7 +153,9 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
       status,
       gateway: "stripe",
       stripe_customer_id: customerId,
+      gateway_customer_id: customerId,
       stripe_subscription_id: subscriptionId,
+      gateway_subscription_id: subscriptionId,
       stripe_price_id: stripePriceId,
       current_period_end: currentPeriodEnd,
       trial_ends_at: trialEndsAt,
