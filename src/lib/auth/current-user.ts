@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { ensureMinistryForSubscription, isMinistryPlanSlug } from "@/lib/data/ministry";
 import type { Database } from "@/types/database";
 
 export type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -59,7 +60,7 @@ function isSubscriptionUsable(subscription: Subscription | null | undefined, pla
   if (!subscription) return false;
   const status = String(subscription.status ?? "").toLowerCase();
   if (!["active", "trialing"].includes(status)) return false;
-  if (planSlug === "premium" && !hasStripeLink(subscription)) return false;
+  if ((planSlug === "premium" || isMinistryPlanSlug(planSlug)) && !hasStripeLink(subscription)) return false;
   const periodEnd = (subscription as any).current_period_end
     ? new Date((subscription as any).current_period_end).getTime()
     : Number.POSITIVE_INFINITY;
@@ -68,9 +69,34 @@ function isSubscriptionUsable(subscription: Subscription | null | undefined, pla
 
 function normalizeEffectivePlanSlug(value: unknown): EffectivePlanSlug {
   const slug = String(value ?? "").trim().toLowerCase();
-  if (slug === "premium") return "premium";
+  if (slug === "premium" || isMinistryPlanSlug(slug)) return "premium";
   if (slug === "plus") return "plus";
   return "free";
+}
+
+function buildMinistryContext(ministryMembership: any): MinistryAccessContext | null {
+  const ministry = ministryMembership?.ministry;
+  const ministryActive = ministry && ["active", "trialing"].includes(String(ministry.status ?? "").toLowerCase());
+
+  if (!ministryActive) return null;
+
+  return {
+    ministryId: ministry.id as string,
+    role: ministryMembership.role as "owner" | "manager" | "member",
+    seatLimit: Number(ministry.seat_limit ?? 0),
+    planType: String(ministry.plan_type ?? ""),
+  };
+}
+
+async function getActiveMinistryMembership(admin: any, userId: string) {
+  const { data } = await admin
+    .from("ministry_members")
+    .select("role,ministry:ministries(*)")
+    .eq("user_id", userId)
+    .eq("status", "active")
+    .maybeSingle();
+
+  return data ?? null;
 }
 
 export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessContext> {
@@ -79,20 +105,38 @@ export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessCo
   if (!data.user) return { effectiveSlug: "guest", profile: null, plan: null, subscription: null, hierarchyLevel: 0, isGuest: true, isAdmin: false, ministry: null };
 
   const admin = createSupabaseAdminClient() as any;
-  const [{ data: plans }, { data: subscription }, profile, { data: ministryMembership }] = await Promise.all([
+  const [{ data: plans }, { data: subscription }, profile] = await Promise.all([
     admin.from("plans").select("*"),
-    admin.from("subscriptions").select("*").eq("user_id", data.user.id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    admin.from("subscriptions").select("*").eq("user_id", data.user.id).order("updated_at", { ascending: false }).order("created_at", { ascending: false }).limit(1).maybeSingle(),
     findProfileForUser(supabase, data.user),
-    admin.from("ministry_members").select("role,ministry:ministries(*)").eq("user_id", data.user.id).eq("status", "active").maybeSingle(),
   ]);
 
   const typedSubscription = (subscription as Subscription | null) ?? null;
   const plan = (plans ?? []).find((p: Plan) => p.id === typedSubscription?.plan_id) ?? null;
-  const ministryActive = ministryMembership?.ministry && ["active", "trialing"].includes(String(ministryMembership.ministry.status ?? "").toLowerCase());
-  const paidPlanSlug = normalizeEffectivePlanSlug(plan?.slug);
-  const usableSubscription = isSubscriptionUsable(typedSubscription, paidPlanSlug);
+  const rawPlanSlug = String(plan?.slug ?? "").trim().toLowerCase();
+  const paidPlanSlug = normalizeEffectivePlanSlug(rawPlanSlug);
+  const usableSubscription = isSubscriptionUsable(typedSubscription, rawPlanSlug);
 
-  const effectiveSlug: EffectivePlanSlug = ministryActive
+  let ministryMembership = await getActiveMinistryMembership(admin, data.user.id);
+  let ministryContext = buildMinistryContext(ministryMembership);
+
+  if (!ministryContext && usableSubscription && isMinistryPlanSlug(rawPlanSlug)) {
+    await ensureMinistryForSubscription({
+      userId: data.user.id,
+      planSlug: rawPlanSlug,
+      subscriptionId: typedSubscription?.id ?? null,
+      stripeCustomerId: (typedSubscription as any)?.stripe_customer_id ?? (typedSubscription as any)?.gateway_customer_id ?? null,
+      stripeSubscriptionId: (typedSubscription as any)?.stripe_subscription_id ?? (typedSubscription as any)?.gateway_subscription_id ?? null,
+      status: typedSubscription?.status ?? null,
+      currentPeriodEnd: (typedSubscription as any)?.current_period_end ?? null,
+      trialEndsAt: (typedSubscription as any)?.trial_ends_at ?? null,
+    });
+
+    ministryMembership = await getActiveMinistryMembership(admin, data.user.id);
+    ministryContext = buildMinistryContext(ministryMembership);
+  }
+
+  const effectiveSlug: EffectivePlanSlug = ministryContext
     ? "premium"
     : usableSubscription
       ? paidPlanSlug
@@ -106,14 +150,7 @@ export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessCo
     hierarchyLevel: effectiveSlug === "premium" ? 3 : effectiveSlug === "plus" ? 2 : 1,
     isGuest: false,
     isAdmin: normalizeRole(profile?.role) === "admin",
-    ministry: ministryActive
-      ? {
-          ministryId: ministryMembership.ministry.id as string,
-          role: ministryMembership.role as "owner" | "manager" | "member",
-          seatLimit: Number(ministryMembership.ministry.seat_limit ?? 0),
-          planType: String(ministryMembership.ministry.plan_type ?? ""),
-        }
-      : null,
+    ministry: ministryContext,
   };
 }
 
