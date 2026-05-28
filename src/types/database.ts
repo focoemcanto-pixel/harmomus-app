@@ -95,7 +95,7 @@ export interface Database {
           user_id: string;
           plan_id: string;
           legacy_pms_subscription_id: string | null;
-          status: "active" | "overdue" | "canceled" | "expired" | "pending";
+          status: "active" | "trialing" | "overdue" | "canceled" | "expired" | "pending";
           starts_at: string | null;
           current_period_end: string | null;
           trial_ends_at: string | null;
@@ -120,7 +120,7 @@ export interface Database {
           user_id: string;
           plan_id: string;
           legacy_pms_subscription_id?: string | null;
-          status?: "active" | "overdue" | "canceled" | "expired" | "pending";
+          status?: "active" | "trialing" | "overdue" | "canceled" | "expired" | "pending";
           starts_at?: string | null;
           current_period_end?: string | null;
           trial_ends_at?: string | null;
