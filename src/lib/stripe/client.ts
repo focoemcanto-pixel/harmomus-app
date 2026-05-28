@@ -94,7 +94,12 @@ export async function cancelSubscription(subscriptionId: string) {
 }
 
 export async function cancelSubscriptionAtPeriodEnd(subscriptionId: string) {
-  return stripe<any>(`/subscriptions/${encodeURIComponent(subscriptionId)}`, new URLSearchParams({ cancel_at_period_end: "true" }));
+  return stripe<any>(
+    `/subscriptions/${encodeURIComponent(subscriptionId)}`,
+    new URLSearchParams({
+      cancel_at_period_end: "true",
+    }),
+  );
 }
 
 export async function getSubscription(subscriptionId: string) {
