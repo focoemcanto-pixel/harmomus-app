@@ -28,6 +28,8 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
   const menuRef = useRef<HTMLDivElement>(null);
   const searchDesktopRef = useRef<HTMLDivElement>(null);
   const searchMobileRef = useRef<HTMLDivElement>(null);
+  const isMinistryUser = Boolean(context.ministry);
+  const isMinistryOwner = context.ministry?.role === "owner" || context.ministry?.role === "manager";
 
   useEffect(() => { const t = setTimeout(() => setDebounced(query.toLowerCase().trim()), 180); return () => clearTimeout(t); }, [query]);
 
@@ -61,7 +63,12 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
     const allowedPremium = context.effectiveSlug === "premium";
     if ((type === "plus" && !allowedPlus) || (type === "premium" && !allowedPremium)) {
       const isPlus = type === "plus";
-      setUpgradeConfig({ title: isPlus ? "Este recurso requer plano Plus ou Premium." : "Este recurso requer plano Premium.", message: isPlus ? "Faça upgrade para desbloquear suas playlists privadas." : "Desbloqueie o acesso premium completo agora.", ctaLabel: "Assinar Premium", ctaHref: "/assinar?plan=premium" });
+      setUpgradeConfig({
+        title: isPlus ? "Este recurso requer plano Plus ou Premium." : "Este recurso requer plano Premium.",
+        message: isPlus ? "Faça upgrade para desbloquear suas playlists privadas." : "Desbloqueie o acesso premium completo agora.",
+        ctaLabel: "Assinar Premium",
+        ctaHref: "/assinar?plan=premium",
+      });
       setUpgradeOpen(true);
       return false;
     }
@@ -88,10 +95,14 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
         <button onClick={() => setMenuOpen((v) => !v)} className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border border-white/20 bg-white/5 text-xs font-semibold md:h-9 md:w-9">
           {showAvatar ? <img src={liveAvatar!} alt="avatar" className="h-full w-full object-cover" /> : context.isGuest ? <UserSilhouetteIcon /> : fallbackInitial}
         </button>
-        {menuOpen ? <div className="absolute right-0 top-11 z-50 min-w-52 rounded-xl border border-white/10 bg-[#0d1220] p-2">
+        {menuOpen ? <div className="absolute right-0 top-11 z-50 min-w-60 rounded-xl border border-white/10 bg-[#0d1220] p-2 shadow-premium">
           {context.isGuest ? <><Link href="/login" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Login</Link><Link href="/cadastro" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Cadastre-se</Link></> : <>
+            {isMinistryUser ? <div className="mb-2 rounded-xl border border-cyan-300/20 bg-cyan-400/10 px-3 py-2 text-xs text-cyan-100">
+              <p className="font-semibold">Premium via Ministério</p>
+              <p className="mt-1 text-cyan-100/70">{isMinistryOwner ? "Responsável ministerial" : "Membro convidado"}</p>
+            </div> : null}
             <Link href="/perfil" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Perfil</Link>
-            <Link href="/assinatura" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Assinatura</Link>
+            {isMinistryUser ? <Link href="/ministerio" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Central Ministerial</Link> : <Link href="/assinatura" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Assinatura</Link>}
             <Link href="/minhas-playlists" onClick={(e) => { if (!onProtectedClick("plus")) e.preventDefault(); }} className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Minhas Playlists</Link>
             <a href={COMMUNITY_WHATSAPP_URL} target="_blank" rel="noopener noreferrer" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Comunidade Harmomus</a>
             <Link href="/area-premium" onClick={(e) => { if (!onProtectedClick("premium")) e.preventDefault(); }} className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5">Área Premium</Link>
