@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { EmailConfirmationState } from "@/components/auth/email-confirmation-state";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { getCheckoutSession } from "@/lib/stripe/client";
@@ -215,14 +216,8 @@ export default async function CheckoutSucesso({ searchParams }: CheckoutSuccessP
         </p>
 
         {firstSignupFlow ? (
-          <div className="mt-6 rounded-2xl border border-cyan-400/30 bg-cyan-500/10 p-5 text-sm text-cyan-50">
-            <h2 className="text-base font-semibold text-cyan-100">Confirme seu e-mail para acessar</h2>
-            <p className="mt-2 text-cyan-50/90">
-              Reenviamos seu e-mail de confirmação para {sync.customerEmail ? <strong>{sync.customerEmail}</strong> : "o e-mail usado no cadastro"}. Abra sua caixa de entrada, clique em confirmar e-mail e depois faça seu primeiro login.
-            </p>
-            <p className="mt-3 text-xs text-cyan-100/70">
-              Verifique também spam, promoções ou lixo eletrônico se não encontrar a mensagem em alguns minutos.
-            </p>
+          <div className="mt-6">
+            <EmailConfirmationState variant="premium" email={sync.customerEmail ?? ""} allowEmailEdit allowResend />
           </div>
         ) : null}
 

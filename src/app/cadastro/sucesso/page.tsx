@@ -1,6 +1,14 @@
 import Link from "next/link";
+import { EmailConfirmationState } from "@/components/auth/email-confirmation-state";
+import { createClient } from "@/lib/supabase/server";
 
-export default function CadastroSucessoPage() {
+type Props = { searchParams?: Promise<{ email?: string }> | { email?: string } };
+
+export default async function CadastroSucessoPage({ searchParams }: Props) {
+  const params = await searchParams;
+  const supabase = await createClient();
+  const { data } = await supabase.auth.getUser();
+  const email = String(data.user?.email ?? params?.email ?? "").trim().toLowerCase();
   return (
     <main className="min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,#17213a_0%,#07080f_42%,#020207_100%)] px-4 py-8 text-white">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_80%_20%,rgba(139,92,246,0.22),transparent_35%),radial-gradient(circle_at_20%_70%,rgba(34,211,238,0.14),transparent_32%)]" />
@@ -38,6 +46,10 @@ export default function CadastroSucessoPage() {
             </div>
           </div>
 
+
+          <div className="px-6 pt-6 md:px-10">
+            <EmailConfirmationState variant="free" email={email} allowEmailEdit allowResend />
+          </div>
           <div className="grid gap-6 p-6 md:grid-cols-[1.1fr_0.9fr] md:p-10">
             <div className="rounded-3xl border border-white/10 bg-black/25 p-6">
               <div className="flex items-center justify-between gap-3">
