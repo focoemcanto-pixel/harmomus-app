@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Crown, Mail, ShieldCheck, Sparkles, Trash2, Users } from "lucide-react";
 
+import { MinistryOnboardingModal } from "@/components/public/ministry-onboarding-modal";
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { getCurrentUserAccessContext, isMinistryManager } from "@/lib/auth/current-user";
 import { canRequestSongsAndTones } from "@/lib/data/ministry";
@@ -56,6 +57,7 @@ export default async function MinisterioPage() {
 
   return (
     <PublicAppShell>
+      {canManage ? <MinistryOnboardingModal ministryId={context.ministry.ministryId} remainingSeats={remainingSeats} /> : null}
       <main className="min-h-screen bg-gradient-to-b from-[#020617] via-[#060b1a] to-[#12051d] px-4 py-8 text-white md:px-8">
         <section className="mx-auto max-w-6xl">
           <div className="overflow-hidden rounded-[2rem] border border-cyan-300/20 bg-gradient-to-br from-[#0b1120] via-[#140d27] to-[#06111f] p-6 shadow-[0_30px_100px_rgba(34,211,238,0.16)] md:p-10">
@@ -111,7 +113,7 @@ export default async function MinisterioPage() {
           </div>
 
           <div className="mt-6 grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
-            <section className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-6 shadow-[0_20px_80px_rgba(0,0,0,0.22)]">
+            <section id="convidar-integrante" className="scroll-mt-28 rounded-[2rem] border border-white/10 bg-white/[0.04] p-6 shadow-[0_20px_80px_rgba(0,0,0,0.22)]">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h2 className="text-xl font-semibold">Convidar integrante</h2>
