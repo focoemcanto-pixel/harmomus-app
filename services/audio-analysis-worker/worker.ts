@@ -10,7 +10,9 @@ import { downloadFromR2 } from "./r2";
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const HEARTBEAT_INTERVAL_MS = 15 * 1000;
 const STALE_PROCESSING_MS = 10 * 60 * 1000;
-const PYIN_TIMEOUT_MS = 90 * 1000;
+const ANALYSIS_MAX_SECONDS = Number(process.env.ANALYSIS_MAX_SECONDS ?? "30");
+const ANALYSIS_SAMPLE_RATE = Number(process.env.ANALYSIS_SAMPLE_RATE ?? "16000");
+const PYIN_TIMEOUT_MS = Number(process.env.PYIN_TIMEOUT_SECONDS ?? "45") * 1000;
 const FFMPEG_TIMEOUT_MS = 30 * 1000;
 const KILL_GRACE_MS = 2_000;
 const MAX_CONCURRENT_ANALYSIS = Number(process.env.MAX_CONCURRENT_ANALYSIS ?? "1");
@@ -219,11 +221,13 @@ function percentile(values: number[], ratio: number): number | null {
   return sorted[index] ?? null;
 }
 
-async function runLibrosaPyin(sourcePath: string) {
-  console.info("[audio-analysis-worker] iniciando librosa.pyin", { analysis_mode: "librosa-pyin-direct", source: sourcePath });
+async function runLibrosaPitchAnalysis(sourcePath: string, mode: "pyin" | "yin") {
+  const analysisMode = mode === "pyin" ? "librosa-pyin-direct" : "librosa-yin-fast-fallback";
+  console.info("[audio-analysis-worker] iniciando análise librosa", { analysis_mode: analysisMode, source: sourcePath });
   const scriptPath = join(process.cwd(), "scripts", "analyze_pyin.py");
   const startedAt = Date.now();
-  const { stdout } = await runSubprocess("python", [scriptPath, sourcePath], PYIN_TIMEOUT_MS, "librosa-pyin");
+  const timeoutMs = mode === "pyin" ? PYIN_TIMEOUT_MS : Math.max(15_000, Math.floor(PYIN_TIMEOUT_MS / 2));
+  const { stdout } = await runSubprocess("python", [scriptPath, sourcePath, mode], timeoutMs, `librosa-${mode}`);
   const elapsedMs = Date.now() - startedAt;
   const payload = JSON.parse(stdout) as {
     notes: Array<{ start_s: number; end_s: number; pitch_midi: number; confidence: number }>;
@@ -231,20 +235,20 @@ async function runLibrosaPyin(sourcePath: string) {
     frames: number;
     voiced_frames: number;
   };
-  console.info("[audio-analysis-worker] finalizando librosa.pyin", { analysis_mode: "librosa-pyin-direct", frames: payload.frames, voiced_frames: payload.voiced_frames, avg_pitch_midi: payload.avg_pitch_midi, elapsed_ms: elapsedMs });
-  return { ...payload, elapsedMs };
+  console.info("[audio-analysis-worker] finalizando análise librosa", { analysis_mode: analysisMode, frames: payload.frames, voiced_frames: payload.voiced_frames, avg_pitch_midi: payload.avg_pitch_midi, elapsed_ms: elapsedMs });
+  return { ...payload, elapsedMs, analysisMode };
 }
 
 async function preprocessAudioWithFfmpeg(inputPath: string, outputPath: string) {
   const startedAt = Date.now();
   await runSubprocess(
     "ffmpeg",
-    ["-y", "-i", inputPath, "-ac", "1", "-ar", "22050", "-t", "60", outputPath],
+    ["-y", "-i", inputPath, "-ac", "1", "-ar", String(ANALYSIS_SAMPLE_RATE), "-t", String(ANALYSIS_MAX_SECONDS), outputPath],
     FFMPEG_TIMEOUT_MS,
     "ffmpeg-preprocess",
   );
   const elapsedMs = Date.now() - startedAt;
-  console.info("[audio-analysis-worker] pré-processamento ffmpeg concluído", { input: inputPath, output: outputPath, elapsed_ms: elapsedMs, pipeline: "mp3->wav-mono-22050hz-60s" });
+  console.info("[audio-analysis-worker] pré-processamento ffmpeg concluído", { input: inputPath, output: outputPath, elapsed_ms: elapsedMs, pipeline: `mp3->wav-mono-${ANALYSIS_SAMPLE_RATE}hz-${ANALYSIS_MAX_SECONDS}s` });
   return elapsedMs;
 }
 
@@ -326,12 +330,27 @@ async function processJob(job: any) {
     }
 
     const ffmpegElapsedMs = await preprocessAudioWithFfmpeg(sourcePath, optimizedWavPath);
-    logs.push({ at: new Date().toISOString(), message: "Pré-processamento do áudio concluído", pipeline: "MP3 -> ffmpeg mono/22050/60s -> librosa.pyin", ffmpeg_elapsed_ms: ffmpegElapsedMs, output_format: "wav" });
+    logs.push({ at: new Date().toISOString(), message: "Pré-processamento do áudio concluído", pipeline: `MP3 -> ffmpeg mono/${ANALYSIS_SAMPLE_RATE}/${ANALYSIS_MAX_SECONDS}s -> librosa.pyin`, ffmpeg_elapsed_ms: ffmpegElapsedMs, output_format: "wav" });
 
-    const analysisMode = "librosa-pyin-direct";
-    const { notes, avg_pitch_midi, elapsedMs: pyinElapsedMs } = await runLibrosaPyin(optimizedWavPath);
+    let analysisResult;
+    try {
+      analysisResult = await runLibrosaPitchAnalysis(optimizedWavPath, "pyin");
+    } catch (error) {
+      const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+      if (!message.includes("timeout")) throw error;
+      console.warn("[audio-analysis-worker] pyin timeout; aplicando fallback yin", { job_id: job.id, timeout_ms: PYIN_TIMEOUT_MS });
+      logs.push({ at: new Date().toISOString(), message: "Timeout no librosa.pyin; fallback para librosa.yin", pyin_timeout_ms: PYIN_TIMEOUT_MS });
+      analysisResult = await runLibrosaPitchAnalysis(optimizedWavPath, "yin");
+    }
 
-    logs.push({ at: new Date().toISOString(), message: "Análise de tessitura concluída", analysis_mode: analysisMode, voice: normalizedVoice, notes_detected: notes.length, avg_pitch_midi, pyin_elapsed_ms: pyinElapsedMs });
+    if (!analysisResult.notes.length) {
+      console.warn("[audio-analysis-worker] pyin sem notas detectadas; aplicando fallback yin", { job_id: job.id });
+      analysisResult = await runLibrosaPitchAnalysis(optimizedWavPath, "yin");
+    }
+
+    const { notes, avg_pitch_midi, elapsedMs: pyinElapsedMs, analysisMode } = analysisResult;
+
+    logs.push({ at: new Date().toISOString(), message: "Análise de tessitura concluída", analysis_mode: analysisMode, voice: normalizedVoice, notes_detected: notes.length, avg_pitch_midi, analysis_elapsed_ms: pyinElapsedMs });
 
     const insights = buildInsights(notes);
     if (insights.minMidi === null || insights.maxMidi === null) {
@@ -385,7 +404,7 @@ async function main() {
   if (MAX_CONCURRENT_ANALYSIS !== 1) {
     console.warn("[audio-analysis-worker] MAX_CONCURRENT_ANALYSIS inválido para este worker; forçando execução serial", { configured: MAX_CONCURRENT_ANALYSIS, enforced: 1 });
   }
-  console.info("[audio-analysis-worker] started", { ENABLE_SMART_TESSITURA_ANALYSIS, MAX_CONCURRENT_ANALYSIS: 1, analysis_pipeline: "librosa-pyin-direct" });
+  console.info("[audio-analysis-worker] started", { ENABLE_SMART_TESSITURA_ANALYSIS, MAX_CONCURRENT_ANALYSIS: 1, analysis_pipeline: "ffmpeg-lite -> librosa-pyin-with-yin-fallback", analysis_max_seconds: ANALYSIS_MAX_SECONDS, analysis_sample_rate: ANALYSIS_SAMPLE_RATE, pyin_timeout_ms: PYIN_TIMEOUT_MS });
 
   while (true) {
     try {

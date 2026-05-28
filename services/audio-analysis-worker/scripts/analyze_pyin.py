@@ -7,19 +7,32 @@ import numpy as np
 
 def main() -> None:
     source_path = sys.argv[1]
+    mode = sys.argv[2] if len(sys.argv) > 2 else "pyin"
     audio, sample_rate = librosa.load(source_path, sr=None, mono=False)
     if audio.ndim > 1:
         audio = np.mean(audio, axis=0)
     hop_length = 256
     frame_length = 2048
-    f0, voiced_flag, voiced_prob = librosa.pyin(
-        audio,
-        fmin=librosa.note_to_hz("C2"),
-        fmax=librosa.note_to_hz("C7"),
-        sr=sample_rate,
-        frame_length=frame_length,
-        hop_length=hop_length,
-    )
+    if mode == "yin":
+        f0 = librosa.yin(
+            audio,
+            fmin=librosa.note_to_hz("C2"),
+            fmax=librosa.note_to_hz("C7"),
+            sr=sample_rate,
+            frame_length=frame_length,
+            hop_length=hop_length,
+        )
+        voiced_flag = None
+        voiced_prob = None
+    else:
+        f0, voiced_flag, voiced_prob = librosa.pyin(
+            audio,
+            fmin=librosa.note_to_hz("C2"),
+            fmax=librosa.note_to_hz("C7"),
+            sr=sample_rate,
+            frame_length=frame_length,
+            hop_length=hop_length,
+        )
     times = librosa.times_like(f0, sr=sample_rate, hop_length=hop_length)
 
     notes = []
