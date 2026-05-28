@@ -66,7 +66,7 @@ export default async function AreaPremiumPage({
     userId
       ? supabaseAdmin
           .from("premium_requests")
-          .select("id,request_type,song_name,artist_name,desired_tone,voice_part,status,created_at,updated_at")
+          .select("id,request_type,song_name,artist_name,desired_tone,voice_part,status,created_at,updated_at,delivered_kit_slug,delivered_at")
           .eq("user_id", userId)
           .order("created_at", { ascending: false })
           .limit(6)
@@ -138,6 +138,15 @@ export default async function AreaPremiumPage({
                     <p className="mt-1 text-sm text-zinc-400">{item.artist_name || "Kit vocal"}</p>
                     {item.request_type === "tone" ? <p className="mt-2 text-sm text-emerald-200">Tom: {item.desired_tone || "—"}{item.voice_part ? ` • ${item.voice_part}` : ""}</p> : null}
                     <p className="mt-4 text-xs uppercase tracking-[0.16em] text-zinc-500">Criado em {formatDate(item.created_at)}</p>
+                    {item.status === "done" && item.delivered_kit_slug ? (
+                      <Link href={`/biblioteca/${item.delivered_kit_slug}`} className="mt-4 inline-flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-emerald-400 to-cyan-300 px-4 py-3 text-sm font-black uppercase tracking-[0.12em] text-black">
+                        Abrir kit entregue
+                      </Link>
+                    ) : item.delivered_kit_slug ? (
+                      <p className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-3 text-xs text-emerald-100">
+                        Kit vinculado: {item.delivered_kit_slug}. Ele aparecerá como entregue quando o status for concluído.
+                      </p>
+                    ) : null}
                   </div>
                 ))}
               </div>
