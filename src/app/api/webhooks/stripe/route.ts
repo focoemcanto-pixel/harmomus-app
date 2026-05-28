@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { NextResponse } from "next/server";
 
-import { createClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getStripeSubscription } from "@/lib/stripe/client";
 import { mapStripeStatus } from "@/lib/stripe/status";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
@@ -34,14 +34,26 @@ function verifySignature(payload: string, signature: string, secret: string) {
   return digestBuffer.length === signatureBuffer.length && timingSafeEqual(digestBuffer, signatureBuffer);
 }
 
+function normalizeMetadataValue(value: unknown) {
+  return String(value ?? "").trim() || null;
+}
+
 function getPlanSlugFromEnvPrice(stripePriceId: string | null) {
   if (!stripePriceId) return null;
   if (stripePriceId === process.env.STRIPE_PLUS_PRICE_ID) return "plus";
   if (stripePriceId === process.env.STRIPE_PREMIUM_PRICE_ID) return "premium";
+  if (stripePriceId === process.env.STRIPE_MINISTRY_10_PRICE_ID) return "ministry_10";
+  if (stripePriceId === process.env.STRIPE_MINISTRY_20_PRICE_ID) return "ministry_20";
+  if (stripePriceId === process.env.STRIPE_MINISTRY_40_PRICE_ID) return "ministry_40";
   return null;
 }
 
-async function getPlanByStripePriceId(supabase: any, stripePriceId: string | null) {
+async function getPlanByStripePriceId(supabase: any, stripePriceId: string | null, metadataPlanSlug?: string | null) {
+  if (metadataPlanSlug) {
+    const { data: metadataPlan } = await supabase.from("plans").select("id, slug").eq("slug", metadataPlanSlug).maybeSingle();
+    if (metadataPlan?.id) return metadataPlan;
+  }
+
   if (!stripePriceId) return null;
 
   const { data } = await supabase.from("plans").select("id, slug").eq("stripe_price_id", stripePriceId).maybeSingle();
@@ -56,7 +68,14 @@ async function getPlanByStripePriceId(supabase: any, stripePriceId: string | nul
 
 async function ensureUserIdByCustomerOrEmail(supabase: any, customerId: string | null, email: string | null) {
   if (customerId) {
-    const { data: byCustomer } = await supabase.from("subscriptions").select("user_id").eq("stripe_customer_id", customerId).maybeSingle();
+    const { data: byCustomer } = await supabase
+      .from("subscriptions")
+      .select("user_id")
+      .or(`stripe_customer_id.eq.${customerId},gateway_customer_id.eq.${customerId}`)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
     if (byCustomer?.user_id) return byCustomer.user_id as string;
   }
 
@@ -89,10 +108,10 @@ function mapStripeEventToWebhookEvent(eventType: string, status: string) {
 async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent): Promise<SyncedSubscriptionContext> {
   const object = event.data?.object ?? {};
 
-  const customerId = object.customer ?? null;
+  const customerId = typeof object.customer === "string" ? object.customer : object.customer?.id ?? null;
   const subscriptionId = object.subscription ?? (String(object.id ?? "").startsWith("sub_") ? object.id : null);
-  const fullSubscription =
-    event.type === "checkout.session.completed" && subscriptionId ? await getStripeSubscription(subscriptionId) : object;
+  const fullSubscription = subscriptionId ? await getStripeSubscription(subscriptionId).catch(() => object) : object;
+
   const stripePriceId =
     fullSubscription?.items?.data?.[0]?.price?.id ??
     object.items?.data?.[0]?.price?.id ??
@@ -100,9 +119,16 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
     object.plan?.id ??
     object.price?.id ??
     null;
+
   const customerEmail = object.customer_details?.email ?? object.customer_email ?? object.email ?? null;
   const metadataUserId =
-    String(object.metadata?.user_id ?? object.subscription_details?.metadata?.user_id ?? "").trim() || null;
+    normalizeMetadataValue(fullSubscription?.metadata?.user_id) ??
+    normalizeMetadataValue(object.metadata?.user_id) ??
+    normalizeMetadataValue(object.subscription_details?.metadata?.user_id);
+  const metadataPlanSlug =
+    normalizeMetadataValue(fullSubscription?.metadata?.plan_slug)?.toLowerCase() ??
+    normalizeMetadataValue(object.metadata?.plan_slug)?.toLowerCase() ??
+    normalizeMetadataValue(object.subscription_details?.metadata?.plan_slug)?.toLowerCase();
 
   const userId = metadataUserId ?? (await ensureUserIdByCustomerOrEmail(supabase, customerId, customerEmail));
   if (!userId) return null;
@@ -130,20 +156,10 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
       updated_at: new Date().toISOString(),
     });
 
-    return {
-      userId,
-      planSlug: "free",
-      status: "canceled",
-      customerId,
-      subscriptionId,
-      stripePriceId,
-      customerEmail,
-      currentPeriodEnd,
-      trialEndsAt,
-    };
+    return { userId, planSlug: "free", status: "canceled", customerId, subscriptionId, stripePriceId, customerEmail, currentPeriodEnd, trialEndsAt };
   }
 
-  const plan = await getPlanByStripePriceId(supabase, stripePriceId);
+  const plan = await getPlanByStripePriceId(supabase, stripePriceId, metadataPlanSlug);
   if (!plan?.id) return null;
 
   await supabase.from("subscriptions").upsert(
@@ -160,23 +176,14 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
       current_period_end: currentPeriodEnd,
       trial_ends_at: trialEndsAt,
       next_billing_at: currentPeriodEnd,
+      auto_renew: !Boolean(fullSubscription?.cancel_at_period_end),
       last_webhook_event: event.type,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "user_id" },
   );
 
-  return {
-    userId,
-    planSlug: plan.slug ?? null,
-    status,
-    customerId,
-    subscriptionId,
-    stripePriceId,
-    customerEmail,
-    currentPeriodEnd,
-    trialEndsAt,
-  };
+  return { userId, planSlug: plan.slug ?? null, status, customerId, subscriptionId, stripePriceId, customerEmail, currentPeriodEnd, trialEndsAt };
 }
 
 async function dispatchStripeWebhookEvent(supabase: any, event: StripeEvent, context: SyncedSubscriptionContext) {
@@ -231,7 +238,6 @@ async function dispatchStripeWebhookEvent(supabase: any, event: StripeEvent, con
       console.error("[stripe.webhook] plan.premium_activated falhou", webhookError);
     }
   }
-
 }
 
 export async function POST(req: Request) {
@@ -252,7 +258,7 @@ export async function POST(req: Request) {
     "invoice.payment_failed",
   ]);
 
-  const supabase = (await createClient()) as any;
+  const supabase = createSupabaseAdminClient() as any;
   await supabase.from("billing_events").insert({ provider: "stripe", event_type: event.type, payload: event, processed: false });
 
   if (acceptedEvents.has(event.type)) {
