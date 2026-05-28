@@ -32,6 +32,15 @@ function isPaidPlan(slug: string) {
   return slug !== "free";
 }
 
+function isProtectedStripeSubscription(subscription?: Record<string, unknown> | null) {
+  if (!subscription?.id) return false;
+
+  const status = String(subscription.status ?? "").toLowerCase();
+  const hasStripeSubscription = Boolean(subscription.stripe_subscription_id || subscription.gateway_subscription_id);
+
+  return hasStripeSubscription || ["active", "trialing", "overdue"].includes(status);
+}
+
 async function getPlanIdBySlug(admin: any, slug: string) {
   const { data: plan, error } = await admin
     .from("plans")
@@ -98,13 +107,15 @@ async function ensureProfile(admin: any, input: EnsureUserAccessInput) {
 async function ensureSubscription(admin: any, userId: string, selectedPlanSlug: string) {
   const { data: existingSubscription, error: existingError } = await admin
     .from("subscriptions")
-    .select("id,status")
+    .select("id,status,stripe_subscription_id,gateway_subscription_id")
     .eq("user_id", userId)
+    .order("updated_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   if (existingError) throw new Error(`Falha ao verificar assinatura: ${existingError.message}`);
 
-  if (existingSubscription?.id && String(existingSubscription.status ?? "") === "active") {
+  if (isProtectedStripeSubscription(existingSubscription)) {
     return;
   }
 
