@@ -180,6 +180,25 @@ export async function POST(request: Request) {
     return fail("Sua conta foi criada, mas não conseguimos iniciar o checkout automaticamente. Tente entrar e assinar novamente.", "form");
   }
 
+  try {
+    await withTimeout(
+      ensureUserAccess({
+        id: userId,
+        email,
+        fullName,
+        selectedPlanSlug: plan,
+      }),
+      5000,
+      "ensureUserAccess",
+    );
+  } catch (accessError) {
+    console.error("[signup] Failed to prepare local user access", accessError);
+    return fail(
+      accessError instanceof Error ? accessError.message : "Não foi possível preparar sua conta agora.",
+      "form",
+    );
+  }
+
   if (isPaidPlan(plan)) {
     try {
       const session = await withTimeout(
@@ -210,17 +229,6 @@ export async function POST(request: Request) {
     }
   }
 
-  await withTimeout(
-    ensureUserAccess({
-      id: userId,
-      email,
-      fullName,
-      selectedPlanSlug: plan,
-    }),
-    2500,
-    "ensureUserAccess",
-  );
-
   runSignupSideEffectsAsync({
     supabase,
     plan,
@@ -233,7 +241,5 @@ export async function POST(request: Request) {
     utmCampaign,
   });
 
-  const successUrl = new URL("/cadastro/verifique-email", request.url);
-  successUrl.searchParams.set("email", email);
-  return NextResponse.redirect(successUrl, 303);
+  return NextResponse.redirect(new URL(next, request.url), 303);
 }
