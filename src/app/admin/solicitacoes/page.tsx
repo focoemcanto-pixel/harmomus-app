@@ -137,7 +137,7 @@ export default async function AdminSolicitacoesPage({
                   <th className="px-4 py-3">Tom/Nipe</th>
                   <th className="px-4 py-3">Usuário</th>
                   <th className="px-4 py-3">Ministério</th>
-                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Status/Entrega</th>
                   <th className="px-4 py-3">Data</th>
                 </tr>
               </thead>
@@ -152,6 +152,11 @@ export default async function AdminSolicitacoesPage({
                     <td className="px-4 py-4">
                       <p className="font-medium text-foreground">{item.song_name}</p>
                       <p className="mt-1 text-xs text-muted">{item.artist_name || item.reference_link || item.notes || "Sem detalhes adicionais"}</p>
+                      {item.delivered_kit_slug ? (
+                        <Link href={`/biblioteca/${item.delivered_kit_slug}`} className="mt-2 inline-flex rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-300">
+                          Kit entregue: {item.delivered_kit_slug}
+                        </Link>
+                      ) : null}
                     </td>
                     <td className="px-4 py-4 text-muted">
                       {item.request_type === "tone" ? `${item.desired_tone || "—"}${item.voice_part ? ` • ${item.voice_part}` : ""}` : "—"}
@@ -170,6 +175,8 @@ export default async function AdminSolicitacoesPage({
                             <option key={value} value={value}>{label}</option>
                           ))}
                         </select>
+
+                        <input name="delivered_kit_slug" defaultValue={item.delivered_kit_slug ?? ""} placeholder="slug-do-kit-entregue" className="h-10 min-w-[170px] rounded-xl border border-border bg-surface-muted px-3 text-xs text-foreground outline-none focus:border-gold-400" />
 
                         <button className="w-full rounded-xl bg-gold-500 px-3 py-2 text-xs font-semibold text-black transition hover:bg-gold-400">
                           Atualizar
