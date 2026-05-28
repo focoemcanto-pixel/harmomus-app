@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { DeletePlaylistButton } from "@/components/public/delete-playlist-button";
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { getCurrentUserPlaylists } from "@/lib/data/playlists";
@@ -186,15 +187,11 @@ export default async function MinhasPlaylistsPage() {
                             Compartilhar
                           </a>
 
-                          <form action={deletePlaylist}>
-                            <input type="hidden" name="playlistId" value={playlist.id} />
-                            <button
-                              type="submit"
-                              className="rounded-lg border border-red-500/20 bg-red-500/10 px-2 py-1 text-[11px] font-medium text-red-300 transition hover:bg-red-500/20"
-                            >
-                              Excluir
-                            </button>
-                          </form>
+                          <DeletePlaylistButton
+                            playlistId={playlist.id}
+                            playlistName={playlist.name}
+                            deletePlaylistAction={deletePlaylist}
+                          />
                         </div>
                       </div>
                     </div>
