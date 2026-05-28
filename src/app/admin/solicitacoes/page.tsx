@@ -6,6 +6,14 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+const STATUS_OPTIONS = [
+  ["pending", "Pendente"],
+  ["reviewing", "Em análise"],
+  ["approved", "Aprovado"],
+  ["done", "Concluído"],
+  ["rejected", "Rejeitado"],
+] as const;
+
 function statusLabel(status?: string | null) {
   if (status === "pending") return "Pendente";
   if (status === "reviewing") return "Em análise";
@@ -72,7 +80,7 @@ export default async function AdminSolicitacoesPage() {
               </thead>
               <tbody className="divide-y divide-border">
                 {rows.map((item: any) => (
-                  <tr key={item.id} className="transition hover:bg-surface-muted/60">
+                  <tr key={item.id} className="transition hover:bg-surface-muted/60 align-top">
                     <td className="px-4 py-4">
                       <span className="rounded-full border border-gold-500/30 bg-gold-500/10 px-3 py-1 text-xs font-semibold text-gold-300">
                         {typeLabel(item.request_type)}
@@ -91,9 +99,23 @@ export default async function AdminSolicitacoesPage() {
                     </td>
                     <td className="px-4 py-4 text-muted">{item.ministry?.name || "Individual"}</td>
                     <td className="px-4 py-4">
-                      <span className="rounded-full border border-border bg-surface-muted px-3 py-1 text-xs text-foreground">
-                        {statusLabel(item.status)}
-                      </span>
+                      <form action="/api/admin/premium-requests/status" method="post" className="space-y-2">
+                        <input type="hidden" name="request_id" value={item.id} />
+
+                        <select name="status" defaultValue={item.status} className="h-10 min-w-[170px] rounded-xl border border-border bg-surface-muted px-3 text-sm text-foreground outline-none focus:border-gold-400">
+                          {STATUS_OPTIONS.map(([value, label]) => (
+                            <option key={value} value={value}>{label}</option>
+                          ))}
+                        </select>
+
+                        <button className="w-full rounded-xl bg-gold-500 px-3 py-2 text-xs font-semibold text-black transition hover:bg-gold-400">
+                          Atualizar
+                        </button>
+
+                        <span className="inline-flex rounded-full border border-border bg-surface-muted px-3 py-1 text-xs text-foreground">
+                          {statusLabel(item.status)}
+                        </span>
+                      </form>
                     </td>
                     <td className="px-4 py-4 text-muted">{formatDate(item.created_at)}</td>
                   </tr>
