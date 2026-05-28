@@ -122,6 +122,8 @@ create table if not exists public.kit_audio_files (
   r2_key text not null,
   public_url text not null,
   file_type text not null,
+  source_type text not null default 'original' check (source_type in ('original', 'generated')),
+  generated_from_file_id uuid references public.kit_audio_files(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -185,6 +187,8 @@ create table if not exists public.migration_logs (
 create index if not exists idx_subscriptions_user_status on public.subscriptions(user_id, status);
 create index if not exists idx_kits_category_published on public.kits(category_id, published);
 create index if not exists idx_kit_audio_files_kit_tone on public.kit_audio_files(kit_id, tone);
+create index if not exists kit_audio_files_source_type_idx on public.kit_audio_files(kit_id, source_type);
+create index if not exists kit_audio_files_generated_from_idx on public.kit_audio_files(generated_from_file_id) where generated_from_file_id is not null;
 create index if not exists idx_playlists_slug_public on public.playlists(slug, is_public);
 create index if not exists idx_playlist_items_playlist_position on public.playlist_items(playlist_id, position);
 create index if not exists idx_kit_access_logs_user_accessed_at on public.kit_access_logs(user_id, accessed_at desc);

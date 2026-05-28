@@ -64,13 +64,27 @@ async function reconcileCompletedJobs(supabase: ReturnType<typeof createSupabase
 
     const { data: existing, error: findError } = await supabase
       .from("kit_audio_files")
-      .select("id")
+      .select("id,source_type,generated_from_file_id")
       .eq("kit_id", kitId)
       .eq("r2_key", job.target_r2_key)
       .maybeSingle();
 
     if (findError) throw new Error(findError.message);
-    if (existing?.id) continue;
+    if (existing?.id) {
+      if (existing.source_type !== "generated" || existing.generated_from_file_id !== (job.source_audio_file_id ?? null)) {
+        const { error: updateError } = await supabase
+          .from("kit_audio_files")
+          .update({
+            source_type: "generated",
+            generated_from_file_id: job.source_audio_file_id ?? null,
+          })
+          .eq("id", existing.id);
+
+        if (updateError) throw new Error(updateError.message);
+        repaired += 1;
+      }
+      continue;
+    }
 
     const { error: insertError } = await supabase
       .from("kit_audio_files")
