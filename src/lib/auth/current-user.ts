@@ -54,12 +54,18 @@ export async function getCurrentProfile() {
 function isSubscriptionUsable(subscription: Subscription | null | undefined) {
   if (!subscription) return false;
   const status = String(subscription.status ?? "").toLowerCase();
-  if (![
-    "active",
-    "trialing",
-  ].includes(status)) return false;
-  const periodEnd = (subscription as any).current_period_end ? new Date((subscription as any).current_period_end).getTime() : Number.POSITIVE_INFINITY;
+  if (!["active", "trialing"].includes(status)) return false;
+  const periodEnd = (subscription as any).current_period_end
+    ? new Date((subscription as any).current_period_end).getTime()
+    : Number.POSITIVE_INFINITY;
   return periodEnd > Date.now();
+}
+
+function normalizeEffectivePlanSlug(value: unknown): EffectivePlanSlug {
+  const slug = String(value ?? "").trim().toLowerCase();
+  if (slug === "premium") return "premium";
+  if (slug === "plus") return "plus";
+  return "free";
 }
 
 export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessContext> {
@@ -78,15 +84,13 @@ export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessCo
   const typedSubscription = (subscription as Subscription | null) ?? null;
   const plan = (plans ?? []).find((p: Plan) => p.id === typedSubscription?.plan_id) ?? null;
   const ministryActive = ministryMembership?.ministry && ["active", "trialing"].includes(String(ministryMembership.ministry.status ?? "").toLowerCase());
-  const onboardingStatus = String((profile as any)?.onboarding_status ?? "");
-  const hasPendingEmailConfirmation = onboardingStatus === "pending_email_confirmation";
+  const usableSubscription = isSubscriptionUsable(typedSubscription);
+  const paidPlanSlug = normalizeEffectivePlanSlug(plan?.slug);
 
   const effectiveSlug: EffectivePlanSlug = ministryActive
     ? "premium"
-    : hasPendingEmailConfirmation
-      ? "free"
-      : isSubscriptionUsable(typedSubscription)
-      ? ((plan?.slug as EffectivePlanSlug | undefined) ?? "free")
+    : usableSubscription
+      ? paidPlanSlug
       : "free";
 
   return {
