@@ -275,14 +275,23 @@ export default async function MinhasPlaylistsPage() {
                             updateVisibilityAction={updatePlaylistVisibility}
                           />
 
-                          <a
-                            href={whatsappShare}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-[11px] font-medium text-emerald-300 transition hover:bg-emerald-500/20"
-                          >
-                            Compartilhar
-                          </a>
+                          {playlist.isPublic ? (
+                            <a
+                              href={whatsappShare}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-[11px] font-medium text-emerald-300 transition hover:bg-emerald-500/20"
+                            >
+                              Compartilhar
+                            </a>
+                          ) : (
+                            <span
+                              className="cursor-not-allowed rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-medium text-zinc-500"
+                              title="Torne a playlist pública para compartilhar"
+                            >
+                              Privada
+                            </span>
+                          )}
 
                           <DeletePlaylistButton
                             playlistId={playlist.id}
