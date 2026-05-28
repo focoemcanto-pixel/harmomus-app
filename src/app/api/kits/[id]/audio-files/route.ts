@@ -33,6 +33,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
         tone,
         voice: normalizeVoice(file.name),
         fileType: file.file_type,
+        source_type: source,
         source,
         isGenerated: source === "generated",
         minMidiNote: file.min_midi_note ?? null,
@@ -49,11 +50,15 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       hasTessituraColumns,
       tones: Array.from(grouped.entries()).map(([tone, toneFiles]) => ({
         tone,
-        source: toneFiles.some((file) => file.source === "original") ? "original" : "generated",
-        isGenerated: !toneFiles.some((file) => file.source === "original"),
         files: toneFiles,
       })),
-    }, { headers: { "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate" } });
+    }, {
+      headers: {
+        "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+        Pragma: "no-cache",
+        Expires: "0",
+      },
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro inesperado ao buscar áudios.";
     return NextResponse.json({ error: message }, { status: 400 });

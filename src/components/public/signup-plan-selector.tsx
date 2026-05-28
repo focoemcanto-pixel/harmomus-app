@@ -3,7 +3,7 @@
 import { Loader2 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
-type PlanSlug = "free" | "plus" | "premium" | "ministry_10";
+type PlanSlug = "free" | "plus" | "premium" | "ministry_10" | "ministry_20" | "ministry_40";
 
 type PlanConfig = {
   slug: PlanSlug;
@@ -64,22 +64,51 @@ const PLAN_CONFIGS: PlanConfig[] = [
   },
   {
     slug: "ministry_10",
-    label: "Ministerial",
-    price: "A partir de R$397/mês",
-    cta: "Criar conta e ver plano ministerial",
+    label: "Ministerial 10",
+    price: "R$397/mês",
+    cta: "Criar conta e assinar plano 10 integrantes",
     features: [
+      "✅ Até 10 integrantes",
       "✅ Acesso Premium para equipe",
-      "✅ 10, 20 ou 40 integrantes",
-      "✅ Responsável gerencia membros",
-      "✅ Ideal para ministérios de louvor",
+      "✅ Gestão centralizada",
       "✅ Todos os tons e nipes",
       "✅ Solicitações centralizadas",
+    ],
+  },
+  {
+    slug: "ministry_20",
+    label: "Ministerial 20",
+    price: "R$697/mês",
+    cta: "Criar conta e assinar plano 20 integrantes",
+    features: [
+      "✅ Até 20 integrantes",
+      "✅ Acesso Premium para equipe",
+      "✅ Gestão centralizada",
+      "✅ Todos os tons e nipes",
+      "✅ Ideal para equipes maiores",
+    ],
+  },
+  {
+    slug: "ministry_40",
+    label: "Ministerial 40",
+    price: "R$997/mês",
+    cta: "Criar conta e assinar plano 40 integrantes",
+    features: [
+      "✅ Até 40 integrantes",
+      "✅ Estrutura ministerial completa",
+      "✅ Gestão avançada de equipe",
+      "✅ Todos os tons e nipes",
+      "✅ Suporte prioritário",
     ],
   },
 ];
 
 function isPaidPlan(plan: PlanSlug) {
   return plan !== "free";
+}
+
+function isMinistryPlan(plan: PlanSlug) {
+  return plan.startsWith("ministry_");
 }
 
 export function SignupPlanSelector({ initialPlan }: { initialPlan: PlanSlug }) {
@@ -96,16 +125,17 @@ export function SignupPlanSelector({ initialPlan }: { initialPlan: PlanSlug }) {
     ? "Abrindo checkout seguro..."
     : "Criando sua conta...";
 
-
   return (
     <>
       <input type="hidden" name="plan" value={selectedPlan} />
 
       <div className="md:col-span-2 mt-2">
         <h2 className="text-lg font-semibold text-white">Escolha seu plano</h2>
+
         <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
-          {PLAN_CONFIGS.map((plan) => {
-            const isSelected = selectedPlan === plan.slug;
+          {PLAN_CONFIGS.filter((plan) => !isMinistryPlan(plan.slug) || plan.slug === "ministry_10").map((plan) => {
+            const isSelected = selectedPlan === plan.slug || (plan.slug === "ministry_10" && isMinistryPlan(selectedPlan));
+
             return (
               <button
                 key={plan.slug}
@@ -118,12 +148,42 @@ export function SignupPlanSelector({ initialPlan }: { initialPlan: PlanSlug }) {
                     : "border-white/20 bg-white/[0.03] hover:border-white/40"
                 }`}
               >
-                <p className="text-xs text-zinc-300">{plan.label}</p>
-                <p className="mt-1 text-xs font-semibold text-white">{plan.price}</p>
+                <p className="text-xs text-zinc-300">{plan.label === "Ministerial 10" ? "Ministerial" : plan.label}</p>
+                <p className="mt-1 text-xs font-semibold text-white">
+                  {plan.label === "Ministerial 10" ? "A partir de R$397/mês" : plan.price}
+                </p>
               </button>
             );
           })}
         </div>
+
+        {isMinistryPlan(selectedPlan) ? (
+          <div className="mt-4 rounded-2xl border border-cyan-300/20 bg-cyan-400/5 p-4">
+            <p className="text-sm font-semibold text-cyan-100">Escolha a quantidade de integrantes do ministério</p>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              {PLAN_CONFIGS.filter((plan) => isMinistryPlan(plan.slug)).map((plan) => {
+                const active = selectedPlan === plan.slug;
+
+                return (
+                  <button
+                    key={plan.slug}
+                    type="button"
+                    onClick={() => setSelectedPlan(plan.slug)}
+                    className={`rounded-2xl border p-4 text-left transition-all ${
+                      active
+                        ? "border-cyan-300 bg-cyan-400/15 shadow-[0_0_25px_rgba(34,211,238,0.2)]"
+                        : "border-white/10 bg-black/20 hover:border-white/30"
+                    }`}
+                  >
+                    <p className="text-base font-semibold text-white">{plan.label}</p>
+                    <p className="mt-1 text-sm text-cyan-100">{plan.price}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
 
         <div className="mt-4 rounded-2xl border border-white/15 bg-black/35 p-4 transition-all duration-300">
           <p className="text-base font-semibold text-white">{currentPlan.label}</p>
@@ -142,9 +202,8 @@ export function SignupPlanSelector({ initialPlan }: { initialPlan: PlanSlug }) {
             <div>
               <p className="font-semibold">{loadingText}</p>
               <p className="mt-1 text-xs text-cyan-100/75">
-                Aguarde alguns segundos. Não feche esta página nem clique novamente.
+                Aguarde alguns segundos. Estamos preparando seu acesso com segurança.
               </p>
-              
             </div>
           </div>
         </div>

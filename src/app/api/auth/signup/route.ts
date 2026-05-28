@@ -7,7 +7,7 @@ import { startStripeCheckoutForSignup } from "@/lib/data/billing";
 import { createClient } from "@/lib/supabase/server";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
 
-const PLAN_OPTIONS = ["free", "plus", "premium", "ministry_10"] as const;
+const PLAN_OPTIONS = ["free", "plus", "premium", "ministry_10", "ministry_20", "ministry_40"] as const;
 type PlanSlug = (typeof PLAN_OPTIONS)[number];
 type Field = "form" | "full_name" | "username" | "email" | "phone" | "password" | "confirm_password";
 
