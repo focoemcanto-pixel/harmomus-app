@@ -122,11 +122,14 @@ export async function getMigrationReadinessAudit() {
     .filter((event: any) => event.processed === false)
     .map((event: any) => ({ id: event.id, event_type: event.event_type, created_at: event.created_at }));
 
-  const recentStripeEventTypes = billingEvents.reduce<Record<string, number>>((acc, event: any) => {
-    const key = String(event.event_type ?? "unknown");
-    acc[key] = (acc[key] ?? 0) + 1;
-    return acc;
-  }, {});
+  const recentStripeEventTypes = billingEvents.reduce(
+    (acc: Record<string, number>, event: any) => {
+      const key = String(event.event_type ?? "unknown");
+      acc[key] = (acc[key] ?? 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>,
+  );
 
   const expectedStripeEvents = [
     "checkout.session.completed",
