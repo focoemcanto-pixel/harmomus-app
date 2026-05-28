@@ -219,16 +219,36 @@ function parseBasicPitchCsv(csv: string) {
 
 async function runDemucsAndBasicPitch(sourcePath: string, workingDir: string) {
   const demucsOutDir = join(workingDir, "demucs");
-  console.info("[audio-analysis-worker] iniciando Demucs");
+  const demucsModels = ["mdx_extra", "htdemucs"] as const;
+  const selectedModel = demucsModels[0];
+  console.info("[audio-analysis-worker] Demucs modelo selecionado", { selected_model: selectedModel });
 
-  await runSubprocess(
-    "demucs",
-    ["--two-stems", "vocals", "--name", "mdx_extra_q", "--device", "cpu", "-j", "1", "-o", demucsOutDir, sourcePath],
-    DEMUCS_TIMEOUT_MS,
-    "demucs",
-    { OMP_NUM_THREADS: "1", MKL_NUM_THREADS: "1", OPENBLAS_NUM_THREADS: "1" },
-  );
-  console.info("[audio-analysis-worker] finalizando Demucs");
+  let usedModel: (typeof demucsModels)[number] | null = null;
+  const demucsStartedAt = Date.now();
+  for (const model of demucsModels) {
+    try {
+      console.info("[audio-analysis-worker] iniciando Demucs", { model });
+      await runSubprocess(
+        "demucs",
+        ["--two-stems", "vocals", "--name", model, "--device", "cpu", "-j", "1", "-o", demucsOutDir, sourcePath],
+        DEMUCS_TIMEOUT_MS,
+        `demucs-${model}`,
+        { OMP_NUM_THREADS: "1", MKL_NUM_THREADS: "1", OPENBLAS_NUM_THREADS: "1" },
+      );
+      usedModel = model;
+      console.info("[audio-analysis-worker] Demucs finalizado", { used_model: usedModel, elapsed_ms: Date.now() - demucsStartedAt });
+      break;
+    } catch (error) {
+      console.warn("[audio-analysis-worker] falha no Demucs, tentando fallback", {
+        attempted_model: model,
+        elapsed_ms: Date.now() - demucsStartedAt,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (!usedModel) {
+    throw new Error("Demucs falhou para todos os modelos configurados: mdx_extra, htdemucs.");
+  }
 
   const { stdout: findStdout } = await runSubprocess("bash", ["-lc", `find ${JSON.stringify(demucsOutDir)} -type f -name vocals.wav | head -n 1`], 15000, "find-demucs");
   const stemPath = findStdout.trim();
