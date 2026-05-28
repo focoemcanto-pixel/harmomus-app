@@ -7,17 +7,22 @@ import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
 
 const ALLOWED_TYPES = new Set(["signup", "email"]);
 
+function confirmationErrorUrl(request: Request, reason = "callback") {
+  return new URL(`/verifique-email?error=${encodeURIComponent(reason)}`, request.url);
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const tokenHash = url.searchParams.get("token_hash");
   const type = url.searchParams.get("type");
 
   if (!tokenHash || !type || !ALLOWED_TYPES.has(type)) {
-    return NextResponse.redirect(new URL("/login?error=callback", request.url), 303);
+    return NextResponse.redirect(confirmationErrorUrl(request, "link_invalido"), 303);
   }
 
   const otpType = (type === "email" ? "signup" : type) as EmailOtpType;
   const supabase = await createClient();
+
   const { error } = await supabase.auth.verifyOtp({
     token_hash: tokenHash,
     type: otpType,
@@ -25,13 +30,12 @@ export async function GET(request: Request) {
 
   if (error) {
     console.error("[auth.confirm] verifyOtp failed", error);
-    return NextResponse.redirect(new URL("/login?error=callback", request.url), 303);
+    const reason = String(error.message ?? "").toLowerCase().includes("expired") ? "link_expirado" : "callback";
+    return NextResponse.redirect(confirmationErrorUrl(request, reason), 303);
   }
 
   const { data: authUser } = await supabase.auth.getUser();
   const user = authUser.user;
-
-  let redirectPath = "/login?confirmed=1";
 
   if (user?.id) {
     const fullName = String(user.user_metadata?.full_name ?? "").trim() || user.email || "";
@@ -44,14 +48,17 @@ export async function GET(request: Request) {
       selectedPlanSlug: planSlug,
     });
 
-    await (supabase as any)
+    const profileUpdate = await (supabase as any)
       .from("profiles")
       .update({
         onboarding_status: "email_confirmed",
         onboarding_step: "waiting_first_login",
-        updated_at: new Date().toISOString(),
       })
       .eq("id", user.id);
+
+    if (profileUpdate.error) {
+      console.error("[auth.confirm] falha ao atualizar onboarding", profileUpdate.error);
+    }
 
     try {
       await dispatchWebhookEvent({
@@ -90,5 +97,5 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.redirect(new URL(redirectPath, request.url), 303);
+  return NextResponse.redirect(new URL("/login?confirmed=1", request.url), 303);
 }
