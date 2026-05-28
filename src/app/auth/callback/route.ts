@@ -56,6 +56,23 @@ export async function GET(request: Request) {
       email: user.email,
       fullName: String(user.user_metadata?.full_name ?? "").trim() || user.email || "",
     });
+
+    const { data: profile } = await (supabase as any)
+      .from("profiles")
+      .select("onboarding_status")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (String(profile?.onboarding_status ?? "") === "email_confirmed") {
+      await (supabase as any)
+        .from("profiles")
+        .update({
+          onboarding_status: "onboarding_completed",
+          onboarding_step: "completed",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", user.id);
+    }
   }
 
   return NextResponse.redirect(new URL(next, request.url), 303);

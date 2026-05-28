@@ -67,6 +67,11 @@ async function ensureProfile(admin: any, input: EnsureUserAccessInput) {
     updated_at: now,
   };
 
+  if (isPaidPlan(normalizeSelectedPlanSlug(input.selectedPlanSlug))) {
+    payload.onboarding_status = "pending_email_confirmation";
+    payload.onboarding_step = "checkout_started";
+  }
+
   if (input.legacyProvider) {
     payload.migrated_from_pms = input.legacyProvider === "pms";
     payload.migrated_from = input.legacyProvider;

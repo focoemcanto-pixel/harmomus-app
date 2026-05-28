@@ -53,6 +53,15 @@ export async function GET(request: Request) {
       selectedPlanSlug: planSlug,
     });
 
+    await (supabase as any)
+      .from("profiles")
+      .update({
+        onboarding_status: "email_confirmed",
+        onboarding_step: "waiting_first_login",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", user.id);
+
     if (type === "signup" && isPaidPlan(planSlug)) {
       redirectPath = `/api/billing/checkout?plan=${encodeURIComponent(planSlug)}`;
     }
@@ -68,7 +77,6 @@ export async function GET(request: Request) {
         },
         data: {
           user_id: user.id,
-          email_confirmed_at: new Date().toISOString(),
           type,
           plan: planSlug,
         },

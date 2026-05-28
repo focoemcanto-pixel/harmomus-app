@@ -78,10 +78,14 @@ export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessCo
   const typedSubscription = (subscription as Subscription | null) ?? null;
   const plan = (plans ?? []).find((p: Plan) => p.id === typedSubscription?.plan_id) ?? null;
   const ministryActive = ministryMembership?.ministry && ["active", "trialing"].includes(String(ministryMembership.ministry.status ?? "").toLowerCase());
+  const onboardingStatus = String((profile as any)?.onboarding_status ?? "");
+  const hasPendingEmailConfirmation = onboardingStatus === "pending_email_confirmation";
 
   const effectiveSlug: EffectivePlanSlug = ministryActive
     ? "premium"
-    : isSubscriptionUsable(typedSubscription)
+    : hasPendingEmailConfirmation
+      ? "free"
+      : isSubscriptionUsable(typedSubscription)
       ? ((plan?.slug as EffectivePlanSlug | undefined) ?? "free")
       : "free";
 

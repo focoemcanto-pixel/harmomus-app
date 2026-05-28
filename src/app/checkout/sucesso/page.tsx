@@ -15,10 +15,8 @@ type SyncCheckoutResult = {
   synced: boolean;
   planSlug: string | null;
   error: string | null;
-  requiresEmailConfirmation: boolean;
+  onboardingStatus: string | null;
   customerEmail: string | null;
-  hasLoggedSession: boolean;
-  hasConfirmedEmail: boolean;
   confirmationEmailResent: boolean;
 };
 
@@ -88,7 +86,7 @@ async function findUserIdByCustomerOrEmail(admin: any, customerId: string | null
 
 async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResult> {
   if (!sessionId) {
-    return { synced: false, planSlug: null, error: "Sessão não informada.", requiresEmailConfirmation: true, customerEmail: null, hasLoggedSession: false, hasConfirmedEmail: false, confirmationEmailResent: false };
+    return { synced: false, planSlug: null, error: "Sessão não informada.", onboardingStatus: "pending_email_confirmation", customerEmail: null, confirmationEmailResent: false };
   }
 
   try {
@@ -102,29 +100,23 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
     const supabase = await createClient();
     const { data: auth } = await supabase.auth.getUser();
     const loggedUserId = auth.user?.id ?? null;
-    const hasLoggedSession = Boolean(loggedUserId);
-    const hasConfirmedEmail = Boolean(auth.user?.email_confirmed_at);
     let confirmationEmailResent = false;
 
-    if (!hasConfirmedEmail && customerEmail) {
-      confirmationEmailResent = await resendSignupConfirmation(supabase, customerEmail);
-    }
-
     if (!planSlug) {
-      return { synced: false, planSlug: null, error: "Plano não identificado pelo Price ID do Stripe.", requiresEmailConfirmation: !hasConfirmedEmail, customerEmail, hasLoggedSession, hasConfirmedEmail, confirmationEmailResent };
+      return { synced: false, planSlug: null, error: "Plano não identificado pelo Price ID do Stripe.", onboardingStatus: "pending_email_confirmation", customerEmail, confirmationEmailResent };
     }
 
     const admin = createSupabaseAdminClient() as any;
     const { data: plan } = await admin.from("plans").select("id, slug").eq("slug", planSlug).maybeSingle();
 
     if (!plan?.id) {
-      return { synced: false, planSlug, error: `Plano ${planSlug} não encontrado no banco.`, requiresEmailConfirmation: !hasConfirmedEmail, customerEmail, hasLoggedSession, hasConfirmedEmail, confirmationEmailResent };
+      return { synced: false, planSlug, error: `Plano ${planSlug} não encontrado no banco.`, onboardingStatus: "pending_email_confirmation", customerEmail, confirmationEmailResent };
     }
 
     const userId = loggedUserId ?? (await findUserIdByCustomerOrEmail(admin, customerId, customerEmail));
 
     if (!userId) {
-      return { synced: false, planSlug, error: "Usuário não localizado para sincronizar assinatura.", requiresEmailConfirmation: true, customerEmail, hasLoggedSession, hasConfirmedEmail, confirmationEmailResent };
+      return { synced: false, planSlug, error: "Usuário não localizado para sincronizar assinatura.", onboardingStatus: "pending_email_confirmation", customerEmail, confirmationEmailResent };
     }
 
     const status = mapStripeStatus(subscription?.status ?? "active");
@@ -158,17 +150,31 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
       : await admin.from("subscriptions").insert(payload);
 
     if (result.error) {
-      return { synced: false, planSlug, error: result.error.message, requiresEmailConfirmation: !hasConfirmedEmail, customerEmail, hasLoggedSession, hasConfirmedEmail, confirmationEmailResent };
+      return { synced: false, planSlug, error: result.error.message, onboardingStatus: "pending_email_confirmation", customerEmail, confirmationEmailResent };
+    }
+
+    await admin
+      .from("profiles")
+      .update({ onboarding_step: "checkout_completed", updated_at: new Date().toISOString() })
+      .eq("id", userId);
+
+    const { data: profile } = await admin
+      .from("profiles")
+      .select("onboarding_status")
+      .eq("id", userId)
+      .maybeSingle();
+
+    const onboardingStatus = String(profile?.onboarding_status ?? "pending_email_confirmation");
+    if (onboardingStatus === "pending_email_confirmation" && customerEmail) {
+      confirmationEmailResent = await resendSignupConfirmation(supabase, customerEmail);
     }
 
     return {
       synced: true,
       planSlug,
       error: null,
-      requiresEmailConfirmation: !hasConfirmedEmail,
+      onboardingStatus,
       customerEmail,
-      hasLoggedSession,
-      hasConfirmedEmail,
       confirmationEmailResent,
     };
   } catch (error) {
@@ -176,10 +182,8 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
       synced: false,
       planSlug: null,
       error: error instanceof Error ? error.message : "Erro desconhecido.",
-      requiresEmailConfirmation: true,
+      onboardingStatus: "pending_email_confirmation",
       customerEmail: null,
-      hasLoggedSession: false,
-      hasConfirmedEmail: false,
       confirmationEmailResent: false,
     };
   }
@@ -189,7 +193,7 @@ export default async function CheckoutSucesso({ searchParams }: CheckoutSuccessP
   const resolvedSearchParams = await searchParams;
   const sync = await syncCheckoutSession(resolvedSearchParams?.session_id);
   const planName = sync.planSlug === "plus" ? "Plus" : sync.planSlug === "premium" ? "Premium" : "Plus/Premium";
-  const firstSignupFlow = sync.requiresEmailConfirmation || !sync.hasConfirmedEmail;
+  const firstSignupFlow = sync.onboardingStatus === "pending_email_confirmation";
 
   return (
     <main className="min-h-screen bg-zinc-950 p-6 text-white">
@@ -214,7 +218,7 @@ export default async function CheckoutSucesso({ searchParams }: CheckoutSuccessP
           <div className="mt-6 rounded-2xl border border-cyan-400/30 bg-cyan-500/10 p-5 text-sm text-cyan-50">
             <h2 className="text-base font-semibold text-cyan-100">Confirme seu e-mail para acessar</h2>
             <p className="mt-2 text-cyan-50/90">
-              {sync.confirmationEmailResent ? "Reenviamos" : "Enviamos"} um e-mail de confirmação para {sync.customerEmail ? <strong>{sync.customerEmail}</strong> : "o e-mail usado no cadastro"}. Abra sua caixa de entrada, clique em confirmar e-mail e depois faça seu primeiro login.
+              Reenviamos seu e-mail de confirmação para {sync.customerEmail ? <strong>{sync.customerEmail}</strong> : "o e-mail usado no cadastro"}. Abra sua caixa de entrada, clique em confirmar e-mail e depois faça seu primeiro login.
             </p>
             <p className="mt-3 text-xs text-cyan-100/70">
               Verifique também spam, promoções ou lixo eletrônico se não encontrar a mensagem em alguns minutos.

@@ -23,6 +23,8 @@ export interface Database {
           migration_completed_at: string | null;
           requires_password_setup: boolean;
           password_setup_completed_at: string | null;
+          onboarding_status: string | null;
+          onboarding_step: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -45,6 +47,8 @@ export interface Database {
           migration_completed_at?: string | null;
           requires_password_setup?: boolean;
           password_setup_completed_at?: string | null;
+          onboarding_status?: string | null;
+          onboarding_step?: string | null;
           created_at?: string;
           updated_at?: string;
         };
