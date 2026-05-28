@@ -22,6 +22,15 @@ type SyncedSubscriptionContext = {
   trialEndsAt: string | null;
 } | null;
 
+const ACCEPTED_EVENTS = new Set([
+  "checkout.session.completed",
+  "customer.subscription.created",
+  "customer.subscription.updated",
+  "customer.subscription.deleted",
+  "invoice.paid",
+  "invoice.payment_failed",
+]);
+
 function verifySignature(payload: string, signature: string, secret: string) {
   const parts = Object.fromEntries(signature.split(",").map((part) => part.split("=")));
   if (!parts.t || !parts.v1) return false;
@@ -34,8 +43,22 @@ function verifySignature(payload: string, signature: string, secret: string) {
   return digestBuffer.length === signatureBuffer.length && timingSafeEqual(digestBuffer, signatureBuffer);
 }
 
-function normalizeMetadataValue(value: unknown) {
+function normalize(value: unknown) {
   return String(value ?? "").trim() || null;
+}
+
+function normalizeLower(value: unknown) {
+  return normalize(value)?.toLowerCase() ?? null;
+}
+
+function getStripeId(value: unknown) {
+  if (typeof value === "string") return normalize(value);
+  if (value && typeof value === "object" && "id" in value) return normalize((value as { id?: unknown }).id);
+  return null;
+}
+
+function toIsoFromStripeSeconds(value: unknown) {
+  return typeof value === "number" ? new Date(value * 1000).toISOString() : null;
 }
 
 function getPlanSlugFromEnvPrice(stripePriceId: string | null) {
@@ -49,36 +72,44 @@ function getPlanSlugFromEnvPrice(stripePriceId: string | null) {
 }
 
 async function getPlanByStripePriceId(supabase: any, stripePriceId: string | null, metadataPlanSlug?: string | null) {
-  console.log("[stripe.webhook.getPlanByStripePriceId] buscando plano", { price_id: stripePriceId, metadata_plan_slug: metadataPlanSlug ?? null });
-
   if (metadataPlanSlug) {
-    const metadataPlanResponse = await supabase.from("plans").select("id, slug").eq("slug", metadataPlanSlug).maybeSingle();
-    console.log("[stripe.webhook.getPlanByStripePriceId] resultado por metadata plan_slug", metadataPlanResponse);
-    if (metadataPlanResponse.error) console.error("[stripe.webhook.getPlanByStripePriceId] erro Supabase por metadata plan_slug", metadataPlanResponse);
-    if (metadataPlanResponse.data?.id) return metadataPlanResponse.data;
+    const { data: metadataPlan, error } = await supabase
+      .from("plans")
+      .select("id, slug")
+      .eq("slug", metadataPlanSlug)
+      .maybeSingle();
+
+    if (error) console.error("[stripe.webhook] Falha ao buscar plano por metadata", error);
+    if (metadataPlan?.id) return metadataPlan;
   }
 
-  if (!stripePriceId) return null;
+  if (stripePriceId) {
+    const { data: pricePlan, error } = await supabase
+      .from("plans")
+      .select("id, slug")
+      .eq("stripe_price_id", stripePriceId)
+      .maybeSingle();
 
-  const pricePlanResponse = await supabase.from("plans").select("id, slug").eq("stripe_price_id", stripePriceId).maybeSingle();
-  console.log("[stripe.webhook.getPlanByStripePriceId] resultado por stripe_price_id", pricePlanResponse);
-  if (pricePlanResponse.error) console.error("[stripe.webhook.getPlanByStripePriceId] erro Supabase por stripe_price_id", pricePlanResponse);
-  if (pricePlanResponse.data?.id) return pricePlanResponse.data;
+    if (error) console.error("[stripe.webhook] Falha ao buscar plano por price id", error);
+    if (pricePlan?.id) return pricePlan;
+  }
 
   const fallbackSlug = getPlanSlugFromEnvPrice(stripePriceId);
   if (!fallbackSlug) return null;
 
-  const fallbackPlanResponse = await supabase.from("plans").select("id, slug").eq("slug", fallbackSlug).maybeSingle();
-  console.log("[stripe.webhook.getPlanByStripePriceId] resultado fallback por env price", fallbackPlanResponse);
-  if (fallbackPlanResponse.error) console.error("[stripe.webhook.getPlanByStripePriceId] erro Supabase fallback", fallbackPlanResponse);
-  return fallbackPlanResponse.data ?? null;
+  const { data: fallbackPlan, error } = await supabase
+    .from("plans")
+    .select("id, slug")
+    .eq("slug", fallbackSlug)
+    .maybeSingle();
+
+  if (error) console.error("[stripe.webhook] Falha ao buscar plano fallback", error);
+  return fallbackPlan ?? null;
 }
 
 async function ensureUserIdByCustomerOrEmail(supabase: any, customerId: string | null, email: string | null) {
-  console.log("[stripe.webhook.ensureUserIdByCustomerOrEmail] buscando user", { customer_id: customerId, metadata_email: email });
-
   if (customerId) {
-    const byCustomerResponse = await supabase
+    const { data: byCustomer, error } = await supabase
       .from("subscriptions")
       .select("user_id")
       .or(`stripe_customer_id.eq.${customerId},gateway_customer_id.eq.${customerId}`)
@@ -86,52 +117,65 @@ async function ensureUserIdByCustomerOrEmail(supabase: any, customerId: string |
       .limit(1)
       .maybeSingle();
 
-    console.log("[stripe.webhook.ensureUserIdByCustomerOrEmail] resultado por customer_id", {
-      user_encontrado: Boolean(byCustomerResponse.data?.user_id),
-      data: byCustomerResponse.data ?? null,
-      supabase_error: byCustomerResponse.error ?? null,
-      supabase_response: byCustomerResponse,
-    });
-    if (byCustomerResponse.error) console.error("[stripe.webhook.ensureUserIdByCustomerOrEmail] erro Supabase por customer_id", byCustomerResponse);
-
-    if (byCustomerResponse.data?.user_id) return byCustomerResponse.data.user_id as string;
+    if (error) console.error("[stripe.webhook] Falha ao buscar usuário por customer", error);
+    if (byCustomer?.user_id) return byCustomer.user_id as string;
   }
 
-  if (!email) {
-    console.error("[stripe.webhook.ensureUserIdByCustomerOrEmail] USER_ID_MISSING", { customer_id: customerId, metadata_email: email });
-    return null;
-  }
+  if (!email) return null;
 
-  const byEmailResponse = await supabase.from("profiles").select("id,email,onboarding_status").ilike("email", email).maybeSingle();
-  console.log("[stripe.webhook.ensureUserIdByCustomerOrEmail] resultado por email", {
-    profile_encontrado: Boolean(byEmailResponse.data?.id),
-    user_encontrado: Boolean(byEmailResponse.data?.id),
-    profile: byEmailResponse.data ?? null,
-    supabase_error: byEmailResponse.error ?? null,
-    supabase_response: byEmailResponse,
-  });
-  if (byEmailResponse.error) console.error("[stripe.webhook.ensureUserIdByCustomerOrEmail] erro Supabase por email", byEmailResponse);
-  if (!byEmailResponse.data?.id) console.error("[stripe.webhook.ensureUserIdByCustomerOrEmail] PROFILE_NOT_FOUND", { customer_id: customerId, metadata_email: email });
+  const { data: byEmail, error } = await supabase
+    .from("profiles")
+    .select("id")
+    .ilike("email", email)
+    .maybeSingle();
 
-  return byEmailResponse.data?.id ?? null;
+  if (error) console.error("[stripe.webhook] Falha ao buscar usuário por e-mail", error);
+  return byEmail?.id ?? null;
 }
 
 async function getProfileForWebhook(supabase: any, userId: string) {
-  const { data } = await supabase.from("profiles").select("id,full_name,email,phone").eq("id", userId).maybeSingle();
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id,full_name,email,phone")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (error) console.error("[stripe.webhook] Falha ao buscar profile", error);
   return data ?? null;
 }
 
-async function downgradeToFree(supabase: any, userId: string, patch: Record<string, unknown>) {
-  const freePlanResponse = await supabase.from("plans").select("id").eq("slug", "free").single();
-  console.log("[stripe.webhook.downgradeToFree] plano free", freePlanResponse);
-  if (freePlanResponse.error) console.error("[stripe.webhook.downgradeToFree] erro Supabase ao buscar plano free", freePlanResponse);
-  if (!freePlanResponse.data?.id) return;
+async function saveSubscriptionByUserId(supabase: any, payload: Record<string, unknown>) {
+  const userId = String(payload.user_id ?? "").trim();
+  if (!userId) return { data: null, error: new Error("user_id ausente no payload de assinatura") };
 
-  const payload = { user_id: userId, plan_id: freePlanResponse.data.id, ...patch };
-  console.log("[stripe.webhook.downgradeToFree] payload salvo no banco", payload);
-  const response = await supabase.from("subscriptions").upsert(payload, { onConflict: "user_id" }).select();
-  console.log("[stripe.webhook.downgradeToFree] resposta Supabase", response);
-  if (response.error) console.error("[stripe.webhook.downgradeToFree] erro Supabase ao fazer downgrade", response);
+  const { data: existing, error: existingError } = await supabase
+    .from("subscriptions")
+    .select("id")
+    .eq("user_id", userId)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingError) return { data: null, error: existingError };
+
+  const response = existing?.id
+    ? await supabase.from("subscriptions").update(payload).eq("id", existing.id).select()
+    : await supabase.from("subscriptions").insert({ ...payload, created_at: new Date().toISOString() }).select();
+
+  if (response.error) console.error("[stripe.webhook] Falha ao salvar assinatura", response.error);
+  return response;
+}
+
+async function downgradeToFree(supabase: any, userId: string, patch: Record<string, unknown>) {
+  const { data: freePlan, error } = await supabase.from("plans").select("id").eq("slug", "free").single();
+  if (error) console.error("[stripe.webhook] Falha ao buscar plano free", error);
+  if (!freePlan?.id) return;
+
+  await saveSubscriptionByUserId(supabase, {
+    user_id: userId,
+    plan_id: freePlan.id,
+    ...patch,
+  });
 }
 
 function mapStripeEventToWebhookEvent(eventType: string, status: string) {
@@ -144,55 +188,23 @@ function mapStripeEventToWebhookEvent(eventType: string, status: string) {
   return null;
 }
 
-async function createOrUpdateSubscription(supabase: any, payload: Record<string, unknown>) {
-  console.log("[stripe.webhook.createOrUpdateSubscription] payload salvo no banco", payload);
-
-  const response = await supabase.from("subscriptions").upsert(payload, { onConflict: "user_id" }).select();
-
-  console.log("[stripe.webhook.createOrUpdateSubscription] resposta completa do Supabase", response);
-  if (response.error) {
-    console.error("[stripe.webhook.createOrUpdateSubscription] erro completo do Supabase", response);
-  }
-
-  return response;
-}
-
 async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent): Promise<SyncedSubscriptionContext> {
-  console.log("[stripe.webhook.syncSubscription] início", { event_id: event.id, event_type: event.type });
-
   const object = event.data?.object ?? {};
-  const isCheckoutSession = event.type === "checkout.session.completed";
-
-  if (isCheckoutSession) {
-    console.log("[stripe.webhook.syncSubscription] checkout.session.completed", {
-      session_id: object.id ?? null,
-      session_mode: object.mode ?? null,
-      session_customer: typeof object.customer === "string" ? object.customer : object.customer?.id ?? null,
-      session_subscription: typeof object.subscription === "string" ? object.subscription : object.subscription?.id ?? null,
-      session_customer_email: object.customer_email ?? object.customer_details?.email ?? null,
-      session_metadata: object.metadata ?? null,
-      metadata_user_id: object.metadata?.user_id ?? null,
-      metadata_email: object.metadata?.email ?? null,
-    });
-  }
-
-  const customerId = typeof object.customer === "string" ? object.customer : object.customer?.id ?? null;
-  const subscriptionId = object.subscription ?? (String(object.id ?? "").startsWith("sub_") ? object.id : null);
-
-  if (isCheckoutSession && !subscriptionId) {
-    console.error("[stripe.webhook.syncSubscription] SESSION_SUBSCRIPTION_NULL", { session_id: object.id ?? null, session_subscription: object.subscription ?? null });
-  }
+  const objectSubscriptionId = getStripeId(object.subscription);
+  const ownSubscriptionId = String(object.id ?? "").startsWith("sub_") ? String(object.id) : null;
+  const subscriptionId = objectSubscriptionId ?? ownSubscriptionId;
 
   let fullSubscription = object;
   if (subscriptionId) {
     try {
       fullSubscription = await getStripeSubscription(subscriptionId);
     } catch (error) {
-      console.error("[stripe.webhook.syncSubscription] erro ao buscar subscription Stripe; usando objeto do evento", { subscription_id: subscriptionId, error, object });
+      console.error("[stripe.webhook] Falha ao buscar subscription no Stripe; usando payload do evento", error);
       fullSubscription = object;
     }
   }
 
+  const customerId = getStripeId(fullSubscription?.customer) ?? getStripeId(object.customer);
   const stripePriceId =
     fullSubscription?.items?.data?.[0]?.price?.id ??
     object.items?.data?.[0]?.price?.id ??
@@ -202,57 +214,44 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
     null;
 
   const customerEmail =
-    fullSubscription?.metadata?.email ??
-    object.metadata?.email ??
-    object.customer_details?.email ??
-    object.customer_email ??
-    object.email ??
-    null;
+    normalize(fullSubscription?.metadata?.email) ??
+    normalize(object.metadata?.email) ??
+    normalize(object.customer_details?.email) ??
+    normalize(object.customer_email) ??
+    normalize(object.email);
+
   const metadataUserId =
-    normalizeMetadataValue(fullSubscription?.metadata?.user_id) ??
-    normalizeMetadataValue(object.metadata?.user_id) ??
-    normalizeMetadataValue(object.subscription_details?.metadata?.user_id);
+    normalize(fullSubscription?.metadata?.user_id) ??
+    normalize(object.metadata?.user_id) ??
+    normalize(object.subscription_details?.metadata?.user_id);
+
   const metadataPlanSlug =
-    normalizeMetadataValue(fullSubscription?.metadata?.plan_slug)?.toLowerCase() ??
-    normalizeMetadataValue(object.metadata?.plan_slug)?.toLowerCase() ??
-    normalizeMetadataValue(object.subscription_details?.metadata?.plan_slug)?.toLowerCase();
-
-  console.log("[stripe.webhook.syncSubscription] subscription encontrada no Stripe", {
-    subscription_encontrada_no_stripe: Boolean(fullSubscription?.id),
-    status_stripe: fullSubscription?.status ?? object.status ?? null,
-    customer_id: customerId,
-    subscription_id: fullSubscription?.id ?? subscriptionId ?? null,
-    price_id: stripePriceId,
-    current_period_end: fullSubscription?.current_period_end ? new Date(fullSubscription.current_period_end * 1000).toISOString() : null,
-    metadata: fullSubscription?.metadata ?? object.metadata ?? null,
-    metadata_user_id: metadataUserId,
-    metadata_email: customerEmail,
-  });
-
-  if (!metadataUserId) console.error("[stripe.webhook.syncSubscription] USER_ID_MISSING", { event_id: event.id, event_type: event.type, metadata: fullSubscription?.metadata ?? object.metadata ?? null });
+    normalizeLower(fullSubscription?.metadata?.plan_slug) ??
+    normalizeLower(object.metadata?.plan_slug) ??
+    normalizeLower(object.subscription_details?.metadata?.plan_slug);
 
   const userId = metadataUserId ?? (await ensureUserIdByCustomerOrEmail(supabase, customerId, customerEmail));
-  console.log("[stripe.webhook.syncSubscription] user encontrado", { user_encontrado: Boolean(userId), user_id: userId ?? null });
   if (!userId) {
-    console.error("[stripe.webhook.syncSubscription] USER_ID_MISSING", { event_id: event.id, event_type: event.type, customer_id: customerId, metadata_email: customerEmail });
+    console.error("[stripe.webhook] Usuário não localizado para evento Stripe", { eventId: event.id, eventType: event.type, customerId });
     return null;
   }
 
-  const profileResponse = await supabase.from("profiles").select("id,email,onboarding_status").eq("id", userId).maybeSingle();
-  console.log("[stripe.webhook.syncSubscription] profile encontrado", {
-    profile_encontrado: Boolean(profileResponse.data?.id),
-    profile: profileResponse.data ?? null,
-    supabase_error: profileResponse.error ?? null,
-    supabase_response: profileResponse,
-  });
-  if (profileResponse.error) console.error("[stripe.webhook.syncSubscription] erro Supabase ao buscar profile", profileResponse);
-  if (!profileResponse.data?.id) console.error("[stripe.webhook.syncSubscription] PROFILE_NOT_FOUND", { user_id: userId, customer_id: customerId, metadata_email: customerEmail });
+  const { data: profile, error: profileError } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (profileError) console.error("[stripe.webhook] Falha ao confirmar profile", profileError);
+  if (!profile?.id) {
+    console.error("[stripe.webhook] Profile não encontrado para assinatura Stripe", { eventId: event.id, userId });
+    return null;
+  }
 
   const status = mapStripeStatus(fullSubscription?.status ?? object.status ?? "active");
-  const currentPeriodEnd = fullSubscription?.current_period_end
-    ? new Date(fullSubscription.current_period_end * 1000).toISOString()
-    : null;
-  const trialEndsAt = fullSubscription?.trial_end ? new Date(fullSubscription.trial_end * 1000).toISOString() : null;
+  const currentPeriodEnd = toIsoFromStripeSeconds(fullSubscription?.current_period_end);
+  const trialEndsAt = toIsoFromStripeSeconds(fullSubscription?.trial_end);
+  const syncedSubscriptionId = getStripeId(fullSubscription?.id) ?? subscriptionId;
 
   if (event.type === "customer.subscription.deleted") {
     await downgradeToFree(supabase, userId, {
@@ -260,8 +259,8 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
       gateway: "stripe",
       stripe_customer_id: customerId,
       gateway_customer_id: customerId,
-      stripe_subscription_id: subscriptionId,
-      gateway_subscription_id: subscriptionId,
+      stripe_subscription_id: syncedSubscriptionId,
+      gateway_subscription_id: syncedSubscriptionId,
       stripe_price_id: stripePriceId,
       current_period_end: currentPeriodEnd,
       trial_ends_at: trialEndsAt,
@@ -271,24 +270,24 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
       updated_at: new Date().toISOString(),
     });
 
-    return { userId, planSlug: "free", status: "canceled", customerId, subscriptionId, stripePriceId, customerEmail, currentPeriodEnd, trialEndsAt };
+    return { userId, planSlug: "free", status: "canceled", customerId, subscriptionId: syncedSubscriptionId, stripePriceId, customerEmail, currentPeriodEnd, trialEndsAt };
   }
 
   const plan = await getPlanByStripePriceId(supabase, stripePriceId, metadataPlanSlug);
   if (!plan?.id) {
-    console.error("[stripe.webhook.syncSubscription] plano não encontrado", { price_id: stripePriceId, metadata_plan_slug: metadataPlanSlug });
+    console.error("[stripe.webhook] Plano não encontrado para evento Stripe", { eventId: event.id, stripePriceId, metadataPlanSlug });
     return null;
   }
 
-  const subscriptionPayload = {
+  const saveResponse = await saveSubscriptionByUserId(supabase, {
     user_id: userId,
     plan_id: plan.id,
     status,
     gateway: "stripe",
     stripe_customer_id: customerId,
     gateway_customer_id: customerId,
-    stripe_subscription_id: subscriptionId,
-    gateway_subscription_id: subscriptionId,
+    stripe_subscription_id: syncedSubscriptionId,
+    gateway_subscription_id: syncedSubscriptionId,
     stripe_price_id: stripePriceId,
     current_period_end: currentPeriodEnd,
     trial_ends_at: trialEndsAt,
@@ -296,12 +295,11 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
     auto_renew: !Boolean(fullSubscription?.cancel_at_period_end),
     last_webhook_event: event.type,
     updated_at: new Date().toISOString(),
-  };
+  });
 
-  const saveResponse = await createOrUpdateSubscription(supabase, subscriptionPayload);
   if (saveResponse.error) return null;
 
-  return { userId, planSlug: plan.slug ?? null, status, customerId, subscriptionId, stripePriceId, customerEmail, currentPeriodEnd, trialEndsAt };
+  return { userId, planSlug: plan.slug ?? null, status, customerId, subscriptionId: syncedSubscriptionId, stripePriceId, customerEmail, currentPeriodEnd, trialEndsAt };
 }
 
 async function dispatchStripeWebhookEvent(supabase: any, event: StripeEvent, context: SyncedSubscriptionContext) {
@@ -353,14 +351,26 @@ async function dispatchStripeWebhookEvent(supabase: any, event: StripeEvent, con
         },
       });
     } catch (webhookError) {
-      console.error("[stripe.webhook] plan.premium_activated falhou", webhookError);
+      console.error("[stripe.webhook] Falha ao disparar plan.premium_activated", webhookError);
     }
   }
 }
 
-export async function POST(req: Request) {
-  console.log("[stripe.webhook] webhook stripe recebido");
+async function getExistingBillingEvent(supabase: any, eventId: string) {
+  const { data, error } = await supabase
+    .from("billing_events")
+    .select("id, processed")
+    .eq("provider", "stripe")
+    .eq("payload->>id", eventId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
+  if (error) console.error("[stripe.webhook] Falha ao verificar idempotência do evento", error);
+  return data ?? null;
+}
+
+export async function POST(req: Request) {
   const signature = req.headers.get("stripe-signature");
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!signature || !secret) return NextResponse.json({ error: "missing signature" }, { status: 400 });
@@ -369,40 +379,39 @@ export async function POST(req: Request) {
   if (!verifySignature(payload, signature, secret)) return NextResponse.json({ error: "invalid signature" }, { status: 400 });
 
   const event = JSON.parse(payload) as StripeEvent;
-  console.log("[stripe.webhook] event.type", { event_id: event.id, event_type: event.type });
-
-  if (event.type === "checkout.session.completed") console.log("[stripe.webhook] checkout.session.completed recebido", { event_id: event.id });
-  if (event.type === "customer.subscription.created") console.log("[stripe.webhook] customer.subscription.created recebido", { event_id: event.id });
-  if (event.type === "customer.subscription.updated") console.log("[stripe.webhook] customer.subscription.updated recebido", { event_id: event.id });
-
-  const acceptedEvents = new Set([
-    "checkout.session.completed",
-    "customer.subscription.created",
-    "customer.subscription.updated",
-    "customer.subscription.deleted",
-    "invoice.paid",
-    "invoice.payment_failed",
-  ]);
-
   const supabase = createSupabaseAdminClient() as any;
-  const billingInsertResponse = await supabase.from("billing_events").insert({ provider: "stripe", event_type: event.type, payload: event, processed: false }).select();
-  console.log("[stripe.webhook] resposta Supabase ao inserir billing_event", billingInsertResponse);
-  if (billingInsertResponse.error) console.error("[stripe.webhook] erro Supabase ao inserir billing_event", billingInsertResponse);
+  const existingBillingEvent = await getExistingBillingEvent(supabase, event.id);
 
-  if (acceptedEvents.has(event.type)) {
+  if (existingBillingEvent?.processed) {
+    return NextResponse.json({ received: true, duplicate: true });
+  }
+
+  const billingEventResponse = existingBillingEvent?.id
+    ? { data: [{ id: existingBillingEvent.id }], error: null }
+    : await supabase
+        .from("billing_events")
+        .insert({ provider: "stripe", event_type: event.type, payload: event, processed: false })
+        .select("id");
+
+  if (billingEventResponse.error) {
+    console.error("[stripe.webhook] Falha ao registrar billing_event", billingEventResponse.error);
+  }
+
+  if (ACCEPTED_EVENTS.has(event.type)) {
     const context = await syncSubscriptionFromStripeEvent(supabase, event);
     await dispatchStripeWebhookEvent(supabase, event, context);
   }
 
-  const billingUpdateResponse = await supabase
-    .from("billing_events")
-    .update({ processed: true })
-    .eq("provider", "stripe")
-    .eq("event_type", event.type)
-    .eq("payload->>id", event.id)
-    .select();
-  console.log("[stripe.webhook] resposta Supabase ao marcar billing_event processado", billingUpdateResponse);
-  if (billingUpdateResponse.error) console.error("[stripe.webhook] erro Supabase ao marcar billing_event processado", billingUpdateResponse);
+  const billingEventId = billingEventResponse.data?.[0]?.id ?? existingBillingEvent?.id;
+  const billingUpdateQuery = supabase.from("billing_events").update({ processed: true });
+
+  const billingUpdateResponse = billingEventId
+    ? await billingUpdateQuery.eq("id", billingEventId)
+    : await billingUpdateQuery.eq("provider", "stripe").eq("payload->>id", event.id);
+
+  if (billingUpdateResponse.error) {
+    console.error("[stripe.webhook] Falha ao marcar billing_event como processado", billingUpdateResponse.error);
+  }
 
   return NextResponse.json({ received: true });
 }
