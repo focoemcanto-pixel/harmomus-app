@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { DeletePlaylistButton } from "@/components/public/delete-playlist-button";
+import { ManagePlaylistKitsList } from "@/components/public/manage-playlist-kits-list";
 import { PlaylistVisibilityToggle } from "@/components/public/playlist-visibility-toggle";
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { RenamePlaylistForm } from "@/components/public/rename-playlist-form";
@@ -34,6 +35,30 @@ async function validatePlaylistOwnership(playlistId: string) {
   if (!playlist) return null;
 
   return { playlist, supabase, user };
+}
+
+async function removeKitFromPlaylistAction(formData: FormData) {
+  "use server";
+
+  const playlistId = String(formData.get("playlistId") ?? "");
+  const kitId = String(formData.get("kitId") ?? "");
+
+  if (!playlistId || !kitId) return;
+
+  const validated = await validatePlaylistOwnership(playlistId);
+  if (!validated) return;
+
+  const { playlist, supabase } = validated;
+
+  const { error } = await supabase
+    .from("playlist_items")
+    .delete()
+    .eq("playlist_id", playlist.id)
+    .eq("kit_id", kitId);
+
+  if (error) throw new Error(error.message);
+
+  redirect("/minhas-playlists");
 }
 
 async function renamePlaylist(formData: FormData) {
@@ -214,17 +239,12 @@ export default async function MinhasPlaylistsPage() {
                       </div>
                     </Link>
 
-                    <div className="space-y-3 p-5">
-                      <div className="space-y-1">
-                        {playlist.covers.slice(0, 3).map((cover) => (
-                          <div key={cover.id} className="flex items-center justify-between gap-3 rounded-xl bg-black/20 px-3 py-2">
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-medium text-white">{cover.name}</p>
-                              <p className="truncate text-xs text-zinc-400">{cover.artist}</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
+                    <div className="space-y-4 p-5">
+                      <ManagePlaylistKitsList
+                        playlistId={playlist.id}
+                        kits={playlist.kits}
+                        removeKitAction={removeKitFromPlaylistAction}
+                      />
 
                       <div className="flex items-center justify-between border-t border-white/5 pt-3 text-xs text-zinc-400">
                         <span>
