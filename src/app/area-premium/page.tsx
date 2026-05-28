@@ -9,6 +9,7 @@ import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { canSubmitPremiumRequests } from "@/lib/auth/ministry-access";
 import { getGlobalTopKits, getRecommendedKits, getUserRecentActivities, getUserTopKits, type TopKit } from "@/lib/data/premium-analytics";
 import { getPublishedKits } from "@/lib/data/public-kits";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -27,6 +28,19 @@ function formatDate(value?: string | null) {
   }
 }
 
+function statusLabel(status?: string | null) {
+  if (status === "pending") return "Pendente";
+  if (status === "reviewing") return "Em análise";
+  if (status === "approved") return "Aprovado";
+  if (status === "done") return "Concluído";
+  if (status === "rejected") return "Rejeitado";
+  return status || "—";
+}
+
+function typeLabel(type?: string | null) {
+  return type === "tone" ? "Pedido de tom" : "Nova música";
+}
+
 export default async function AreaPremiumPage({
   searchParams,
 }: {
@@ -41,13 +55,25 @@ export default async function AreaPremiumPage({
   if (context.effectiveSlug !== "premium") redirect("/assinatura");
 
   const userId = context.profile?.id ?? "";
-  const [topYou, topSite, recommendedKits, activities, allKits] = await Promise.all([
+  const supabaseAdmin = createSupabaseAdminClient() as any;
+
+  const [topYou, topSite, recommendedKits, activities, allKits, premiumRequestsResponse] = await Promise.all([
     userId ? getUserTopKits(userId, 5).catch(() => []) : Promise.resolve([]),
     getGlobalTopKits(5).catch(() => []),
     userId ? getRecommendedKits(userId, 6).catch(() => []) : Promise.resolve([]),
     userId ? getUserRecentActivities(userId, 10).catch(() => []) : Promise.resolve([]),
     getPublishedKits().catch(() => []),
+    userId
+      ? supabaseAdmin
+          .from("premium_requests")
+          .select("id,request_type,song_name,artist_name,desired_tone,voice_part,status,created_at,updated_at")
+          .eq("user_id", userId)
+          .order("created_at", { ascending: false })
+          .limit(6)
+      : Promise.resolve({ data: [] }),
   ]);
+
+  const userPremiumRequests = premiumRequestsResponse?.data ?? [];
 
   const toneRequestKits = allKits.slice(0, 500).map((kit) => ({
     id: kit.id,
@@ -86,7 +112,7 @@ export default async function AreaPremiumPage({
                 {[
                   [String(totalUserPlays), "Reproduções", Headphones],
                   [activities.length ? "1" : "0", "Dias seguidos", Sparkles],
-                  ["0", "Favoritos", Star],
+                  [String(userPremiumRequests.length), "Solicitações", MessageCircle],
                   [joinedAt, "Membro desde", Crown],
                 ].map(([value, label, Icon]) => (
                   <div key={String(label)} className="rounded-3xl border border-emerald-400/25 bg-white/[0.04] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
@@ -98,6 +124,27 @@ export default async function AreaPremiumPage({
               </div>
             </div>
           </div>
+
+          <PremiumPanel title="Minhas solicitações" icon={<MessageCircle className="text-emerald-300" />} className="mt-8">
+            {userPremiumRequests.length ? (
+              <div className="grid gap-3 md:grid-cols-2">
+                {userPremiumRequests.map((item: any) => (
+                  <div key={item.id} className="rounded-3xl border border-white/10 bg-white/[0.035] p-5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full border border-emerald-400/25 bg-emerald-400/10 px-3 py-1 text-xs font-bold text-emerald-200">{typeLabel(item.request_type)}</span>
+                      <span className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1 text-xs text-zinc-200">{statusLabel(item.status)}</span>
+                    </div>
+                    <h3 className="mt-4 text-lg font-black text-white">{item.song_name}</h3>
+                    <p className="mt-1 text-sm text-zinc-400">{item.artist_name || "Kit vocal"}</p>
+                    {item.request_type === "tone" ? <p className="mt-2 text-sm text-emerald-200">Tom: {item.desired_tone || "—"}{item.voice_part ? ` • ${item.voice_part}` : ""}</p> : null}
+                    <p className="mt-4 text-xs uppercase tracking-[0.16em] text-zinc-500">Criado em {formatDate(item.created_at)}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyState text="Você ainda não enviou solicitações premium. Quando solicitar uma música ou tom, o andamento aparecerá aqui." />
+            )}
+          </PremiumPanel>
 
           <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_1fr]">
             <PremiumPanel title="Top 5 (você)" icon={<Music2 className="text-emerald-300" />}>
