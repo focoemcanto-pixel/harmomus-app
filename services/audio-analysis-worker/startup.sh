@@ -5,7 +5,7 @@ log() {
   echo "[audio-analysis-worker][startup] $*"
 }
 
-log "Validando ambiente Python para librosa/pyin"
+log "Validando ambiente Python para librosa/yin"
 log "which python: $(which python)"
 log "which pip: $(which pip)"
 
