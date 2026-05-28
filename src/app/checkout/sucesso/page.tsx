@@ -19,6 +19,7 @@ type SyncCheckoutResult = {
   customerEmail: string | null;
   hasLoggedSession: boolean;
   hasConfirmedEmail: boolean;
+  confirmationEmailResent: boolean;
 };
 
 function getPlanSlugFromPrice(priceId: string | null) {
@@ -39,6 +40,26 @@ function getCustomerIdFromSession(session: any) {
 
 function getCustomerEmailFromSession(session: any) {
   return String(session?.customer_details?.email ?? session?.customer_email ?? "").trim().toLowerCase() || null;
+}
+
+async function resendSignupConfirmation(supabase: any, email: string | null) {
+  if (!email) return false;
+
+  const base = process.env.NEXT_PUBLIC_APP_URL?.trim()?.replace(/\/$/, "") || null;
+  const emailRedirectTo = base ? `${base}/auth/confirm?next=${encodeURIComponent("/login?confirmed=1")}` : undefined;
+
+  const { error } = await supabase.auth.resend({
+    type: "signup",
+    email,
+    options: emailRedirectTo ? { emailRedirectTo } : undefined,
+  });
+
+  if (error) {
+    console.error("[checkout.success] Falha ao reenviar confirmação de e-mail", error);
+    return false;
+  }
+
+  return true;
 }
 
 async function findUserIdByCustomerOrEmail(admin: any, customerId: string | null, email: string | null) {
@@ -67,7 +88,7 @@ async function findUserIdByCustomerOrEmail(admin: any, customerId: string | null
 
 async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResult> {
   if (!sessionId) {
-    return { synced: false, planSlug: null, error: "Sessão não informada.", requiresEmailConfirmation: true, customerEmail: null, hasLoggedSession: false, hasConfirmedEmail: false };
+    return { synced: false, planSlug: null, error: "Sessão não informada.", requiresEmailConfirmation: true, customerEmail: null, hasLoggedSession: false, hasConfirmedEmail: false, confirmationEmailResent: false };
   }
 
   try {
@@ -83,22 +104,27 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
     const loggedUserId = auth.user?.id ?? null;
     const hasLoggedSession = Boolean(loggedUserId);
     const hasConfirmedEmail = Boolean(auth.user?.email_confirmed_at);
+    let confirmationEmailResent = false;
+
+    if (!hasConfirmedEmail && customerEmail) {
+      confirmationEmailResent = await resendSignupConfirmation(supabase, customerEmail);
+    }
 
     if (!planSlug) {
-      return { synced: false, planSlug: null, error: "Plano não identificado pelo Price ID do Stripe.", requiresEmailConfirmation: !hasConfirmedEmail, customerEmail, hasLoggedSession, hasConfirmedEmail };
+      return { synced: false, planSlug: null, error: "Plano não identificado pelo Price ID do Stripe.", requiresEmailConfirmation: !hasConfirmedEmail, customerEmail, hasLoggedSession, hasConfirmedEmail, confirmationEmailResent };
     }
 
     const admin = createSupabaseAdminClient() as any;
     const { data: plan } = await admin.from("plans").select("id, slug").eq("slug", planSlug).maybeSingle();
 
     if (!plan?.id) {
-      return { synced: false, planSlug, error: `Plano ${planSlug} não encontrado no banco.`, requiresEmailConfirmation: !hasConfirmedEmail, customerEmail, hasLoggedSession, hasConfirmedEmail };
+      return { synced: false, planSlug, error: `Plano ${planSlug} não encontrado no banco.`, requiresEmailConfirmation: !hasConfirmedEmail, customerEmail, hasLoggedSession, hasConfirmedEmail, confirmationEmailResent };
     }
 
     const userId = loggedUserId ?? (await findUserIdByCustomerOrEmail(admin, customerId, customerEmail));
 
     if (!userId) {
-      return { synced: false, planSlug, error: "Usuário não localizado para sincronizar assinatura.", requiresEmailConfirmation: true, customerEmail, hasLoggedSession, hasConfirmedEmail };
+      return { synced: false, planSlug, error: "Usuário não localizado para sincronizar assinatura.", requiresEmailConfirmation: true, customerEmail, hasLoggedSession, hasConfirmedEmail, confirmationEmailResent };
     }
 
     const status = mapStripeStatus(subscription?.status ?? "active");
@@ -132,7 +158,7 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
       : await admin.from("subscriptions").insert(payload);
 
     if (result.error) {
-      return { synced: false, planSlug, error: result.error.message, requiresEmailConfirmation: !hasConfirmedEmail, customerEmail, hasLoggedSession, hasConfirmedEmail };
+      return { synced: false, planSlug, error: result.error.message, requiresEmailConfirmation: !hasConfirmedEmail, customerEmail, hasLoggedSession, hasConfirmedEmail, confirmationEmailResent };
     }
 
     return {
@@ -143,6 +169,7 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
       customerEmail,
       hasLoggedSession,
       hasConfirmedEmail,
+      confirmationEmailResent,
     };
   } catch (error) {
     return {
@@ -153,6 +180,7 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
       customerEmail: null,
       hasLoggedSession: false,
       hasConfirmedEmail: false,
+      confirmationEmailResent: false,
     };
   }
 }
@@ -186,7 +214,7 @@ export default async function CheckoutSucesso({ searchParams }: CheckoutSuccessP
           <div className="mt-6 rounded-2xl border border-cyan-400/30 bg-cyan-500/10 p-5 text-sm text-cyan-50">
             <h2 className="text-base font-semibold text-cyan-100">Confirme seu e-mail para acessar</h2>
             <p className="mt-2 text-cyan-50/90">
-              Enviamos um e-mail de confirmação para {sync.customerEmail ? <strong>{sync.customerEmail}</strong> : "o e-mail usado no cadastro"}. Abra sua caixa de entrada, clique em confirmar e-mail e depois faça seu primeiro login.
+              {sync.confirmationEmailResent ? "Reenviamos" : "Enviamos"} um e-mail de confirmação para {sync.customerEmail ? <strong>{sync.customerEmail}</strong> : "o e-mail usado no cadastro"}. Abra sua caixa de entrada, clique em confirmar e-mail e depois faça seu primeiro login.
             </p>
             <p className="mt-3 text-xs text-cyan-100/70">
               Verifique também spam, promoções ou lixo eletrônico se não encontrar a mensagem em alguns minutos.
