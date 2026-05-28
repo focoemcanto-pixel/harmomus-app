@@ -12,18 +12,11 @@ function appBaseUrl(request: Request) {
   return process.env.NEXT_PUBLIC_APP_URL?.trim()?.replace(/\/$/, "") || new URL(request.url).origin;
 }
 
-function getStripeCustomerId(session: any) {
-  if (typeof session?.customer === "string") return session.customer;
-  if (session?.customer?.id) return String(session.customer.id);
-  return null;
-}
-
 async function getStripeContext(sessionId: string) {
   const session = await getCheckoutSession(sessionId);
   return {
     email: normalizeEmail(session?.metadata?.email ?? session?.customer_details?.email ?? session?.customer_email) || null,
     userId: String(session?.metadata?.user_id ?? "").trim() || null,
-    customerId: getStripeCustomerId(session),
   };
 }
 
@@ -52,34 +45,28 @@ async function findPendingProfileById(admin: any, userId: string | null) {
   return data ?? null;
 }
 
-async function findPendingProfileByStripeCustomer(admin: any, customerId: string | null, expectedEmail: string | null) {
-  if (!customerId) return null;
+async function safeMarkProfilePending(admin: any, userId: string | null, email: string) {
+  const profile = (await findPendingProfileById(admin, userId)) ?? (await findPendingProfileByEmail(admin, email));
+  if (!profile?.id) return null;
 
-  const { data: subscription, error: subscriptionError } = await admin
-    .from("subscriptions")
-    .select("user_id")
-    .or(`stripe_customer_id.eq.${customerId},gateway_customer_id.eq.${customerId}`)
-    .limit(1)
-    .maybeSingle();
-
-  if (subscriptionError) throw new Error(subscriptionError.message);
-  if (!subscription?.user_id) return null;
-
-  const profile = await findPendingProfileById(admin, subscription.user_id);
-  if (!profile) return null;
-
-  const profileEmail = normalizeEmail(profile.email);
-  if (expectedEmail && profileEmail && profileEmail !== expectedEmail) {
-    console.error("[email-confirmation.resend] Stripe customer matched a different profile email", {
-      expectedEmail,
-      profileEmail,
-      userId: profile.id,
-      customerId,
-    });
-    return null;
+  if (String(profile.onboarding_status ?? "") !== "pending_email_confirmation") {
+    await admin
+      .from("profiles")
+      .update({ onboarding_status: "pending_email_confirmation", onboarding_step: "waiting_email_confirmation" })
+      .eq("id", profile.id);
   }
 
   return profile;
+}
+
+async function resendSignupEmail(supabase: any, request: Request, email: string) {
+  const emailRedirectTo = `${appBaseUrl(request)}/auth/confirm?next=${encodeURIComponent("/login?confirmed=1")}`;
+
+  return supabase.auth.resend({
+    type: "signup",
+    email,
+    options: { emailRedirectTo },
+  });
 }
 
 export async function POST(request: Request) {
@@ -91,10 +78,6 @@ export async function POST(request: Request) {
     const admin = createSupabaseAdminClient() as any;
     const supabase = await createClient();
 
-    let email = requestedEmail;
-    let customerId: string | null = null;
-    let sessionUserId: string | null = null;
-
     if (sessionId) {
       const stripeContext = await getStripeContext(sessionId).catch((error) => {
         console.error("[email-confirmation.resend] sessão Stripe inválida", error);
@@ -105,51 +88,40 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Sessão de checkout inválida para reenviar confirmação." }, { status: 403 });
       }
 
-      if (email && email !== stripeContext.email) {
+      if (requestedEmail && requestedEmail !== stripeContext.email) {
         return NextResponse.json({ error: "E-mail não corresponde à sessão de checkout." }, { status: 403 });
       }
 
-      email = stripeContext.email;
-      customerId = stripeContext.customerId;
-      sessionUserId = stripeContext.userId;
+      await safeMarkProfilePending(admin, stripeContext.userId, stripeContext.email).catch((error) => {
+        console.error("[email-confirmation.resend] não foi possível sincronizar profile pendente", error);
+      });
+
+      const { error } = await resendSignupEmail(supabase, request, stripeContext.email);
+      if (error) return NextResponse.json({ error: error.message || "Falha ao reenviar e-mail." }, { status: 400 });
+
+      return NextResponse.json({ ok: true, email: stripeContext.email });
     }
+
+    let email = requestedEmail;
+    let userId: string | null = null;
 
     if (!email) {
       const { data: auth } = await supabase.auth.getUser();
       email = normalizeEmail(auth.user?.email);
-      sessionUserId = auth.user?.id ?? null;
+      userId = auth.user?.id ?? null;
     }
 
     if (!email) return NextResponse.json({ error: "E-mail não encontrado para reenviar confirmação." }, { status: 400 });
 
-    const profile =
-      (await findPendingProfileById(admin, sessionUserId)) ??
-      (await findPendingProfileByEmail(admin, email)) ??
-      (await findPendingProfileByStripeCustomer(admin, customerId, email));
-
+    const profile = (await findPendingProfileById(admin, userId)) ?? (await findPendingProfileByEmail(admin, email));
     if (!profile?.id) return NextResponse.json({ error: "Cadastro pendente não encontrado para este e-mail." }, { status: 404 });
-
-    const profileEmail = normalizeEmail(profile.email);
-    if (profileEmail && profileEmail !== email) {
-      return NextResponse.json(
-        { error: "O e-mail da sessão não corresponde ao e-mail cadastrado. Use a opção de alterar e-mail para corrigir." },
-        { status: 409 },
-      );
-    }
 
     if (String(profile.onboarding_status ?? "") !== "pending_email_confirmation") {
       return NextResponse.json({ error: "Ação disponível apenas na etapa de confirmação de e-mail." }, { status: 403 });
     }
 
-    const resendEmail = email;
-    const emailRedirectTo = `${appBaseUrl(request)}/auth/confirm?next=${encodeURIComponent("/login?confirmed=1")}`;
-
-    const { error } = await supabase.auth.resend({
-      type: "signup",
-      email: resendEmail,
-      options: { emailRedirectTo },
-    });
-
+    const resendEmail = normalizeEmail(profile.email) || email;
+    const { error } = await resendSignupEmail(supabase, request, resendEmail);
     if (error) return NextResponse.json({ error: error.message || "Falha ao reenviar e-mail." }, { status: 400 });
 
     return NextResponse.json({ ok: true, email: resendEmail });
