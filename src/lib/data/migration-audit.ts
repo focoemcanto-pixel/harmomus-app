@@ -18,6 +18,13 @@ type AuthUserLite = {
   created_at?: string | null;
 };
 
+type AuditPlan = {
+  id: string;
+  slug?: string | null;
+  name?: string | null;
+  hierarchy_level?: number | null;
+};
+
 function normalizeEmail(value: unknown) {
   return String(value ?? "").trim().toLowerCase();
 }
@@ -64,12 +71,12 @@ export async function getMigrationReadinessAudit() {
 
   const profiles = profilesResult.data ?? [];
   const subscriptions = subscriptionsResult.data ?? [];
-  const plans = plansResult.data ?? [];
+  const plans = (plansResult.data ?? []) as AuditPlan[];
   const billingEvents = billingEventsResult.data ?? [];
 
   const authIdSet = new Set(authUsers.map((user) => user.id));
   const profileIdSet = new Set(profiles.map((profile: any) => profile.id));
-  const planById = new Map(plans.map((plan: any) => [String(plan.id), plan]));
+  const planById = new Map<string, AuditPlan>(plans.map((plan) => [String(plan.id), plan]));
 
   const authWithoutProfile = authUsers
     .filter((user) => !profileIdSet.has(user.id))
