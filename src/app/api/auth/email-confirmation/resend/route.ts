@@ -21,7 +21,8 @@ function getStripeCustomerId(session: any) {
 async function getStripeContext(sessionId: string) {
   const session = await getCheckoutSession(sessionId);
   return {
-    email: normalizeEmail(session?.customer_details?.email ?? session?.customer_email) || null,
+    email: normalizeEmail(session?.metadata?.email ?? session?.customer_details?.email ?? session?.customer_email) || null,
+    userId: String(session?.metadata?.user_id ?? "").trim() || null,
     customerId: getStripeCustomerId(session),
   };
 }
@@ -38,7 +39,20 @@ async function findPendingProfileByEmail(admin: any, email: string) {
   return data ?? null;
 }
 
-async function findPendingProfileByStripeCustomer(admin: any, customerId: string | null) {
+async function findPendingProfileById(admin: any, userId: string | null) {
+  if (!userId) return null;
+
+  const { data, error } = await admin
+    .from("profiles")
+    .select("id,email,onboarding_status")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  return data ?? null;
+}
+
+async function findPendingProfileByStripeCustomer(admin: any, customerId: string | null, expectedEmail: string | null) {
   if (!customerId) return null;
 
   const { data: subscription, error: subscriptionError } = await admin
@@ -51,14 +65,21 @@ async function findPendingProfileByStripeCustomer(admin: any, customerId: string
   if (subscriptionError) throw new Error(subscriptionError.message);
   if (!subscription?.user_id) return null;
 
-  const { data: profile, error: profileError } = await admin
-    .from("profiles")
-    .select("id,email,onboarding_status")
-    .eq("id", subscription.user_id)
-    .maybeSingle();
+  const profile = await findPendingProfileById(admin, subscription.user_id);
+  if (!profile) return null;
 
-  if (profileError) throw new Error(profileError.message);
-  return profile ?? null;
+  const profileEmail = normalizeEmail(profile.email);
+  if (expectedEmail && profileEmail && profileEmail !== expectedEmail) {
+    console.error("[email-confirmation.resend] Stripe customer matched a different profile email", {
+      expectedEmail,
+      profileEmail,
+      userId: profile.id,
+      customerId,
+    });
+    return null;
+  }
+
+  return profile;
 }
 
 export async function POST(request: Request) {
@@ -72,6 +93,7 @@ export async function POST(request: Request) {
 
     let email = requestedEmail;
     let customerId: string | null = null;
+    let sessionUserId: string | null = null;
 
     if (sessionId) {
       const stripeContext = await getStripeContext(sessionId).catch((error) => {
@@ -89,26 +111,37 @@ export async function POST(request: Request) {
 
       email = stripeContext.email;
       customerId = stripeContext.customerId;
+      sessionUserId = stripeContext.userId;
     }
 
     if (!email) {
       const { data: auth } = await supabase.auth.getUser();
       email = normalizeEmail(auth.user?.email);
+      sessionUserId = auth.user?.id ?? null;
     }
 
     if (!email) return NextResponse.json({ error: "E-mail não encontrado para reenviar confirmação." }, { status: 400 });
 
     const profile =
-      (await findPendingProfileByStripeCustomer(admin, customerId)) ??
-      (await findPendingProfileByEmail(admin, email));
+      (await findPendingProfileById(admin, sessionUserId)) ??
+      (await findPendingProfileByEmail(admin, email)) ??
+      (await findPendingProfileByStripeCustomer(admin, customerId, email));
 
     if (!profile?.id) return NextResponse.json({ error: "Cadastro pendente não encontrado para este e-mail." }, { status: 404 });
+
+    const profileEmail = normalizeEmail(profile.email);
+    if (profileEmail && profileEmail !== email) {
+      return NextResponse.json(
+        { error: "O e-mail da sessão não corresponde ao e-mail cadastrado. Use a opção de alterar e-mail para corrigir." },
+        { status: 409 },
+      );
+    }
 
     if (String(profile.onboarding_status ?? "") !== "pending_email_confirmation") {
       return NextResponse.json({ error: "Ação disponível apenas na etapa de confirmação de e-mail." }, { status: 403 });
     }
 
-    const resendEmail = normalizeEmail(profile.email) || email;
+    const resendEmail = email;
     const emailRedirectTo = `${appBaseUrl(request)}/auth/confirm?next=${encodeURIComponent("/login?confirmed=1")}`;
 
     const { error } = await supabase.auth.resend({
