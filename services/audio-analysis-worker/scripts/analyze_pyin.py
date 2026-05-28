@@ -7,7 +7,9 @@ import numpy as np
 
 def main() -> None:
     source_path = sys.argv[1]
-    audio, sample_rate = librosa.load(source_path, sr=22050, mono=True)
+    audio, sample_rate = librosa.load(source_path, sr=None, mono=False)
+    if audio.ndim > 1:
+        audio = np.mean(audio, axis=0)
     hop_length = 256
     frame_length = 2048
     f0, voiced_flag, voiced_prob = librosa.pyin(
