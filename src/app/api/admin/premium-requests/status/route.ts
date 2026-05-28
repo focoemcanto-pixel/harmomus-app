@@ -21,16 +21,41 @@ export async function POST(request: Request) {
   const form = await request.formData();
   const requestId = String(form.get("request_id") ?? "").trim();
   const status = String(form.get("status") ?? "").trim();
+  const deliveredKitSlug = String(form.get("delivered_kit_slug") ?? "").trim();
 
   if (!requestId || !ALLOWED_STATUS.includes(status as any)) {
     return redirectToAdmin(request, "Status inválido para esta solicitação.");
   }
 
   const admin = createSupabaseAdminClient() as any;
+  const now = new Date().toISOString();
+  const patch: Record<string, unknown> = {
+    status,
+    updated_at: now,
+  };
+
+  if (deliveredKitSlug) {
+    const { data: kit } = await admin
+      .from("kits")
+      .select("slug")
+      .eq("slug", deliveredKitSlug)
+      .eq("published", true)
+      .maybeSingle();
+
+    if (!kit?.slug) {
+      return redirectToAdmin(request, "Kit entregue não encontrado ou ainda não publicado.");
+    }
+
+    patch.delivered_kit_slug = kit.slug;
+    patch.delivered_at = status === "done" ? now : null;
+  } else {
+    patch.delivered_kit_slug = null;
+    patch.delivered_at = null;
+  }
 
   const { error } = await admin
     .from("premium_requests")
-    .update({ status, updated_at: new Date().toISOString() })
+    .update(patch)
     .eq("id", requestId);
 
   if (error) {
