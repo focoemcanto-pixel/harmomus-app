@@ -9,7 +9,7 @@ import { downloadFromR2 } from "./r2";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const HEARTBEAT_INTERVAL_MS = 15 * 1000;
-const STALE_PROCESSING_MS = 2 * 60 * 1000;
+const STALE_PROCESSING_MS = 10 * 60 * 1000;
 const DEMUCS_TIMEOUT_MS = 12 * 60 * 1000;
 const BASIC_PITCH_TIMEOUT_MS = 8 * 60 * 1000;
 const KILL_GRACE_MS = 2_000;
@@ -35,27 +35,7 @@ function midiToNoteName(midi: number): string {
 
 async function reserveJob() {
   console.info("[audio-analysis-worker] reservando job");
-  await failStaleProcessingJobs();
-
-  const thresholdIso = new Date(Date.now() - STALE_PROCESSING_MS).toISOString();
-  const { data: activeProcessing, error: processingError } = await supabase
-    .from("audio_analysis_jobs")
-    .select("id, started_at, updated_at")
-    .eq("status", "processing")
-    .gte("updated_at", thresholdIso)
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (processingError) throw new Error(processingError.message);
-  if (activeProcessing) {
-    console.info("[audio-analysis-worker] job processing recente encontrado, aguardando", {
-      processing_job_id: activeProcessing.id,
-      started_at: activeProcessing.started_at,
-      updated_at: activeProcessing.updated_at,
-    });
-    return null;
-  }
+  await recoverStaleProcessingJobs();
 
   const { data: pending, error } = await supabase
     .from("audio_analysis_jobs")
@@ -83,30 +63,30 @@ async function reserveJob() {
   return locked ?? null;
 }
 
-async function failStaleProcessingJobs() {
+async function recoverStaleProcessingJobs() {
   const staleThresholdIso = new Date(Date.now() - STALE_PROCESSING_MS).toISOString();
-  const { data: staleJobs, error: staleQueryError } = await supabase
+  const recoveredAt = new Date().toISOString();
+
+  const { data: recoveredJobs, error: recoverError } = await supabase
     .from("audio_analysis_jobs")
-    .select("id, updated_at")
+    .update({
+      status: "pending",
+      started_at: null,
+      error_message: null,
+    })
     .eq("status", "processing")
-    .lt("updated_at", staleThresholdIso);
+    .lt("started_at", staleThresholdIso)
+    .select("id, started_at");
 
-  if (staleQueryError) throw new Error(staleQueryError.message);
-  if (!staleJobs?.length) return;
+  if (recoverError) throw new Error(recoverError.message);
+  if (!recoveredJobs?.length) return;
 
-  for (const staleJob of staleJobs) {
-    const { error: failError } = await supabase
-      .from("audio_analysis_jobs")
-      .update({
-        status: "failed",
-        error_message: "stale processing heartbeat timeout",
-        completed_at: new Date().toISOString(),
-      })
-      .eq("id", staleJob.id)
-      .eq("status", "processing");
-
-    if (failError) throw new Error(failError.message);
-    console.warn("[audio-analysis-worker] stale processing detectado e marcado como failed", { job_id: staleJob.id, updated_at: staleJob.updated_at });
+  for (const recoveredJob of recoveredJobs) {
+    console.warn("[audio-analysis-worker] stale job recovered", {
+      job_id: recoveredJob.id,
+      recovered_at: recoveredAt,
+      previous_started_at: recoveredJob.started_at,
+    });
   }
 }
 
