@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BarChart3, Bell, LayoutDashboard, ShieldCheck, UserPlus, Users } from "lucide-react";
+import { BarChart3, Bell, ExternalLink, LayoutDashboard, ShieldCheck, UserPlus, Users } from "lucide-react";
 
 const navItems = [
   { href: "/ministerio", label: "Visão Geral", icon: LayoutDashboard },
@@ -34,6 +34,9 @@ export function MinistryNav() {
           </Link>
         );
       })}
+      <Link href="/" className="ml-auto inline-flex shrink-0 items-center gap-2 rounded-2xl border border-cyan-300/20 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/20">
+        <ExternalLink className="h-4 w-4" /> Ver site
+      </Link>
     </nav>
   );
 }
@@ -59,7 +62,7 @@ export function statusLabel(status?: string | null) {
   if (normalized === "pending") return "Pendente";
   if (normalized === "invited") return "Convidado";
   if (normalized === "trialing") return "Em teste";
-  if (normalized === "removed") return "Removido";
+  if (normalized === "removed") return "Arquivado";
   return status || "—";
 }
 
