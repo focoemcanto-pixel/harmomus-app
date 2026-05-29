@@ -120,6 +120,13 @@ export async function POST(request: Request) {
   }
 
   const inviteUrl = buildAbsoluteUrl(`/convite-ministerio/${insertedMember.invite_token}`, request.url);
+  console.log("[MINISTRY INVITE] preparing email", {
+    to: insertedMember.invited_email,
+    from: process.env.RESEND_FROM_EMAIL,
+    ministry: ministry.name,
+    inviteToken,
+  });
+
   const emailResult = await sendMinistryInviteEmail({
     to: insertedMember.invited_email,
     invitedName: insertedMember.invited_name,
@@ -127,6 +134,13 @@ export async function POST(request: Request) {
     inviteUrl,
   });
 
-  if (emailResult.sent) return redirectToMinisterio(request, "Convite Premium enviado por e-mail com sucesso.");
+  console.log("[MINISTRY INVITE] resend response", emailResult);
+
+  if (emailResult.sent) {
+    console.log("[MINISTRY INVITE] SUCCESS");
+    return redirectToMinisterio(request, "Convite Premium enviado por e-mail com sucesso.");
+  }
+
+  console.error("[MINISTRY INVITE] FAILED", emailResult);
   return redirectToMinisterio(request, "Convite Premium criado com sucesso. Envie o link manualmente pela Central Ministerial.");
 }
