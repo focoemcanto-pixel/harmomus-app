@@ -81,6 +81,7 @@ export default async function MinisterioPage({ searchParams }: { searchParams?: 
       .from("ministry_members")
       .select("id,ministry_id,user_id,role,status,invited_email,invited_name,invite_token,invited_at,accepted_at,removed_at,created_at,updated_at")
       .eq("ministry_id", context.ministry.ministryId)
+      .neq("status", "removed")
       .order("created_at", { ascending: true }),
   ]);
 
