@@ -5,7 +5,7 @@ import { Crown, Mail, ShieldCheck, Sparkles, Trash2, Users } from "lucide-react"
 import { MinistryOnboardingModal } from "@/components/public/ministry-onboarding-modal";
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { getCurrentUserAccessContext, isMinistryManager } from "@/lib/auth/current-user";
-import { canRequestSongsAndTones } from "@/lib/data/ministry";
+import { canRequestSongsAndTones, ensureMinistryForSubscription, isMinistryPlanSlug } from "@/lib/data/ministry";
 import { createClient } from "@/lib/supabase/server";
 
 function statusLabel(status?: string | null) {
@@ -24,10 +24,32 @@ function planLabel(planType?: string | null) {
   return "Ministerial";
 }
 
+function isActiveSubscription(status?: string | null) {
+  return ["active", "trialing"].includes(String(status ?? "").toLowerCase());
+}
+
 export default async function MinisterioPage() {
-  const context = await getCurrentUserAccessContext();
+  let context = await getCurrentUserAccessContext();
 
   if (context.isGuest) redirect("/login");
+
+  const planSlug = String(context.plan?.slug ?? "").trim().toLowerCase();
+
+  if (!context.ministry && context.profile?.id && isMinistryPlanSlug(planSlug) && isActiveSubscription(context.subscription?.status)) {
+    await ensureMinistryForSubscription({
+      userId: context.profile.id,
+      planSlug,
+      subscriptionId: context.subscription?.id ?? null,
+      stripeCustomerId: (context.subscription as any)?.stripe_customer_id ?? (context.subscription as any)?.gateway_customer_id ?? null,
+      stripeSubscriptionId: (context.subscription as any)?.stripe_subscription_id ?? (context.subscription as any)?.gateway_subscription_id ?? null,
+      status: context.subscription?.status ?? null,
+      currentPeriodEnd: (context.subscription as any)?.current_period_end ?? null,
+      trialEndsAt: (context.subscription as any)?.trial_ends_at ?? null,
+    });
+
+    redirect("/ministerio");
+  }
+
   if (!context.ministry) redirect("/assinatura");
 
   const supabase = (await createClient()) as any;
