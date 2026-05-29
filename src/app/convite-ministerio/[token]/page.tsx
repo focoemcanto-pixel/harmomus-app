@@ -7,7 +7,8 @@ import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 function statusLabel(status?: string | null) {
-  if (status === "pending") return "Convite pendente";
+  if (status === "pending") return "Aguardando aceite";
+  if (status === "invited") return "Aguardando cadastro";
   if (status === "active") return "Convite aceito";
   if (status === "expired") return "Convite expirado";
   return status || "Convite";
@@ -42,6 +43,7 @@ export default async function MinisterioInvitePage({ params }: { params: Promise
   const currentEmail = String(context.profile?.email ?? "").toLowerCase();
   const isLoggedInRightUser = Boolean(context.profile?.id && currentEmail === inviteEmail);
   const nextUrl = `/convite-ministerio/${token}`;
+  const needsSignup = String(invite.status) === "invited" && !invite.user_id;
 
   if (invite.status === "active" && isLoggedInRightUser) {
     redirect("/");
@@ -86,9 +88,17 @@ export default async function MinisterioInvitePage({ params }: { params: Promise
           </div>
 
           {!context.profile?.id ? (
-            <div className="mt-8 flex flex-wrap gap-3">
-              <Link href={`/login?redirect=${encodeURIComponent(nextUrl)}`} className="rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-semibold text-slate-950">Entrar e aceitar</Link>
-              <Link href={`/cadastro?plan=free&redirect=${encodeURIComponent(nextUrl)}&email=${encodeURIComponent(invite.invited_email)}`} className="rounded-2xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-white">Criar conta</Link>
+            <div className="mt-8 rounded-3xl border border-cyan-300/20 bg-cyan-400/10 p-5">
+              <h2 className="text-lg font-semibold text-white">{needsSignup ? "Crie sua conta para ativar o convite" : "Entre para aceitar o convite"}</h2>
+              <p className="mt-2 text-sm leading-6 text-cyan-50/90">
+                {needsSignup ? "Use o e-mail do convite para criar sua conta e liberar o acesso Premium Ministerial." : "Este convite já está vinculado a uma conta existente. Entre com o e-mail do convite para liberar o acesso Premium Ministerial."}
+              </p>
+              <div className="mt-5 flex flex-wrap gap-3">
+                <Link href={`/login?redirect=${encodeURIComponent(nextUrl)}`} className="rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-semibold text-slate-950">Entrar e aceitar convite</Link>
+                {needsSignup ? (
+                  <Link href={`/cadastro?plan=free&redirect=${encodeURIComponent(nextUrl)}&email=${encodeURIComponent(invite.invited_email)}`} className="rounded-2xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-white">Criar conta</Link>
+                ) : null}
+              </div>
             </div>
           ) : !isLoggedInRightUser ? (
             <div className="mt-8 rounded-2xl border border-amber-300/25 bg-amber-500/10 p-5 text-sm text-amber-100">
