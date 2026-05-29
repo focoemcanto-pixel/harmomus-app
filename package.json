@@ -9,7 +9,8 @@
     "lint": "ESLINT_USE_FLAT_CONFIG=false eslint .",
     "typecheck": "tsc --noEmit",
     "preview": "opennextjs-cloudflare build && wrangler dev",
-    "deploy": "opennextjs-cloudflare build && wrangler deploy"
+    "deploy": "opennextjs-cloudflare build",
+    "deploy:wrangler": "opennextjs-cloudflare build && wrangler deploy"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "latest",
