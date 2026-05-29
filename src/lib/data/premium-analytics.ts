@@ -25,6 +25,13 @@ function sinceDate(days = 90) {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 }
 
+function dateKey(value: string | null | undefined) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
+}
+
 function countByKit(logs: AudioLog[]) {
   const counts = new Map<string, number>();
   for (const row of logs) {
@@ -79,6 +86,39 @@ export async function getGlobalTopKits(limit = 10): Promise<TopKit[]> {
 export async function getUserTopKits(userId: string, limit = 5): Promise<TopKit[]> {
   const logs = await fetchAllowedAudioLogs({ userId, days: 180, limit: 2000 });
   return hydrateTopKits(countByKit(logs), limit);
+}
+
+export async function getUserPlayStreak(userId: string): Promise<number> {
+  const logs = await fetchAllowedAudioLogs({ userId, days: 120, limit: 2000 });
+  const days = new Set(logs.map((row) => dateKey(row.accessed_at)).filter(Boolean) as string[]);
+  if (!days.size) return 0;
+
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  let cursor = new Date(today);
+  let streak = 0;
+
+  for (let i = 0; i < 120; i += 1) {
+    const key = cursor.toISOString().slice(0, 10);
+    if (!days.has(key)) break;
+    streak += 1;
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+  }
+
+  if (streak > 0) return streak;
+
+  const yesterday = new Date(today);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  cursor = yesterday;
+
+  for (let i = 0; i < 120; i += 1) {
+    const key = cursor.toISOString().slice(0, 10);
+    if (!days.has(key)) break;
+    streak += 1;
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+  }
+
+  return streak;
 }
 
 export async function getRecommendedKits(userId: string, limit = 6): Promise<TopKit[]> {
