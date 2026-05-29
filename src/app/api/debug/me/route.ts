@@ -77,6 +77,7 @@ export async function GET(request: Request) {
 
   return NextResponse.json({
     debugVersion: DEBUG_VERSION,
+    buildMarker: "FORCE_DEPLOY_TEST_20260529",
     authError: error?.message ?? null,
     user: data.user
       ? {
