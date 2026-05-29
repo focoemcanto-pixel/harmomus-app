@@ -29,6 +29,17 @@ function isPaidPlan(plan: PlanSlug) {
   return plan !== "free";
 }
 
+function getMinistryInviteToken(path: string) {
+  const match = path.match(/^\/convite-ministerio\/([^/?#]+)/);
+  return match?.[1] ? decodeURIComponent(match[1]) : "";
+}
+
+function getPostSignupNext(plan: PlanSlug, redirectTo: string) {
+  const inviteToken = getMinistryInviteToken(redirectTo);
+  if (inviteToken) return `/api/ministerio/accept?token=${encodeURIComponent(inviteToken)}`;
+  return plan === "free" ? "/cadastro/sucesso?plan=free" : "/checkout/sucesso";
+}
+
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${label} timeout after ${timeoutMs}ms`)), timeoutMs);
@@ -88,7 +99,7 @@ function runSignupSideEffectsAsync(input: {
 function mapSupabaseError(message: string): { message: string; field: Field } {
   const lower = message.toLowerCase();
   if (lower.includes("already") || lower.includes("registered") || lower.includes("exists") || lower.includes("duplicate")) {
-    return { message: "Este e-mail já possui cadastro. Tente entrar ou recuperar a senha.", field: "email" };
+    return { message: "Este e-mail já possui cadastro. Entre com este e-mail para aceitar o convite ou recupere sua senha.", field: "email" };
   }
   if (lower.includes("password") || lower.includes("senha")) {
     return { message: "A senha precisa ter pelo menos 6 caracteres e ser mais segura.", field: "password" };
@@ -150,7 +161,8 @@ export async function POST(request: Request) {
 
   const supabase = await createClient();
   const origin = new URL(request.url).origin;
-  const next = plan === "free" ? "/cadastro/sucesso?plan=free" : "/checkout/sucesso";
+  const next = getPostSignupNext(plan, redirectTo);
+  const isMinistryInviteSignup = Boolean(getMinistryInviteToken(redirectTo));
 
   const { data, error: createError } = await supabase.auth.signUp({
     email,
@@ -163,6 +175,7 @@ export async function POST(request: Request) {
         phone,
         plan_slug: plan,
         origin,
+        ministry_invite_redirect: isMinistryInviteSignup ? next : null,
         utm_source: utmSource,
         utm_campaign: utmCampaign,
       },
@@ -177,7 +190,7 @@ export async function POST(request: Request) {
   const userId = data.user?.id;
 
   if (!userId) {
-    return fail("Sua conta foi criada, mas não conseguimos iniciar o checkout automaticamente. Tente entrar e assinar novamente.", "form");
+    return fail("Sua conta foi criada, mas não conseguimos concluir o acesso automaticamente. Tente entrar novamente.", "form");
   }
 
   try {
@@ -199,7 +212,7 @@ export async function POST(request: Request) {
     );
   }
 
-  if (isPaidPlan(plan)) {
+  if (isPaidPlan(plan) && !isMinistryInviteSignup) {
     try {
       const session = await withTimeout(
         startStripeCheckoutForSignup(userId, email, plan, origin),
