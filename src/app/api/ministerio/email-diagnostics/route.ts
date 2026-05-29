@@ -2,20 +2,32 @@ import { NextResponse } from "next/server";
 
 import { getCurrentUserAccessContext, isMinistryManager } from "@/lib/auth/current-user";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+const DIAGNOSTICS_VERSION = "2026-05-29-email-diagnostics-v2";
+
 function maskSecret(value?: string | null) {
   if (!value) return null;
   if (value.length <= 8) return "********";
   return `${value.slice(0, 4)}...${value.slice(-4)}`;
 }
 
+function json(data: Record<string, unknown>, init?: ResponseInit) {
+  const response = NextResponse.json({ diagnosticsVersion: DIAGNOSTICS_VERSION, ...data }, init);
+  response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  response.headers.set("X-Harmomus-Diagnostics", DIAGNOSTICS_VERSION);
+  return response;
+}
+
 export async function GET() {
   const context = await getCurrentUserAccessContext();
 
   if (!context.profile?.id || !context.ministry || !isMinistryManager(context)) {
-    return NextResponse.json({ ok: false, error: "not_allowed" }, { status: 403 });
+    return json({ ok: false, error: "not_allowed" }, { status: 403 });
   }
 
-  return NextResponse.json({
+  return json({
     ok: true,
     hasResendApiKey: Boolean(process.env.RESEND_API_KEY),
     resendApiKeyPreview: maskSecret(process.env.RESEND_API_KEY),
@@ -32,14 +44,14 @@ export async function POST(request: Request) {
   const context = await getCurrentUserAccessContext();
 
   if (!context.profile?.id || !context.ministry || !isMinistryManager(context)) {
-    return NextResponse.json({ ok: false, error: "not_allowed" }, { status: 403 });
+    return json({ ok: false, error: "not_allowed" }, { status: 403 });
   }
 
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.RESEND_FROM_EMAIL;
 
   if (!apiKey || !from) {
-    return NextResponse.json({
+    return json({
       ok: false,
       error: "missing_env",
       hasResendApiKey: Boolean(apiKey),
@@ -51,7 +63,7 @@ export async function POST(request: Request) {
   const to = String(body?.to ?? context.profile?.email ?? "").trim().toLowerCase();
 
   if (!to || !to.includes("@")) {
-    return NextResponse.json({ ok: false, error: "invalid_to" }, { status: 400 });
+    return json({ ok: false, error: "invalid_to" }, { status: 400 });
   }
 
   const response = await fetch("https://api.resend.com/emails", {
@@ -74,7 +86,7 @@ export async function POST(request: Request) {
   });
 
   const raw = await response.text().catch(() => "");
-  let parsed: any = null;
+  let parsed: unknown = null;
 
   try {
     parsed = raw ? JSON.parse(raw) : null;
@@ -82,7 +94,7 @@ export async function POST(request: Request) {
     parsed = null;
   }
 
-  return NextResponse.json({
+  return json({
     ok: response.ok,
     status: response.status,
     resendResponse: parsed ?? raw,
