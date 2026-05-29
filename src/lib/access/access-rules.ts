@@ -99,10 +99,19 @@ export async function registerKitAccess(userId: string, kitId: string): Promise<
   return getFreeAccessStats(userId);
 }
 
+function resolveMinimumPlan(kit: PublicKit) {
+  const allowed = Array.isArray(kit.allowedPlanSlugs) ? kit.allowedPlanSlugs : [];
+  if (kit.requiredPlan?.slug === "plus" || allowed.includes("plus")) return "plus" as const;
+  return "premium" as const;
+}
+
 export async function canPlayAudio(context: CurrentUserAccessContext, kit: PublicKit) {
   if (context.isGuest) return { allowed: false, reason: "guest" as const };
 
-  if (!canAccessKit(context.effectiveSlug, kit.allowedPlanSlugs)) return { allowed: false, reason: "plan_hierarchy" as const };
+  if (!canAccessKit(context.effectiveSlug, kit.allowedPlanSlugs)) {
+    const requiredPlan = resolveMinimumPlan(kit);
+    return { allowed: false, reason: "plan_hierarchy" as const, requiredPlan };
+  }
 
   if (context.effectiveSlug === "free" && context.profile) {
     const stats = await getFreeAccessStats(context.profile.id);
