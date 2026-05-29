@@ -1,4 +1,5 @@
 import { getCurrentUserAccessContext, type CurrentUserAccessContext } from "@/lib/auth/current-user";
+import { canRequestSongsAndTones } from "@/lib/data/ministry";
 
 export async function getEffectiveUserPlan() {
   return getCurrentUserAccessContext();
@@ -17,5 +18,9 @@ export function canManageMinistry(context: CurrentUserAccessContext) {
 }
 
 export function canSubmitPremiumRequests(context: CurrentUserAccessContext) {
-  return context.effectiveSlug === "premium" && (!context.ministry || isMinistryManager(context));
+  return canRequestSongsAndTones({
+    isAdmin: context.isAdmin,
+    ministryRole: context.ministry?.role ?? null,
+    effectiveSlug: context.effectiveSlug,
+  });
 }

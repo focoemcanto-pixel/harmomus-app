@@ -338,6 +338,7 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
                 kitSlug={liveKit.slug}
                 categorySlug={liveKit.category?.slug}
                 planSlug={accessContext.effectiveSlug}
+                canRequestSongsAndTones={accessContext.canRequestSongsAndTones}
                 onPremiumRequired={openPremiumToneUpgrade}
               />
             </div>

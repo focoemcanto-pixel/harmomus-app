@@ -1,108 +1,106 @@
-import { NextResponse } from "next/server";
 import { randomBytes } from "crypto";
+import { NextResponse } from "next/server";
 
 import { getCurrentUserAccessContext, isMinistryManager } from "@/lib/auth/current-user";
-import { createClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 function redirectToMinisterio(request: Request, message?: string) {
   const url = new URL("/ministerio", request.url);
-  if (message) {
-    url.searchParams.set("message", message);
-  }
-
+  if (message) url.searchParams.set("message", message);
   return NextResponse.redirect(url, 303);
+}
+
+function cleanEmail(value: unknown) {
+  return String(value ?? "").trim().toLowerCase();
 }
 
 export async function POST(request: Request) {
   const context = await getCurrentUserAccessContext();
 
-  if (!context.profile || !context.ministry || !isMinistryManager(context)) {
+  if (!context.profile?.id || !context.ministry || !isMinistryManager(context)) {
     return redirectToMinisterio(request, "Você não possui permissão para convidar integrantes.");
   }
 
   const form = await request.formData();
+  const resendMemberId = String(form.get("resend_member_id") ?? "").trim();
+  const admin = createSupabaseAdminClient() as any;
 
-  const email = String(form.get("email") ?? "")
-    .trim()
-    .toLowerCase();
+  if (resendMemberId) {
+    const token = randomBytes(24).toString("hex");
+    const now = new Date().toISOString();
+    const { error } = await admin
+      .from("ministry_members")
+      .update({ invite_token: token, invited_at: now, invited_by: context.profile.id, updated_at: now })
+      .eq("id", resendMemberId)
+      .eq("ministry_id", context.ministry.ministryId)
+      .in("status", ["pending", "invited"]);
 
-  const name = String(form.get("name") ?? "").trim();
-
-  const role = String(form.get("role") ?? "member");
-
-  if (!email || !email.includes("@") || !["member", "manager"].includes(role)) {
-    return redirectToMinisterio(request, "Informe dados válidos para o convite.");
+    if (error) return redirectToMinisterio(request, error.message || "Não foi possível reenviar o convite.");
+    return redirectToMinisterio(request, "Convite reenviado com sucesso.");
   }
 
-  const token = randomBytes(24).toString("hex");
-  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString();
+  const email = cleanEmail(form.get("email"));
+  const name = String(form.get("name") ?? "").trim();
 
-  const supabase = (await createClient()) as any;
+  if (!name || !email || !email.includes("@")) {
+    return redirectToMinisterio(request, "Informe nome e e-mail válidos para o convite.");
+  }
 
-  const { data: ministry } = await supabase
+  const { data: ministry } = await admin
     .from("ministries")
     .select("id,seat_limit,status")
     .eq("id", context.ministry.ministryId)
     .single();
 
-  if (!ministry?.id) {
-    return redirectToMinisterio(request, "Central ministerial não encontrada.");
-  }
+  if (!ministry?.id) return redirectToMinisterio(request, "Central ministerial não encontrada.");
+  if (!["active", "trialing"].includes(String(ministry.status ?? "").toLowerCase())) return redirectToMinisterio(request, "Seu plano ministerial não está ativo.");
 
-  if (!["active", "trialing"].includes(String(ministry.status ?? "").toLowerCase())) {
-    return redirectToMinisterio(request, "Seu plano ministerial não está ativo.");
-  }
-
-  const { count } = await supabase
+  const { count } = await admin
     .from("ministry_members")
     .select("id", { count: "exact", head: true })
     .eq("ministry_id", ministry.id)
-    .in("status", ["pending", "active"]);
+    .in("status", ["active", "pending", "invited"]);
 
   if ((count ?? 0) >= Number(ministry.seat_limit ?? 0)) {
     return redirectToMinisterio(request, "Você atingiu o limite de vagas do seu plano.");
   }
 
-  const { data: existingMember } = await supabase
+  const { data: existingMember } = await admin
     .from("ministry_members")
     .select("id")
     .eq("ministry_id", ministry.id)
     .ilike("invited_email", email)
-    .in("status", ["pending", "active"])
+    .in("status", ["active", "pending", "invited"])
     .maybeSingle();
 
-  if (existingMember?.id) {
-    return redirectToMinisterio(request, "Esse integrante já possui acesso ou convite pendente.");
-  }
+  if (existingMember?.id) return redirectToMinisterio(request, "Esse integrante já possui acesso ou convite pendente.");
 
-  const { error: inviteError } = await supabase.from("ministry_invites").insert({
+  const { data: profile } = await admin.from("profiles").select("id,email").ilike("email", email).maybeSingle();
+  const now = new Date().toISOString();
+  const token = randomBytes(24).toString("hex");
+
+  const { error } = await admin.from("ministry_members").insert({
     ministry_id: context.ministry.ministryId,
-    email,
-    role,
-    token,
-    invited_name: name || null,
-    invited_by: context.profile.id,
-    expires_at: expiresAt,
-  });
-
-  if (inviteError) {
-    return redirectToMinisterio(request, inviteError.message || "Não foi possível criar o convite.");
-  }
-
-  const { error: memberError } = await supabase.from("ministry_members").insert({
-    ministry_id: context.ministry.ministryId,
+    user_id: null,
     invited_email: email,
-    invited_name: name || null,
-    role,
-    status: "pending",
+    invited_name: name,
+    role: "member",
+    status: profile?.id ? "pending" : "invited",
     invite_token: token,
     invited_by: context.profile.id,
-    invited_at: new Date().toISOString(),
+    invited_at: now,
+    created_at: now,
+    updated_at: now,
   });
 
-  if (memberError) {
-    return redirectToMinisterio(request, memberError.message || "Falha ao preparar membro pendente.");
-  }
+  if (error) return redirectToMinisterio(request, error.message || "Falha ao preparar convite.");
 
-  return redirectToMinisterio(request, "Convite enviado com sucesso.");
+  await admin.from("ministry_activity_logs").insert({
+    ministry_id: context.ministry.ministryId,
+    actor_id: context.profile.id,
+    action: "member.invited",
+    metadata: { email, name, status: profile?.id ? "pending" : "invited" },
+  });
+
+  return redirectToMinisterio(request, "Convite Premium enviado com sucesso.");
 }
