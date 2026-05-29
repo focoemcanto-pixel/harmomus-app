@@ -1,4 +1,3 @@
-import { randomBytes } from "crypto";
 import { NextResponse } from "next/server";
 
 import { getCurrentUserAccessContext, isMinistryManager } from "@/lib/auth/current-user";
@@ -7,6 +6,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 function redirectToMinisterio(request: Request, message?: string) {
   const url = new URL("/ministerio", request.url);
   if (message) url.searchParams.set("message", message);
+  url.hash = "convites";
   return NextResponse.redirect(url, 303);
 }
 
@@ -22,6 +22,25 @@ export async function POST(request: Request) {
   }
 
   const form = await request.formData();
+  const resendMemberId = String(form.get("resend_member_id") ?? "").trim();
+  const admin = createSupabaseAdminClient() as any;
+  const now = new Date().toISOString();
+
+  if (resendMemberId) {
+    const { error } = await admin
+      .from("ministry_members")
+      .update({
+        invite_token: crypto.randomUUID(),
+        invited_at: now,
+        updated_at: now,
+      })
+      .eq("id", resendMemberId)
+      .eq("ministry_id", context.ministry.ministryId)
+      .in("status", ["pending", "invited"]);
+
+    return redirectToMinisterio(request, error ? "Não foi possível reenviar o convite." : "Convite reenviado com sucesso.");
+  }
+
   const email = normalizeEmail(form.get("email"));
   const name = String(form.get("name") ?? "").trim();
   const role = String(form.get("role") ?? "member").trim().toLowerCase();
@@ -29,11 +48,6 @@ export async function POST(request: Request) {
   if (!email || !email.includes("@") || !["member", "manager"].includes(role)) {
     return redirectToMinisterio(request, "Informe dados válidos para o convite.");
   }
-
-  const token = randomBytes(24).toString("hex");
-  const now = new Date().toISOString();
-  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString();
-  const admin = createSupabaseAdminClient() as any;
 
   const { data: ministry, error: ministryError } = await admin
     .from("ministries")
@@ -49,80 +63,41 @@ export async function POST(request: Request) {
     return redirectToMinisterio(request, "Seu plano ministerial não está ativo.");
   }
 
-  const { count: usedSeats } = await admin
+  const { data: members } = await admin
     .from("ministry_members")
-    .select("id", { count: "exact", head: true })
+    .select("id,status,invited_email,user_id")
     .eq("ministry_id", ministry.id)
-    .in("status", ["active", "pending"]);
+    .neq("status", "removed");
 
-  if ((usedSeats ?? 0) >= Number(ministry.seat_limit ?? 0)) {
+  const usedSeats = (members ?? []).filter((member: any) => ["active", "pending", "invited"].includes(String(member.status))).length;
+  if (usedSeats >= Number(ministry.seat_limit ?? 0)) {
     return redirectToMinisterio(request, "Você atingiu o limite de vagas do seu plano.");
   }
 
-  const { data: existingMember } = await admin
-    .from("ministry_members")
-    .select("id,status")
-    .eq("ministry_id", ministry.id)
-    .ilike("invited_email", email)
-    .in("status", ["active", "pending"])
-    .maybeSingle();
-
-  if (existingMember?.id) {
+  const duplicate = (members ?? []).find((member: any) => String(member.invited_email ?? "").trim().toLowerCase() === email);
+  if (duplicate) {
     return redirectToMinisterio(request, "Esse integrante já possui acesso ou convite pendente.");
   }
 
-  const { data: existingInvite } = await admin
-    .from("ministry_invites")
-    .select("id,status,expires_at")
-    .eq("ministry_id", ministry.id)
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("id,email,full_name")
     .ilike("email", email)
-    .eq("status", "pending")
     .maybeSingle();
 
-  if (existingInvite?.id && new Date(existingInvite.expires_at).getTime() > Date.now()) {
-    return redirectToMinisterio(request, "Esse e-mail já possui um convite pendente.");
-  }
-
-  if (existingInvite?.id) {
-    await admin.from("ministry_invites").update({ status: "expired" }).eq("id", existingInvite.id);
-  }
-
-  const { data: invite, error: inviteError } = await admin
-    .from("ministry_invites")
-    .insert({
-      ministry_id: context.ministry.ministryId,
-      email,
-      role,
-      token,
-      invited_by: context.profile.id,
-      expires_at: expiresAt,
-      status: "pending",
-    })
-    .select("id")
-    .single();
-
-  if (inviteError || !invite?.id) {
-    return redirectToMinisterio(request, inviteError?.message || "Não foi possível criar o convite.");
-  }
-
-  const { error: memberError } = await admin.from("ministry_members").insert({
+  const { error } = await admin.from("ministry_members").insert({
     ministry_id: context.ministry.ministryId,
-    user_id: null,
+    user_id: profile?.id ?? null,
     invited_email: email,
-    invited_name: name || null,
+    invited_name: name || profile?.full_name || "Integrante",
     role,
-    status: "pending",
-    invite_token: token,
+    status: profile?.id ? "pending" : "invited",
+    invite_token: crypto.randomUUID(),
     invited_by: context.profile.id,
     invited_at: now,
     created_at: now,
     updated_at: now,
   });
 
-  if (memberError) {
-    await admin.from("ministry_invites").update({ status: "canceled" }).eq("id", invite.id);
-    return redirectToMinisterio(request, memberError.message || "Falha ao preparar membro pendente.");
-  }
-
-  return redirectToMinisterio(request, "Convite Premium enviado com sucesso.");
+  return redirectToMinisterio(request, error ? error.message || "Falha ao preparar convite." : "Convite Premium criado com sucesso.");
 }
