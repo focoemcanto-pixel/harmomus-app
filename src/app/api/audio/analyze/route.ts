@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
+import { calculateToneRecommendation } from "@/lib/recommendation-engine";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 type AnalyzePayload = {
@@ -14,6 +15,7 @@ type BatchError = {
 };
 
 type ExistingAnalysisJob = {
+  voice?: string | null;
   id: string;
   audio_file_id: string;
   status: string;
@@ -37,6 +39,36 @@ function hasCompleteAnalysis(job: ExistingAnalysisJob) {
   const comfortMax = job.comfort_max_note ?? job.comfort_max_midi;
 
   return [detectedMin, detectedMax, comfortMin, comfortMax].every((value) => typeof value === "number");
+}
+
+function getAnalysisRange(job: ExistingAnalysisJob, prefix: "detected" | "comfort") {
+  if (prefix === "detected") {
+    return {
+      min: job.detected_min_note ?? job.detected_min_midi ?? null,
+      max: job.detected_max_note ?? job.detected_max_midi ?? null,
+    };
+  }
+
+  return {
+    min: job.comfort_min_note ?? job.comfort_min_midi ?? null,
+    max: job.comfort_max_note ?? job.comfort_max_midi ?? null,
+  };
+}
+
+function getJobRecommendation(job: ExistingAnalysisJob) {
+  const voice = deriveVoice(job.voice);
+  if (!voice) return null;
+
+  const detectedRange = getAnalysisRange(job, "detected");
+  const comfortRange = getAnalysisRange(job, "comfort");
+
+  return calculateToneRecommendation({
+    voiceType: voice,
+    detectedMinMidi: detectedRange.min,
+    detectedMaxMidi: detectedRange.max,
+    comfortMinMidi: comfortRange.min,
+    comfortMaxMidi: comfortRange.max,
+  });
 }
 
 function deriveVoice(value: string | null | undefined) {
@@ -207,13 +239,20 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    const jobs = (data ?? []).map((job) => ({
-      ...job,
-      detected_min_note: job.detected_min_note ?? job.detected_min_midi ?? null,
-      detected_max_note: job.detected_max_note ?? job.detected_max_midi ?? null,
-      comfort_min_note: job.comfort_min_note ?? job.comfort_min_midi ?? null,
-      comfort_max_note: job.comfort_max_note ?? job.comfort_max_midi ?? null,
-    }));
+    const jobs = (data ?? []).map((job) => {
+      const normalizedJob = {
+        ...job,
+        detected_min_note: job.detected_min_note ?? job.detected_min_midi ?? null,
+        detected_max_note: job.detected_max_note ?? job.detected_max_midi ?? null,
+        comfort_min_note: job.comfort_min_note ?? job.comfort_min_midi ?? null,
+        comfort_max_note: job.comfort_max_note ?? job.comfort_max_midi ?? null,
+      };
+
+      return {
+        ...normalizedJob,
+        recommendation: getJobRecommendation(normalizedJob),
+      };
+    });
 
     return NextResponse.json({ success: true, jobs }, { status: 200 });
   } catch (error) {
