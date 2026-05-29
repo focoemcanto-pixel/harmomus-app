@@ -1,5 +1,4 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
 import { createCheckoutSession, createCustomerPortalSession, getOrCreateCustomer, updateSubscription } from "@/lib/stripe/client";
 
 function resolveAppUrl(fallbackOrigin?: string | null) {
@@ -43,6 +42,8 @@ async function getPlanBySlug(admin: any, planSlug: string) {
 }
 
 async function getPlanById(supabase: any, planId: string) {
+  if (!planId) throw new Error("Plano obrigatório.");
+
   const { data: plan, error } = await supabase
     .from("plans")
     .select("id,slug,trial_days,stripe_price_id")
@@ -50,7 +51,7 @@ async function getPlanById(supabase: any, planId: string) {
     .single();
 
   if (error) throw new Error(`Falha ao buscar plano: ${error.message}`);
-  if (!plan?.id) throw new Error("Plano não encontrado.");
+  if (!plan?.id || plan.slug === "free") throw new Error("Plano inválido para assinatura paga.");
 
   const stripePriceId = resolvePlanPriceId(plan.slug, plan.stripe_price_id);
   if (!stripePriceId) throw new Error(`Plano ${plan.slug} sem Price ID configurado no ambiente.`);
@@ -59,6 +60,8 @@ async function getPlanById(supabase: any, planId: string) {
 }
 
 async function savePendingStripeSubscription(supabase: any, input: { userId: string; planId: string; customerId: string }) {
+  if (!input.planId) throw new Error("Plano obrigatório para preparar assinatura.");
+
   const now = new Date().toISOString();
   const payload = {
     user_id: input.userId,
@@ -153,28 +156,44 @@ export async function startStripeCheckoutForSignup(userId: string, email: string
 export async function createPortal(userId: string, email: string, fallbackOrigin?: string | null) {
   assertStripeReady();
   const supabase = createSupabaseAdminClient() as any;
-  const { data: sub } = await supabase.from("subscriptions").select("*").eq("user_id", userId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  const { data: sub, error } = await supabase
+    .from("subscriptions")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw new Error(`Falha ao buscar assinatura: ${error.message}`);
+
+  const existingCustomerId = sub?.stripe_customer_id ?? sub?.gateway_customer_id;
+  if (!sub?.id || !existingCustomerId) {
+    throw new Error("Você ainda não possui uma assinatura Stripe vinculada. Inicie uma assinatura primeiro.");
+  }
 
   const customerId = await getOrCreateCustomer({
     email,
     userId,
-    existingCustomerId: sub?.stripe_customer_id ?? sub?.gateway_customer_id,
+    existingCustomerId,
   });
-
-  if (!sub?.id) {
-    await savePendingStripeSubscription(supabase, { userId, planId: sub?.plan_id, customerId });
-  }
 
   return createCustomerPortalSession(customerId, `${resolveAppUrl(fallbackOrigin)}/assinatura`);
 }
 
 export async function changeSubscriptionPlan(userId: string, planId: string) {
+  if (!planId) throw new Error("Plano obrigatório para alteração.");
+
   const supabase = createSupabaseAdminClient() as any;
-  const [{ data: sub }, plan] = await Promise.all([
-    supabase.from("subscriptions").select("*").eq("user_id", userId).order("created_at", { ascending: false }).limit(1).single(),
+  const [{ data: sub, error: subError }, plan] = await Promise.all([
+    supabase.from("subscriptions").select("*").eq("user_id", userId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
     getPlanById(supabase, planId),
   ]);
-  if (!sub?.stripe_subscription_id) throw new Error("Assinatura inválida para upgrade");
+
+  if (subError) throw new Error(`Falha ao buscar assinatura: ${subError.message}`);
+  if (!sub?.id) throw new Error("Nenhuma assinatura encontrada para este usuário.");
+  if (!sub?.stripe_subscription_id) throw new Error("Assinatura inválida para upgrade/troca de plano.");
+  if (sub.plan_id === planId) return;
+
   await updateSubscription(sub.stripe_subscription_id, plan.stripePriceId);
   const { error } = await supabase.from("subscriptions").update({ plan_id: planId, stripe_price_id: plan.stripePriceId, updated_at: new Date().toISOString() }).eq("id", sub.id);
   if (error) throw new Error(`Falha ao atualizar plano local: ${error.message}`);
