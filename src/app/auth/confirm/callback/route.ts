@@ -5,14 +5,14 @@ import { ensureUserAccess } from "@/lib/auth/ensure-user-access";
 import { createClient } from "@/lib/supabase/server";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
 
-const ALLOWED_TYPES = new Set(["signup", "email"]);
+const ALLOWED_TYPES = new Set(["signup", "email", "recovery"]);
 
 function confirmationErrorUrl(request: Request, reason = "callback") {
   return new URL(`/auth/confirm?error=${encodeURIComponent(reason)}`, request.url);
 }
 
-function normalizeNext(raw: string | null) {
-  if (!raw || !raw.startsWith("/")) return "/login?confirmed=1";
+function normalizeNext(raw: string | null, type?: string) {
+  if (!raw || !raw.startsWith("/")) return type === "recovery" ? "/redefinir-senha" : "/login?confirmed=1";
   return raw;
 }
 
@@ -21,7 +21,7 @@ export async function GET(request: Request) {
   const code = url.searchParams.get("code");
   const tokenHash = url.searchParams.get("token_hash");
   const type = url.searchParams.get("type") ?? "signup";
-  const next = normalizeNext(url.searchParams.get("next"));
+  const next = normalizeNext(url.searchParams.get("next"), type);
   const supabase = await createClient();
 
   if (code) {
@@ -51,7 +51,7 @@ export async function GET(request: Request) {
   const { data: authUser } = await supabase.auth.getUser();
   const user = authUser.user;
 
-  if (user?.id) {
+  if (user?.id && type !== "recovery") {
     const fullName = String(user.user_metadata?.full_name ?? "").trim() || user.email || "";
     const planSlug = String(user.user_metadata?.plan_slug ?? "free").toLowerCase();
     const eventType = (type === "email" ? "signup" : type) as EmailOtpType;
