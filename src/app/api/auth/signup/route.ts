@@ -156,7 +156,7 @@ export async function POST(request: Request) {
     email,
     password,
     options: {
-      emailRedirectTo: `${origin}/auth/confirm?next=${encodeURIComponent(next)}`,
+      emailRedirectTo: `${origin}/auth/confirm/callback?next=${encodeURIComponent(next)}`,
       data: {
         full_name: fullName,
         username,
