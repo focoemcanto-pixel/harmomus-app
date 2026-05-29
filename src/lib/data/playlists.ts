@@ -144,7 +144,6 @@ export async function getCurrentUserPlaylists(): Promise<UserPlaylistSummary[]> 
   const itemsByPlaylist = new Map<string, any[]>();
 
   for (const item of items ?? []) {
-    if (!item.kits?.published) continue;
     const current = itemsByPlaylist.get(item.playlist_id) ?? [];
     current.push(item);
     itemsByPlaylist.set(item.playlist_id, current);
@@ -154,7 +153,7 @@ export async function getCurrentUserPlaylists(): Promise<UserPlaylistSummary[]> 
     const playlistItems = itemsByPlaylist.get(playlist.id) ?? [];
     const normalizedKits = playlistItems.map((item: any) => ({
       id: item.kits.id,
-      name: item.kits.name,
+      name: item.kits.published ? item.kits.name : `${item.kits.name} (não publicado)`,
       artist: item.kits.artist,
       cover_url: item.kits.cover_url,
     }));
@@ -245,7 +244,8 @@ export async function getPlaylistBySlug(slug: string): Promise<PublicPlaylist | 
   const catIds = Array.from(new Set((items ?? []).map((i: any) => i.kits.category_id).filter(Boolean)));
   const { data: categories } = catIds.length ? await supabase.from("categories").select("id, name, slug").in("id", catIds) : { data: [] };
   const cmap = new Map((categories ?? []).map((c: any) => [c.id, c]));
-  const kitIds = (items ?? []).map((i: any) => i.kits.id);
+  const publicItems = (items ?? []).filter((i: any) => i.kits.published);
+  const kitIds = publicItems.map((i: any) => i.kits.id);
   const audioFiles = await getAudioFilesForPlaylist(supabase, kitIds);
 
   const normalizeVoice = (value: string): PlaylistTrackVoice => {
@@ -268,32 +268,30 @@ export async function getPlaylistBySlug(slug: string): Promise<PublicPlaylist | 
     id: playlist.id,
     name: playlist.name,
     slug: playlist.slug,
-    kits: (items ?? [])
-      .filter((i: any) => i.kits.published)
-      .map((i: any) => ({
-        ...i.kits,
-        original_tone: i.kits.original_tone ?? null,
-        default_tone: i.kits.default_tone ?? null,
-        allow_pitch_shift: i.kits.allow_pitch_shift ?? true,
-        max_pitch_shift_semitones: i.kits.max_pitch_shift_semitones ?? 2,
-        category: i.kits.category_id ? cmap.get(i.kits.category_id) ?? null : null,
-        tracks: (filesByKitId.get(i.kits.id) ?? []).map((file) => ({
-          id: file.id,
-          tone: file.tone,
-          voice: normalizeVoice(file.name),
-          name: file.name,
-          streamUrl: `/api/audio/${file.id}`,
-          fileType: file.file_type,
-          minMidiNote: file.min_midi_note ?? null,
-          maxMidiNote: file.max_midi_note ?? null,
-          detectedMinMidiNote: file.detected_min_midi_note ?? null,
-          detectedMaxMidiNote: file.detected_max_midi_note ?? null,
-          tessituraConfidence: file.tessitura_confidence ?? null,
-          tessituraSource: file.tessitura_source ?? "manual",
-          sourceType: file.source_type === "generated" ? "generated" : "original",
-          isGenerated: file.source_type === "generated",
-        })),
+    kits: publicItems.map((i: any) => ({
+      ...i.kits,
+      original_tone: i.kits.original_tone ?? null,
+      default_tone: i.kits.default_tone ?? null,
+      allow_pitch_shift: i.kits.allow_pitch_shift ?? true,
+      max_pitch_shift_semitones: i.kits.max_pitch_shift_semitones ?? 2,
+      category: i.kits.category_id ? cmap.get(i.kits.category_id) ?? null : null,
+      tracks: (filesByKitId.get(i.kits.id) ?? []).map((file) => ({
+        id: file.id,
+        tone: file.tone,
+        voice: normalizeVoice(file.name),
+        name: file.name,
+        streamUrl: `/api/audio/${file.id}`,
+        fileType: file.file_type,
+        minMidiNote: file.min_midi_note ?? null,
+        maxMidiNote: file.max_midi_note ?? null,
+        detectedMinMidiNote: file.detected_min_midi_note ?? null,
+        detectedMaxMidiNote: file.detected_max_midi_note ?? null,
+        tessituraConfidence: file.tessitura_confidence ?? null,
+        tessituraSource: file.tessitura_source ?? "manual",
+        sourceType: file.source_type === "generated" ? "generated" : "original",
+        isGenerated: file.source_type === "generated",
       })),
+    })),
   };
 }
 
