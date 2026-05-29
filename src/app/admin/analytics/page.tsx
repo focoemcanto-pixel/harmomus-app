@@ -6,7 +6,11 @@ import {
   getPlanBreakdown,
   getPlaysByDay,
   getPremiumRequestsSummary,
+  getRecentDenied,
   getRecentPlays,
+  getTopDeniedKits,
+  getTopDeniedReasons,
+  getTopGatePages,
   getTopKits,
   getTopSongs,
   getTopTones,
@@ -37,8 +41,8 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
   const params = await searchParams;
   const filters: AnalyticsFilters = { period: (params.period as any) ?? "30", plan: (params.plan as any) ?? "all", device: (params.device as any) ?? "all", query: params.q ?? "" };
 
-  const [summary, byDay, devices, plans, topSongs, topKits, topUsers, topTones, topVoices, recent, premiumRequests] = await Promise.all([
-    getAdminAnalyticsSummary(filters), getPlaysByDay(filters), getDeviceBreakdown(filters), getPlanBreakdown(filters), getTopSongs(filters), getTopKits(filters), getTopUsers(filters), getTopTones(filters), getTopVoices(filters), getRecentPlays(filters), getPremiumRequestsSummary(filters),
+  const [summary, byDay, devices, plans, topSongs, topKits, topUsers, topTones, topVoices, recent, premiumRequests, deniedReasons, deniedKits, gatePages, recentDenied] = await Promise.all([
+    getAdminAnalyticsSummary(filters), getPlaysByDay(filters), getDeviceBreakdown(filters), getPlanBreakdown(filters), getTopSongs(filters), getTopKits(filters), getTopUsers(filters), getTopTones(filters), getTopVoices(filters), getRecentPlays(filters), getPremiumRequestsSummary(filters), getTopDeniedReasons(filters), getTopDeniedKits(filters), getTopGatePages(filters), getRecentDenied(filters),
   ]);
 
   const peakDay = [...byDay].sort((a, b) => b.plays - a.plays)[0];
@@ -55,7 +59,7 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
     </form>
 
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-      {[["Plays", summary.plays], ["Usuários únicos", summary.uniqueUsers], ["Sessões únicas", summary.uniqueSessions], ["Média diária", summary.avgDailyPlays], ["Assinantes ativos", summary.activeSubscribers], ["Premium ativos", summary.premiumActive], ["Plus ativos", summary.plusActive], ["Free ativos", summary.freeActive], ["Mensal/Anual", `${summary.monthly}/${summary.annual}`], ["Solicitações premium abertas", premiumRequests.open]].map((c) => <div key={String(c[0])} className="rounded-xl border border-white/10 bg-gradient-to-br from-emerald-500/10 via-cyan-500/5 to-violet-500/10 p-4 shadow-[0_0_30px_rgba(34,211,238,0.08)]"><p className="text-xs text-zinc-400">{c[0]}</p><p className="text-2xl font-semibold">{c[1]}</p></div>)}
+      {[["Plays", summary.plays], ["Tentativas bloqueadas", summary.denied], ["Taxa de bloqueio", `${summary.denyRate}%`], ["Usuários únicos", summary.uniqueUsers], ["Sessões únicas", summary.uniqueSessions], ["Média diária", summary.avgDailyPlays], ["Assinantes ativos", summary.activeSubscribers], ["Premium ativos", summary.premiumActive], ["Plus ativos", summary.plusActive], ["Solicitações premium abertas", premiumRequests.open]].map((c) => <div key={String(c[0])} className="rounded-xl border border-white/10 bg-gradient-to-br from-emerald-500/10 via-cyan-500/5 to-violet-500/10 p-4 shadow-[0_0_30px_rgba(34,211,238,0.08)]"><p className="text-xs text-zinc-400">{c[0]}</p><p className="text-2xl font-semibold">{c[1]}</p></div>)}
     </div>
 
     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -66,6 +70,9 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
       <BlockList title="Top 10 usuários" data={topUsers} />
       <BlockList title="Tons mais ouvidos" data={topTones} />
       <BlockList title="Vozes/Nipes mais ouvidos" data={topVoices} />
+      <BlockList title="Motivos de bloqueio" data={deniedReasons} />
+      <BlockList title="Kits que mais batem no bloqueio" data={deniedKits} />
+      <BlockList title="Páginas com mais bloqueio" data={gatePages} />
       <BlockList title="Usuários ativos no período" data={[{ label: "Usuários com plays", value: summary.uniqueUsers }]} />
       <BlockList title="Consumo por plano ativo" data={[{ label: "Plus", value: summary.plusActive }, { label: "Premium", value: summary.premiumActive }]} />
     </div>
@@ -74,8 +81,8 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
       <div className="rounded-xl border border-emerald-300/20 bg-emerald-500/5 p-4">Kit em alta: <strong>{topKits[0]?.label ?? "não informado"}</strong></div>
       <div className="rounded-xl border border-cyan-300/20 bg-cyan-500/5 p-4">Dia com mais uso: <strong>{peakDay ? `${formatDay(peakDay.date)} (${peakDay.plays} plays)` : "não informado"}</strong></div>
       <div className="rounded-xl border border-violet-300/20 bg-violet-500/5 p-4">Plano com mais consumo: <strong>{topPlan}</strong></div>
-      <div className="rounded-xl border border-emerald-300/20 bg-emerald-500/5 p-4">Tom mais ouvido: <strong>{topTones[0]?.label ?? "não informado"}</strong></div>
-      <div className="rounded-xl border border-cyan-300/20 bg-cyan-500/5 p-4">Voz mais ouvida: <strong>{topVoices[0]?.label ?? "não informado"}</strong></div>
+      <div className="rounded-xl border border-emerald-300/20 bg-emerald-500/5 p-4">Maior motivo de bloqueio: <strong>{deniedReasons[0]?.label ?? "não informado"}</strong></div>
+      <div className="rounded-xl border border-cyan-300/20 bg-cyan-500/5 p-4">Kit com mais bloqueios: <strong>{deniedKits[0]?.label ?? "não informado"}</strong></div>
       <div className="rounded-xl border border-violet-300/20 bg-violet-500/5 p-4">Assinante mais ativo: <strong>{topUsers[0]?.label ?? "não informado"}</strong></div>
     </div>
 
@@ -84,6 +91,11 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
     <div className="rounded-xl border border-white/10 bg-black/30 p-4 overflow-x-auto">
       <h3 className="mb-3 text-sm font-semibold text-cyan-200">Últimos 50 plays</h3>
       {recent.length===0?<EmptyState/>:<table className="min-w-[1100px] w-full text-xs"><thead className="text-left text-zinc-400"><tr><th>Quando</th><th>Kit</th><th>Música/Faixa</th><th>Usuário</th><th>Plano</th><th>Dispositivo</th><th>Tom/Voz</th><th>Página/Abrir kit</th></tr></thead><tbody>{recent.map((r, i)=> <tr key={`${r.when}-${i}`} className="border-t border-white/10"><td>{r.when ? new Date(r.when).toLocaleString("pt-BR") : "-"}</td><td>{r.kit}</td><td>{r.track}</td><td>{r.user}</td><td>{r.plan}</td><td>{r.device}</td><td>{r.toneVoice}</td><td>{r.kitSlug ? <Link className="text-cyan-300" href={`/biblioteca/${r.kitSlug}`}>{r.page}</Link> : r.page}</td></tr>)}</tbody></table>}
+    </div>
+
+    <div className="rounded-xl border border-rose-400/20 bg-rose-950/20 p-4 overflow-x-auto">
+      <h3 className="mb-3 text-sm font-semibold text-rose-200">Últimos bloqueios / oportunidades de conversão</h3>
+      {recentDenied.length===0?<EmptyState/>:<table className="min-w-[1100px] w-full text-xs"><thead className="text-left text-zinc-400"><tr><th>Quando</th><th>Kit</th><th>Música/Faixa</th><th>Usuário</th><th>Plano</th><th>Dispositivo</th><th>Motivo</th><th>Página/Abrir kit</th></tr></thead><tbody>{recentDenied.map((r, i)=> <tr key={`${r.when}-${i}`} className="border-t border-white/10"><td>{r.when ? new Date(r.when).toLocaleString("pt-BR") : "-"}</td><td>{r.kit}</td><td>{r.track}</td><td>{r.user}</td><td>{r.plan}</td><td>{r.device}</td><td>{r.reason}</td><td>{r.kitSlug ? <Link className="text-cyan-300" href={`/biblioteca/${r.kitSlug}`}>{r.page}</Link> : r.page}</td></tr>)}</tbody></table>}
     </div>
   </section>;
 }
