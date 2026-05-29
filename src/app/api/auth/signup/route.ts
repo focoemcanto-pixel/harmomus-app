@@ -40,6 +40,15 @@ function getPostSignupNext(plan: PlanSlug, redirectTo: string) {
   return plan === "free" ? "/cadastro/sucesso?plan=free" : "/checkout/sucesso";
 }
 
+function getConfirmationWaitingPath(email: string, next: string, isMinistryInviteSignup: boolean) {
+  const params = new URLSearchParams();
+  params.set("plan", "free");
+  params.set("email", email);
+  if (isMinistryInviteSignup) params.set("invite", "1");
+  if (next) params.set("next", next);
+  return `/cadastro/sucesso?${params.toString()}`;
+}
+
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${label} timeout after ${timeoutMs}ms`)), timeoutMs);
@@ -212,36 +221,6 @@ export async function POST(request: Request) {
     );
   }
 
-  if (isPaidPlan(plan) && !isMinistryInviteSignup) {
-    try {
-      const session = await withTimeout(
-        startStripeCheckoutForSignup(userId, email, plan, origin),
-        10000,
-        "startStripeCheckoutForSignup",
-      );
-
-      runSignupSideEffectsAsync({
-        supabase,
-        plan,
-        origin,
-        fullName,
-        email,
-        phone,
-        username,
-        utmSource,
-        utmCampaign,
-      });
-
-      return NextResponse.redirect(session.url, 303);
-    } catch (checkoutError) {
-      console.error("[signup] Failed to start checkout after paid signup", checkoutError);
-      return fail(
-        checkoutError instanceof Error ? checkoutError.message : "Não foi possível iniciar o checkout agora.",
-        "form",
-      );
-    }
-  }
-
   runSignupSideEffectsAsync({
     supabase,
     plan,
@@ -253,6 +232,28 @@ export async function POST(request: Request) {
     utmSource,
     utmCampaign,
   });
+
+  if (isMinistryInviteSignup && !data.session) {
+    return NextResponse.redirect(new URL(getConfirmationWaitingPath(email, next, true), request.url), 303);
+  }
+
+  if (isPaidPlan(plan) && !isMinistryInviteSignup) {
+    try {
+      const session = await withTimeout(
+        startStripeCheckoutForSignup(userId, email, plan, origin),
+        10000,
+        "startStripeCheckoutForSignup",
+      );
+
+      return NextResponse.redirect(session.url, 303);
+    } catch (checkoutError) {
+      console.error("[signup] Failed to start checkout after paid signup", checkoutError);
+      return fail(
+        checkoutError instanceof Error ? checkoutError.message : "Não foi possível iniciar o checkout agora.",
+        "form",
+      );
+    }
+  }
 
   return NextResponse.redirect(new URL(next, request.url), 303);
 }
