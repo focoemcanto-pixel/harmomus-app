@@ -14,10 +14,33 @@ function distance(a: TouchPoint, b: TouchPoint) {
   return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
 }
 
+function formatSubscriptionStatus(status: string) {
+  const normalized = String(status ?? "").trim().toLowerCase();
+  const map: Record<string, string> = {
+    active: "Ativa",
+    trialing: "Teste ativo",
+    pending: "Pendente",
+    incomplete: "Pagamento pendente",
+    past_due: "Pagamento atrasado",
+    canceled: "Cancelada",
+    cancelled: "Cancelada",
+    expired: "Expirada",
+    free: "Free",
+  };
+  return map[normalized] ?? status;
+}
+
+function isPendingSubscription(status: string) {
+  const normalized = String(status ?? "").trim().toLowerCase();
+  return ["pending", "incomplete", "past_due"].includes(normalized);
+}
+
 export function ProfilePageClient({ initialName, email, username, planName, subscriptionStatus, avatarUrl, userId, stats }: { initialName: string; email: string; username: string; planName: string; subscriptionStatus: string; avatarUrl: string | null; userId: string; stats: Stats }) {
   const [name, setName] = useState(initialName);
   const [avatar, setAvatar] = useState<string | null>(avatarUrl);
   const [savingName, setSavingName] = useState(false);
+  const [passwordResetState, setPasswordResetState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [passwordResetMessage, setPasswordResetMessage] = useState("");
   const [open, setOpen] = useState(false);
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -30,6 +53,8 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
   const pinchRef = useRef<{ distance: number; zoom: number } | null>(null);
 
   const nameInitial = useMemo(() => (name || email || "U").slice(0, 1).toUpperCase(), [name, email]);
+  const readableStatus = formatSubscriptionStatus(subscriptionStatus);
+  const pendingSubscription = isPendingSubscription(subscriptionStatus);
 
   async function saveProfileName() {
     try {
@@ -54,6 +79,24 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
       alert(error instanceof Error ? error.message : "Erro ao salvar nome.");
     } finally {
       setSavingName(false);
+    }
+  }
+
+  async function requestPasswordReset() {
+    try {
+      setPasswordResetState("sending");
+      setPasswordResetMessage("");
+
+      const response = await fetch("/api/profile/password-reset", { method: "POST" });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) throw new Error(data?.error || "Não foi possível enviar o e-mail de alteração de senha.");
+
+      setPasswordResetState("sent");
+      setPasswordResetMessage("Enviamos um link de alteração de senha para seu e-mail.");
+    } catch (error) {
+      setPasswordResetState("error");
+      setPasswordResetMessage(error instanceof Error ? error.message : "Erro ao solicitar alteração de senha.");
     }
   }
 
@@ -156,34 +199,66 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
     pinchRef.current = null;
   }
 
-  return <main className="bg-gradient-to-b from-[#06070d] to-[#0f1523] p-4 text-white md:p-6">
-    <section className="mx-auto max-w-5xl rounded-3xl border border-white/15 bg-white/5 p-6 shadow-2xl backdrop-blur-xl">
+  return <main className="bg-gradient-to-b from-[#06070d] to-[#0f1523] p-3 text-white md:p-6">
+    <section className="mx-auto w-full max-w-5xl rounded-3xl border border-white/15 bg-white/5 p-4 shadow-2xl backdrop-blur-xl md:p-6">
       <div className="mb-6"><Link href="/" className="inline-flex rounded-xl border border-cyan-300/30 bg-cyan-400/10 px-4 py-2 text-sm font-medium text-cyan-100 hover:bg-cyan-300/20">← Voltar para Home</Link></div>
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <label className="group relative block h-24 w-24 overflow-hidden rounded-full border border-cyan-300/40 bg-black/30 shadow-[0_0_30px_rgba(56,189,248,0.2)]">
-            {avatar ? <img src={avatar} className="h-full w-full object-cover" alt="avatar" /> : <span className="flex h-full items-center justify-center text-2xl font-semibold">{nameInitial}</span>}
+
+      <div className="grid gap-5 md:grid-cols-[auto_1fr_auto] md:items-center">
+        <div className="flex justify-center md:justify-start">
+          <label className="group relative block h-28 w-28 overflow-hidden rounded-full border border-cyan-300/40 bg-black/30 shadow-[0_0_30px_rgba(56,189,248,0.2)] md:h-24 md:w-24">
+            {avatar ? <img src={avatar} className="h-full w-full object-cover" alt="avatar" /> : <span className="flex h-full items-center justify-center text-3xl font-semibold">{nameInitial}</span>}
           </label>
-          <div>
-            <div className="flex items-center gap-2">
-              <input className="rounded-lg bg-white/5 px-3 py-2" value={name} onChange={(e)=>setName(e.target.value)} />
-              <button
-                onClick={saveProfileName}
-                disabled={savingName}
-                className="rounded-lg border border-cyan-300/30 bg-cyan-400/10 px-3 py-2 text-sm text-cyan-100 hover:bg-cyan-300/20 disabled:opacity-60"
-              >
-                {savingName ? "Salvando..." : "Salvar"}
-              </button>
-            </div>
-            <p className="mt-2 text-zinc-300">@{username}</p>
-            <p className="text-zinc-400">{email}</p>
+        </div>
+
+        <div className="min-w-0 space-y-3">
+          <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+            <input className="min-w-0 rounded-xl bg-white/5 px-4 py-3 text-base outline-none ring-cyan-300/30 focus:ring" value={name} onChange={(e)=>setName(e.target.value)} />
+            <button
+              onClick={saveProfileName}
+              disabled={savingName}
+              className="rounded-xl border border-cyan-300/30 bg-cyan-400/10 px-4 py-3 text-sm font-medium text-cyan-100 hover:bg-cyan-300/20 disabled:opacity-60"
+            >
+              {savingName ? "Salvando..." : "Salvar"}
+            </button>
+          </div>
+          <div className="min-w-0 text-center md:text-left">
+            <p className="truncate text-zinc-300">@{username}</p>
+            <p className="break-all text-sm text-zinc-400">{email}</p>
           </div>
         </div>
-        <button onClick={() => setOpen(true)} className="rounded-xl border border-white/25 bg-white/10 px-4 py-2 transition hover:bg-white/20">Alterar foto</button>
+
+        <button onClick={() => setOpen(true)} className="w-full rounded-xl border border-white/25 bg-white/10 px-4 py-3 transition hover:bg-white/20 md:w-auto">Alterar foto</button>
       </div>
 
-      <div className="mt-6 grid gap-3 md:grid-cols-4">{[["Plano", planName],["Assinatura", subscriptionStatus],["Kits hoje", String(stats.kitsToday)],["Histórico", String(stats.history)]].map(([k,v]) => <div key={k} className="rounded-2xl border border-white/10 bg-black/20 p-4"><p className="text-xs text-zinc-400">{k}</p><p className="text-lg font-medium">{v}</p></div>)}</div>
-      <div className="mt-6 grid gap-3 md:grid-cols-3">{[["Playlists",stats.playlists],["Favoritos",stats.favorites],["Segurança","Alterar senha"]].map((it)=> <div key={String(it[0])} className="rounded-2xl border border-white/10 bg-white/5 p-4">{it[0]}: <span className="text-zinc-200">{String(it[1])}</span></div>)}</div>
+      {pendingSubscription ? (
+        <div className="mt-5 rounded-2xl border border-amber-300/30 bg-amber-400/10 p-4 text-sm text-amber-100">
+          <p className="font-semibold">Assinatura pendente</p>
+          <p className="mt-1 text-amber-100/85">Seu perfil mostra o plano {planName}, mas a assinatura ainda está como {readableStatus}. Conclua o pagamento ou aguarde a confirmação para liberar o acesso completo.</p>
+        </div>
+      ) : null}
+
+      <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {[["Plano", planName],["Assinatura", readableStatus],["Kits hoje", String(stats.kitsToday)],["Histórico", String(stats.history)]].map(([k,v]) => <div key={k} className="rounded-2xl border border-white/10 bg-black/20 p-4"><p className="text-xs text-zinc-400">{k}</p><p className="mt-1 text-lg font-medium">{v}</p></div>)}
+      </div>
+
+      <div className="mt-6 grid gap-3 md:grid-cols-3">
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">Playlists: <span className="text-zinc-200">{stats.playlists}</span></div>
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">Favoritos: <span className="text-zinc-200">{stats.favorites}</span></div>
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+          <button
+            type="button"
+            onClick={requestPasswordReset}
+            disabled={passwordResetState === "sending"}
+            className="w-full text-left font-medium text-cyan-100 disabled:opacity-60"
+          >
+            🔐 {passwordResetState === "sending" ? "Enviando link..." : "Alterar senha"}
+          </button>
+          {passwordResetMessage ? (
+            <p className={`mt-2 text-xs ${passwordResetState === "error" ? "text-rose-200" : "text-emerald-200"}`}>{passwordResetMessage}</p>
+          ) : null}
+        </div>
+      </div>
+
       <a href="/logout" className="mt-8 inline-block rounded-lg border border-rose-300/40 px-4 py-2 text-rose-200">Logout</a>
     </section>
 
