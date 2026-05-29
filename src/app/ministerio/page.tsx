@@ -70,6 +70,10 @@ export default async function MinisterioPage({ searchParams }: { searchParams?: 
 
   if (!context.ministry) redirect("/assinatura");
 
+  if (!isMinistryManager(context)) {
+    redirect("/");
+  }
+
   const supabase = createSupabaseAdminClient() as any;
   const [{ data: ministry }, { data: rawMembers }] = await Promise.all([
     supabase.from("ministries").select("*").eq("id", context.ministry.ministryId).single(),
