@@ -23,6 +23,7 @@ function safeRate(part: number, total: number) {
 function normalizeStatus(status?: string | null) {
   const value = String(status ?? "").toLowerCase().trim();
   if (["sent", "delivered", "enviado", "entregue"].includes(value)) return "sent";
+  if (["queued", "pending", "fila", "pendente"].includes(value)) return "queued";
   if (["open", "opened", "abriu", "email_open", "email_opened"].includes(value)) return "opened";
   if (["click", "clicked", "clicou", "whatsapp_click", "link_clicked"].includes(value)) return "clicked";
   if (["reply", "replied", "respondeu"].includes(value)) return "replied";
@@ -127,11 +128,12 @@ export async function enqueueCampaignDeliveries(campaignId: string, channel: Cha
     campaign_id: campaignId,
     user_id: contact.id,
     channel,
-    status: "enviado",
+    status: "queued",
     details: {
       recipient: channel === "email" ? contact.email : contact.phone,
       queued_from: "admin_comunicacao",
       campaign_name: campaign.name,
+      delivery_note: "Mensagem colocada em fila. Nenhum provedor real de envio está configurado neste módulo.",
     },
   }));
 
@@ -148,7 +150,7 @@ export async function getPendingQueue(limit = 30) {
   const { data, error } = await supabase
     .from("communication_logs")
     .select("id,campaign_id,channel,details,status,created_at")
-    .eq("status", "enviado")
+    .in("status", ["queued", "pending", "fila", "pendente"])
     .order("created_at", { ascending: false })
     .limit(limit);
 
