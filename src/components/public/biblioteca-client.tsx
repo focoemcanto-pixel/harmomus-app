@@ -29,11 +29,19 @@ function getKitSearchText(kit: PublicKit) {
   ].filter(Boolean).join(" "));
 }
 
+function resolveLockedPlanLabel(kit: PublicKit) {
+  const allowed = Array.isArray(kit.allowedPlanSlugs) ? kit.allowedPlanSlugs : [];
+  if (kit.requiredPlan?.slug === "plus" || allowed.includes("plus")) return "PLUS";
+  if (kit.requiredPlan?.slug === "premium" || allowed.includes("premium")) return "PREMIUM";
+  return "PREMIUM";
+}
+
 export function BibliotecaClient({ kits, planSlug }: BibliotecaClientProps) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
   const [artist, setArtist] = useState("");
   const [plan, setPlan] = useState("");
+  const viewerPlan = normalizePlan(planSlug);
 
   const categories = useMemo(
     () => Array.from(new Map(kits.filter((kit) => kit.category).map((kit) => [kit.category!.slug, kit.category!])).values()).sort((a, b) => a.name.localeCompare(b.name, "pt-BR")),
@@ -125,24 +133,37 @@ export function BibliotecaClient({ kits, planSlug }: BibliotecaClientProps) {
         </div>
       ) : (
         <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((kit) => (
-            <Link key={kit.id} href={`/biblioteca/${kit.slug}`} className="relative rounded-xl border border-white/10 bg-surface p-3 transition hover:-translate-y-0.5 hover:border-gold-400/30 hover:bg-white/[0.04]">
-              <img src={kit.coverUrl ?? "https://placehold.co/600x360/101114/f4f4f5?text=Harmomus"} className="h-40 w-full rounded-lg object-cover" alt={kit.name} />
-              {!canAccessKit(normalizePlan(planSlug), kit.allowedPlanSlugs) ? (
-                <div className="absolute inset-3 flex flex-col items-center justify-center rounded-lg bg-black/55 text-center backdrop-blur-[1px]">
-                  <p className="text-lg">🔒</p>
-                  <p className="text-xs text-white">Kit exclusivo para Plus/Premium</p>
-                  <span className="mt-2 rounded-md border border-gold-400/40 bg-gold-500/20 px-2 py-1 text-xs text-gold-200">Fazer upgrade</span>
+          {filtered.map((kit) => {
+            const locked = !canAccessKit(viewerPlan, kit.allowedPlanSlugs);
+            const lockedPlan = resolveLockedPlanLabel(kit);
+            const lockedText = lockedPlan === "PLUS" ? "Exclusivo Plus/Premium" : "Exclusivo Premium";
+
+            return (
+              <Link key={kit.id} href={`/biblioteca/${kit.slug}`} className="relative rounded-xl border border-white/10 bg-surface p-3 transition hover:-translate-y-0.5 hover:border-gold-400/30 hover:bg-white/[0.04]">
+                <div className="relative overflow-hidden rounded-lg">
+                  <img src={kit.coverUrl ?? "https://placehold.co/600x360/101114/f4f4f5?text=Harmomus"} className={`h-40 w-full object-cover transition ${locked ? "opacity-65" : ""}`} alt={kit.name} />
+                  {locked ? (
+                    <>
+                      <div className="absolute inset-0 bg-black/30" />
+                      <div className="absolute left-3 top-3 rounded-full border border-gold-300/50 bg-black/70 px-3 py-1 text-[11px] font-bold tracking-[0.14em] text-gold-100 shadow-lg">
+                        🔒 {lockedPlan}
+                      </div>
+                      <div className="absolute bottom-3 left-3 right-3 rounded-xl border border-white/15 bg-black/70 px-3 py-2 text-center backdrop-blur">
+                        <p className="text-xs font-semibold text-white">{lockedText}</p>
+                        <p className="mt-0.5 text-[11px] text-zinc-300">Faça upgrade para desbloquear</p>
+                      </div>
+                    </>
+                  ) : null}
                 </div>
-              ) : null}
-              <h3 className="mt-3 text-white">{kit.name}</h3>
-              <p className="text-sm text-zinc-300">{kit.artist}</p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {kit.category ? <span className="rounded-full border border-white/10 px-2 py-1 text-xs text-zinc-300">{kit.category.name}</span> : null}
-                {kit.requiredPlan ? <span className="rounded-full border border-gold-500/40 bg-gold-500/10 px-2 py-1 text-xs text-gold-300">{kit.requiredPlan.name}</span> : null}
-              </div>
-            </Link>
-          ))}
+                <h3 className="mt-3 text-white">{kit.name}</h3>
+                <p className="text-sm text-zinc-300">{kit.artist}</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {kit.category ? <span className="rounded-full border border-white/10 px-2 py-1 text-xs text-zinc-300">{kit.category.name}</span> : null}
+                  {kit.requiredPlan ? <span className="rounded-full border border-gold-500/40 bg-gold-500/10 px-2 py-1 text-xs text-gold-300">{kit.requiredPlan.name}</span> : null}
+                </div>
+              </Link>
+            );
+          })}
         </section>
       )}
     </>
