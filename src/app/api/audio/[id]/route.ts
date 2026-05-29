@@ -102,9 +102,11 @@ async function logAudioAccess(payload: {
 }
 
 function runAfterResponse(task: () => Promise<void>) {
-  void task().catch((error) => {
-    console.warn("[audio] tarefa pós-resposta falhou", error);
-  });
+  setTimeout(() => {
+    void task().catch((error) => {
+      console.warn("[audio] tarefa pós-resposta falhou", error);
+    });
+  }, 0);
 }
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -236,7 +238,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       });
 
       await dispatchWebhookEvent({
-        event: "kit.downloaded",
+        event: "audio.played",
         source: "audio.stream",
         recipient: {
           name: context.profile?.full_name ?? null,
@@ -248,7 +250,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           categoria: requiredPlan?.slug ?? null,
           usuario: { id: context.profile?.id ?? null, email: context.profile?.email ?? null },
           arquivo: { id: audioFile.id, nome: audioFile.name, tom: audioFile.tone },
-          downloaded_at: new Date().toISOString(),
+          played_at: new Date().toISOString(),
         },
       });
     });
