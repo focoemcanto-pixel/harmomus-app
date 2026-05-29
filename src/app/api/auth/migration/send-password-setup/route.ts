@@ -162,7 +162,7 @@ export async function POST(request: Request) {
   }
 
   const origin = new URL(request.url).origin;
-  const callbackUrl = new URL("/auth/confirm", origin);
+  const callbackUrl = new URL("/auth/confirm/callback", origin);
   callbackUrl.searchParams.set("type", "recovery");
   callbackUrl.searchParams.set("next", "/redefinir-senha?migration=1");
 
