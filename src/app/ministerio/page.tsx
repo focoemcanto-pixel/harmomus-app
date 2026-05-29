@@ -13,6 +13,10 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+type MinisterioSearchParams = {
+  message?: string | string[];
+};
+
 function isActiveSubscription(status?: string | null) {
   return ["active", "trialing"].includes(String(status ?? "").toLowerCase());
 }
@@ -35,8 +39,17 @@ function messageTone(message?: string | null) {
   return "warning";
 }
 
-export default async function MinisterioPage({ searchParams }: { searchParams?: Promise<{ message?: string }> }) {
-  const [context, resolvedSearchParams] = await Promise.all([getCurrentUserAccessContext(), searchParams ?? Promise.resolve({})]);
+function normalizeMessage(value?: string | string[]) {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
+
+export default async function MinisterioPage({ searchParams }: { searchParams?: Promise<MinisterioSearchParams> }) {
+  const [context, resolvedSearchParams] = await Promise.all([
+    getCurrentUserAccessContext(),
+    searchParams ?? Promise.resolve({} as MinisterioSearchParams),
+  ]);
+
   if (context.isGuest) redirect("/login");
 
   const planSlug = String(context.plan?.slug ?? "").trim().toLowerCase();
@@ -78,7 +91,7 @@ export default async function MinisterioPage({ searchParams }: { searchParams?: 
   const canManage = isMinistryManager(context);
   const canRemove = isMinistryOwner(context);
   const canRequest = canRequestSongsAndTones({ isAdmin: context.isAdmin, ministryRole: context.ministry.role, effectiveSlug: context.effectiveSlug });
-  const message = resolvedSearchParams?.message;
+  const message = normalizeMessage(resolvedSearchParams.message);
   const tone = messageTone(message);
 
   return (
@@ -129,16 +142,16 @@ export default async function MinisterioPage({ searchParams }: { searchParams?: 
                 <p className="mt-2 text-sm leading-6 text-zinc-300">
                   Apenas administradores Harmomus e o responsável do ministério podem solicitar novas músicas e novos tons. Integrantes mantêm o acesso Premium aos kits, sem abrir pedidos.
                 </p>
-                <div className="mt-5 rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-zinc-300">
-                  Seu perfil atual: <strong className="text-white">{canRequest ? "pode solicitar" : "não pode solicitar"}</strong>.
-                  {canRequest ? <Link href="/area-premium#solicitar-musica" className="ml-2 text-cyan-200 underline-offset-4 hover:underline">Abrir solicitações</Link> : null}
+                <div className="mt-4 flex flex-wrap gap-3">
+                  {canRequest ? <Link href="/area-premium#solicitacoes" className="rounded-xl bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950">Abrir solicitações</Link> : null}
+                  <Link href="/todos-os-kits" className="rounded-xl border border-white/10 px-4 py-2 text-sm text-zinc-200 hover:bg-white/10">Ver kits</Link>
                 </div>
               </div>
             </div>
           </PremiumPanel>
         </div>
 
-        <MinistryMembersTable members={members} canManage={canManage} canRemove={canRemove} />
+        <MinistryMembersTable members={members} canRemove={canRemove} />
       </MinistryShell>
     </>
   );
