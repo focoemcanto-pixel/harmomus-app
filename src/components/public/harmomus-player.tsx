@@ -32,7 +32,6 @@ export function HarmomusPlayer({ engine, src, title, canPlay, semitoneShift = 0,
     volume,
     loop,
     errorMessage,
-    preloadTrack,
     playTrack,
     togglePlay,
     seekTo,
@@ -78,24 +77,8 @@ export function HarmomusPlayer({ engine, src, title, canPlay, semitoneShift = 0,
     });
   }
 
-  function handlePreload() {
-    if (!canPlay || !src || isPlaying || semitoneShift !== 0) return;
-
-    preloadTrack({
-      src,
-      title,
-      semitoneShift,
-      trackId,
-    });
-  }
-
   return (
-    <div
-      className="rounded-xl border border-white/10 bg-black/30 p-4"
-      onMouseEnter={handlePreload}
-      onTouchStart={handlePreload}
-      onFocus={handlePreload}
-    >
+    <div className="rounded-xl border border-white/10 bg-black/30 p-4">
       <p className="mb-3 text-sm text-muted">{title}</p>
 
       <div className="flex items-center gap-3">
