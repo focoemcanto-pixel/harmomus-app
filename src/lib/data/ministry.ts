@@ -24,6 +24,10 @@ export function canRequestSongsAndTones(input: {
   return input.effectiveSlug === "premium" && !input.ministryRole;
 }
 
+function buildDefaultMinistrySlug(userId: string) {
+  return `ministerio-${userId}`;
+}
+
 export async function countActiveMinistryMembers(ministryId: string) {
   const supabase = (await createClient()) as any;
 
@@ -59,8 +63,9 @@ export async function ensureMinistryForSubscription(input: {
     .maybeSingle();
 
   const ministryPayload = {
-    owner_id: input.userId,
+    owner_user_id: input.userId,
     subscription_id: input.subscriptionId ?? null,
+    slug: buildDefaultMinistrySlug(input.userId),
     name: profile?.full_name ? `Ministério de ${profile.full_name}` : "Meu Ministério",
     plan_type: input.planSlug,
     seat_limit: seatLimit,
@@ -75,7 +80,7 @@ export async function ensureMinistryForSubscription(input: {
   const { data: existing } = await admin
     .from("ministries")
     .select("id")
-    .eq("owner_id", input.userId)
+    .eq("owner_user_id", input.userId)
     .maybeSingle();
 
   const saveResponse = existing?.id
@@ -124,7 +129,7 @@ export async function getOwnedMinistry(userId: string) {
   const { data, error } = await admin
     .from("ministries")
     .select("*")
-    .eq("owner_id", userId)
+    .eq("owner_user_id", userId)
     .maybeSingle();
 
   if (error) throw new Error(`Falha ao buscar ministério: ${error.message}`);
