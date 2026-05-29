@@ -15,7 +15,7 @@ export async function getUserMinistry(userId: string) {
 
 export async function getMinistryByOwner(ownerUserId: string) {
   const supabase = (await createClient()) as any;
-  const { data } = await supabase.from("ministries").select("*").eq("owner_user_id", ownerUserId).maybeSingle();
+  const { data } = await supabase.from("ministries").select("*").eq("owner_id", ownerUserId).maybeSingle();
   return data ?? null;
 }
 
