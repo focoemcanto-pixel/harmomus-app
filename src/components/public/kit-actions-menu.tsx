@@ -11,16 +11,19 @@ export function KitActionsMenu({
   kitSlug,
   categorySlug,
   planSlug,
+  canRequestSongsAndTones = planSlug === "premium",
   onPremiumRequired,
 }: {
   kitName: string;
   kitSlug: string;
   categorySlug?: string | null;
   planSlug?: string | null;
+  canRequestSongsAndTones?: boolean;
   onPremiumRequired?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const isPremium = planSlug === "premium";
+  const canRequestTone = isPremium && canRequestSongsAndTones;
   const canUsePlaylists = canSavePlaylist(planSlug);
 
   const requestToneHref = `/area-premium?kit=${encodeURIComponent(kitSlug)}&nome=${encodeURIComponent(kitName)}#solicitar-tom`;
@@ -51,7 +54,7 @@ export function KitActionsMenu({
             </button>
           )}
 
-          {isPremium ? (
+          {canRequestTone ? (
             <Link href={requestToneHref} className="mt-1 block rounded-lg border border-emerald-400/25 px-3 py-2 text-sm text-emerald-200 hover:bg-white/5">
               Solicitar novo tom
             </Link>
@@ -65,9 +68,9 @@ export function KitActionsMenu({
             </button>
           )}
 
-          {!isPremium ? (
+          {!canRequestTone ? (
             <p className="mt-2 rounded-lg bg-yellow-400/10 px-3 py-2 text-xs leading-relaxed text-yellow-100">
-              Recurso Premium: faça upgrade para pedir novos tons e acessar todos os recursos.
+              {isPremium ? "No plano ministerial, apenas o responsável pode solicitar novos tons." : "Recurso Premium: faça upgrade para pedir novos tons e acessar todos os recursos."}
             </p>
           ) : null}
 

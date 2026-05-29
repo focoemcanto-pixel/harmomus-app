@@ -1,36 +1,35 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Crown, Mail, ShieldCheck, Sparkles, Trash2, Users } from "lucide-react";
+import { Crown, Mail, ShieldCheck, Sparkles, Users } from "lucide-react";
 
+import { MinistryInviteCard } from "@/components/ministerio/ministry-invite-card";
+import { MinistryMembersTable } from "@/components/ministerio/ministry-members-table";
+import { MinistryShell, planLabel, PremiumPanel, statusLabel } from "@/components/ministerio/ministry-ui";
 import { MinistryOnboardingModal } from "@/components/public/ministry-onboarding-modal";
-import { getCurrentUserAccessContext, isMinistryManager } from "@/lib/auth/current-user";
+import { getCurrentUserAccessContext, isMinistryManager, isMinistryOwner } from "@/lib/auth/current-user";
 import { canRequestSongsAndTones, ensureMinistryForSubscription, getMinistrySeatLimit, isMinistryPlanSlug } from "@/lib/data/ministry";
-import { createClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
-function statusLabel(status?: string | null) {
-  const normalized = String(status ?? "").toLowerCase();
-  if (normalized === "active") return "Ativo";
-  if (normalized === "pending") return "Pendente";
-  if (normalized === "invited") return "Convidado";
-  if (normalized === "trialing") return "Em teste";
-  if (normalized === "removed") return "Removido";
-  return status || "—";
-}
-
-function planLabel(planType?: string | null) {
-  if (planType === "ministry_40") return "Ministerial 40";
-  if (planType === "ministry_20") return "Ministerial 20";
-  if (planType === "ministry_10") return "Ministerial 10";
-  return "Ministerial";
-}
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 function isActiveSubscription(status?: string | null) {
   return ["active", "trialing"].includes(String(status ?? "").toLowerCase());
 }
 
+function metric(label: string, value: string | number, icon: React.ReactNode, hint?: string) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
+      <div className="text-cyan-200">{icon}</div>
+      <p className="mt-4 text-xs uppercase tracking-[0.14em] text-zinc-400">{label}</p>
+      <p className="mt-2 text-3xl font-semibold text-white">{value}</p>
+      {hint ? <p className="mt-2 text-xs text-zinc-500">{hint}</p> : null}
+    </div>
+  );
+}
+
 export default async function MinisterioPage() {
   const context = await getCurrentUserAccessContext();
-
   if (context.isGuest) redirect("/login");
 
   const planSlug = String(context.plan?.slug ?? "").trim().toLowerCase();
@@ -46,191 +45,86 @@ export default async function MinisterioPage() {
       currentPeriodEnd: (context.subscription as any)?.current_period_end ?? null,
       trialEndsAt: (context.subscription as any)?.trial_ends_at ?? null,
     });
-
     redirect("/ministerio");
   }
 
   if (!context.ministry) redirect("/assinatura");
 
-  const supabase = (await createClient()) as any;
-
+  const supabase = createSupabaseAdminClient() as any;
   const [{ data: ministry }, { data: rawMembers }] = await Promise.all([
     supabase.from("ministries").select("*").eq("id", context.ministry.ministryId).single(),
     supabase
       .from("ministry_members")
-      .select("id,user_id,role,status,invited_email,invited_name")
+      .select("id,ministry_id,user_id,role,status,invited_email,invited_name,invite_token,invited_at,accepted_at,removed_at,created_at,updated_at,profile:profiles(full_name,email,last_login_at,last_seen_at)")
       .eq("ministry_id", context.ministry.ministryId)
-      .neq("status", "removed")
-      .order("created_at"),
+      .order("created_at", { ascending: true }),
   ]);
 
   const members = rawMembers ?? [];
   const ministryPlanType = String(ministry?.plan_type ?? context.ministry.planType ?? planSlug ?? "").trim().toLowerCase();
   const seatLimit = Number(ministry?.seat_limit ?? 0) || Number(context.ministry.seatLimit ?? 0) || getMinistrySeatLimit(ministryPlanType);
-
-  const activeSeats = members.filter((m: any) => ["active", "pending", "invited"].includes(String(m.status))).length;
-  const pendingSeats = members.filter((m: any) => ["pending", "invited"].includes(String(m.status))).length;
-  const remainingSeats = Math.max(0, seatLimit - activeSeats);
-  const usagePercent = seatLimit > 0 ? Math.min(100, Math.round((activeSeats / seatLimit) * 100)) : 0;
-
-  const canRequest = canRequestSongsAndTones({
-    isAdmin: context.isAdmin,
-    ministryRole: context.ministry.role,
-    effectiveSlug: context.effectiveSlug,
-  });
-
+  const usedSeats = members.filter((member: any) => ["active", "pending", "invited"].includes(String(member.status))).length;
+  const activeMembers = members.filter((member: any) => String(member.status) === "active").length;
+  const pendingInvites = members.filter((member: any) => ["pending", "invited"].includes(String(member.status))).length;
+  const remainingSeats = Math.max(0, seatLimit - usedSeats);
+  const usagePercent = seatLimit > 0 ? Math.min(100, Math.round((usedSeats / seatLimit) * 100)) : 0;
   const canManage = isMinistryManager(context);
+  const canRemove = isMinistryOwner(context);
+  const canRequest = canRequestSongsAndTones({ isAdmin: context.isAdmin, ministryRole: context.ministry.role, effectiveSlug: context.effectiveSlug });
 
   return (
     <>
       {canManage ? <MinistryOnboardingModal ministryId={context.ministry.ministryId} remainingSeats={remainingSeats} /> : null}
+      <MinistryShell>
+        <div className="overflow-hidden rounded-[2rem] border border-cyan-300/20 bg-gradient-to-br from-[#0b1120]/95 via-[#140d27]/95 to-[#06111f]/95 p-6 shadow-[0_30px_100px_rgba(34,211,238,0.16)] md:p-10">
+          <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/25 bg-cyan-400/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100">
+                <Crown className="h-4 w-4" /> Central Ministerial Premium
+              </div>
+              <h1 className="mt-5 text-3xl font-semibold tracking-tight md:text-5xl">{ministry?.name}</h1>
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-300 md:text-base">
+                Um plano compartilhado premium para sua equipe de louvor: acessos, convites, permissões e acompanhamento em um só lugar.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-sm text-zinc-200 md:min-w-[240px]">
+              <p className="text-xs uppercase tracking-[0.16em] text-zinc-400">Plano</p>
+              <p className="mt-2 text-2xl font-semibold text-cyan-100">{planLabel(ministryPlanType)}</p>
+              <p className="mt-2 text-xs text-zinc-400">Status: {statusLabel(ministry?.status)}</p>
+            </div>
+          </div>
 
-      <main className="min-h-screen bg-gradient-to-b from-[#020617] via-[#060b1a] to-[#12051d] px-4 py-8 text-white md:px-8">
-        <section className="mx-auto max-w-6xl space-y-6">
-          <div className="overflow-hidden rounded-[2rem] border border-cyan-300/20 bg-gradient-to-br from-[#0b1120] via-[#140d27] to-[#06111f] p-6 shadow-[0_30px_100px_rgba(34,211,238,0.16)] md:p-10">
-            <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
+          <div className="mt-8 grid gap-4 md:grid-cols-4">
+            {metric("Plano", planLabel(ministryPlanType), <Crown className="h-5 w-5" />, statusLabel(ministry?.status))}
+            {metric("Vagas", `${usedSeats}/${seatLimit}`, <Users className="h-5 w-5" />, `${remainingSeats} livres`)}
+            {metric("Convites pendentes", pendingInvites, <Mail className="h-5 w-5" />, "Pendentes + convidados")}
+            {metric("Integrantes ativos", activeMembers, <Sparkles className="h-5 w-5" />, "Acessos aceitos")}
+          </div>
+          <div className="mt-7 h-3 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-gradient-to-r from-cyan-300 to-fuchsia-400" style={{ width: `${usagePercent}%` }} /></div>
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+          <MinistryInviteCard canManage={canManage} remainingSeats={remainingSeats} />
+          <PremiumPanel id="permissoes">
+            <div className="flex items-start gap-4">
+              <div className="rounded-2xl border border-emerald-300/20 bg-emerald-400/10 p-3 text-emerald-100"><ShieldCheck className="h-5 w-5" /></div>
               <div>
-                <div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/25 bg-cyan-400/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100">
-                  <Crown className="h-4 w-4" /> Central Ministerial
-                </div>
-
-                <h1 className="mt-5 text-3xl font-semibold tracking-tight md:text-5xl">{ministry?.name}</h1>
-
-                <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-300 md:text-base">
-                  Controle os acessos Premium da sua equipe de louvor em uma central exclusiva do Harmomus.
+                <p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Permissões</p>
+                <h2 className="mt-2 text-2xl font-semibold">Solicitações centralizadas</h2>
+                <p className="mt-2 text-sm leading-6 text-zinc-300">
+                  Apenas administradores Harmomus e o responsável do ministério podem solicitar novas músicas e novos tons. Integrantes mantêm o acesso Premium aos kits, sem abrir pedidos.
                 </p>
-              </div>
-
-              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-sm text-zinc-200 md:min-w-[240px]">
-                <p className="text-xs uppercase tracking-[0.16em] text-zinc-400">Plano</p>
-                <p className="mt-2 text-2xl font-semibold text-cyan-100">{planLabel(ministryPlanType)}</p>
-                <p className="mt-2 text-xs text-zinc-400">Status: {statusLabel(ministry?.status)}</p>
-              </div>
-            </div>
-
-            <div className="mt-8 grid gap-4 md:grid-cols-4">
-              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
-                <Users className="h-5 w-5 text-cyan-200" />
-                <p className="mt-4 text-xs uppercase tracking-[0.14em] text-zinc-400">Vagas usadas</p>
-                <p className="mt-2 text-3xl font-semibold">{activeSeats}/{seatLimit}</p>
-              </div>
-
-              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
-                <Sparkles className="h-5 w-5 text-fuchsia-200" />
-                <p className="mt-4 text-xs uppercase tracking-[0.14em] text-zinc-400">Disponíveis</p>
-                <p className="mt-2 text-3xl font-semibold">{remainingSeats}</p>
-              </div>
-
-              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
-                <Mail className="h-5 w-5 text-amber-200" />
-                <p className="mt-4 text-xs uppercase tracking-[0.14em] text-zinc-400">Pendentes</p>
-                <p className="mt-2 text-3xl font-semibold">{pendingSeats}</p>
-              </div>
-
-              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
-                <ShieldCheck className="h-5 w-5 text-emerald-200" />
-                <p className="mt-4 text-xs uppercase tracking-[0.14em] text-zinc-400">Solicitações</p>
-                <p className="mt-2 text-xl font-semibold">{canRequest ? "Liberadas" : "Restritas"}</p>
-              </div>
-            </div>
-
-            <div className="mt-7 h-3 overflow-hidden rounded-full bg-white/10">
-              <div className="h-full rounded-full bg-gradient-to-r from-cyan-300 to-fuchsia-400" style={{ width: `${usagePercent}%` }} />
-            </div>
-          </div>
-
-          <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
-            <section id="convidar-integrante" className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-6 shadow-[0_20px_80px_rgba(0,0,0,0.22)]">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Convites</p>
-                  <h2 className="mt-2 text-2xl font-semibold">Cadastrar integrantes</h2>
-                  <p className="mt-2 text-sm leading-6 text-zinc-300">
-                    Envie o convite pelo e-mail. Os membros recebem acesso Premium aos kits, mas não podem solicitar novas músicas ou tons.
-                  </p>
+                <div className="mt-5 rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-zinc-300">
+                  Seu perfil atual: <strong className="text-white">{canRequest ? "pode solicitar" : "não pode solicitar"}</strong>.
+                  {canRequest ? <Link href="/area-premium#solicitar-musica" className="ml-2 text-cyan-200 underline-offset-4 hover:underline">Abrir solicitações</Link> : null}
                 </div>
               </div>
+            </div>
+          </PremiumPanel>
+        </div>
 
-              {canManage ? (
-                <form action="/api/ministerio/invite" method="post" className="mt-6 space-y-3">
-                  <input
-                    name="name"
-                    placeholder="Nome do integrante"
-                    className="h-12 w-full rounded-2xl border border-white/15 bg-black/25 px-4 text-sm text-white outline-none ring-cyan-300/30 placeholder:text-zinc-500 focus:ring"
-                  />
-
-                  <input
-                    name="email"
-                    type="email"
-                    required
-                    placeholder="email@integrante.com"
-                    className="h-12 w-full rounded-2xl border border-white/15 bg-black/25 px-4 text-sm text-white outline-none ring-cyan-300/30 placeholder:text-zinc-500 focus:ring"
-                  />
-
-                  <button
-                    disabled={remainingSeats <= 0}
-                    className="h-12 w-full rounded-2xl bg-gradient-to-r from-cyan-300 to-fuchsia-400 text-sm font-semibold text-slate-950 shadow-[0_18px_50px_rgba(34,211,238,0.18)] disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {remainingSeats <= 0 ? "Limite de vagas atingido" : "Enviar convite premium"}
-                  </button>
-                </form>
-              ) : (
-                <div className="mt-6 rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-zinc-300">
-                  Apenas o responsável do plano ministerial pode cadastrar integrantes.
-                </div>
-              )}
-            </section>
-
-            <section className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-6 shadow-[0_20px_80px_rgba(0,0,0,0.22)]">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Equipe</p>
-                  <h2 className="mt-2 text-2xl font-semibold">Integrantes</h2>
-                  <p className="mt-1 text-sm text-zinc-400">Acompanhe quem já está usando o acesso Premium do ministério.</p>
-                </div>
-
-                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-zinc-300">
-                  {activeSeats}/{seatLimit}
-                </span>
-              </div>
-
-              <div className="mt-6 space-y-3">
-                {members.map((member: any) => (
-                  <div key={member.id} className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-black/20 p-4 md:flex-row md:items-center md:justify-between">
-                    <div>
-                      <p className="font-semibold text-white">{member.invited_name || "Integrante"}</p>
-                      <p className="mt-1 text-sm text-zinc-400">{member.invited_email || "E-mail não informado"}</p>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-full border border-cyan-300/25 bg-cyan-400/10 px-3 py-1 text-xs font-semibold text-cyan-100">
-                        {member.role === "owner" ? "Responsável" : "Membro"}
-                      </span>
-                      <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-zinc-200">
-                        {statusLabel(member.status)}
-                      </span>
-                      {canManage && member.role !== "owner" ? (
-                        <form action="/api/ministerio/remove" method="post">
-                          <input type="hidden" name="member_id" value={member.id} />
-                          <button className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-rose-300/20 bg-rose-500/10 text-rose-100 transition hover:bg-rose-500/20" aria-label="Remover integrante">
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </form>
-                      ) : null}
-                    </div>
-                  </div>
-                ))}
-
-                {!members.length ? (
-                  <div className="rounded-2xl border border-dashed border-white/10 bg-black/20 p-6 text-center text-sm text-zinc-400">
-                    Nenhum integrante cadastrado ainda.
-                  </div>
-                ) : null}
-              </div>
-            </section>
-          </div>
-        </section>
-      </main>
+        <MinistryMembersTable members={members} canManage={canManage} canRemove={canRemove} />
+      </MinistryShell>
     </>
   );
 }

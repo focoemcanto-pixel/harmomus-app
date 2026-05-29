@@ -6,10 +6,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 function redirectToMinisterio(request: Request, message?: string) {
   const url = new URL("/ministerio", request.url);
-  if (message) {
-    url.searchParams.set("message", message);
-  }
-
+  if (message) url.searchParams.set("message", message);
   return NextResponse.redirect(url, 303);
 }
 
@@ -20,7 +17,7 @@ function normalizeEmail(value: FormDataEntryValue | null) {
 export async function POST(request: Request) {
   const context = await getCurrentUserAccessContext();
 
-  if (!context.profile || !context.ministry || !isMinistryManager(context)) {
+  if (!context.profile?.id || !context.ministry || !isMinistryManager(context)) {
     return redirectToMinisterio(request, "Você não possui permissão para convidar integrantes.");
   }
 
@@ -56,7 +53,7 @@ export async function POST(request: Request) {
     .from("ministry_members")
     .select("id", { count: "exact", head: true })
     .eq("ministry_id", ministry.id)
-    .in("status", ["pending", "active"]);
+    .in("status", ["active", "pending", "invited"]);
 
   if ((usedSeats ?? 0) >= Number(ministry.seat_limit ?? 0)) {
     return redirectToMinisterio(request, "Você atingiu o limite de vagas do seu plano.");
@@ -67,7 +64,7 @@ export async function POST(request: Request) {
     .select("id,status")
     .eq("ministry_id", ministry.id)
     .ilike("invited_email", email)
-    .in("status", ["pending", "active"])
+    .in("status", ["active", "pending", "invited"])
     .maybeSingle();
 
   if (existingMember?.id) {
@@ -110,10 +107,11 @@ export async function POST(request: Request) {
 
   const { error: memberError } = await admin.from("ministry_members").insert({
     ministry_id: context.ministry.ministryId,
+    user_id: null,
     invited_email: email,
-    invited_name: name || null,
-    role,
-    status: "pending",
+    invited_name: name,
+    role: "member",
+    status: profile?.id ? "pending" : "invited",
     invite_token: token,
     invited_by: context.profile.id,
     invited_at: now,
@@ -126,5 +124,5 @@ export async function POST(request: Request) {
     return redirectToMinisterio(request, memberError.message || "Falha ao preparar membro pendente.");
   }
 
-  return redirectToMinisterio(request, "Convite enviado com sucesso.");
+  return redirectToMinisterio(request, "Convite Premium enviado com sucesso.");
 }

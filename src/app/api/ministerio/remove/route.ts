@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getCurrentUserAccessContext, isMinistryManager } from "@/lib/auth/current-user";
+import { getCurrentUserAccessContext, isMinistryOwner } from "@/lib/auth/current-user";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 function redirectToMinisterio(request: Request, message?: string) {
@@ -12,7 +12,7 @@ function redirectToMinisterio(request: Request, message?: string) {
 export async function POST(request: Request) {
   const context = await getCurrentUserAccessContext();
 
-  if (!context.profile?.id || !context.ministry || !isMinistryManager(context)) {
+  if (!context.profile?.id || !context.ministry || !isMinistryOwner(context)) {
     return redirectToMinisterio(request, "Você não possui permissão para remover integrantes.");
   }
 
