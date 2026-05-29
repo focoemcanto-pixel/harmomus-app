@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ExternalLink, RotateCcw, Trash2 } from "lucide-react";
 
 import { CopyInviteLink } from "@/components/ministerio/copy-invite-link";
+import { WhatsAppInviteLink } from "@/components/ministerio/whatsapp-invite-link";
 import { formatDate, PremiumPanel, roleLabel, statusLabel } from "@/components/ministerio/ministry-ui";
 import type { MinistryMemberRow } from "@/components/ministerio/types";
 
@@ -14,7 +15,7 @@ function statusClass(status?: string | null) {
   return "border-white/10 bg-white/5 text-zinc-200";
 }
 
-export function MinistryMembersTable({ members, canRemove, canManage }: { members: MinistryMemberRow[]; canRemove: boolean; canManage: boolean }) {
+export function MinistryMembersTable({ members, canRemove, canManage, ministryName }: { members: MinistryMemberRow[]; canRemove: boolean; canManage: boolean; ministryName: string }) {
   return (
     <PremiumPanel id="integrantes" className="overflow-hidden p-0">
       <div className="flex flex-col gap-3 p-5 md:flex-row md:items-center md:justify-between md:p-6">
@@ -60,6 +61,7 @@ export function MinistryMembersTable({ members, canRemove, canManage }: { member
                             <ExternalLink className="h-3.5 w-3.5" /> Abrir convite
                           </Link>
                           <CopyInviteLink href={invitePath} />
+                          <WhatsAppInviteLink href={invitePath} invitedName={member.invited_name || name} ministryName={ministryName} />
                         </div>
                       ) : null}
                     </td>
