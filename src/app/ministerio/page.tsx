@@ -28,8 +28,15 @@ function metric(label: string, value: string | number, icon: React.ReactNode, hi
   );
 }
 
-export default async function MinisterioPage() {
-  const context = await getCurrentUserAccessContext();
+function messageTone(message?: string | null) {
+  const value = String(message ?? "").toLowerCase();
+  if (!value) return null;
+  if (value.includes("sucesso") || value.includes("criado") || value.includes("reenviado") || value.includes("removido")) return "success";
+  return "warning";
+}
+
+export default async function MinisterioPage({ searchParams }: { searchParams?: Promise<{ message?: string }> }) {
+  const [context, resolvedSearchParams] = await Promise.all([getCurrentUserAccessContext(), searchParams ?? Promise.resolve({})]);
   if (context.isGuest) redirect("/login");
 
   const planSlug = String(context.plan?.slug ?? "").trim().toLowerCase();
@@ -55,7 +62,7 @@ export default async function MinisterioPage() {
     supabase.from("ministries").select("*").eq("id", context.ministry.ministryId).single(),
     supabase
       .from("ministry_members")
-      .select("id,ministry_id,user_id,role,status,invited_email,invited_name,invite_token,invited_at,accepted_at,removed_at,created_at,updated_at,profile:profiles(full_name,email,last_login_at,last_seen_at)")
+      .select("id,ministry_id,user_id,role,status,invited_email,invited_name,invite_token,invited_at,accepted_at,removed_at,created_at,updated_at")
       .eq("ministry_id", context.ministry.ministryId)
       .order("created_at", { ascending: true }),
   ]);
@@ -71,11 +78,19 @@ export default async function MinisterioPage() {
   const canManage = isMinistryManager(context);
   const canRemove = isMinistryOwner(context);
   const canRequest = canRequestSongsAndTones({ isAdmin: context.isAdmin, ministryRole: context.ministry.role, effectiveSlug: context.effectiveSlug });
+  const message = resolvedSearchParams?.message;
+  const tone = messageTone(message);
 
   return (
     <>
       {canManage ? <MinistryOnboardingModal ministryId={context.ministry.ministryId} remainingSeats={remainingSeats} /> : null}
       <MinistryShell>
+        {message ? (
+          <div className={`rounded-[1.5rem] border p-4 text-sm shadow-[0_20px_70px_rgba(0,0,0,0.22)] ${tone === "success" ? "border-emerald-300/25 bg-emerald-500/10 text-emerald-100" : "border-amber-300/25 bg-amber-500/10 text-amber-100"}`}>
+            {message}
+          </div>
+        ) : null}
+
         <div className="overflow-hidden rounded-[2rem] border border-cyan-300/20 bg-gradient-to-br from-[#0b1120]/95 via-[#140d27]/95 to-[#06111f]/95 p-6 shadow-[0_30px_100px_rgba(34,211,238,0.16)] md:p-10">
           <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
             <div>
