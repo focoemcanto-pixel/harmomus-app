@@ -199,6 +199,12 @@ function mapStripeEventToWebhookEvent(eventType: string, status: string) {
   return null;
 }
 
+function shouldDispatchPremiumActivated(eventType: string, context: NonNullable<SyncedSubscriptionContext>) {
+  if (context.planSlug !== "premium") return false;
+  if (!["active", "trialing"].includes(context.status)) return false;
+  return eventType === "checkout.session.completed" || eventType === "customer.subscription.created";
+}
+
 async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent): Promise<SyncedSubscriptionContext> {
   const object = event.data?.object ?? {};
   const objectSubscriptionId = getStripeId(object.subscription);
@@ -360,7 +366,7 @@ async function dispatchStripeWebhookEvent(supabase: any, event: StripeEvent, con
     },
   });
 
-  if (context.planSlug === "premium" && ["active", "trialing"].includes(context.status)) {
+  if (shouldDispatchPremiumActivated(event.type, context)) {
     try {
       await dispatchWebhookEvent({
         event: "plan.premium_activated",
@@ -406,7 +412,13 @@ export async function POST(req: Request) {
   const payload = await req.text();
   if (!verifySignature(payload, signature, secret)) return NextResponse.json({ error: "invalid signature" }, { status: 400 });
 
-  const event = JSON.parse(payload) as StripeEvent;
+  let event: StripeEvent;
+  try {
+    event = JSON.parse(payload) as StripeEvent;
+  } catch {
+    return NextResponse.json({ error: "invalid payload" }, { status: 400 });
+  }
+
   const supabase = createSupabaseAdminClient() as any;
   const existingBillingEvent = await getExistingBillingEvent(supabase, event.id);
 
