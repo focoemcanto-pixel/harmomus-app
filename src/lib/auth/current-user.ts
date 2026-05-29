@@ -52,15 +52,22 @@ export async function getCurrentProfile() {
   return await findProfileForUser(supabase, data.user);
 }
 
-function hasStripeLink(subscription: Subscription | null | undefined) {
-  return Boolean(subscription?.stripe_subscription_id && subscription?.stripe_customer_id);
+function hasBillingLink(subscription: Subscription | null | undefined) {
+  if (!subscription) return false;
+
+  const stripeSubscriptionId = (subscription as any).stripe_subscription_id;
+  const stripeCustomerId = (subscription as any).stripe_customer_id;
+  const gatewaySubscriptionId = (subscription as any).gateway_subscription_id;
+  const gatewayCustomerId = (subscription as any).gateway_customer_id;
+
+  return Boolean((stripeSubscriptionId && stripeCustomerId) || (gatewaySubscriptionId && gatewayCustomerId));
 }
 
 function isSubscriptionUsable(subscription: Subscription | null | undefined, planSlug?: string | null) {
   if (!subscription) return false;
   const status = String(subscription.status ?? "").toLowerCase();
   if (!["active", "trialing"].includes(status)) return false;
-  if ((planSlug === "premium" || isMinistryPlanSlug(planSlug)) && !hasStripeLink(subscription)) return false;
+  if ((planSlug === "premium" || isMinistryPlanSlug(planSlug)) && !hasBillingLink(subscription)) return false;
   const periodEnd = (subscription as any).current_period_end
     ? new Date((subscription as any).current_period_end).getTime()
     : Number.POSITIVE_INFINITY;
