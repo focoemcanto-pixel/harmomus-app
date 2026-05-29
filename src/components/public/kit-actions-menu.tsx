@@ -24,6 +24,7 @@ export function KitActionsMenu({
   const [open, setOpen] = useState(false);
   const isPremium = planSlug === "premium";
   const canRequestTone = isPremium && canRequestSongsAndTones;
+  const isPremiumWithoutRequestPermission = isPremium && !canRequestSongsAndTones;
   const canUsePlaylists = canSavePlaylist(planSlug);
 
   const requestToneHref = `/area-premium?kit=${encodeURIComponent(kitSlug)}&nome=${encodeURIComponent(kitName)}#solicitar-tom`;
@@ -58,7 +59,7 @@ export function KitActionsMenu({
             <Link href={requestToneHref} className="mt-1 block rounded-lg border border-emerald-400/25 px-3 py-2 text-sm text-emerald-200 hover:bg-white/5">
               Solicitar novo tom
             </Link>
-          ) : (
+          ) : isPremiumWithoutRequestPermission ? null : (
             <button
               type="button"
               onClick={handleBlockedPremiumAction}
@@ -68,9 +69,15 @@ export function KitActionsMenu({
             </button>
           )}
 
-          {!canRequestTone ? (
+          {!canRequestTone && !isPremiumWithoutRequestPermission ? (
             <p className="mt-2 rounded-lg bg-yellow-400/10 px-3 py-2 text-xs leading-relaxed text-yellow-100">
-              {isPremium ? "No plano ministerial, apenas o responsável pode solicitar novos tons." : "Recurso Premium: faça upgrade para pedir novos tons e acessar todos os recursos."}
+              Recurso Premium: faça upgrade para pedir novos tons e acessar todos os recursos.
+            </p>
+          ) : null}
+
+          {isPremiumWithoutRequestPermission ? (
+            <p className="mt-2 rounded-lg bg-cyan-400/10 px-3 py-2 text-xs leading-relaxed text-cyan-100">
+              Solicitações de novos tons são centralizadas pelo responsável do plano ministerial.
             </p>
           ) : null}
 
