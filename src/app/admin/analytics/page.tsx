@@ -24,6 +24,15 @@ function BlockList({ title, data }: { title: string; data: { label: string; valu
   return <div className="rounded-xl border border-white/10 bg-black/30 p-4"><h3 className="mb-3 text-sm font-semibold text-cyan-200">{title}</h3>{data.length===0?<EmptyState/>:<div className="space-y-2">{data.map((item)=> <div key={item.label}><div className="mb-1 flex justify-between text-xs"><span>{item.label}</span><span>{item.value}</span></div><div className="h-2 rounded bg-white/10"><div className="h-2 rounded bg-gradient-to-r from-emerald-400 via-cyan-400 to-violet-400" style={{width:`${Math.max((item.value/max)*100, 4)}%`}} /></div></div>)}</div>}</div>;
 }
 
+function formatDay(value?: string) {
+  if (!value) return "não informado";
+  try {
+    return new Date(`${value}T00:00:00`).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+  } catch {
+    return value;
+  }
+}
+
 export default async function AdminAnalyticsPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const params = await searchParams;
   const filters: AnalyticsFilters = { period: (params.period as any) ?? "30", plan: (params.plan as any) ?? "all", device: (params.device as any) ?? "all", query: params.q ?? "" };
@@ -32,8 +41,8 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
     getAdminAnalyticsSummary(filters), getPlaysByDay(filters), getDeviceBreakdown(filters), getPlanBreakdown(filters), getTopSongs(filters), getTopKits(filters), getTopUsers(filters), getTopTones(filters), getTopVoices(filters), getRecentPlays(filters), getPremiumRequestsSummary(filters),
   ]);
 
-  const peakHour = byDay.length ? "20h-22h" : "não informado";
-  const topPlan = plans.sort((a, b) => b.value - a.value)[0]?.label ?? "não informado";
+  const peakDay = [...byDay].sort((a, b) => b.plays - a.plays)[0];
+  const topPlan = [...plans].sort((a, b) => b.value - a.value)[0]?.label ?? "não informado";
 
   return <section className="space-y-6 text-zinc-100">
     <PageHeader title="Analytics" description="Inteligência de consumo real da plataforma Harmomus." />
@@ -46,7 +55,7 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
     </form>
 
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-      {[['Plays', summary.plays], ['Usuários únicos', summary.uniqueUsers], ['Sessões únicas', summary.uniqueSessions], ['Média diária', summary.avgDailyPlays], ['Assinantes ativos', summary.activeSubscribers], ['Premium ativos', summary.premiumActive], ['Plus ativos', summary.plusActive], ['Free ativos', summary.freeActive], ['Mensal/Anual', `${summary.monthly}/${summary.annual}`], ['Solicitações premium abertas', premiumRequests.open]].map((c) => <div key={String(c[0])} className="rounded-xl border border-white/10 bg-gradient-to-br from-emerald-500/10 via-cyan-500/5 to-violet-500/10 p-4 shadow-[0_0_30px_rgba(34,211,238,0.08)]"><p className="text-xs text-zinc-400">{c[0]}</p><p className="text-2xl font-semibold">{c[1]}</p></div>)}
+      {[["Plays", summary.plays], ["Usuários únicos", summary.uniqueUsers], ["Sessões únicas", summary.uniqueSessions], ["Média diária", summary.avgDailyPlays], ["Assinantes ativos", summary.activeSubscribers], ["Premium ativos", summary.premiumActive], ["Plus ativos", summary.plusActive], ["Free ativos", summary.freeActive], ["Mensal/Anual", `${summary.monthly}/${summary.annual}`], ["Solicitações premium abertas", premiumRequests.open]].map((c) => <div key={String(c[0])} className="rounded-xl border border-white/10 bg-gradient-to-br from-emerald-500/10 via-cyan-500/5 to-violet-500/10 p-4 shadow-[0_0_30px_rgba(34,211,238,0.08)]"><p className="text-xs text-zinc-400">{c[0]}</p><p className="text-2xl font-semibold">{c[1]}</p></div>)}
     </div>
 
     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -57,13 +66,13 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
       <BlockList title="Top 10 usuários" data={topUsers} />
       <BlockList title="Tons mais ouvidos" data={topTones} />
       <BlockList title="Vozes/Nipes mais ouvidos" data={topVoices} />
-      <BlockList title="Crescimento de usuários" data={[{ label: 'Novos usuários ativos', value: summary.uniqueUsers }]} />
-      <BlockList title="Conversão free → plus/premium" data={[{ label: 'Plus', value: summary.plusActive }, { label: 'Premium', value: summary.premiumActive }]} />
+      <BlockList title="Usuários ativos no período" data={[{ label: "Usuários com plays", value: summary.uniqueUsers }]} />
+      <BlockList title="Consumo por plano ativo" data={[{ label: "Plus", value: summary.plusActive }, { label: "Premium", value: summary.premiumActive }]} />
     </div>
 
     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
       <div className="rounded-xl border border-emerald-300/20 bg-emerald-500/5 p-4">Kit em alta: <strong>{topKits[0]?.label ?? "não informado"}</strong></div>
-      <div className="rounded-xl border border-cyan-300/20 bg-cyan-500/5 p-4">Melhor horário de uso: <strong>{peakHour}</strong></div>
+      <div className="rounded-xl border border-cyan-300/20 bg-cyan-500/5 p-4">Dia com mais uso: <strong>{peakDay ? `${formatDay(peakDay.date)} (${peakDay.plays} plays)` : "não informado"}</strong></div>
       <div className="rounded-xl border border-violet-300/20 bg-violet-500/5 p-4">Plano com mais consumo: <strong>{topPlan}</strong></div>
       <div className="rounded-xl border border-emerald-300/20 bg-emerald-500/5 p-4">Tom mais ouvido: <strong>{topTones[0]?.label ?? "não informado"}</strong></div>
       <div className="rounded-xl border border-cyan-300/20 bg-cyan-500/5 p-4">Voz mais ouvida: <strong>{topVoices[0]?.label ?? "não informado"}</strong></div>
