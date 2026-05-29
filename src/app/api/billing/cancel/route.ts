@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentUser } from "@/lib/auth/current-user";
-import { createClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { cancelSubscriptionAtPeriodEnd } from "@/lib/stripe/client";
 
 function appUrl(path: string, req: Request) {
@@ -16,15 +16,19 @@ export async function POST(req: Request) {
       return NextResponse.redirect(appUrl("/login", req), 303);
     }
 
-    const supabase = (await createClient()) as any;
+    const supabase = createSupabaseAdminClient() as any;
 
-    const { data: subscription } = await supabase
+    const { data: subscription, error: subscriptionError } = await supabase
       .from("subscriptions")
       .select("*")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
+
+    if (subscriptionError) {
+      throw new Error(`Falha ao buscar assinatura: ${subscriptionError.message}`);
+    }
 
     if (!subscription?.stripe_subscription_id) {
       return NextResponse.redirect(
@@ -40,7 +44,7 @@ export async function POST(req: Request) {
       subscription.stripe_subscription_id,
     );
 
-    await supabase
+    const { error: updateError } = await supabase
       .from("subscriptions")
       .update({
         cancel_at_period_end: true,
@@ -52,11 +56,16 @@ export async function POST(req: Request) {
           : null,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", subscription.id);
+      .eq("id", subscription.id)
+      .eq("user_id", user.id);
+
+    if (updateError) {
+      throw new Error(`Assinatura cancelada no Stripe, mas falhou ao atualizar o banco: ${updateError.message}`);
+    }
 
     return NextResponse.redirect(
       appUrl(
-        "/assinatura?error=Assinatura programada para cancelamento no fim do ciclo.",
+        "/assinatura?message=Assinatura programada para cancelamento no fim do ciclo.",
         req,
       ),
       303,
