@@ -72,11 +72,30 @@ export async function ensureMinistryForSubscription(input: {
     updated_at: now,
   };
 
-  const { data: existing } = await admin
-    .from("ministries")
-    .select("id")
-    .eq("owner_id", input.userId)
-    .maybeSingle();
+  let existing: any = null;
+
+  if (input.subscriptionId) {
+    const { data } = await admin
+      .from("ministries")
+      .select("id")
+      .eq("owner_id", input.userId)
+      .eq("subscription_id", input.subscriptionId)
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    existing = data?.[0] ?? null;
+  }
+
+  if (!existing) {
+    const { data } = await admin
+      .from("ministries")
+      .select("id")
+      .eq("owner_id", input.userId)
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    existing = data?.[0] ?? null;
+  }
 
   const saveResponse = existing?.id
     ? await admin.from("ministries").update(ministryPayload).eq("id", existing.id).select("*").single()
@@ -88,12 +107,16 @@ export async function ensureMinistryForSubscription(input: {
 
   const ministry = saveResponse.data;
 
-  const { data: ownerMember } = await admin
+  const { data: ownerMembers } = await admin
     .from("ministry_members")
     .select("id")
     .eq("ministry_id", ministry.id)
     .eq("user_id", input.userId)
-    .maybeSingle();
+    .eq("role", "owner")
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  const ownerMember = ownerMembers?.[0] ?? null;
 
   const ownerPayload = {
     ministry_id: ministry.id,
@@ -125,10 +148,11 @@ export async function getOwnedMinistry(userId: string) {
     .from("ministries")
     .select("*")
     .eq("owner_id", userId)
-    .maybeSingle();
+    .order("created_at", { ascending: false })
+    .limit(1);
 
   if (error) throw new Error(`Falha ao buscar ministério: ${error.message}`);
-  return data ?? null;
+  return data?.[0] ?? null;
 }
 
 export async function getMinistryMembers(ministryId: string) {
@@ -136,7 +160,7 @@ export async function getMinistryMembers(ministryId: string) {
 
   const { data, error } = await admin
     .from("ministry_members")
-    .select("*, profile:profiles(id,full_name,email)")
+    .select("id,ministry_id,user_id,role,status,invited_email,invited_name,created_at,updated_at")
     .eq("ministry_id", ministryId)
     .neq("status", "removed")
     .order("created_at", { ascending: true });
@@ -150,8 +174,8 @@ export async function getMinistryDashboard(userId: string) {
   if (!ministry) return { ministry: null, members: [], activeSeats: 0, pendingSeats: 0, remainingSeats: 0 };
 
   const members = await getMinistryMembers(ministry.id);
-  const activeSeats = members.filter((member: any) => ["active", "pending"].includes(String(member.status))).length;
-  const pendingSeats = members.filter((member: any) => String(member.status) === "pending").length;
+  const activeSeats = members.filter((member: any) => ["active", "pending", "invited"].includes(String(member.status))).length;
+  const pendingSeats = members.filter((member: any) => ["pending", "invited"].includes(String(member.status))).length;
   const remainingSeats = Math.max(0, Number(ministry.seat_limit ?? 0) - activeSeats);
 
   return { ministry, members, activeSeats, pendingSeats, remainingSeats };
