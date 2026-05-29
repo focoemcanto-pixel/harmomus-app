@@ -214,12 +214,11 @@ export function SignupPlanSelector({ initialPlan }: { initialPlan: PlanSlug }) {
         type={isPaidPlan(selectedPlan) ? "button" : "submit"}
         disabled={isSubmitting}
         onClick={() => {
-          setIsSubmitting(true);
-
           if (!isPaidPlan(selectedPlan)) return;
 
+          setIsSubmitting(true);
           window.setTimeout(() => {
-            submitButtonRef.current?.form?.submit();
+            submitButtonRef.current?.form?.requestSubmit();
           }, 40);
         }}
         className="h-12 w-full rounded-2xl border border-cyan-300/50 bg-gradient-to-r from-cyan-400 to-violet-500 font-semibold text-slate-950 shadow-[0_18px_50px_rgba(34,211,238,0.25)] transition hover:brightness-110 disabled:cursor-wait disabled:opacity-80 md:col-span-2"
