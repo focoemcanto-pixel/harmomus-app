@@ -136,7 +136,18 @@ export async function getSubscription(subscriptionId: string) {
 }
 
 export async function updateSubscription(subscriptionId: string, priceId: string) {
-  return stripe(`/subscriptions/${subscriptionId}`, new URLSearchParams({ "items[0][id]": "si_placeholder", "items[0][price]": priceId }));
+  const subscription = await getSubscription(subscriptionId);
+  const subscriptionItemId = subscription?.items?.data?.[0]?.id;
+
+  if (!subscriptionItemId) {
+    throw new Error("Não foi possível localizar o item da assinatura no Stripe.");
+  }
+
+  return stripe(`/subscriptions/${encodeURIComponent(subscriptionId)}`, new URLSearchParams({
+    "items[0][id]": subscriptionItemId,
+    "items[0][price]": priceId,
+    proration_behavior: "create_prorations",
+  }));
 }
 
 export async function listCustomerInvoices(customerId: string, limit = 24) {
