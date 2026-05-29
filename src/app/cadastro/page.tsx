@@ -39,8 +39,11 @@ export default async function CadastroPage({ searchParams }: { searchParams: Pro
   const logoUrl = settings.branding.logoUrl || "";
   const loginImageUrl = settings.branding.loginImageUrl || settings.branding.heroImageUrl || "";
   const headline = settings.home.headline || "Prepare sua voz. Honre seu chamado.";
-  const selectedPlan = (PLAN_OPTIONS.includes((params.plan ?? "").toLowerCase() as PlanSlug) ? (params.plan ?? "free").toLowerCase() : "free") as PlanSlug;
   const redirectPath = safeRedirect(String(params.redirect ?? ""));
+  const isMinistryInviteSignup = redirectPath.startsWith("/convite-ministerio/");
+  const selectedPlan = isMinistryInviteSignup
+    ? "free"
+    : (PLAN_OPTIONS.includes((params.plan ?? "").toLowerCase() as PlanSlug) ? (params.plan ?? "free").toLowerCase() : "free") as PlanSlug;
 
   let error = params.error ? decodeURIComponent(params.error) : "";
 
@@ -57,13 +60,27 @@ export default async function CadastroPage({ searchParams }: { searchParams: Pro
         {loginImageUrl ? <img src={loginImageUrl} alt="" className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-10" /> : null}
         <div className="relative mx-auto w-full max-w-2xl rounded-[2rem] border border-white/15 bg-gradient-to-b from-white/[0.08] to-white/[0.03] p-6 shadow-[0_0_90px_rgba(119,78,255,0.25)] backdrop-blur-2xl md:p-8">
           <HarmomusAuthLogo logoUrl={logoUrl} appName={appName} />
-          <h1 className="mt-2 text-center text-3xl font-semibold text-white md:text-4xl">Crie sua conta</h1>
-          <p className="mt-2 text-center text-sm text-zinc-300">{headline}</p>
+          <div className="mx-auto max-w-xl text-center">
+            {isMinistryInviteSignup ? (
+              <div className="mb-4 inline-flex rounded-full border border-cyan-300/25 bg-cyan-400/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100">
+                Convite Ministerial Premium
+              </div>
+            ) : null}
+            <h1 className="mt-2 text-3xl font-semibold text-white md:text-4xl">
+              {isMinistryInviteSignup ? "Crie sua conta para ativar o convite" : "Crie sua conta"}
+            </h1>
+            <p className="mt-2 text-sm text-zinc-300">
+              {isMinistryInviteSignup
+                ? "Você não precisa escolher plano nem pagar nada. Sua vaga Premium será vinculada ao ministério após o aceite do convite."
+                : headline}
+            </p>
+          </div>
           <form action="/api/auth/signup" method="post" className="mt-7 grid gap-4 md:grid-cols-2">
             <input type="hidden" name="redirect" value={redirectPath} />
+            {isMinistryInviteSignup ? <input type="hidden" name="plan" value="free" /> : null}
             <div className="md:col-span-2"><label className="mb-2 block text-sm text-zinc-200">Nome</label><input name="full_name" required defaultValue={defaults.fullName} className={inputClass("full_name", field)} /><FieldError name="full_name" field={field} error={error} /></div>
             <div><label className="mb-2 block text-sm text-zinc-200">Nome de usuário</label><input name="username" required defaultValue={defaults.username} className={inputClass("username", field)} /><FieldError name="username" field={field} error={error} /></div>
-            <div><label className="mb-2 block text-sm text-zinc-200">E-mail</label><input name="email" type="email" required defaultValue={defaults.email} className={inputClass("email", field)} /><FieldError name="email" field={field} error={error} /></div>
+            <div><label className="mb-2 block text-sm text-zinc-200">E-mail</label><input name="email" type="email" required defaultValue={defaults.email} readOnly={isMinistryInviteSignup && Boolean(defaults.email)} className={`${inputClass("email", field)} ${isMinistryInviteSignup && defaults.email ? "cursor-not-allowed opacity-80" : ""}`} /><FieldError name="email" field={field} error={error} /></div>
             <div><label className="mb-2 block text-sm text-zinc-200">Telefone / WhatsApp</label><input name="phone" required defaultValue={defaults.phone} placeholder="(11) 99999-9999" className={inputClass("phone", field)} /><FieldError name="phone" field={field} error={error} /></div>
             <div><label className="mb-2 block text-sm text-zinc-200">Senha</label><input name="password" type="password" required className={inputClass("password", field)} /><FieldError name="password" field={field} error={error} /></div>
             <div><label className="mb-2 block text-sm text-zinc-200">Confirmar senha</label><input name="confirm_password" type="password" required className={inputClass("confirm_password", field)} /><FieldError name="confirm_password" field={field} error={error} /></div>
@@ -75,9 +92,15 @@ export default async function CadastroPage({ searchParams }: { searchParams: Pro
               </div>
             ) : null}
 
-            <SignupPlanSelector initialPlan={selectedPlan} />
+            {isMinistryInviteSignup ? (
+              <div className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-4 text-sm text-cyan-50 md:col-span-2">
+                Ao criar sua conta, volte para a página do convite e clique em <strong>Aceitar convite</strong> para liberar seu acesso Premium Ministerial.
+              </div>
+            ) : (
+              <SignupPlanSelector initialPlan={selectedPlan} />
+            )}
           </form>
-          <p className="mt-5 text-center text-sm text-zinc-300">Já tem conta? <Link href="/login" className="text-cyan-200 hover:text-cyan-100">Entrar</Link></p>
+          <p className="mt-5 text-center text-sm text-zinc-300">Já tem conta? <Link href={`/login${redirectPath ? `?redirect=${encodeURIComponent(redirectPath)}` : ""}`} className="text-cyan-200 hover:text-cyan-100">Entrar</Link></p>
         </div>
       </section>
     </PublicAppShell>
