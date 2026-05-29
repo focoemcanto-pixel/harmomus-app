@@ -4,10 +4,10 @@ import { getCurrentUserAccessContext, isMinistryManager } from "@/lib/auth/curre
 import { buildAbsoluteUrl, sendMinistryInviteEmail } from "@/lib/email/ministry-invite-email";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
-function redirectToMinisterio(request: Request, message?: string) {
+function redirectToMinisterio(request: Request, message?: string, hash = "convites") {
   const url = new URL("/ministerio", request.url);
   if (message) url.searchParams.set("message", message);
-  url.hash = "convites";
+  url.hash = hash;
   return NextResponse.redirect(url, 303);
 }
 
@@ -97,20 +97,22 @@ export async function POST(request: Request) {
     return redirectToMinisterio(request, "Informe dados válidos para o convite.");
   }
 
-  const { data: members } = await admin
+  const { data: allMembers } = await admin
     .from("ministry_members")
     .select("id,status,invited_email,user_id")
-    .eq("ministry_id", ministry.id)
-    .neq("status", "removed");
+    .eq("ministry_id", ministry.id);
 
-  const usedSeats = (members ?? []).filter((member: any) => ["active", "pending", "invited"].includes(String(member.status))).length;
-  if (usedSeats >= Number(ministry.seat_limit ?? 0)) {
-    return redirectToMinisterio(request, "Você atingiu o limite de vagas do seu plano.");
+  const duplicate = (allMembers ?? []).find((member: any) => String(member.invited_email ?? "").trim().toLowerCase() === email);
+  if (duplicate) {
+    if (String(duplicate.status) === "removed") {
+      return redirectToMinisterio(request, "Este integrante está arquivado. Use o botão Restaurar para devolver o acesso sem criar novo convite.", "arquivados");
+    }
+    return redirectToMinisterio(request, "Esse integrante já possui acesso ou convite pendente.");
   }
 
-  const duplicate = (members ?? []).find((member: any) => String(member.invited_email ?? "").trim().toLowerCase() === email);
-  if (duplicate) {
-    return redirectToMinisterio(request, "Esse integrante já possui acesso ou convite pendente.");
+  const usedSeats = (allMembers ?? []).filter((member: any) => ["active", "pending", "invited"].includes(String(member.status))).length;
+  if (usedSeats >= Number(ministry.seat_limit ?? 0)) {
+    return redirectToMinisterio(request, "Você atingiu o limite de vagas do seu plano.");
   }
 
   const { data: profile } = await admin
