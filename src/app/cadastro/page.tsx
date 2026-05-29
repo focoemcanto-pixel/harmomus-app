@@ -102,12 +102,7 @@ export default async function CadastroPage({ searchParams }: { searchParams: Pro
                 </button>
               </>
             ) : (
-              <>
-                <SignupPlanSelector initialPlan={selectedPlan} />
-                <button type="submit" className="h-13 rounded-2xl bg-gradient-to-r from-cyan-300 to-fuchsia-400 px-5 py-4 text-base font-extrabold text-slate-950 shadow-[0_0_34px_rgba(103,232,249,0.22)] transition hover:brightness-110 md:col-span-2">
-                  Criar conta
-                </button>
-              </>
+              <SignupPlanSelector initialPlan={selectedPlan} />
             )}
           </form>
           <p className="mt-5 text-center text-sm text-zinc-300">Já tem conta? <Link href={`/login${redirectPath ? `?redirect=${encodeURIComponent(redirectPath)}` : ""}`} className="text-cyan-200 hover:text-cyan-100">Entrar</Link></p>
