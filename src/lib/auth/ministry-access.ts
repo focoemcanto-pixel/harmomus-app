@@ -1,4 +1,7 @@
-import { getCurrentUserAccessContext, type CurrentUserAccessContext } from "@/lib/auth/current-user";
+import {
+  getCurrentUserAccessContext,
+  type CurrentUserAccessContext,
+} from "@/lib/auth/current-user";
 import { canRequestSongsAndTones } from "@/lib/data/ministry";
 
 export async function getEffectiveUserPlan() {
@@ -6,11 +9,17 @@ export async function getEffectiveUserPlan() {
 }
 
 export function isMinistryOwner(context: CurrentUserAccessContext) {
-  return context.ministry?.role === "owner";
+  return (
+    context.ministry?.role === "owner" || context.ministry?.role === "admin"
+  );
 }
 
 export function isMinistryManager(context: CurrentUserAccessContext) {
-  return context.ministry?.role === "owner" || context.ministry?.role === "manager";
+  return (
+    context.ministry?.role === "owner" ||
+    context.ministry?.role === "admin" ||
+    context.ministry?.role === "manager"
+  );
 }
 
 export function canManageMinistry(context: CurrentUserAccessContext) {
