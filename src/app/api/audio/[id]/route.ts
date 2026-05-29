@@ -26,6 +26,10 @@ function parseRangeHeader(rangeHeader: string | null, totalSize?: number): { sta
   return { start, end };
 }
 
+function shouldCountPlayback(range: { start: number; end?: number } | null) {
+  return !range || range.start === 0;
+}
+
 function resolveAudioContentType(fileType: string | null | undefined, upstreamContentType: string | null | undefined) {
   const normalized = String(fileType ?? "").toLowerCase().replace(/^audio\//, "");
   if (normalized === "mp3" || normalized === "mpeg") return "audio/mpeg";
@@ -58,6 +62,12 @@ function resolvePagePath(request: NextRequest) {
   } catch {
     return referer.slice(0, 200);
   }
+}
+
+function resolveRequiredPlan(plans: any[] | null | undefined, requiredPlanValue: unknown) {
+  const raw = String(requiredPlanValue ?? "").trim();
+  if (!raw) return null;
+  return (plans ?? []).find((plan: any) => plan.id === raw || plan.slug === raw) ?? null;
 }
 
 async function logAudioAccess(payload: {
@@ -120,7 +130,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return new Response("Kit não encontrado.", { status: 404 });
   }
 
-  const requiredPlan = (plans ?? []).find((p: any) => p.slug === kit.required_plan) ?? null;
+  const requiredPlan = resolveRequiredPlan(plans, kit.required_plan);
   const accessKit: PublicKit = {
     id: kit.id,
     slug: kit.slug,
@@ -135,7 +145,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     maxPitchShiftSemitones: kit.max_pitch_shift_semitones ?? 2,
     category: null,
     requiredPlan,
-    allowedPlanSlugs: Array.isArray(kit.allowed_plan_slugs) && kit.allowed_plan_slugs.length ? kit.allowed_plan_slugs : ["free", "plus", "premium"],
+    allowedPlanSlugs: Array.isArray(kit.allowed_plan_slugs) && kit.allowed_plan_slugs.length ? kit.allowed_plan_slugs : requiredPlan?.slug === "premium" ? ["premium"] : requiredPlan?.slug === "plus" ? ["plus", "premium"] : ["free", "plus", "premium"],
     tones: [],
   };
 
@@ -183,6 +193,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   const range = parseRangeHeader(request.headers.get("range"));
+  const shouldTrackPlayback = shouldCountPlayback(range);
   const streamResponse = await getAudioStream(audioFile.r2_key, range ?? undefined);
   const streamBody = streamResponse.Body;
   if (!streamBody) return new Response("Áudio indisponível.", { status: 502 });
@@ -206,34 +217,36 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     headers.set("Content-Range", `bytes ${range.start}-${end}/${totalLength}`);
   }
 
-  await logAudioAccess({
-    user_id: context.profile?.id ?? null,
-    kit_id: kit.id,
-    audio_file_id: audioFile.id,
-    status: "allowed",
-    reason: "ok",
-    ...analyticsContext,
-  });
-
-  try {
-    await dispatchWebhookEvent({
-      event: "kit.downloaded",
-      source: "audio.stream",
-      recipient: {
-        name: context.profile?.full_name ?? null,
-        email: context.profile?.email ?? null,
-        phone: context.profile?.phone ?? null,
-      },
-      data: {
-        kit: { id: kit.id, slug: kit.slug, nome: kit.name },
-        categoria: kit.required_plan ?? null,
-        usuario: { id: context.profile?.id ?? null, email: context.profile?.email ?? null },
-        arquivo: { id: audioFile.id, nome: audioFile.name, tom: audioFile.tone },
-        downloaded_at: new Date().toISOString(),
-      },
+  if (shouldTrackPlayback) {
+    await logAudioAccess({
+      user_id: context.profile?.id ?? null,
+      kit_id: kit.id,
+      audio_file_id: audioFile.id,
+      status: "allowed",
+      reason: "ok",
+      ...analyticsContext,
     });
-  } catch (webhookError) {
-    console.warn("[audio] webhook kit.downloaded falhou", webhookError);
+
+    try {
+      await dispatchWebhookEvent({
+        event: "kit.downloaded",
+        source: "audio.stream",
+        recipient: {
+          name: context.profile?.full_name ?? null,
+          email: context.profile?.email ?? null,
+          phone: context.profile?.phone ?? null,
+        },
+        data: {
+          kit: { id: kit.id, slug: kit.slug, nome: kit.name },
+          categoria: requiredPlan?.slug ?? null,
+          usuario: { id: context.profile?.id ?? null, email: context.profile?.email ?? null },
+          arquivo: { id: audioFile.id, nome: audioFile.name, tom: audioFile.tone },
+          downloaded_at: new Date().toISOString(),
+        },
+      });
+    } catch (webhookError) {
+      console.warn("[audio] webhook kit.downloaded falhou", webhookError);
+    }
   }
 
   return new Response(streamBody.transformToWebStream(), { status, headers });
