@@ -70,6 +70,11 @@ function resolveRequiredPlan(plans: any[] | null | undefined, requiredPlanValue:
   return (plans ?? []).find((plan: any) => plan.id === raw || plan.slug === raw) ?? null;
 }
 
+function normalizeAudioSource(value: unknown) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return normalized === "generated" ? "generated" : "original";
+}
+
 async function logAudioAccess(payload: {
   user_id: string | null;
   kit_id: string;
@@ -116,7 +121,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const { data: audioFile } = await (supabase as any)
     .from("kit_audio_files")
-    .select("id,kit_id,tone,name,r2_key,file_type")
+    .select("id,kit_id,tone,name,r2_key,file_type,source_type")
     .eq("id", id)
     .maybeSingle();
 
@@ -179,24 +184,18 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   if (!access.tone.allowed) {
-    const toneMatchAllowed = await (supabase as any)
-      .from("kit_audio_files")
-      .select("tone")
-      .eq("kit_id", kit.id)
-      .order("tone", { ascending: true })
-      .limit(1)
-      .maybeSingle();
+    const audioSource = normalizeAudioSource(audioFile.source_type);
 
-    if (toneMatchAllowed.data?.tone && toneMatchAllowed.data.tone !== audioFile.tone) {
+    if (audioSource !== "original") {
       await logAudioAccess({
         user_id: context.profile?.id ?? null,
         kit_id: kit.id,
         audio_file_id: audioFile.id,
         status: "denied",
-        reason: "tone_restricted",
+        reason: "tone_restricted_generated",
         ...analyticsContext,
       });
-      return new Response("Troca de tom indisponível para seu plano.", { status: 403 });
+      return new Response("Este tom gerado por IA é exclusivo para assinantes Premium.", { status: 403 });
     }
   }
 
