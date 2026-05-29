@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Crown, Headphones, MessageCircle, Music2, Sparkles, Star, Trophy } from "lucide-react";
 
+import { PremiumFeedbackForm } from "@/components/public/premium-feedback-form";
 import { PremiumSongRequestForm } from "@/components/public/premium-song-request-form";
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { PremiumToneRequestForm } from "@/components/public/premium-tone-request-form";
@@ -38,7 +39,9 @@ function statusLabel(status?: string | null) {
 }
 
 function typeLabel(type?: string | null) {
-  return type === "tone" ? "Pedido de tom" : "Nova música";
+  if (type === "tone") return "Pedido de tom";
+  if (type === "feedback") return "Feedback";
+  return "Nova música";
 }
 
 export default async function AreaPremiumPage({
@@ -135,7 +138,7 @@ export default async function AreaPremiumPage({
                       <span className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1 text-xs text-zinc-200">{statusLabel(item.status)}</span>
                     </div>
                     <h3 className="mt-4 text-lg font-black text-white">{item.song_name}</h3>
-                    <p className="mt-1 text-sm text-zinc-400">{item.artist_name || "Kit vocal"}</p>
+                    <p className="mt-1 text-sm text-zinc-400">{item.artist_name || (item.request_type === "feedback" ? "Mensagem enviada" : "Kit vocal")}</p>
                     {item.request_type === "tone" ? <p className="mt-2 text-sm text-emerald-200">Tom: {item.desired_tone || "—"}{item.voice_part ? ` • ${item.voice_part}` : ""}</p> : null}
                     <p className="mt-4 text-xs uppercase tracking-[0.16em] text-zinc-500">Criado em {formatDate(item.created_at)}</p>
                     {item.status === "done" && item.delivered_kit_slug ? (
@@ -151,7 +154,7 @@ export default async function AreaPremiumPage({
                 ))}
               </div>
             ) : (
-              <EmptyState text="Você ainda não enviou solicitações premium. Quando solicitar uma música ou tom, o andamento aparecerá aqui." />
+              <EmptyState text="Você ainda não enviou solicitações premium. Quando solicitar uma música, tom ou feedback, o andamento aparecerá aqui." />
             )}
           </PremiumPanel>
 
@@ -199,7 +202,7 @@ export default async function AreaPremiumPage({
             <div className="space-y-6">
               {canSubmitPremiumRequests(context) ? <PremiumSongRequestForm /> : <EmptyState text="No seu ministério, apenas owner/manager podem enviar solicitações premium." />}
               {canSubmitPremiumRequests(context) ? <PremiumToneRequestForm kits={toneRequestKits} initialKitSlug={requestedKitSlug} initialKitName={requestedKitName} /> : null}
-              <PremiumForm title="Enviar feedback" icon={<MessageCircle />} button="Enviar feedback" fields={["Tipo *", "Mensagem *", "Email opcional"]} />
+              {canSubmitPremiumRequests(context) ? <PremiumFeedbackForm /> : null}
             </div>
           </div>
         </section>
@@ -219,8 +222,4 @@ function Ranking({ items, empty }: { items: TopKit[]; empty: string }) {
 
 function EmptyState({ text }: { text: string }) {
   return <div className="rounded-3xl border border-white/10 bg-white/[0.035] p-6 text-sm text-zinc-300">{text}</div>;
-}
-
-function PremiumForm({ title, icon, fields, button }: { title: string; icon: React.ReactNode; fields: string[]; button: string }) {
-  return <form className="rounded-[2rem] border border-emerald-400/20 bg-[#161918]/90 p-6"><h3 className="mb-5 flex items-center gap-3 text-2xl font-black text-white">{icon}{title}</h3><div className="grid gap-4">{fields.map((field) => <label key={field} className="block text-sm font-bold text-zinc-200">{field}<input className="mt-2 h-12 w-full rounded-2xl border border-white/15 bg-white/[0.06] px-4 text-white outline-none ring-emerald-300/40 focus:ring" placeholder={field.replace(" *", "")} /></label>)}</div><button type="button" className="mt-5 inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-400 to-cyan-300 font-black uppercase tracking-[0.16em] text-black">{button}</button></form>;
 }
