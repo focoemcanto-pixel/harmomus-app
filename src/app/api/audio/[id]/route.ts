@@ -5,6 +5,7 @@ import { resolveKitAccess } from "@/lib/access/access-rules";
 import type { PublicKit } from "@/lib/data/public-kits";
 import { getAudioStream } from "@/lib/r2/get-audio-stream";
 import { createClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
 
 export const runtime = "nodejs";
@@ -35,19 +36,60 @@ function resolveAudioContentType(fileType: string | null | undefined, upstreamCo
   return "audio/mpeg";
 }
 
+function resolveDeviceType(userAgent: string | null) {
+  const ua = String(userAgent ?? "").toLowerCase();
+  if (/mobile|android|iphone|ipad|ipod/.test(ua)) return "mobile";
+  return "desktop";
+}
+
+function resolveSessionId(request: NextRequest) {
+  return request.cookies.get("sb-access-token")?.value?.slice(0, 24)
+    ?? request.cookies.get("harmomus_session")?.value
+    ?? null;
+}
+
+function resolvePagePath(request: NextRequest) {
+  const referer = request.headers.get("referer");
+  if (!referer) return null;
+
+  try {
+    const url = new URL(referer);
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return referer.slice(0, 200);
+  }
+}
+
 async function logAudioAccess(payload: {
   user_id: string | null;
   kit_id: string;
   audio_file_id: string;
   status: "allowed" | "denied";
   reason: string;
+  session_id?: string | null;
+  device_type?: string | null;
+  plan_slug?: string | null;
+  page_path?: string | null;
 }) {
-  try {
-    const supabase = await createClient();
-    await (supabase as any).from("audio_access_logs").insert(payload);
-  } catch {
-    // TODO: adicionar telemetria estruturada caso a tabela ainda não exista no ambiente.
-  }
+  const supabase = createSupabaseAdminClient() as any;
+  const enrichedPayload = {
+    ...payload,
+    accessed_at: new Date().toISOString(),
+  };
+
+  const { error } = await supabase.from("audio_access_logs").insert(enrichedPayload);
+
+  if (!error) return;
+
+  // Compatibilidade com bancos que ainda não receberam as colunas novas de analytics.
+  await supabase.from("audio_access_logs").insert({
+    user_id: payload.user_id,
+    kit_id: payload.kit_id,
+    audio_file_id: payload.audio_file_id,
+    status: payload.status,
+    reason: payload.reason,
+    accessed_at: enrichedPayload.accessed_at,
+  });
 }
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -98,6 +140,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   };
 
   const access = await resolveKitAccess(context, accessKit);
+  const analyticsContext = {
+    session_id: resolveSessionId(request),
+    device_type: resolveDeviceType(request.headers.get("user-agent")),
+    plan_slug: context.effectiveSlug,
+    page_path: resolvePagePath(request),
+  };
 
   if (!access.play.allowed) {
     await logAudioAccess({
@@ -106,6 +154,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       audio_file_id: audioFile.id,
       status: "denied",
       reason: access.play.reason,
+      ...analyticsContext,
     });
 
     return new Response("Acesso negado a este áudio.", { status: 403 });
@@ -127,6 +176,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         audio_file_id: audioFile.id,
         status: "denied",
         reason: "tone_restricted",
+        ...analyticsContext,
       });
       return new Response("Troca de tom indisponível para seu plano.", { status: 403 });
     }
@@ -162,6 +212,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     audio_file_id: audioFile.id,
     status: "allowed",
     reason: "ok",
+    ...analyticsContext,
   });
 
   try {
