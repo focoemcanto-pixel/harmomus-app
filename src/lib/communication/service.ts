@@ -4,8 +4,30 @@ import type { AudienceContact, Channel, CommunicationCampaign, CommunicationQueu
 type LogLite = { status: string; channel: string; created_at: string };
 type EventLite = { event_type: string; created_at: string };
 
+export type CommunicationLogRow = {
+  id: string;
+  campaign_id: string | null;
+  user_id: string | null;
+  channel: string | null;
+  status: string | null;
+  created_at: string;
+  details?: Record<string, unknown> | null;
+  campaign?: { name?: string | null } | null;
+  profile?: { full_name?: string | null; email?: string | null; phone?: string | null } | null;
+};
+
 function safeRate(part: number, total: number) {
   return total ? (part / total) * 100 : 0;
+}
+
+function normalizeStatus(status?: string | null) {
+  const value = String(status ?? "").toLowerCase().trim();
+  if (["sent", "delivered", "enviado", "entregue"].includes(value)) return "sent";
+  if (["open", "opened", "abriu", "email_open", "email_opened"].includes(value)) return "opened";
+  if (["click", "clicked", "clicou", "whatsapp_click", "link_clicked"].includes(value)) return "clicked";
+  if (["reply", "replied", "respondeu"].includes(value)) return "replied";
+  if (["failed", "erro", "falhou"].includes(value)) return "failed";
+  return value || "unknown";
 }
 
 export async function getCommunicationDashboard() {
@@ -24,9 +46,9 @@ export async function getCommunicationDashboard() {
   const logs = (logsResult.data ?? []) as LogLite[];
   const events = (eventsResult.data ?? []) as EventLite[];
 
-  const sent = logs.filter((d) => ["enviado", "entregue", "clicou", "abriu", "respondeu"].includes(d.status)).length;
-  const opened = logs.filter((d) => d.status === "abriu").length + events.filter((e) => ["email_open", "email_opened"].includes(e.event_type)).length;
-  const clicked = logs.filter((d) => d.status === "clicou").length + events.filter((e) => ["whatsapp_click", "link_clicked"].includes(e.event_type)).length;
+  const sent = logs.filter((d) => ["sent", "opened", "clicked", "replied"].includes(normalizeStatus(d.status))).length;
+  const opened = logs.filter((d) => normalizeStatus(d.status) === "opened").length + events.filter((e) => ["email_open", "email_opened"].includes(e.event_type)).length;
+  const clicked = logs.filter((d) => normalizeStatus(d.status) === "clicked").length + events.filter((e) => ["whatsapp_click", "link_clicked"].includes(e.event_type)).length;
   const converted = events.filter((e) => ["subscription_created", "conversion"].includes(e.event_type)).length;
 
   return {
@@ -141,4 +163,27 @@ export async function getPendingQueue(limit = 30) {
     status: item.status,
     attempts: 0,
   })) as unknown as CommunicationQueueItem[];
+}
+
+export async function getCommunicationLogs(limit = 100): Promise<CommunicationLogRow[]> {
+  const supabase = createSupabaseAdminClient() as any;
+  const fullSelect = "id,campaign_id,user_id,channel,status,details,created_at,campaign:communication_campaigns(name),profile:profiles(full_name,email,phone)";
+  const fallbackSelect = "id,campaign_id,user_id,channel,status,details,created_at";
+
+  const { data, error } = await supabase
+    .from("communication_logs")
+    .select(fullSelect)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (!error) return (data ?? []) as CommunicationLogRow[];
+
+  const { data: fallbackData, error: fallbackError } = await supabase
+    .from("communication_logs")
+    .select(fallbackSelect)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (fallbackError) throw fallbackError;
+  return (fallbackData ?? []) as CommunicationLogRow[];
 }
