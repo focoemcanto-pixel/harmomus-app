@@ -1,5 +1,13 @@
 import Link from "next/link";
-import { BarChart3, Bell, ExternalLink, LayoutDashboard, ShieldCheck, UserPlus, Users } from "lucide-react";
+import {
+  BarChart3,
+  Bell,
+  ExternalLink,
+  LayoutDashboard,
+  ShieldCheck,
+  UserPlus,
+  Users,
+} from "lucide-react";
 
 const navItems = [
   { href: "/ministerio", label: "Visão Geral", icon: LayoutDashboard },
@@ -28,22 +36,40 @@ export function MinistryNav() {
       {navItems.map((item) => {
         const Icon = item.icon;
         return (
-          <Link key={item.href} href={item.href} className="inline-flex shrink-0 items-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold text-zinc-300 transition hover:bg-white/10 hover:text-white">
+          <Link
+            key={item.href}
+            href={item.href}
+            className="inline-flex shrink-0 items-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold text-zinc-300 transition hover:bg-white/10 hover:text-white"
+          >
             <Icon className="h-4 w-4 text-cyan-200" />
             {item.label}
           </Link>
         );
       })}
-      <Link href="/" className="ml-auto inline-flex shrink-0 items-center gap-2 rounded-2xl border border-cyan-300/20 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/20">
+      <Link
+        href="/"
+        className="ml-auto inline-flex shrink-0 items-center gap-2 rounded-2xl border border-cyan-300/20 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/20"
+      >
         <ExternalLink className="h-4 w-4" /> Ver site
       </Link>
     </nav>
   );
 }
 
-export function PremiumPanel({ children, id, className = "" }: { children: React.ReactNode; id?: string; className?: string }) {
+export function PremiumPanel({
+  children,
+  id,
+  className = "",
+}: {
+  children: React.ReactNode;
+  id?: string;
+  className?: string;
+}) {
   return (
-    <section id={id} className={`rounded-[2rem] border border-white/10 bg-white/[0.045] p-5 shadow-[0_24px_90px_rgba(0,0,0,0.28)] backdrop-blur-xl md:p-6 ${className}`}>
+    <section
+      id={id}
+      className={`rounded-[2rem] border border-white/10 bg-white/[0.045] p-5 shadow-[0_24px_90px_rgba(0,0,0,0.28)] backdrop-blur-xl md:p-6 ${className}`}
+    >
       {children}
     </section>
   );
@@ -53,7 +79,11 @@ export function formatDate(value?: string | null, fallback = "—") {
   if (!value) return fallback;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return fallback;
-  return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+  return date.toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
 }
 
 export function statusLabel(status?: string | null) {
@@ -68,7 +98,7 @@ export function statusLabel(status?: string | null) {
 
 export function roleLabel(role?: string | null) {
   if (role === "owner") return "Responsável";
-  if (role === "manager") return "Gestor";
+  if (role === "admin" || role === "manager") return "Administrador";
   return "Integrante";
 }
 

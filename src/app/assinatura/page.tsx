@@ -1,10 +1,13 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { CancelSubscriptionButton } from "./cancel-subscription-button";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
-import { getCustomerPaymentMethods, getStripeSubscription, listCustomerInvoices } from "@/lib/stripe/client";
+import {
+  getCustomerPaymentMethods,
+  getStripeSubscription,
+  listCustomerInvoices,
+} from "@/lib/stripe/client";
 import { getPlans } from "@/lib/data/plans";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -30,7 +33,10 @@ function formatDate(value?: string | null) {
 
 function formatAmount(cents?: number | null, currency?: string | null) {
   if (typeof cents !== "number") return "Não informado";
-  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: (currency ?? "BRL").toUpperCase() }).format(cents / 100);
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: (currency ?? "BRL").toUpperCase(),
+  }).format(cents / 100);
 }
 
 function invoiceStatusLabel(status?: string | null) {
@@ -52,32 +58,55 @@ function billingCycleLabel(interval?: string | null) {
 }
 
 function stripeTimestampToIso(value: unknown) {
-  return typeof value === "number" ? new Date(value * 1000).toISOString() : null;
+  return typeof value === "number"
+    ? new Date(value * 1000).toISOString()
+    : null;
 }
 
 function getStripeId(value: unknown) {
   if (typeof value === "string") return value;
-  if (value && typeof value === "object" && "id" in value) return String((value as { id?: unknown }).id ?? "") || null;
+  if (value && typeof value === "object" && "id" in value)
+    return String((value as { id?: unknown }).id ?? "") || null;
   return null;
 }
 
 function getInvoiceSubscriptionId(invoice: any) {
-  return getStripeId(invoice.subscription) ?? getStripeId(invoice.parent?.subscription_details?.subscription) ?? null;
+  return (
+    getStripeId(invoice.subscription) ??
+    getStripeId(invoice.parent?.subscription_details?.subscription) ??
+    null
+  );
 }
 
-function normalizeInvoices(invoices: any[], currentSubscriptionId?: string | null) {
+function normalizeInvoices(
+  invoices: any[],
+  currentSubscriptionId?: string | null,
+) {
   const seen = new Set<string>();
   return invoices
     .filter((invoice) => {
       const invoiceSubscriptionId = getInvoiceSubscriptionId(invoice);
-      if (currentSubscriptionId && invoiceSubscriptionId && invoiceSubscriptionId !== currentSubscriptionId) return false;
+      if (
+        currentSubscriptionId &&
+        invoiceSubscriptionId &&
+        invoiceSubscriptionId !== currentSubscriptionId
+      )
+        return false;
       return true;
     })
     .filter((invoice) => {
       const total = Number(invoice.total ?? invoice.amount_paid ?? 0);
-      const isZeroTrialInvoice = total === 0 && String(invoice.billing_reason ?? "").includes("subscription_create");
+      const isZeroTrialInvoice =
+        total === 0 &&
+        String(invoice.billing_reason ?? "").includes("subscription_create");
       if (isZeroTrialInvoice && seen.has("trial-zero-invoice")) return false;
-      const key = isZeroTrialInvoice ? "trial-zero-invoice" : String(invoice.id ?? invoice.number ?? `${invoice.created}-${invoice.total}-${invoice.status}`);
+      const key = isZeroTrialInvoice
+        ? "trial-zero-invoice"
+        : String(
+            invoice.id ??
+              invoice.number ??
+              `${invoice.created}-${invoice.total}-${invoice.status}`,
+          );
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -89,81 +118,105 @@ function getInvoiceUrl(invoice: any) {
   return invoice.hosted_invoice_url ?? invoice.invoice_pdf ?? null;
 }
 
-function InfoCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function InfoCard({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+}) {
   return (
     <div className="rounded-2xl border border-white/15 bg-white/5 p-4">
-      <p className="text-xs uppercase tracking-[0.12em] text-zinc-300">{label}</p>
+      <p className="text-xs uppercase tracking-[0.12em] text-zinc-300">
+        {label}
+      </p>
       <p className="mt-2 text-xl font-semibold text-white">{value}</p>
       {hint ? <p className="mt-2 text-xs text-zinc-400">{hint}</p> : null}
     </div>
   );
 }
 
-async function getMinistryBillingInfo(context: Awaited<ReturnType<typeof getCurrentUserAccessContext>>) {
+async function getMinistryBillingInfo(
+  context: Awaited<ReturnType<typeof getCurrentUserAccessContext>>,
+) {
   if (!context.ministry?.ministryId) return null;
   const admin = createSupabaseAdminClient() as any;
-  const [{ data: ministry }, { data: owner }] = await Promise.all([
-    admin.from("ministries").select("id,name,status,plan_type,owner_id").eq("id", context.ministry.ministryId).maybeSingle(),
-    admin
-      .from("ministry_members")
-      .select("user_id,invited_email,invited_name,profile:profiles(email,full_name)")
-      .eq("ministry_id", context.ministry.ministryId)
-      .eq("role", "owner")
-      .maybeSingle(),
-  ]);
+  const { data: ministry } = await admin
+    .from("ministries")
+    .select("id,name")
+    .eq("id", context.ministry.ministryId)
+    .maybeSingle();
 
   return {
     ministryName: ministry?.name || "seu ministério",
-    ministryStatus: String(ministry?.status ?? "active"),
-    ownerName: owner?.profile?.full_name || owner?.invited_name || "Responsável do ministério",
-    ownerEmail: owner?.profile?.email || owner?.invited_email || "Gerenciado pelo responsável",
   };
 }
 
-export default async function AssinaturaPage({ searchParams }: { searchParams?: Promise<{ error?: string }> }) {
-  const [context, params] = await Promise.all([getCurrentUserAccessContext(), searchParams]);
+export default async function AssinaturaPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ error?: string }>;
+}) {
+  const [context, params] = await Promise.all([
+    getCurrentUserAccessContext(),
+    searchParams,
+  ]);
   if (context.isGuest) redirect("/login");
 
   const isMinistryPremium = Boolean(context.ministry);
-  const ministryInfo = isMinistryPremium ? await getMinistryBillingInfo(context) : null;
+  const ministryInfo = isMinistryPremium
+    ? await getMinistryBillingInfo(context)
+    : null;
 
   if (isMinistryPremium) {
     return (
       <PublicAppShell>
         <main className="min-h-screen bg-gradient-to-b from-[#020617] via-[#060b1a] to-[#09031a] p-4 text-white md:p-8">
           <section className="mx-auto max-w-5xl rounded-[2rem] border border-cyan-300/20 bg-gradient-to-br from-[#0b1120] via-[#120d24] to-[#0a0f1f] p-6 shadow-[0_30px_80px_rgba(34,211,238,0.22)] md:p-10">
-            <p className="text-xs uppercase tracking-[0.22em] text-cyan-200">Painel de assinatura</p>
-            <h1 className="mt-3 text-3xl font-semibold md:text-4xl">Premium Ministerial ativo</h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-300">
-              Seu acesso Premium foi concedido por um plano ministerial. A cobrança e a gestão das vagas são administradas pelo responsável do ministério.
+            <p className="text-xs uppercase tracking-[0.22em] text-cyan-200">
+              Painel de assinatura
             </p>
+            <h1 className="mt-3 text-3xl font-semibold md:text-4xl">
+              Minha conta
+            </h1>
 
-            <div className="mt-8 grid gap-4 md:grid-cols-4">
-              <InfoCard label="Plano atual" value="Premium Ministerial" hint="Benefício vinculado ao ministério" />
-              <InfoCard label="Status do acesso" value="Ativo" hint="Enquanto você fizer parte do ministério" />
-              <InfoCard label="Concedido por" value={ministryInfo?.ministryName ?? "Ministério"} />
-              <InfoCard label="Cobrança" value="Administrada pelo ministério" hint="Você não possui cobrança individual neste acesso" />
-            </div>
-
-            <div className="mt-8 rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-5 text-sm text-emerald-50">
-              <h2 className="text-lg font-semibold text-white">Seu acesso está liberado</h2>
-              <p className="mt-2 leading-6">
-                Você pode acessar os kits, tons e recursos Premium disponíveis para integrantes. Solicitações de novas músicas e tons continuam centralizadas no responsável do ministério.
+            <div className="mt-8 rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-6">
+              <p className="text-xs uppercase tracking-[0.18em] text-cyan-100">
+                Premium Ministerial
+              </p>
+              <h2 className="mt-3 text-2xl font-semibold text-white">
+                Premium Ministerial
+              </h2>
+              <p className="mt-3 text-sm leading-6 text-cyan-50">
+                Seu acesso Premium é fornecido por{" "}
+                {ministryInfo?.ministryName ?? "seu ministério"}.
               </p>
             </div>
 
-            <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.04] p-5">
-              <h2 className="text-lg font-semibold">Responsável pelo plano</h2>
-              <div className="mt-4 grid gap-4 md:grid-cols-2">
-                <InfoCard label="Responsável" value={ministryInfo?.ownerName ?? "Responsável do ministério"} />
-                <InfoCard label="Contato" value={ministryInfo?.ownerEmail ?? "Gerenciado pelo ministério"} />
-              </div>
+            <div className="mt-8 grid gap-4 md:grid-cols-3">
+              <InfoCard label="Plano atual" value="Premium Ministerial" />
+              <InfoCard label="Status do acesso" value="Ativo" />
+              <InfoCard
+                label="Ministério"
+                value={ministryInfo?.ministryName ?? "Ministério"}
+              />
             </div>
 
             <div className="mt-8 flex flex-wrap gap-3">
-              <Link href="/" className="rounded-xl bg-cyan-300 px-5 py-3 text-sm font-semibold text-slate-950">Ver site</Link>
-              <Link href="/todos-os-kits" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-zinc-100 hover:bg-white/10">Ver kits</Link>
-              <Link href="/assinar?plan=premium" className="rounded-xl border border-fuchsia-300/40 bg-fuchsia-500/10 px-5 py-3 text-sm font-semibold text-fuchsia-100">Assinar Premium individual</Link>
+              <a
+                href="/"
+                className="rounded-xl bg-cyan-300 px-5 py-3 text-sm font-semibold text-slate-950"
+              >
+                Ver site
+              </a>
+              <a
+                href="/todos-os-kits"
+                className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-zinc-100 hover:bg-white/10"
+              >
+                Ver kits
+              </a>
             </div>
           </section>
         </main>
@@ -172,34 +225,63 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
   }
 
   const plans = await getPlans();
-  const currentPlan = context.plan?.name ?? (context.effectiveSlug === "premium" ? "Premium" : context.effectiveSlug === "plus" ? "Plus" : "Free");
-  const status = String(context.subscription?.status ?? "pending").toLowerCase();
-  const customerId = context.subscription?.stripe_customer_id ?? context.subscription?.gateway_customer_id;
+  const currentPlan =
+    context.plan?.name ??
+    (context.effectiveSlug === "premium"
+      ? "Premium"
+      : context.effectiveSlug === "plus"
+        ? "Plus"
+        : "Free");
+  const status = String(
+    context.subscription?.status ?? "pending",
+  ).toLowerCase();
+  const customerId =
+    context.subscription?.stripe_customer_id ??
+    context.subscription?.gateway_customer_id;
   const subscriptionId = context.subscription?.stripe_subscription_id;
-  const cancelAtPeriodEnd = Boolean((context.subscription as any)?.cancel_at_period_end);
+  const cancelAtPeriodEnd = Boolean(
+    (context.subscription as any)?.cancel_at_period_end,
+  );
   const hasStripeLink = Boolean(customerId && subscriptionId);
-  const hasUnsyncedPremium = context.plan?.slug === "premium" && (status === "pending" || !hasStripeLink);
+  const hasUnsyncedPremium =
+    context.plan?.slug === "premium" &&
+    (status === "pending" || !hasStripeLink);
 
   let invoices: any[] = [];
   let paymentMethodLabel = customerId ? "Não cadastrado" : "Não vinculado";
   let billingCycle = "Não informado";
-  let nextBillingDate: string | null = context.subscription?.next_billing_at ?? context.subscription?.current_period_end ?? null;
-  let periodEndDate: string | null = context.subscription?.current_period_end ?? null;
+  let nextBillingDate: string | null =
+    context.subscription?.next_billing_at ??
+    context.subscription?.current_period_end ??
+    null;
+  let periodEndDate: string | null =
+    context.subscription?.current_period_end ?? null;
   let trialEndDate: string | null = context.subscription?.trial_ends_at ?? null;
 
   if (customerId && process.env.STRIPE_SECRET_KEY) {
-    const [invoiceResponse, paymentMethodsResponse, stripeSubscription] = await Promise.all([
-      listCustomerInvoices(customerId, 24).catch(() => ({ data: [] })),
-      getCustomerPaymentMethods(customerId, 1).catch(() => ({ data: [] })),
-      subscriptionId ? getStripeSubscription(subscriptionId).catch(() => null) : Promise.resolve(null),
-    ]);
+    const [invoiceResponse, paymentMethodsResponse, stripeSubscription] =
+      await Promise.all([
+        listCustomerInvoices(customerId, 24).catch(() => ({ data: [] })),
+        getCustomerPaymentMethods(customerId, 1).catch(() => ({ data: [] })),
+        subscriptionId
+          ? getStripeSubscription(subscriptionId).catch(() => null)
+          : Promise.resolve(null),
+      ]);
 
-    invoices = normalizeInvoices(Array.isArray(invoiceResponse?.data) ? invoiceResponse.data : [], subscriptionId);
+    invoices = normalizeInvoices(
+      Array.isArray(invoiceResponse?.data) ? invoiceResponse.data : [],
+      subscriptionId,
+    );
     const card = paymentMethodsResponse?.data?.[0]?.card;
-    paymentMethodLabel = card ? `${String(card.brand ?? "Cartão").toUpperCase()} •••• ${card.last4}` : "Não cadastrado";
-    const interval = stripeSubscription?.items?.data?.[0]?.price?.recurring?.interval;
+    paymentMethodLabel = card
+      ? `${String(card.brand ?? "Cartão").toUpperCase()} •••• ${card.last4}`
+      : "Não cadastrado";
+    const interval =
+      stripeSubscription?.items?.data?.[0]?.price?.recurring?.interval;
     billingCycle = billingCycleLabel(interval);
-    const currentPeriodEndIso = stripeTimestampToIso(stripeSubscription?.current_period_end);
+    const currentPeriodEndIso = stripeTimestampToIso(
+      stripeSubscription?.current_period_end,
+    );
     const trialEndIso = stripeTimestampToIso(stripeSubscription?.trial_end);
     if (currentPeriodEndIso) {
       nextBillingDate = currentPeriodEndIso;
@@ -230,24 +312,33 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
     <PublicAppShell>
       <main className="min-h-screen bg-gradient-to-b from-[#020617] via-[#060b1a] to-[#09031a] p-4 text-white md:p-8">
         <section className="mx-auto max-w-5xl rounded-[2rem] border border-fuchsia-300/20 bg-gradient-to-br from-[#0b1120] via-[#120d24] to-[#0a0f1f] p-6 shadow-[0_30px_80px_rgba(91,33,182,0.35)] md:p-10">
-          <p className="text-xs uppercase tracking-[0.22em] text-cyan-200">Painel de assinatura</p>
-          <h1 className="mt-3 text-3xl font-semibold md:text-4xl">Status real da sua assinatura</h1>
+          <p className="text-xs uppercase tracking-[0.22em] text-cyan-200">
+            Painel de assinatura
+          </p>
+          <h1 className="mt-3 text-3xl font-semibold md:text-4xl">
+            Status real da sua assinatura
+          </h1>
 
           {hasUnsyncedPremium ? (
             <div className="mt-6 rounded-2xl border border-amber-400/30 bg-amber-500/10 p-4 text-sm text-amber-100">
-              Sua assinatura ainda não foi sincronizada com o Stripe. Aguarde alguns instantes ou entre em contato.
+              Sua assinatura ainda não foi sincronizada com o Stripe. Aguarde
+              alguns instantes ou entre em contato.
             </div>
           ) : null}
 
           {cancelAtPeriodEnd ? (
             <div className="mt-6 rounded-2xl border border-rose-400/30 bg-rose-500/10 p-4 text-sm text-rose-100">
-              Sua assinatura está programada para cancelar no fim do ciclo atual. Você continuará com acesso até {formatDate(periodEndDate)}.
+              Sua assinatura está programada para cancelar no fim do ciclo
+              atual. Você continuará com acesso até {formatDate(periodEndDate)}.
             </div>
           ) : null}
 
           <div className="mt-8 grid gap-4 md:grid-cols-4">
             <InfoCard label="Plano atual" value={currentPlan} />
-            <InfoCard label="Status da assinatura" value={STATUS_LABELS[status] ?? status} />
+            <InfoCard
+              label="Status da assinatura"
+              value={STATUS_LABELS[status] ?? status}
+            />
             <InfoCard label="Próxima cobrança" value={nextBillingLabel} />
             <InfoCard label="Método de pagamento" value={paymentMethodLabel} />
           </div>
@@ -255,21 +346,37 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
           <div className="mt-4 grid gap-4 md:grid-cols-3">
             <InfoCard label="Ciclo" value={billingCycle} />
             <InfoCard label="Renovação" value={renewalStatus} />
-            <InfoCard label="Fim do teste" value={status === "trialing" ? formatDate(trialEndDate) : "—"} />
+            <InfoCard
+              label="Fim do teste"
+              value={status === "trialing" ? formatDate(trialEndDate) : "—"}
+            />
           </div>
 
-          {params?.error ? <p className="mt-4 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">{params.error}</p> : null}
+          {params?.error ? (
+            <p className="mt-4 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+              {params.error}
+            </p>
+          ) : null}
 
           <div className="mt-8 rounded-2xl border border-white/15 bg-black/20 p-5">
             <h2 className="text-lg font-semibold">Histórico de pagamentos</h2>
             {!invoices.length ? (
-              <p className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-4 text-sm text-zinc-300">Quando houver cobranças, seus recibos e faturas aparecerão aqui.</p>
+              <p className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-4 text-sm text-zinc-300">
+                Quando houver cobranças, seus recibos e faturas aparecerão aqui.
+              </p>
             ) : (
               <div className="mt-4 overflow-x-auto">
                 <table className="min-w-full text-left text-sm">
                   <thead className="text-xs uppercase tracking-[0.1em] text-zinc-400">
                     <tr>
-                      <th className="px-3 py-3">Data</th><th className="px-3 py-3">Valor</th><th className="px-3 py-3">Plano</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Forma de pagamento</th><th className="px-3 py-3">Próxima cobrança</th><th className="px-3 py-3">Ciclo</th><th className="px-3 py-3">Recibo/Fatura</th>
+                      <th className="px-3 py-3">Data</th>
+                      <th className="px-3 py-3">Valor</th>
+                      <th className="px-3 py-3">Plano</th>
+                      <th className="px-3 py-3">Status</th>
+                      <th className="px-3 py-3">Forma de pagamento</th>
+                      <th className="px-3 py-3">Próxima cobrança</th>
+                      <th className="px-3 py-3">Ciclo</th>
+                      <th className="px-3 py-3">Recibo/Fatura</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/10 text-zinc-100">
@@ -277,14 +384,38 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
                       const invoiceUrl = getInvoiceUrl(invoice);
                       return (
                         <tr key={invoice.id}>
-                          <td className="px-3 py-3">{formatDate(stripeTimestampToIso(invoice.created))}</td>
-                          <td className="px-3 py-3">{formatAmount(invoice.amount_paid ?? invoice.total, invoice.currency)}</td>
+                          <td className="px-3 py-3">
+                            {formatDate(stripeTimestampToIso(invoice.created))}
+                          </td>
+                          <td className="px-3 py-3">
+                            {formatAmount(
+                              invoice.amount_paid ?? invoice.total,
+                              invoice.currency,
+                            )}
+                          </td>
                           <td className="px-3 py-3">{currentPlan}</td>
-                          <td className="px-3 py-3">{invoiceStatusLabel(invoice.status)}</td>
+                          <td className="px-3 py-3">
+                            {invoiceStatusLabel(invoice.status)}
+                          </td>
                           <td className="px-3 py-3">{paymentMethodLabel}</td>
                           <td className="px-3 py-3">{nextBillingLabel}</td>
                           <td className="px-3 py-3">{billingCycle}</td>
-                          <td className="px-3 py-3">{invoiceUrl ? <a className="rounded-lg border border-cyan-300/40 px-3 py-2 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/10" href={invoiceUrl} target="_blank" rel="noreferrer">Abrir fatura</a> : <span className="text-zinc-500">Indisponível</span>}</td>
+                          <td className="px-3 py-3">
+                            {invoiceUrl ? (
+                              <a
+                                className="rounded-lg border border-cyan-300/40 px-3 py-2 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/10"
+                                href={invoiceUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Abrir fatura
+                              </a>
+                            ) : (
+                              <span className="text-zinc-500">
+                                Indisponível
+                              </span>
+                            )}
+                          </td>
                         </tr>
                       );
                     })}
@@ -297,19 +428,45 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
           <div className="mt-8 rounded-2xl border border-white/10 bg-white/[0.03] p-5">
             <h2 className="text-lg font-semibold">Gerenciar assinatura</h2>
             <div className="mt-4 flex flex-wrap gap-3">
-              <form action="/api/billing/portal" method="post"><button className="rounded-xl bg-gradient-to-r from-cyan-300 to-blue-400 px-5 py-3 text-sm font-semibold text-slate-900">Abrir portal Stripe</button></form>
-              <a href="/assinar?plan=premium" className="rounded-xl border border-fuchsia-300/50 bg-fuchsia-500/10 px-5 py-3 text-sm font-semibold text-fuchsia-100">Trocar plano</a>
-              {!cancelAtPeriodEnd && hasStripeLink ? <form action="/api/billing/cancel" method="post"><CancelSubscriptionButton /></form> : null}
+              <form action="/api/billing/portal" method="post">
+                <button className="rounded-xl bg-gradient-to-r from-cyan-300 to-blue-400 px-5 py-3 text-sm font-semibold text-slate-900">
+                  Abrir portal Stripe
+                </button>
+              </form>
+              <a
+                href="/assinar?plan=premium"
+                className="rounded-xl border border-fuchsia-300/50 bg-fuchsia-500/10 px-5 py-3 text-sm font-semibold text-fuchsia-100"
+              >
+                Trocar plano
+              </a>
+              {!cancelAtPeriodEnd && hasStripeLink ? (
+                <form action="/api/billing/cancel" method="post">
+                  <CancelSubscriptionButton />
+                </form>
+              ) : null}
             </div>
-            {!hasStripeLink ? <p className="mt-3 text-xs text-zinc-400">Cancelamento direto indisponível porque esta assinatura não está vinculada ao Stripe neste cadastro.</p> : null}
+            {!hasStripeLink ? (
+              <p className="mt-3 text-xs text-zinc-400">
+                Cancelamento direto indisponível porque esta assinatura não está
+                vinculada ao Stripe neste cadastro.
+              </p>
+            ) : null}
           </div>
 
           <div className="mt-8 rounded-2xl border border-white/10 bg-white/[0.03] p-5">
             <h2 className="text-lg font-semibold">Planos disponíveis</h2>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
-              {plans.filter((p) => ["plus", "premium"].includes(p.slug)).map((plan) => (
-                <div key={plan.id} className="rounded-xl border border-white/10 bg-black/20 p-4"><p className="text-sm font-semibold">{plan.name}</p><p className="text-xs text-zinc-300">{plan.description}</p></div>
-              ))}
+              {plans
+                .filter((p) => ["plus", "premium"].includes(p.slug))
+                .map((plan) => (
+                  <div
+                    key={plan.id}
+                    className="rounded-xl border border-white/10 bg-black/20 p-4"
+                  >
+                    <p className="text-sm font-semibold">{plan.name}</p>
+                    <p className="text-xs text-zinc-300">{plan.description}</p>
+                  </div>
+                ))}
             </div>
           </div>
         </section>
