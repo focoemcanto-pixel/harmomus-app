@@ -5,13 +5,21 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 const BASE_SELECT = "id,kit_id,tone,name,file_type,source_type";
 const TESSITURA_SELECT = `${BASE_SELECT},min_midi_note,max_midi_note,detected_min_midi_note,detected_max_midi_note,tessitura_confidence,tessitura_source`;
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
     const supabase = createSupabaseAdminClient() as any;
+
+    const { data: kit, error: kitError } = await supabase
+      .from("kits")
+      .select("id,published")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (kitError) throw new Error(kitError.message);
+    if (!kit?.id || kit.published !== true) {
+      return NextResponse.json({ error: "Kit não encontrado." }, { status: 404 });
+    }
 
     const { files, hasTessituraColumns } = await getAudioFiles(supabase, id);
 
@@ -51,9 +59,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       })),
     }, {
       headers: {
-        "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
-        Pragma: "no-cache",
-        Expires: "0",
+        "Cache-Control": "public, max-age=60, stale-while-revalidate=300",
       },
     });
   } catch (error) {
