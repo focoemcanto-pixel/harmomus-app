@@ -68,7 +68,8 @@ async function acceptInvite(request: Request, token: string) {
     .eq("ministry_id", member.ministry_id)
     .in("status", ["active", "pending", "invited"]);
 
-  if ((usedSeats ?? 0) > Number(ministry.seat_limit ?? 0)) {
+  const seatLimit = Number(ministry.seat_limit ?? 0);
+  if (seatLimit > 0 && (usedSeats ?? 0) >= seatLimit) {
     return redirectTo(`/convite-ministerio/${token}`, request, "O limite de vagas deste ministério foi atingido.");
   }
 
