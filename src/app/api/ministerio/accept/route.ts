@@ -5,10 +5,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 function redirectTo(url: string, request: Request, message?: string) {
   const target = new URL(url, request.url);
-  if (message) {
-    target.searchParams.set("message", message);
-  }
-
+  if (message) target.searchParams.set("message", message);
   return NextResponse.redirect(target, 303);
 }
 
@@ -30,7 +27,7 @@ export async function POST(request: Request) {
 
   const { data: member } = await admin
     .from("ministry_members")
-    .select("*, ministry:ministries(id,name,status,seat_limit)")
+    .select("id,ministry_id,user_id,role,status,invited_email,invite_token")
     .eq("invite_token", token)
     .maybeSingle();
 
@@ -39,23 +36,38 @@ export async function POST(request: Request) {
   }
 
   if (member.status === "active") {
-    return redirectTo("/ministerio", request, "Este convite já foi utilizado.");
+    return redirectTo("/", request, "Este convite já foi utilizado.");
   }
 
-  const currentEmail = String(context.profile.email ?? "")
-    .trim()
-    .toLowerCase();
+  if (member.status === "removed") {
+    return redirectTo("/", request, "Este convite foi removido.");
+  }
 
-  const inviteEmail = String(member.invited_email ?? "")
-    .trim()
-    .toLowerCase();
+  const { data: ministry } = await admin
+    .from("ministries")
+    .select("id,name,status,seat_limit")
+    .eq("id", member.ministry_id)
+    .maybeSingle();
+
+  if (!ministry?.id || !["active", "trialing"].includes(String(ministry.status ?? "").toLowerCase())) {
+    return redirectTo(`/convite-ministerio/${token}`, request, "O plano ministerial não está ativo.");
+  }
+
+  const currentEmail = String(context.profile.email ?? "").trim().toLowerCase();
+  const inviteEmail = String(member.invited_email ?? "").trim().toLowerCase();
 
   if (currentEmail !== inviteEmail) {
     return redirectTo(`/convite-ministerio/${token}`, request, "Entre com o e-mail correto para aceitar o convite.");
   }
 
-  if (!["active", "trialing"].includes(String(member.ministry?.status ?? "").toLowerCase())) {
-    return redirectTo(`/convite-ministerio/${token}`, request, "O plano ministerial não está ativo.");
+  const { count: usedSeats } = await admin
+    .from("ministry_members")
+    .select("id", { count: "exact", head: true })
+    .eq("ministry_id", member.ministry_id)
+    .in("status", ["active", "pending", "invited"]);
+
+  if ((usedSeats ?? 0) > Number(ministry.seat_limit ?? 0)) {
+    return redirectTo(`/convite-ministerio/${token}`, request, "O limite de vagas deste ministério foi atingido.");
   }
 
   const now = new Date().toISOString();
@@ -73,16 +85,6 @@ export async function POST(request: Request) {
   if (error) {
     return redirectTo(`/convite-ministerio/${token}`, request, error.message || "Não foi possível aceitar o convite.");
   }
-
-  await admin.from("ministry_activity_logs").insert({
-    ministry_id: member.ministry_id,
-    actor_id: context.profile.id,
-    action: "member.accepted",
-    metadata: {
-      email: inviteEmail,
-      accepted_at: now,
-    },
-  });
 
   return redirectTo("/", request, "Acesso Premium liberado com sucesso.");
 }
