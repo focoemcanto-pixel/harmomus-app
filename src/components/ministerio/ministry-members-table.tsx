@@ -1,4 +1,5 @@
-import { RotateCcw, Trash2 } from "lucide-react";
+import Link from "next/link";
+import { ExternalLink, RotateCcw, Trash2 } from "lucide-react";
 
 import { formatDate, PremiumPanel, roleLabel, statusLabel } from "@/components/ministerio/ministry-ui";
 import type { MinistryMemberRow } from "@/components/ministerio/types";
@@ -25,15 +26,15 @@ export function MinistryMembersTable({ members, canRemove, canManage }: { member
 
       {members.length ? (
         <div className="overflow-x-auto">
-          <table className="min-w-[920px] w-full text-left text-sm">
+          <table className="min-w-[1040px] w-full text-left text-sm">
             <thead className="border-y border-white/10 bg-white/[0.04] text-xs uppercase tracking-[0.12em] text-zinc-400">
               <tr>
                 <th className="px-4 py-3">Nome</th>
                 <th className="px-4 py-3">Email</th>
                 <th className="px-4 py-3">Função</th>
                 <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Data Convite</th>
-                <th className="px-4 py-3">Último Acesso</th>
+                <th className="px-4 py-3">Convite</th>
+                <th className="px-4 py-3">Aceite</th>
                 <th className="px-4 py-3 text-right">Ações</th>
               </tr>
             </thead>
@@ -41,23 +42,31 @@ export function MinistryMembersTable({ members, canRemove, canManage }: { member
               {members.map((member) => {
                 const email = member.profile?.email || member.invited_email || "—";
                 const name = member.profile?.full_name || member.invited_name || "Integrante";
-                const lastAccess = member.profile?.last_login_at || member.profile?.last_seen_at;
                 const pending = ["pending", "invited"].includes(String(member.status));
+                const invitePath = member.invite_token ? `/convite-ministerio/${member.invite_token}` : null;
+
                 return (
                   <tr key={member.id} className="align-top transition hover:bg-white/[0.035]">
                     <td className="px-4 py-4 font-semibold text-white">{name}</td>
                     <td className="px-4 py-4 text-zinc-300">{email}</td>
                     <td className="px-4 py-4 text-zinc-300">{roleLabel(member.role)}</td>
                     <td className="px-4 py-4"><span className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusClass(member.status)}`}>{statusLabel(member.status)}</span></td>
-                    <td className="px-4 py-4 text-zinc-400">{formatDate(member.invited_at || member.created_at)}</td>
-                    <td className="px-4 py-4 text-zinc-400">{formatDate(lastAccess, "Nunca")}</td>
+                    <td className="px-4 py-4 text-zinc-400">
+                      <div>{formatDate(member.invited_at || member.created_at)}</div>
+                      {pending && invitePath ? (
+                        <Link href={invitePath} className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-cyan-200 underline-offset-4 hover:underline">
+                          <ExternalLink className="h-3.5 w-3.5" /> Abrir página do convite
+                        </Link>
+                      ) : null}
+                    </td>
+                    <td className="px-4 py-4 text-zinc-400">{member.accepted_at ? formatDate(member.accepted_at) : pending ? "Aguardando" : "—"}</td>
                     <td className="px-4 py-4">
                       <div className="flex justify-end gap-2">
                         {canManage && pending ? (
                           <form action="/api/ministerio/invite" method="post">
                             <input type="hidden" name="resend_member_id" value={member.id} />
-                            <button className="inline-flex h-9 items-center gap-2 rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-3 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-500/20" aria-label="Reenviar convite">
-                              <RotateCcw className="h-3.5 w-3.5" /> Reenviar
+                            <button className="inline-flex h-9 items-center gap-2 rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-3 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-500/20" aria-label="Gerar novo convite">
+                              <RotateCcw className="h-3.5 w-3.5" /> Gerar novo convite
                             </button>
                           </form>
                         ) : null}
