@@ -3,11 +3,9 @@
 import Link from "next/link";
 import { Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getPitchEngine, type PitchPlaybackController } from "@/lib/audio/pitch-engine";
-import { midiToBrazilianNote } from "@/lib/audio/pitch-analysis";
 
+import { getPitchEngine, type PitchPlaybackController } from "@/lib/audio/pitch-engine";
 import type { PlaylistKitSummary, PlaylistTrackVoice, PublicPlaylist } from "@/lib/data/playlists";
-import { analyzeTessitura } from "@/lib/music/tessitura";
 import { CHROMATIC_TONES_SHARP, pickInitialTone, resolveToneTrack } from "@/lib/music/tones";
 
 interface PlaylistPlayerClientProps {
@@ -21,7 +19,7 @@ function formatTime(value: number): string {
   return `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, "0")}`;
 }
 
-function voiceLabel(voice: PlaylistTrackVoice | string | null) {
+function voiceLabel(voice: PlaylistTrackVoice | string | null | undefined) {
   if (!voice) return "Todos";
   const map: Record<string, string> = {
     todos: "Todos",
@@ -45,30 +43,12 @@ function getVoiceOptions(kit: PlaylistKitSummary, tone: string) {
   return Array.from(new Set(kit.tracks.filter((track) => !tone || track.tone === tone).map((track) => track.voice).filter(Boolean))) as PlaylistTrackVoice[];
 }
 
-function findTrack(kit: PlaylistKitSummary, tone: string, voice: PlaylistTrackVoice | "") {
-  return kit.tracks.find((track) => track.tone === tone && track.voice === voice) ?? kit.tracks.find((track) => track.tone === tone) ?? kit.tracks[0] ?? null;
+function firstVoice(voices: PlaylistTrackVoice[]) {
+  return voices.includes("todos") ? "todos" : voices[0] ?? "";
 }
 
 function toneStatusLabel(source: "original" | "generated" | null | undefined) {
   return source === "original" ? "Original" : "Harmomus IA";
-}
-
-function tessituraStatusLabel(status: string) {
-  const map: Record<string, string> = {
-    comfortable: "Confortável",
-    extended: "Estendida",
-    extreme: "Extrema",
-    unsafe: "Fora da zona segura",
-  };
-  return map[status] ?? status;
-}
-
-function getTrackMidiRange(track: KitTrack | null) {
-  if (!track) return null;
-  const min = track.minMidiNote ?? track.detectedMinMidiNote;
-  const max = track.maxMidiNote ?? track.detectedMaxMidiNote;
-  if (typeof min !== "number" || typeof max !== "number") return null;
-  return { min, max };
 }
 
 export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
@@ -93,33 +73,39 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
 
   const toneResolution = useMemo(() => {
     if (!currentKit || !selectedTone) return null;
+
     return resolveToneTrack({
       tracks: currentKit.tracks,
       requestedTone: selectedTone,
       allowPitchShift: currentKit.allow_pitch_shift,
       maxPitchShiftSemitones: currentKit.max_pitch_shift_semitones,
-      pickTrack: (tracks) => tracks.find((track) => track.voice === selectedVoice) ?? tracks.find((track) => track.voice === "todos") ?? tracks[0] ?? null,
+      pickTrack: (tracks) => {
+        const exactVoice = selectedVoice ? tracks.find((track) => track.voice === selectedVoice) : null;
+        return exactVoice ?? tracks.find((track) => track.voice === "todos") ?? tracks[0] ?? null;
+      },
     });
   }, [currentKit, selectedTone, selectedVoice]);
 
   const sourceToneForVoices = toneResolution?.sourceTone ?? selectedTone;
   const voiceOptions = useMemo(() => currentKit ? getVoiceOptions(currentKit, sourceToneForVoices) : [], [currentKit, sourceToneForVoices]);
-  const currentTrack = toneResolution?.sourceTrack ?? (currentKit ? findTrack(currentKit, selectedTone, selectedVoice) : null);
+  const currentTrack: KitTrack | null = toneResolution?.sourceTrack ?? null;
   const playableTrack = toneResolution?.isAvailable ? currentTrack : null;
   const semitoneShift = toneResolution?.isPitchShifted ? toneResolution.semitoneShift : 0;
+  const selectedSource = currentTrack?.sourceType ?? null;
+  const isSelectedToneReal = selectedSource === "original";
+  const canPlaySelectedTone = Boolean(playableTrack?.streamUrl);
 
-  const tessituraAnalysis = useMemo(() => {
-    if (!toneResolution?.sourceTone || !selectedTone) return null;
-    const range = getTrackMidiRange(currentTrack);
-    if (!range) return null;
-
-    return analyzeTessitura({
-      requestedTone: selectedTone,
-      sourceTone: toneResolution.sourceTone,
-      sourceMinMidi: range.min,
-      sourceMaxMidi: range.max,
-    });
-  }, [currentTrack, selectedTone, toneResolution?.sourceTone]);
+  const activeTrackKey = useMemo(() => {
+    return [
+      playlist.id,
+      currentKit?.id ?? "no-kit",
+      selectedTone || "no-tone",
+      selectedVoice || "no-voice",
+      playableTrack?.id ?? "no-track",
+      playableTrack?.streamUrl ?? "no-src",
+      String(semitoneShift),
+    ].join("::");
+  }, [playlist.id, currentKit?.id, selectedTone, selectedVoice, playableTrack?.id, playableTrack?.streamUrl, semitoneShift]);
 
   function disposePitchController() {
     try {
@@ -130,101 +116,112 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
     pitchControllerRef.current = null;
   }
 
-  useEffect(() => {
-    setCurrentKitIndex(0);
+  function resetPlayback(nextSrc?: string | null) {
+    pitchSessionRef.current += 1;
+    disposePitchController();
+
+    const audio = audioRef.current;
+    if (audio) {
+      try { audio.pause(); } catch {}
+      try { audio.currentTime = 0; } catch {}
+
+      if (nextSrc) {
+        if (audio.getAttribute("src") !== nextSrc && audio.src !== nextSrc) {
+          audio.src = nextSrc;
+        }
+        audio.load();
+      } else {
+        audio.removeAttribute("src");
+        audio.src = "";
+        try { audio.load(); } catch {}
+      }
+    }
+
     setCurrentTime(0);
     setDuration(0);
     setIsPlaying(false);
+    setIsLoadingPlayback(false);
+  }
+
+  useEffect(() => {
+    setCurrentKitIndex(0);
+    setSelectedTone("");
+    setSelectedVoice("");
+    resetPlayback(null);
   }, [playlist.id]);
 
   useEffect(() => {
     if (!currentKit) return;
+
     const nextTone = pickInitialTone({
       availableTones: realToneOptions,
       defaultTone: currentKit.default_tone,
       originalTone: currentKit.original_tone,
     });
     const voices = getVoiceOptions(currentKit, nextTone);
-    const preferredVoice = voices.includes("todos") ? "todos" : voices[0] ?? "";
+
     setSelectedTone(nextTone);
-    setSelectedVoice(preferredVoice);
-    setCurrentTime(0);
-    setDuration(0);
-  }, [currentKitIndex, currentKit, realToneOptions]);
+    setSelectedVoice(firstVoice(voices));
+    resetPlayback(null);
+  }, [currentKitIndex, currentKit?.id]);
 
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    pitchSessionRef.current += 1;
-    disposePitchController();
-
-    audio.pause();
-    audio.currentTime = 0;
-
-    setCurrentTime(0);
-    setDuration(0);
-    setIsPlaying(false);
-    setIsLoadingPlayback(false);
-  }, [playableTrack?.id, semitoneShift]);
+    resetPlayback(playableTrack?.streamUrl ?? null);
+  }, [activeTrackKey]);
 
   useEffect(() => {
     return () => {
-      disposePitchController();
+      resetPlayback(null);
     };
   }, []);
 
-  const playKitAt = (index: number) => {
+  function playKitAt(index: number) {
     if (index < 0 || index >= kits.length) return;
     setCurrentKitIndex(index);
-    setIsPlaying(false);
-  };
+    resetPlayback(null);
+  }
 
-  const next = () => {
+  function next() {
     if (kits.length === 0) return;
 
     if (currentKitIndex >= kits.length - 1) {
       if (replayAtEnd) {
         setCurrentKitIndex(0);
+      } else {
+        resetPlayback(null);
       }
-      setIsPlaying(false);
       return;
     }
 
     setCurrentKitIndex((prev) => prev + 1);
-    setIsPlaying(false);
-  };
+    resetPlayback(null);
+  }
 
-  const prev = () => {
+  function prev() {
     if (currentKitIndex <= 0) {
       setCurrentKitIndex(0);
-      setIsPlaying(false);
+      resetPlayback(null);
       return;
     }
 
     setCurrentKitIndex((prevIndex) => prevIndex - 1);
-    setIsPlaying(false);
-  };
+    resetPlayback(null);
+  }
 
-  const togglePlay = async () => {
+  async function togglePlay() {
     const audio = audioRef.current;
-    if (!audio || !playableTrack?.streamUrl || isLoadingPlayback) return;
+    const src = playableTrack?.streamUrl ?? null;
+    if (!audio || !src || isLoadingPlayback) return;
 
-    if (semitoneShift === 0) {
-      try {
-        if (audio.paused) {
-          setIsLoadingPlayback(true);
-          await audio.play();
-          setIsPlaying(true);
-        } else {
-          audio.pause();
-          setIsPlaying(false);
-        }
-      } catch {
-        setIsPlaying(false);
-      } finally {
-        setIsLoadingPlayback(false);
-      }
+    const normalizedCurrentSrc = audio.currentSrc || audio.src || audio.getAttribute("src") || "";
+    if (!normalizedCurrentSrc.includes(src) && normalizedCurrentSrc !== src) {
+      resetPlayback(src);
+    }
+
+    if (isPlaying) {
+      try { pitchControllerRef.current?.pause(); } catch {}
+      audio.pause();
+      setIsPlaying(false);
       return;
     }
 
@@ -233,56 +230,66 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
     try {
       setIsLoadingPlayback(true);
 
-      if (!pitchControllerRef.current) {
-        const engine = getPitchEngine();
-        const controller = await engine.createPlayback({ audio, semitoneShift });
-
-        if (session !== pitchSessionRef.current) {
-          controller.dispose();
-          return;
-        }
-
-        pitchControllerRef.current = controller;
-      } else {
-        pitchControllerRef.current.setSemitoneShift(semitoneShift);
+      if (semitoneShift === 0) {
+        await audio.play();
+        if (session === pitchSessionRef.current) setIsPlaying(true);
+        return;
       }
-
-      if (isPlaying) {
-        pitchControllerRef.current.pause();
-        setIsPlaying(false);
-      } else {
-        await pitchControllerRef.current.play();
-        setIsPlaying(true);
-      }
-    } catch (error) {
-      console.error("[PlaylistPlayer] pitch engine failed, falling back to native", error);
 
       disposePitchController();
+      const controller = await getPitchEngine().createPlayback({ audio, semitoneShift });
 
-      try {
-        await audio.play();
-        setIsPlaying(true);
-      } catch {
-        setIsPlaying(false);
+      if (session !== pitchSessionRef.current) {
+        controller.dispose();
+        return;
       }
+
+      pitchControllerRef.current = controller;
+      await controller.play();
+      if (session === pitchSessionRef.current) setIsPlaying(true);
+    } catch (error) {
+      console.error("[PlaylistPlayer] playback failed", error);
+      setIsPlaying(false);
     } finally {
       setIsLoadingPlayback(false);
     }
-  };
+  }
+
+  function handleToneChange(tone: string) {
+    if (!currentKit) return;
+
+    const previewResolution = resolveToneTrack({
+      tracks: currentKit.tracks,
+      requestedTone: tone,
+      allowPitchShift: currentKit.allow_pitch_shift,
+      maxPitchShiftSemitones: currentKit.max_pitch_shift_semitones,
+      pickTrack: (tracks) => {
+        const exactVoice = selectedVoice ? tracks.find((track) => track.voice === selectedVoice) : null;
+        return exactVoice ?? tracks.find((track) => track.voice === "todos") ?? tracks[0] ?? null;
+      },
+    });
+
+    const voices = getVoiceOptions(currentKit, previewResolution?.sourceTone ?? tone);
+    setSelectedTone(tone);
+    setSelectedVoice(voices.includes(selectedVoice as PlaylistTrackVoice) ? selectedVoice : firstVoice(voices));
+    resetPlayback(null);
+  }
+
+  function handleVoiceChange(voice: PlaylistTrackVoice) {
+    setSelectedVoice(voice);
+    resetPlayback(null);
+  }
 
   if (!currentKit) {
     return <main className="min-h-screen bg-[radial-gradient(circle_at_top,#1f2840_0%,#06070c_40%)] p-6 text-white">Playlist vazia.</main>;
   }
 
-  const selectedSource = currentTrack?.sourceType ?? null;
-  const isSelectedToneReal = selectedSource === "original";
-  const canPlaySelectedTone = Boolean(playableTrack?.streamUrl);
-  const trackMidiRange = getTrackMidiRange(currentTrack);
-
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,#1f2840_0%,#06070c_40%)] p-4 md:p-8">
       <audio
+        key={activeTrackKey}
         ref={audioRef}
+        preload="metadata"
         src={playableTrack?.streamUrl ?? undefined}
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
@@ -314,24 +321,19 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
                     <span className="mb-2 block text-xs uppercase tracking-[0.18em] text-zinc-400">Tom</span>
                     <select
                       value={selectedTone}
-                      onChange={(event) => {
-                        const tone = event.target.value;
-                        const previewResolution = currentKit ? resolveToneTrack({
+                      onChange={(event) => handleToneChange(event.target.value)}
+                      className="h-11 w-full rounded-xl border border-white/15 bg-black/30 px-3 text-sm text-white outline-none"
+                    >
+                      {toneOptions.map((tone) => {
+                        const optionResolution = currentKit ? resolveToneTrack({
                           tracks: currentKit.tracks,
                           requestedTone: tone,
                           allowPitchShift: currentKit.allow_pitch_shift,
                           maxPitchShiftSemitones: currentKit.max_pitch_shift_semitones,
+                          pickTrack: (tracks) => tracks.find((item) => item.voice === selectedVoice) ?? tracks.find((item) => item.voice === "todos") ?? tracks[0] ?? null,
                         }) : null;
-                        const voices = currentKit ? getVoiceOptions(currentKit, previewResolution?.sourceTone ?? tone) : [];
-                        setSelectedTone(tone);
-                        setSelectedVoice(voices.includes(selectedVoice as PlaylistTrackVoice) ? selectedVoice : voices.includes("todos") ? "todos" : voices[0] ?? "");
-                        setIsPlaying(false);
-                      }}
-                      className="h-11 w-full rounded-xl border border-white/15 bg-black/30 px-3 text-sm text-white outline-none"
-                    >
-                      {toneOptions.map((tone) => {
-                        const track = currentKit?.tracks.find((item) => item.tone === tone && (item.voice === selectedVoice || !selectedVoice)) ?? currentKit?.tracks.find((item) => item.tone === tone) ?? null;
-                        return <option key={tone} value={tone}>{tone} • {toneStatusLabel(track?.sourceType)}</option>;
+                        const optionTrack = optionResolution?.sourceTrack ?? null;
+                        return <option key={tone} value={tone}>{tone} • {toneStatusLabel(optionTrack?.sourceType)}</option>;
                       })}
                     </select>
                   </label>
@@ -340,10 +342,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
                     <span className="mb-2 block text-xs uppercase tracking-[0.18em] text-zinc-400">Voz / Nipe</span>
                     <select
                       value={selectedVoice}
-                      onChange={(event) => {
-                        setSelectedVoice(event.target.value as PlaylistTrackVoice);
-                        setIsPlaying(false);
-                      }}
+                      onChange={(event) => handleVoiceChange(event.target.value as PlaylistTrackVoice)}
                       className="h-11 w-full rounded-xl border border-white/15 bg-black/30 px-3 text-sm text-white outline-none"
                     >
                       {voiceOptions.map((voice) => <option key={voice} value={voice}>{voiceLabel(voice)}</option>)}
@@ -351,28 +350,15 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
                   </label>
                 </div>
 
-                <p className="mt-4 text-sm text-zinc-300">Áudio selecionado: {currentTrack ? `${selectedTone} • ${voiceLabel(currentTrack.voice)}` : "Indisponível"}</p>
-                <p className="mt-1 text-xs text-zinc-500">Tom original: {currentKit.original_tone ?? "não informado"} • Tom inicial: {currentKit.default_tone ?? currentKit.original_tone ?? "automático"}</p>
+                <p className="mt-4 text-sm text-zinc-300">
+                  Áudio selecionado: {currentTrack ? `${selectedTone} • ${voiceLabel(currentTrack.voice)}` : "Indisponível"}
+                </p>
+                <p className="mt-1 text-xs text-zinc-500">
+                  Tom original: {currentKit.original_tone ?? "não informado"} • Tom inicial: {currentKit.default_tone ?? currentKit.original_tone ?? "automático"}
+                </p>
                 {toneResolution?.isPitchShifted ? (
                   <p className="mt-2 rounded-xl border border-gold-400/20 bg-gold-400/10 px-3 py-2 text-xs text-gold-200">
                     Harmomus AI: usando {toneResolution.sourceTone} {toneResolution.semitoneShift > 0 ? `+${toneResolution.semitoneShift}` : toneResolution.semitoneShift} semitom(ns).
-                  </p>
-                ) : null}
-                {tessituraAnalysis ? (
-                  <div className="mt-3 rounded-xl border border-white/10 bg-black/25 px-3 py-3 text-xs text-zinc-200">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-full border border-white/10 px-2 py-1 text-zinc-200">Zona: {tessituraStatusLabel(tessituraAnalysis.status)}</span>
-                      <span className="rounded-full border border-white/10 px-2 py-1 text-zinc-200">Nipe sugerido: {voiceLabel(tessituraAnalysis.suggestedRange)}</span>
-                      {tessituraAnalysis.suggestedOctaveShift !== 0 ? <span className="rounded-full border border-gold-400/20 px-2 py-1 text-gold-200">Oitava: {tessituraAnalysis.suggestedOctaveShift > 0 ? "+1" : "-1"}</span> : null}
-                    </div>
-                    <p className="mt-2 text-zinc-300">{tessituraAnalysis.message}</p>
-                    <p className="mt-1 text-zinc-500">
-                      Faixa original: {trackMidiRange ? `${midiToBrazilianNote(trackMidiRange.min)} → ${midiToBrazilianNote(trackMidiRange.max)}` : "não analisada"} • Após ajuste: {midiToBrazilianNote(tessituraAnalysis.targetMidiRange.min)} → {midiToBrazilianNote(tessituraAnalysis.targetMidiRange.max)}
-                    </p>
-                  </div>
-                ) : currentTrack ? (
-                  <p className="mt-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-zinc-400">
-                    Tessitura ainda não analisada para esta faixa.
                   </p>
                 ) : null}
                 {!toneResolution?.isAvailable && selectedTone ? (
@@ -406,7 +392,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
                     {isPlaying ? <Pause size={20} /> : <Play size={20} />}
                   </button>
                   <button onClick={next} className="rounded-full border border-white/20 p-3 text-white"><SkipForward size={18} /></button>
-                  <button onClick={() => setReplayAtEnd((v) => !v)} className={`rounded-full border px-4 py-2 text-sm ${replayAtEnd ? "border-gold-300 text-gold-300" : "border-white/20 text-zinc-200"}`}>
+                  <button onClick={() => setReplayAtEnd((value) => !value)} className={`rounded-full border px-4 py-2 text-sm ${replayAtEnd ? "border-gold-300 text-gold-300" : "border-white/20 text-zinc-200"}`}>
                     Replay {replayAtEnd ? "ON" : "OFF"}
                   </button>
                   <span className="text-xs text-zinc-400">{isSelectedToneReal ? "Original" : "Harmomus IA"}</span>
