@@ -14,6 +14,16 @@ import { createClient } from "@/lib/supabase/server";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+function resolveRequiredPlanForTracking(kit: any) {
+  if (kit?.requiredPlan?.slug) return kit.requiredPlan.slug;
+
+  const allowed = Array.isArray(kit?.allowedPlanSlugs) ? kit.allowedPlanSlugs : [];
+  if (allowed.includes("free")) return "free";
+  if (allowed.includes("plus")) return "plus";
+  if (allowed.includes("premium")) return "premium";
+  return "premium";
+}
+
 export default async function BibliotecaKitPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const kit = await getPublishedKitBySlug(slug);
@@ -36,8 +46,11 @@ export default async function BibliotecaKitPage({ params }: { params: Promise<{ 
         metadata: {
           feature: "kit_page",
           kitId: kit.id,
-          requiredPlan: kit.requiredPlan?.slug ?? null,
+          kitSlug: kit.slug,
+          kitName: kit.name,
+          requiredPlan: resolveRequiredPlanForTracking(kit),
           userPlan: current.effectiveSlug,
+          reason: accessContext.play.reason,
         },
       });
     } catch {}
