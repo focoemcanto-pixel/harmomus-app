@@ -11,27 +11,41 @@ function confirmationErrorUrl(request: Request, reason = "callback") {
   return new URL(`/auth/confirm?error=${encodeURIComponent(reason)}`, request.url);
 }
 
+function normalizeNext(raw: string | null) {
+  if (!raw || !raw.startsWith("/")) return "/login?confirmed=1";
+  return raw;
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
+  const code = url.searchParams.get("code");
   const tokenHash = url.searchParams.get("token_hash");
-  const type = url.searchParams.get("type");
-
-  if (!tokenHash || !type || !ALLOWED_TYPES.has(type)) {
-    return NextResponse.redirect(confirmationErrorUrl(request, "link_invalido"), 303);
-  }
-
-  const otpType = (type === "email" ? "signup" : type) as EmailOtpType;
+  const type = url.searchParams.get("type") ?? "signup";
+  const next = normalizeNext(url.searchParams.get("next"));
   const supabase = await createClient();
 
-  const { error } = await supabase.auth.verifyOtp({
-    token_hash: tokenHash,
-    type: otpType,
-  });
+  if (code) {
+    const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+    if (exchangeError) {
+      console.error("[auth.confirm.callback] exchangeCodeForSession failed", exchangeError);
+      return NextResponse.redirect(confirmationErrorUrl(request, "callback"), 303);
+    }
+  } else {
+    if (!tokenHash || !ALLOWED_TYPES.has(type)) {
+      return NextResponse.redirect(confirmationErrorUrl(request, "link_invalido"), 303);
+    }
 
-  if (error) {
-    console.error("[auth.confirm.callback] verifyOtp failed", error);
-    const reason = String(error.message ?? "").toLowerCase().includes("expired") ? "link_expirado" : "callback";
-    return NextResponse.redirect(confirmationErrorUrl(request, reason), 303);
+    const otpType = (type === "email" ? "signup" : type) as EmailOtpType;
+    const { error } = await supabase.auth.verifyOtp({
+      token_hash: tokenHash,
+      type: otpType,
+    });
+
+    if (error) {
+      console.error("[auth.confirm.callback] verifyOtp failed", error);
+      const reason = String(error.message ?? "").toLowerCase().includes("expired") ? "link_expirado" : "callback";
+      return NextResponse.redirect(confirmationErrorUrl(request, reason), 303);
+    }
   }
 
   const { data: authUser } = await supabase.auth.getUser();
@@ -40,6 +54,7 @@ export async function GET(request: Request) {
   if (user?.id) {
     const fullName = String(user.user_metadata?.full_name ?? "").trim() || user.email || "";
     const planSlug = String(user.user_metadata?.plan_slug ?? "free").toLowerCase();
+    const eventType = (type === "email" ? "signup" : type) as EmailOtpType;
 
     await ensureUserAccess({
       id: user.id,
@@ -53,6 +68,7 @@ export async function GET(request: Request) {
       .update({
         onboarding_status: "email_confirmed",
         onboarding_step: "waiting_first_login",
+        updated_at: new Date().toISOString(),
       })
       .eq("id", user.id);
 
@@ -71,12 +87,12 @@ export async function GET(request: Request) {
         },
         data: {
           user_id: user.id,
-          type: otpType,
+          type: eventType,
           plan: planSlug,
         },
       });
 
-      if (otpType === "signup" && planSlug === "free") {
+      if (eventType === "signup" && planSlug === "free") {
         await dispatchWebhookEvent({
           event: "plan.free_activated",
           source: "auth.signup_confirmed",
@@ -97,5 +113,5 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.redirect(new URL("/login?confirmed=1", request.url), 303);
+  return NextResponse.redirect(new URL(next, request.url), 303);
 }
