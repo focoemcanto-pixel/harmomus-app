@@ -53,7 +53,7 @@ export async function POST(request: Request) {
     .from("ministry_members")
     .select("id", { count: "exact", head: true })
     .eq("ministry_id", ministry.id)
-    .in("status", ["active", "pending", "invited"]);
+    .in("status", ["active", "pending"]);
 
   if ((usedSeats ?? 0) >= Number(ministry.seat_limit ?? 0)) {
     return redirectToMinisterio(request, "Você atingiu o limite de vagas do seu plano.");
@@ -64,7 +64,7 @@ export async function POST(request: Request) {
     .select("id,status")
     .eq("ministry_id", ministry.id)
     .ilike("invited_email", email)
-    .in("status", ["active", "pending", "invited"])
+    .in("status", ["active", "pending"])
     .maybeSingle();
 
   if (existingMember?.id) {
@@ -109,9 +109,9 @@ export async function POST(request: Request) {
     ministry_id: context.ministry.ministryId,
     user_id: null,
     invited_email: email,
-    invited_name: name,
-    role: "member",
-    status: profile?.id ? "pending" : "invited",
+    invited_name: name || null,
+    role,
+    status: "pending",
     invite_token: token,
     invited_by: context.profile.id,
     invited_at: now,
