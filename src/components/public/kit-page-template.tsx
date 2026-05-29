@@ -210,6 +210,9 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
     return (
       <PremiumKitGateCard
         mode={accessContext?.isGuest ? "guest" : "upgrade"}
+        reason={accessContext?.play?.reason}
+        requiredPlan={accessContext?.play?.requiredPlan}
+        stats={accessContext?.play?.stats}
       />
     );
   }
@@ -317,7 +320,18 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
   }
 
   function handleSelectVoice(voice: VoiceType) {
-    if (voice !== selectedVoice) stopPlayback();
+    if (!accessContext.tone.allowed && voice !== "todos") {
+      setUpgradeConfig({
+        title: "Vozes separadas são um recurso Premium.",
+        message: "Assine o Premium para estudar soprano, contralto e tenor separadamente.",
+        ctaLabel: "Fazer upgrade para Premium",
+        ctaHref: "/assinar?plan=premium",
+      });
+      setUpgradeOpen(true);
+      return;
+    }
+
+    stopPlayback();
     setSelectedVoice(voice);
   }
 
@@ -401,18 +415,18 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
                     } else if (accessContext.play.reason === "free_limit") {
                       setUpgradeConfig({
                         title: "Você atingiu seu limite gratuito de hoje.",
-                        message: "Assine o Premium e continue estudando sem interrupções.",
-                        ctaLabel: "Liberar acesso com Premium",
-                        ctaHref: "/assinar?plan=premium",
+                        message: "Seu plano Free permite acessar até 3 kits diferentes a cada 24 horas. Faça upgrade para continuar estudando sem interrupções.",
+                        ctaLabel: "Fazer upgrade",
+                        ctaHref: "/assinar?plan=plus",
                       });
                     } else {
                       const requiredPlan = accessContext.play.requiredPlan ?? "premium";
                       const planLabel = requiredPlan === "plus" ? "Plus" : "Premium";
                       setUpgradeConfig({
-                        title: `Este kit requer plano ${planLabel}.`,
-                        message: "Faça upgrade para desbloquear este conteúdo agora.",
-                        ctaLabel: "Assinar Premium",
-                        ctaHref: "/assinar?plan=premium",
+                        title: requiredPlan === "plus" ? "Kit exclusivo para Plus e Premium." : "Kit exclusivo para Premium.",
+                        message: requiredPlan === "plus" ? "Faça upgrade para desbloquear este kit e toda a biblioteca Plus." : "Faça upgrade para acessar este kit, modulação inteligente e recursos avançados.",
+                        ctaLabel: requiredPlan === "plus" ? "Conhecer plano Plus" : "Assinar Premium",
+                        ctaHref: requiredPlan === "plus" ? "/assinar?plan=plus" : "/assinar?plan=premium",
                       });
                     }
                     setUpgradeOpen(true);
