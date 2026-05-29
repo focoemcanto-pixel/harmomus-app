@@ -4,6 +4,51 @@ import { PublicShellClient } from "@/components/public/public-shell-client";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { getAdminSettings } from "@/lib/data/admin-settings";
 import { getPublishedKitSearchItems } from "@/lib/data/public-kits";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+
+async function getRemovedMinistryNotice(userId?: string | null) {
+  if (!userId) return null;
+
+  const admin = createSupabaseAdminClient() as any;
+  const { data } = await admin
+    .from("ministry_members")
+    .select("id,removed_at,updated_at,ministry:ministries(name)")
+    .eq("user_id", userId)
+    .eq("status", "removed")
+    .order("removed_at", { ascending: false, nullsFirst: false })
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!data?.id) return null;
+
+  return {
+    ministryName: data.ministry?.name || "seu ministério",
+  };
+}
+
+function RemovedMinistryUpsellBanner({ ministryName }: { ministryName: string }) {
+  return (
+    <div className="border-b border-amber-300/20 bg-gradient-to-r from-amber-500/15 via-fuchsia-500/10 to-cyan-500/10 px-4 py-4 text-white">
+      <div className="mx-auto flex max-w-7xl flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-amber-100">Seu acesso Premium Ministerial foi encerrado.</p>
+          <p className="mt-1 text-xs leading-5 text-zinc-200 md:text-sm">
+            Você não faz mais parte de <strong>{ministryName}</strong>. Sua conta Harmomus continua ativa no plano gratuito.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/assinar?plan=premium" className="rounded-xl bg-cyan-300 px-4 py-2 text-xs font-bold text-slate-950 transition hover:bg-cyan-200 md:text-sm">
+            Assinar Premium individual
+          </Link>
+          <Link href="/todos-os-kits" className="rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-xs font-semibold text-white transition hover:bg-white/10 md:text-sm">
+            Continuar Free
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export async function PublicAppShell({ children }: { children: React.ReactNode }) {
   const [context, searchItems, settings] = await Promise.all([
@@ -11,6 +56,10 @@ export async function PublicAppShell({ children }: { children: React.ReactNode }
     getPublishedKitSearchItems(),
     getAdminSettings(),
   ]);
+
+  const removedMinistryNotice = !context.isGuest && !context.ministry && context.effectiveSlug === "free"
+    ? await getRemovedMinistryNotice(context.profile?.id)
+    : null;
 
   const logoUrl = settings.branding.logoUrl;
   const appName = settings.branding.appName || "Harmomus";
@@ -42,7 +91,10 @@ export async function PublicAppShell({ children }: { children: React.ReactNode }
         </div>
       </header>
 
-      <div className="pt-20 md:pt-28">{children}</div>
+      <div className="pt-20 md:pt-28">
+        {removedMinistryNotice ? <RemovedMinistryUpsellBanner ministryName={removedMinistryNotice.ministryName} /> : null}
+        {children}
+      </div>
     </main>
   );
 }
