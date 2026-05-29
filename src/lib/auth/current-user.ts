@@ -74,29 +74,36 @@ function normalizeEffectivePlanSlug(value: unknown): EffectivePlanSlug {
   return "free";
 }
 
-function buildMinistryContext(ministryMembership: any): MinistryAccessContext | null {
-  const ministry = ministryMembership?.ministry;
+function buildMinistryContextFromRows(membership: any, ministry: any): MinistryAccessContext | null {
   const ministryActive = ministry && ["active", "trialing"].includes(String(ministry.status ?? "").toLowerCase());
-
-  if (!ministryActive) return null;
+  if (!membership || !ministryActive) return null;
 
   return {
     ministryId: ministry.id as string,
-    role: ministryMembership.role as "owner" | "manager" | "member",
+    role: membership.role as "owner" | "manager" | "member",
     seatLimit: Number(ministry.seat_limit ?? 0),
     planType: String(ministry.plan_type ?? ""),
   };
 }
 
 async function getActiveMinistryMembership(admin: any, userId: string) {
-  const { data } = await admin
+  const { data: membership } = await admin
     .from("ministry_members")
-    .select("role,ministry:ministries(*)")
+    .select("id,ministry_id,role,status")
     .eq("user_id", userId)
     .eq("status", "active")
     .maybeSingle();
 
-  return data ?? null;
+  if (!membership?.ministry_id) return null;
+
+  const { data: ministry } = await admin
+    .from("ministries")
+    .select("id,status,seat_limit,plan_type")
+    .eq("id", membership.ministry_id)
+    .maybeSingle();
+
+  if (!ministry) return null;
+  return { ...membership, ministry };
 }
 
 export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessContext> {
@@ -118,7 +125,7 @@ export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessCo
   const usableSubscription = isSubscriptionUsable(typedSubscription, rawPlanSlug);
 
   let ministryMembership = await getActiveMinistryMembership(admin, data.user.id);
-  let ministryContext = buildMinistryContext(ministryMembership);
+  let ministryContext = buildMinistryContextFromRows(ministryMembership, ministryMembership?.ministry);
 
   if (!ministryContext && usableSubscription && isMinistryPlanSlug(rawPlanSlug)) {
     await ensureMinistryForSubscription({
@@ -133,7 +140,7 @@ export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessCo
     });
 
     ministryMembership = await getActiveMinistryMembership(admin, data.user.id);
-    ministryContext = buildMinistryContext(ministryMembership);
+    ministryContext = buildMinistryContextFromRows(ministryMembership, ministryMembership?.ministry);
   }
 
   const effectiveSlug: EffectivePlanSlug = ministryContext
