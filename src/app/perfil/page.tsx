@@ -3,21 +3,32 @@ import { redirect } from "next/navigation";
 import { ProfilePageClient } from "@/components/public/profile-page-client";
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
-import { createClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+
+async function safeCount(query: PromiseLike<{ count: number | null; error?: unknown }>) {
+  try {
+    const { count, error } = await query;
+    if (error) return 0;
+    return count ?? 0;
+  } catch {
+    return 0;
+  }
+}
 
 export default async function PerfilPage() {
   const context = await getCurrentUserAccessContext();
   if (context.isGuest) redirect("/login");
 
-  const supabase = await createClient();
+  const supabase = createSupabaseAdminClient() as any;
   const userId = context.profile?.id ?? "";
   const today = new Date();
   const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())).toISOString();
 
-  const [{ count: playlists }, { count: kitsToday }, { count: history }] = await Promise.all([
-    (supabase as any).from("playlists").select("id", { count: "exact", head: true }).eq("user_id", userId),
-    (supabase as any).from("kit_access_logs").select("id", { count: "exact", head: true }).eq("user_id", userId).gte("accessed_at", start),
-    (supabase as any).from("kit_access_logs").select("id", { count: "exact", head: true }).eq("user_id", userId),
+  const [playlists, favorites, kitsToday, history] = await Promise.all([
+    safeCount((supabase as any).from("playlists").select("id", { count: "exact", head: true }).eq("user_id", userId)),
+    safeCount((supabase as any).from("kit_favorites").select("id", { count: "exact", head: true }).eq("user_id", userId)),
+    safeCount((supabase as any).from("audio_access_logs").select("id", { count: "exact", head: true }).eq("user_id", userId).eq("status", "allowed").gte("accessed_at", start)),
+    safeCount((supabase as any).from("audio_access_logs").select("id", { count: "exact", head: true }).eq("user_id", userId).eq("status", "allowed")),
   ]);
 
   return <PublicAppShell><ProfilePageClient
@@ -28,6 +39,6 @@ export default async function PerfilPage() {
     avatarUrl={context.profile?.avatar_url ?? null}
     planName={context.plan?.name ?? "Free"}
     subscriptionStatus={context.subscription?.status ?? "inactive"}
-    stats={{ playlists: playlists ?? 0, favorites: 0, history: history ?? 0, kitsToday: kitsToday ?? 0 }}
+    stats={{ playlists, favorites, history, kitsToday }}
   /></PublicAppShell>;
 }
