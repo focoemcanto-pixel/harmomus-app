@@ -10,8 +10,8 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
     }
 
-    const body = await request.json();
-    const fullName = String(body.full_name ?? "").trim();
+    const body = await request.json().catch(() => null);
+    const fullName = String(body?.full_name ?? "").trim();
 
     if (!fullName) {
       return NextResponse.json({ error: "Informe seu nome." }, { status: 400 });
