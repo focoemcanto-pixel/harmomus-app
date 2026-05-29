@@ -20,6 +20,7 @@ type AccessLogRow = {
   accessed_at?: string | null;
   created_at?: string | null;
   status?: string | null;
+  reason?: string | null;
   device_type?: string | null;
   plan_slug?: string | null;
   page_path?: string | null;
@@ -37,6 +38,14 @@ function sinceDate(period: AnalyticsPeriod = "30") {
   date.setDate(date.getDate() - days + 1);
   date.setHours(0, 0, 0, 0);
   return date.toISOString();
+}
+
+function isAllowed(row: AccessLogRow) {
+  return norm(row.status) === "allowed";
+}
+
+function isDenied(row: AccessLogRow) {
+  return norm(row.status) === "denied";
 }
 
 function filterRows(rows: AccessLogRow[], filters: AnalyticsFilters) {
@@ -58,8 +67,8 @@ async function getBaseLogs(filters: AnalyticsFilters): Promise<AccessLogRow[]> {
   const supabase = createSupabaseAdminClient() as any;
   const since = sinceDate(filters.period ?? "30");
 
-  const fullSelect = "id,user_id,session_id,kit_id,audio_file_id,accessed_at,created_at,status,device_type,plan_slug,page_path,kit_audio_files(name,tone),kits(id,name,slug),profiles(full_name,email)";
-  const legacySelect = "id,user_id,kit_id,audio_file_id,accessed_at,status,kit_audio_files(name,tone),kits(id,name,slug),profiles(full_name,email)";
+  const fullSelect = "id,user_id,session_id,kit_id,audio_file_id,accessed_at,created_at,status,reason,device_type,plan_slug,page_path,kit_audio_files(name,tone),kits(id,name,slug),profiles(full_name,email)";
+  const legacySelect = "id,user_id,kit_id,audio_file_id,accessed_at,status,reason,kit_audio_files(name,tone),kits(id,name,slug),profiles(full_name,email)";
 
   const fullResponse = await supabase
     .from("audio_access_logs")
@@ -91,17 +100,23 @@ export async function getAdminAnalyticsSummary(filters: AnalyticsFilters) {
     supabase.from("plans").select("id,slug,name").then((r: any) => r.data ?? []),
   ]);
 
-  const uniqueUsers = new Set(logs.map((l) => l.user_id).filter(Boolean));
-  const uniqueSessions = new Set(logs.map((l) => l.session_id ?? l.id).filter(Boolean));
+  const allowedLogs = logs.filter(isAllowed);
+  const deniedLogs = logs.filter(isDenied);
+  const uniqueUsers = new Set(allowedLogs.map((l) => l.user_id).filter(Boolean));
+  const uniqueSessions = new Set(allowedLogs.map((l) => l.session_id ?? l.id).filter(Boolean));
   const days = Number(filters.period ?? "30");
   const planById = new Map((plans as any[]).map((p) => [p.id, p.slug]));
   const activePlanSlugs = (subscriptions as any[]).map((s) => planById.get(s.plan_id) ?? "free");
+  const totalAttempts = allowedLogs.length + deniedLogs.length;
 
   return {
-    plays: logs.length,
+    plays: allowedLogs.length,
+    denied: deniedLogs.length,
+    totalAttempts,
+    denyRate: totalAttempts ? Number(((deniedLogs.length / totalAttempts) * 100).toFixed(1)) : 0,
     uniqueUsers: uniqueUsers.size,
     uniqueSessions: uniqueSessions.size,
-    avgDailyPlays: Number((logs.length / days).toFixed(1)),
+    avgDailyPlays: Number((allowedLogs.length / days).toFixed(1)),
     activeSubscribers: (subscriptions as any[]).length,
     premiumActive: activePlanSlugs.filter((s) => s === "premium" || String(s).startsWith("ministry_")).length,
     plusActive: activePlanSlugs.filter((s) => s === "plus").length,
@@ -112,7 +127,7 @@ export async function getAdminAnalyticsSummary(filters: AnalyticsFilters) {
 }
 
 export async function getPlaysByDay(filters: AnalyticsFilters) {
-  const logs = await getBaseLogs(filters);
+  const logs = (await getBaseLogs(filters)).filter(isAllowed);
   const map = new Map<string, number>();
   logs.forEach((l) => {
     const source = l.accessed_at ?? l.created_at ?? new Date().toISOString();
@@ -123,28 +138,58 @@ export async function getPlaysByDay(filters: AnalyticsFilters) {
 }
 
 export async function getDeviceBreakdown(filters: AnalyticsFilters) {
-  const logs = await getBaseLogs(filters);
+  const logs = (await getBaseLogs(filters)).filter(isAllowed);
   const map = new Map<string, number>();
   logs.forEach((l)=>{ const k = norm(l.device_type) || "não informado"; map.set(k, (map.get(k)??0)+1); });
   return Array.from(map.entries()).map(([label, value])=>({label,value}));
 }
 
 export async function getPlanBreakdown(filters: AnalyticsFilters) {
-  const logs = await getBaseLogs(filters);
+  const logs = (await getBaseLogs(filters)).filter(isAllowed);
   const map = new Map<string, number>();
   logs.forEach((l)=>{ const k = norm(l.plan_slug) || "não informado"; map.set(k, (map.get(k)??0)+1); });
   return Array.from(map.entries()).map(([label, value])=>({label,value}));
 }
 
 function topN(map: Map<string, number>, limit = 10) { return Array.from(map.entries()).sort((a,b)=>b[1]-a[1]).slice(0, limit).map(([label, value])=>({ label, value })); }
-export async function getTopSongs(filters: AnalyticsFilters) { const logs = await getBaseLogs(filters); const map = new Map<string, number>(); logs.forEach((l)=>{ const k = l.kit_audio_files?.name ?? "Faixa não informada"; map.set(k, (map.get(k)??0)+1); }); return topN(map); }
-export async function getTopKits(filters: AnalyticsFilters) { const logs = await getBaseLogs(filters); const map = new Map<string, number>(); logs.forEach((l)=>{ const k = l.kits?.name ?? "Kit não informado"; map.set(k, (map.get(k)??0)+1); }); return topN(map); }
-export async function getTopUsers(filters: AnalyticsFilters) { const logs = await getBaseLogs(filters); const map = new Map<string, number>(); logs.forEach((l)=>{ const k = l.profiles?.full_name || l.profiles?.email || l.user_id || "Usuário não informado"; map.set(k, (map.get(k)??0)+1); }); return topN(map); }
-export async function getTopTones(filters: AnalyticsFilters) { const logs = await getBaseLogs(filters); const map = new Map<string, number>(); logs.forEach((l)=>{ const k = l.kit_audio_files?.tone ?? "Tom não informado"; map.set(k, (map.get(k)??0)+1); }); return topN(map); }
-export async function getTopVoices(filters: AnalyticsFilters) { const logs = await getBaseLogs(filters); const map = new Map<string, number>(); logs.forEach((l)=>{ const k = l.kit_audio_files?.name ?? "Voz/Faixa não informada"; map.set(k, (map.get(k)??0)+1); }); return topN(map); }
+export async function getTopSongs(filters: AnalyticsFilters) { const logs = (await getBaseLogs(filters)).filter(isAllowed); const map = new Map<string, number>(); logs.forEach((l)=>{ const k = l.kit_audio_files?.name ?? "Faixa não informada"; map.set(k, (map.get(k)??0)+1); }); return topN(map); }
+export async function getTopKits(filters: AnalyticsFilters) { const logs = (await getBaseLogs(filters)).filter(isAllowed); const map = new Map<string, number>(); logs.forEach((l)=>{ const k = l.kits?.name ?? "Kit não informado"; map.set(k, (map.get(k)??0)+1); }); return topN(map); }
+export async function getTopUsers(filters: AnalyticsFilters) { const logs = (await getBaseLogs(filters)).filter(isAllowed); const map = new Map<string, number>(); logs.forEach((l)=>{ const k = l.profiles?.full_name || l.profiles?.email || l.user_id || "Usuário não informado"; map.set(k, (map.get(k)??0)+1); }); return topN(map); }
+export async function getTopTones(filters: AnalyticsFilters) { const logs = (await getBaseLogs(filters)).filter(isAllowed); const map = new Map<string, number>(); logs.forEach((l)=>{ const k = l.kit_audio_files?.tone ?? "Tom não informado"; map.set(k, (map.get(k)??0)+1); }); return topN(map); }
+export async function getTopVoices(filters: AnalyticsFilters) { const logs = (await getBaseLogs(filters)).filter(isAllowed); const map = new Map<string, number>(); logs.forEach((l)=>{ const k = l.kit_audio_files?.name ?? "Voz/Faixa não informada"; map.set(k, (map.get(k)??0)+1); }); return topN(map); }
+
+export async function getTopDeniedReasons(filters: AnalyticsFilters) {
+  const logs = (await getBaseLogs(filters)).filter(isDenied);
+  const map = new Map<string, number>();
+  logs.forEach((l) => {
+    const k = l.reason ?? "motivo não informado";
+    map.set(k, (map.get(k) ?? 0) + 1);
+  });
+  return topN(map);
+}
+
+export async function getTopDeniedKits(filters: AnalyticsFilters) {
+  const logs = (await getBaseLogs(filters)).filter(isDenied);
+  const map = new Map<string, number>();
+  logs.forEach((l) => {
+    const k = l.kits?.name ?? "Kit não informado";
+    map.set(k, (map.get(k) ?? 0) + 1);
+  });
+  return topN(map);
+}
+
+export async function getTopGatePages(filters: AnalyticsFilters) {
+  const logs = (await getBaseLogs(filters)).filter(isDenied);
+  const map = new Map<string, number>();
+  logs.forEach((l) => {
+    const k = l.page_path ?? "página não informada";
+    map.set(k, (map.get(k) ?? 0) + 1);
+  });
+  return topN(map);
+}
 
 export async function getRecentPlays(filters: AnalyticsFilters) {
-  const logs = await getBaseLogs(filters);
+  const logs = (await getBaseLogs(filters)).filter(isAllowed);
   return logs.slice(0, 50).map((row) => ({
     when: row.accessed_at ?? row.created_at ?? "",
     kit: row.kits?.name ?? "Kit não informado",
@@ -154,6 +199,21 @@ export async function getRecentPlays(filters: AnalyticsFilters) {
     plan: row.plan_slug ?? "não informado",
     device: row.device_type ?? "não informado",
     toneVoice: `${row.kit_audio_files?.tone ?? "Tom não informado"} / ${row.kit_audio_files?.name ?? "Voz/Faixa não informada"}`,
+    page: row.page_path ?? "não informado",
+  }));
+}
+
+export async function getRecentDenied(filters: AnalyticsFilters) {
+  const logs = (await getBaseLogs(filters)).filter(isDenied);
+  return logs.slice(0, 30).map((row) => ({
+    when: row.accessed_at ?? row.created_at ?? "",
+    kit: row.kits?.name ?? "Kit não informado",
+    kitSlug: row.kits?.slug ?? "",
+    track: row.kit_audio_files?.name ?? "Faixa não informada",
+    user: row.profiles?.full_name ?? row.profiles?.email ?? row.user_id ?? "Usuário não informado",
+    plan: row.plan_slug ?? "não informado",
+    device: row.device_type ?? "não informado",
+    reason: row.reason ?? "motivo não informado",
     page: row.page_path ?? "não informado",
   }));
 }
