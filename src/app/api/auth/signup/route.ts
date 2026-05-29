@@ -4,6 +4,7 @@ import { ensureUserAccess } from "@/lib/auth/ensure-user-access";
 import { trackMarketingEvent } from "@/lib/communications/events";
 import { formatPhoneBR, normalizePhoneInternational } from "@/lib/communications/phone";
 import { startStripeCheckoutForSignup } from "@/lib/data/billing";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
 
@@ -38,15 +39,6 @@ function getPostSignupNext(plan: PlanSlug, redirectTo: string) {
   const inviteToken = getMinistryInviteToken(redirectTo);
   if (inviteToken) return `/api/ministerio/accept?token=${encodeURIComponent(inviteToken)}`;
   return plan === "free" ? "/cadastro/sucesso?plan=free" : "/checkout/sucesso";
-}
-
-function getConfirmationWaitingPath(email: string, next: string, isMinistryInviteSignup: boolean) {
-  const params = new URLSearchParams();
-  params.set("plan", "free");
-  params.set("email", email);
-  if (isMinistryInviteSignup) params.set("invite", "1");
-  if (next) params.set("next", next);
-  return `/cadastro/sucesso?${params.toString()}`;
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
@@ -144,6 +136,108 @@ function buildErrorRedirect(
   return NextResponse.redirect(url, 303);
 }
 
+async function createConfirmedMinistryMemberAccount(input: {
+  request: Request;
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  token: string;
+  email: string;
+  password: string;
+  fullName: string;
+  username: string;
+  phone: string;
+  plan: PlanSlug;
+  origin: string;
+}) {
+  const admin = createSupabaseAdminClient() as any;
+  const now = new Date().toISOString();
+
+  const { data: invite, error: inviteError } = await admin
+    .from("ministry_members")
+    .select("id,ministry_id,user_id,status,invited_email,role,ministry:ministries(id,status,seat_limit)")
+    .eq("invite_token", input.token)
+    .maybeSingle();
+
+  if (inviteError || !invite?.id) {
+    throw new Error("Convite não encontrado ou expirado.");
+  }
+
+  if (!["invited", "pending"].includes(String(invite.status))) {
+    throw new Error("Este convite não está mais disponível.");
+  }
+
+  const inviteEmail = String(invite.invited_email ?? "").trim().toLowerCase();
+  if (inviteEmail !== input.email) {
+    throw new Error("Use o mesmo e-mail que recebeu o convite ministerial.");
+  }
+
+  if (!invite.ministry?.id || !["active", "trialing"].includes(String(invite.ministry.status ?? "").toLowerCase())) {
+    throw new Error("O plano ministerial não está ativo.");
+  }
+
+  if (invite.user_id) {
+    throw new Error("Este convite já está vinculado a uma conta. Entre com esse e-mail para aceitar.");
+  }
+
+  const { data: created, error: createError } = await admin.auth.admin.createUser({
+    email: input.email,
+    password: input.password,
+    email_confirm: true,
+    user_metadata: {
+      full_name: input.fullName,
+      username: input.username,
+      phone: input.phone,
+      plan_slug: input.plan,
+      origin: input.origin,
+      ministry_invite_token: input.token,
+    },
+  });
+
+  if (createError || !created?.user?.id) {
+    const message = String(createError?.message ?? "Não foi possível criar a conta.");
+    if (message.toLowerCase().includes("already") || message.toLowerCase().includes("registered") || message.toLowerCase().includes("exists")) {
+      throw new Error("Este e-mail já possui conta. Entre com esse e-mail para aceitar o convite ou recupere sua senha.");
+    }
+    throw new Error(message);
+  }
+
+  await ensureUserAccess({
+    id: created.user.id,
+    email: input.email,
+    fullName: input.fullName,
+    selectedPlanSlug: "free",
+  });
+
+  const { error: memberError } = await admin
+    .from("ministry_members")
+    .update({
+      user_id: created.user.id,
+      status: "active",
+      accepted_at: now,
+      updated_at: now,
+    })
+    .eq("id", invite.id);
+
+  if (memberError) {
+    throw new Error(memberError.message || "Não foi possível ativar o convite ministerial.");
+  }
+
+  const { error: loginError } = await input.supabase.auth.signInWithPassword({
+    email: input.email,
+    password: input.password,
+  });
+
+  if (loginError) {
+    const loginUrl = new URL("/login", input.request.url);
+    loginUrl.searchParams.set("redirect", "/");
+    loginUrl.searchParams.set("message", "Conta criada e convite ativado. Entre com a senha que você acabou de cadastrar.");
+    return NextResponse.redirect(loginUrl, 303);
+  }
+
+  const target = new URL("/", input.request.url);
+  target.searchParams.set("message", "Acesso Premium Ministerial liberado com sucesso.");
+  return NextResponse.redirect(target, 303);
+}
+
 export async function POST(request: Request) {
   const formData = await request.formData();
   const fullName = String(formData.get("full_name") ?? "").trim();
@@ -170,9 +264,43 @@ export async function POST(request: Request) {
 
   const supabase = await createClient();
   const origin = new URL(request.url).origin;
-  const next = getPostSignupNext(plan, redirectTo);
-  const isMinistryInviteSignup = Boolean(getMinistryInviteToken(redirectTo));
+  const inviteToken = getMinistryInviteToken(redirectTo);
+  const isMinistryInviteSignup = Boolean(inviteToken);
 
+  if (isMinistryInviteSignup) {
+    try {
+      const response = await createConfirmedMinistryMemberAccount({
+        request,
+        supabase,
+        token: inviteToken,
+        email,
+        password,
+        fullName,
+        username,
+        phone,
+        plan,
+        origin,
+      });
+
+      runSignupSideEffectsAsync({
+        supabase,
+        plan,
+        origin,
+        fullName,
+        email,
+        phone,
+        username,
+        utmSource,
+        utmCampaign,
+      });
+
+      return response;
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : "Não foi possível ativar o convite ministerial.", "form");
+    }
+  }
+
+  const next = getPostSignupNext(plan, redirectTo);
   const { data, error: createError } = await supabase.auth.signUp({
     email,
     password,
@@ -184,7 +312,6 @@ export async function POST(request: Request) {
         phone,
         plan_slug: plan,
         origin,
-        ministry_invite_redirect: isMinistryInviteSignup ? next : null,
         utm_source: utmSource,
         utm_campaign: utmCampaign,
       },
@@ -233,11 +360,7 @@ export async function POST(request: Request) {
     utmCampaign,
   });
 
-  if (isMinistryInviteSignup && !data.session) {
-    return NextResponse.redirect(new URL(getConfirmationWaitingPath(email, next, true), request.url), 303);
-  }
-
-  if (isPaidPlan(plan) && !isMinistryInviteSignup) {
+  if (isPaidPlan(plan)) {
     try {
       const session = await withTimeout(
         startStripeCheckoutForSignup(userId, email, plan, origin),
