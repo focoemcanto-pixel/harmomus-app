@@ -12,6 +12,7 @@ const ACTIVE_FREE_KIT_COOKIE = "harmomus_active_kit_id";
 export interface FreeAccessStats {
   accessCountToday: number;
   uniqueKitCount24h: number;
+  accessedKitIds: string[];
   remaining: number;
   limit: number;
   nextResetAt: string;
@@ -69,11 +70,12 @@ export async function getFreeAccessStats(userId: string): Promise<FreeAccessStat
 
   const rows = ((data ?? []) as { kit_id: string }[]).filter((row) => row.kit_id);
   const uniqueKitIds = new Set(rows.map((row) => row.kit_id));
+  const accessedKitIds = Array.from(uniqueKitIds);
   const accessCountToday = uniqueKitIds.size;
   const uniqueKitCount24h = uniqueKitIds.size;
   const remaining = Math.max(0, FREE_LIMIT - uniqueKitCount24h);
 
-  return { accessCountToday, uniqueKitCount24h, remaining, limit: FREE_LIMIT, nextResetAt };
+  return { accessCountToday, uniqueKitCount24h, accessedKitIds, remaining, limit: FREE_LIMIT, nextResetAt };
 }
 
 export async function registerKitAccess(userId: string, kitId: string): Promise<FreeAccessStats> {
@@ -81,7 +83,7 @@ export async function registerKitAccess(userId: string, kitId: string): Promise<
   const stats = await getFreeAccessStats(userId);
   const activeKitId = await getActiveFreeKitId();
 
-  if (activeKitId === kitId) return stats;
+  if (activeKitId === kitId || stats.accessedKitIds.includes(kitId)) return stats;
   if (stats.uniqueKitCount24h >= FREE_LIMIT) return stats;
 
   const { error: insertError } = await supabase.from("kit_access_logs").insert({ user_id: userId, kit_id: kitId });
@@ -118,8 +120,9 @@ export async function canPlayAudio(context: CurrentUserAccessContext, kit: Publi
     const stats = await getFreeAccessStats(context.profile.id);
     const dailyLimit = getDailyKitLimit(context.effectiveSlug) ?? FREE_LIMIT;
     const activeKitId = await getActiveFreeKitId();
+    const kitAlreadyCounted = activeKitId === kit.id || stats.accessedKitIds.includes(kit.id);
 
-    if (kitAllowsFree(kit) && stats.uniqueKitCount24h >= dailyLimit && activeKitId !== kit.id) {
+    if (kitAllowsFree(kit) && stats.uniqueKitCount24h >= dailyLimit && !kitAlreadyCounted) {
       return { allowed: false, reason: "free_limit" as const, stats };
     }
 
