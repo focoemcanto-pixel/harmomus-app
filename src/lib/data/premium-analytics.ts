@@ -16,58 +16,85 @@ export type RecentActivity = {
   kit_slug?: string | null;
 };
 
-export type PremiumRequestType = "music_request" | "tone_request" | "feedback";
-export type PremiumRequestStatus = "new" | "in_review" | "done" | "archived";
+export type PremiumRequestType = "song" | "tone" | "feedback";
+export type PremiumRequestStatus = "pending" | "reviewing" | "approved" | "done" | "rejected";
 
-export async function getGlobalTopKits(limit = 10): Promise<TopKit[]> {
-  const supabase = createSupabaseAdminClient() as any;
-  const { data: logs } = await supabase.from("audio_access_logs").select("kit_id").eq("status", "allowed");
+type AudioLog = { id: string; kit_id: string | null; accessed_at?: string | null; kits?: { category_id?: string | null } | null };
+
+function sinceDate(days = 90) {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function countByKit(logs: AudioLog[]) {
   const counts = new Map<string, number>();
-  for (const row of logs ?? []) counts.set(row.kit_id, (counts.get(row.kit_id) ?? 0) + 1);
+  for (const row of logs) {
+    if (!row.kit_id) continue;
+    counts.set(row.kit_id, (counts.get(row.kit_id) ?? 0) + 1);
+  }
+  return counts;
+}
+
+async function fetchAllowedAudioLogs(input?: { userId?: string; days?: number; limit?: number; withCategory?: boolean }) {
+  const supabase = createSupabaseAdminClient() as any;
+  const select = input?.withCategory ? "id,kit_id,accessed_at,kits(category_id)" : "id,kit_id,accessed_at";
+  let query = supabase
+    .from("audio_access_logs")
+    .select(select)
+    .eq("status", "allowed")
+    .gte("accessed_at", sinceDate(input?.days ?? 90))
+    .order("accessed_at", { ascending: false })
+    .limit(input?.limit ?? 2000);
+
+  if (input?.userId) query = query.eq("user_id", input.userId);
+
+  const { data, error } = await query;
+  if (error) return [] as AudioLog[];
+  return (data ?? []) as AudioLog[];
+}
+
+async function hydrateTopKits(counts: Map<string, number>, limit: number): Promise<TopKit[]> {
+  const supabase = createSupabaseAdminClient() as any;
   const ids = Array.from(counts.keys());
   if (!ids.length) return [];
 
-  const { data: kits, error } = await supabase.from("kits").select("id, slug, name, artist, cover_url").in("id", ids).eq("published", true);
+  const { data, error } = await supabase
+    .from("kits")
+    .select("id, slug, name, artist, cover_url")
+    .in("id", ids)
+    .eq("published", true);
+
   if (error) throw new Error(error.message);
 
-  return (kits ?? [])
+  return (data ?? [])
     .map((kit: any): TopKit => ({ ...kit, plays: counts.get(kit.id) ?? 0 }))
     .sort((a: TopKit, b: TopKit) => b.plays - a.plays)
     .slice(0, limit);
 }
 
+export async function getGlobalTopKits(limit = 10): Promise<TopKit[]> {
+  const logs = await fetchAllowedAudioLogs({ days: 90, limit: 5000 });
+  return hydrateTopKits(countByKit(logs), limit);
+}
+
 export async function getUserTopKits(userId: string, limit = 5): Promise<TopKit[]> {
-  const supabase = createSupabaseAdminClient() as any;
-  const { data: logs } = await supabase.from("audio_access_logs").select("kit_id").eq("status", "allowed").eq("user_id", userId);
-  const counts = new Map<string, number>();
-  for (const row of logs ?? []) counts.set(row.kit_id, (counts.get(row.kit_id) ?? 0) + 1);
-  const ids = Array.from(counts.keys());
-  if (!ids.length) return [];
-
-  const { data: kits, error } = await supabase.from("kits").select("id, slug, name, artist, cover_url").in("id", ids).eq("published", true);
-  if (error) throw new Error(error.message);
-
-  return (kits ?? [])
-    .map((kit: any): TopKit => ({ ...kit, plays: counts.get(kit.id) ?? 0 }))
-    .sort((a: TopKit, b: TopKit) => b.plays - a.plays)
-    .slice(0, limit);
+  const logs = await fetchAllowedAudioLogs({ userId, days: 180, limit: 2000 });
+  return hydrateTopKits(countByKit(logs), limit);
 }
 
 export async function getRecommendedKits(userId: string, limit = 6): Promise<TopKit[]> {
   const supabase = createSupabaseAdminClient() as any;
-  const { data: recentLogs } = await supabase
-    .from("audio_access_logs")
-    .select("kit_id, kits(category_id)")
-    .eq("status", "allowed")
-    .eq("user_id", userId)
-    .order("accessed_at", { ascending: false })
-    .limit(30);
+  const recentLogs = await fetchAllowedAudioLogs({ userId, days: 180, limit: 50, withCategory: true });
+  const listenedIds = new Set<string>(recentLogs.map((row) => row.kit_id).filter(Boolean) as string[]);
+  const categoryIds = Array.from(new Set(recentLogs.map((row) => row.kits?.category_id).filter(Boolean)));
 
-  const listenedIds = new Set<string>((recentLogs ?? []).map((row: any) => row.kit_id).filter(Boolean));
-  const categoryIds = Array.from(new Set((recentLogs ?? []).map((row: any) => row.kits?.category_id).filter(Boolean)));
+  let query = supabase
+    .from("kits")
+    .select("id, slug, name, artist, cover_url")
+    .eq("published", true)
+    .limit(limit * 3);
 
-  let query = supabase.from("kits").select("id, slug, name, artist, cover_url").eq("published", true).limit(limit * 2);
   if (categoryIds.length) query = query.in("category_id", categoryIds);
+
   const { data, error } = await query.order("created_at", { ascending: false });
   if (error) throw new Error(error.message);
 
@@ -76,9 +103,24 @@ export async function getRecommendedKits(userId: string, limit = 6): Promise<Top
     .map((kit: any): TopKit => ({ ...kit, plays: 0 }));
 
   if (recommended.length < limit) {
-    const top = await getGlobalTopKits(limit * 2);
-    const missing = top.filter((kit: TopKit) => !listenedIds.has(kit.id) && !recommended.some((item: TopKit) => item.id === kit.id));
+    const top = await getGlobalTopKits(limit * 3);
+    const missing = top.filter((kit) => !listenedIds.has(kit.id) && !recommended.some((item) => item.id === kit.id));
     recommended = [...recommended, ...missing];
+  }
+
+  if (recommended.length < limit) {
+    const { data: newest } = await supabase
+      .from("kits")
+      .select("id, slug, name, artist, cover_url")
+      .eq("published", true)
+      .order("created_at", { ascending: false })
+      .limit(limit * 2);
+
+    const fallback = (newest ?? [])
+      .filter((kit: any) => !listenedIds.has(kit.id) && !recommended.some((item) => item.id === kit.id))
+      .map((kit: any): TopKit => ({ ...kit, plays: 0 }));
+
+    recommended = [...recommended, ...fallback];
   }
 
   return recommended.slice(0, limit);
@@ -93,28 +135,33 @@ export async function getUserRecentActivities(userId: string, limit = 10): Promi
     .eq("user_id", userId)
     .order("accessed_at", { ascending: false })
     .limit(limit);
+
   if (error) throw new Error(error.message);
 
   return (data ?? []).map((row: any): RecentActivity => ({
     id: row.id,
     created_at: row.accessed_at,
     kit_slug: row.kits?.slug ?? null,
-    label: `Ouviu: ${row.kits?.name ?? "Kit"} (${row.kit_audio_files?.tone ?? "tom"} / ${row.kit_audio_files?.name ?? "voz"})`,
+    label: `Ouviu: ${row.kits?.name ?? "Kit"} (${row.kit_audio_files?.tone ?? "tom"} / ${row.kit_audio_files?.name ?? "faixa"})`,
   }));
 }
 
 export async function getPremiumRequestStats(days = 30) {
   const supabase = createSupabaseAdminClient() as any;
-  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
-  const { data, error } = await supabase.from("premium_requests").select("type, status, created_at").gte("created_at", since);
+  const since = sinceDate(days);
+  const { data, error } = await supabase
+    .from("premium_requests")
+    .select("request_type, status, created_at")
+    .gte("created_at", since);
+
   if (error) throw new Error(error.message);
   const rows = data ?? [];
   return {
     total: rows.length,
-    music: rows.filter((r: any) => r.type === "music_request").length,
-    tone: rows.filter((r: any) => r.type === "tone_request").length,
-    feedback: rows.filter((r: any) => r.type === "feedback").length,
-    new: rows.filter((r: any) => r.status === "new").length,
+    music: rows.filter((r: any) => r.request_type === "song").length,
+    tone: rows.filter((r: any) => r.request_type === "tone").length,
+    feedback: rows.filter((r: any) => r.request_type === "feedback").length,
+    new: rows.filter((r: any) => r.status === "pending").length,
   };
 }
 
@@ -122,9 +169,10 @@ export async function getPremiumRequests() {
   const supabase = createSupabaseAdminClient() as any;
   const { data, error } = await supabase
     .from("premium_requests")
-    .select("*, profiles(full_name, email, avatar_url), kits(name, slug, artist)")
+    .select("*, profile:profiles(full_name, email, avatar_url), kit:kits(name, slug, artist)")
     .order("created_at", { ascending: false })
     .limit(200);
+
   if (error) throw new Error(error.message);
   return data ?? [];
 }
@@ -141,18 +189,20 @@ export async function createPremiumRequest(input: {
   kit_id?: string | null;
 }) {
   const supabase = createSupabaseAdminClient() as any;
+  const requestType = input.type === "tone" ? "tone" : input.type === "feedback" ? "feedback" : "song";
+
   const { error } = await supabase.from("premium_requests").insert({
     user_id: input.userId,
-    type: input.type,
-    title: input.title,
-    artist: input.artist ?? null,
-    reference_url: input.reference_url ?? null,
-    requested_tone: input.requested_tone ?? null,
-    urgency: input.urgency ?? null,
-    message: input.message ?? null,
+    request_type: requestType,
+    song_name: input.title,
+    artist_name: input.artist ?? null,
+    reference_link: input.reference_url ?? null,
+    desired_tone: input.requested_tone ?? null,
+    notes: input.message ?? null,
     kit_id: input.kit_id ?? null,
-    status: "new",
+    status: "pending",
   });
+
   if (error) throw new Error(error.message);
 }
 
