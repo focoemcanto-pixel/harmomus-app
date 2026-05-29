@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Crown, Mail, ShieldCheck, Sparkles, Users } from "lucide-react";
+import { Archive, Crown, Mail, ShieldCheck, Sparkles, Users } from "lucide-react";
 
 import { ArchivedMembersPanel } from "@/components/ministerio/archived-members-panel";
 import { MinistryInviteCard } from "@/components/ministerio/ministry-invite-card";
@@ -93,6 +93,7 @@ export default async function MinisterioPage({ searchParams }: { searchParams?: 
   const usedSeats = members.filter((member: any) => ["active", "pending", "invited"].includes(String(member.status))).length;
   const activeMembers = members.filter((member: any) => String(member.status) === "active").length;
   const pendingInvites = members.filter((member: any) => ["pending", "invited"].includes(String(member.status))).length;
+  const archivedCount = archivedMembers.length;
   const remainingSeats = Math.max(0, seatLimit - usedSeats);
   const usagePercent = seatLimit > 0 ? Math.min(100, Math.round((usedSeats / seatLimit) * 100)) : 0;
   const canManage = isMinistryManager(context);
@@ -129,11 +130,12 @@ export default async function MinisterioPage({ searchParams }: { searchParams?: 
             </div>
           </div>
 
-          <div className="mt-8 grid gap-4 md:grid-cols-4">
+          <div className="mt-8 grid gap-4 md:grid-cols-5">
             {metric("Plano", planLabel(ministryPlanType), <Crown className="h-5 w-5" />, statusLabel(ministry?.status))}
             {metric("Vagas", `${usedSeats}/${seatLimit}`, <Users className="h-5 w-5" />, `${remainingSeats} livres`)}
             {metric("Convites pendentes", pendingInvites, <Mail className="h-5 w-5" />, "Pendentes + convidados")}
             {metric("Integrantes ativos", activeMembers, <Sparkles className="h-5 w-5" />, "Acessos aceitos")}
+            {metric("Arquivados", archivedCount, <Archive className="h-5 w-5" />, "Histórico preservado")}
           </div>
           <div className="mt-7 h-3 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-gradient-to-r from-cyan-300 to-fuchsia-400" style={{ width: `${usagePercent}%` }} /></div>
         </div>
