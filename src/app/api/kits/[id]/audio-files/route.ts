@@ -2,12 +2,11 @@ import { NextResponse } from "next/server";
 
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
-const BASE_SELECT = "id,kit_id,tone,name,r2_key,public_url,file_type,source_type";
+const BASE_SELECT = "id,kit_id,tone,name,file_type,source_type";
 const TESSITURA_SELECT = `${BASE_SELECT},min_midi_note,max_midi_note,detected_min_midi_note,detected_max_midi_note,tessitura_confidence,tessitura_source`;
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -27,8 +26,6 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       list.push({
         id: file.id,
         name: file.name,
-        key: file.r2_key,
-        url: file.public_url,
         streamUrl: `/api/audio/${file.id}`,
         tone,
         voice: normalizeVoice(file.name),
@@ -81,7 +78,6 @@ async function getAudioFiles(supabase: any, kitId: string) {
 
   return { files: fallbackData ?? [], hasTessituraColumns: false };
 }
-
 
 function isAudioSourceType(sourceType: string | null | undefined): sourceType is "original" | "generated" {
   return sourceType === "original" || sourceType === "generated";
