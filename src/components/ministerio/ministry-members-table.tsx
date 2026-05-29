@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ExternalLink, RotateCcw, Trash2 } from "lucide-react";
 
+import { CopyInviteLink } from "@/components/ministerio/copy-invite-link";
 import { formatDate, PremiumPanel, roleLabel, statusLabel } from "@/components/ministerio/ministry-ui";
 import type { MinistryMemberRow } from "@/components/ministerio/types";
 
@@ -26,7 +27,7 @@ export function MinistryMembersTable({ members, canRemove, canManage }: { member
 
       {members.length ? (
         <div className="overflow-x-auto">
-          <table className="min-w-[1040px] w-full text-left text-sm">
+          <table className="min-w-[1120px] w-full text-left text-sm">
             <thead className="border-y border-white/10 bg-white/[0.04] text-xs uppercase tracking-[0.12em] text-zinc-400">
               <tr>
                 <th className="px-4 py-3">Nome</th>
@@ -54,9 +55,12 @@ export function MinistryMembersTable({ members, canRemove, canManage }: { member
                     <td className="px-4 py-4 text-zinc-400">
                       <div>{formatDate(member.invited_at || member.created_at)}</div>
                       {pending && invitePath ? (
-                        <Link href={invitePath} className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-cyan-200 underline-offset-4 hover:underline">
-                          <ExternalLink className="h-3.5 w-3.5" /> Abrir página do convite
-                        </Link>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <Link href={invitePath} className="inline-flex items-center gap-1 text-xs font-semibold text-cyan-200 underline-offset-4 hover:underline">
+                            <ExternalLink className="h-3.5 w-3.5" /> Abrir convite
+                          </Link>
+                          <CopyInviteLink href={invitePath} />
+                        </div>
                       ) : null}
                     </td>
                     <td className="px-4 py-4 text-zinc-400">{member.accepted_at ? formatDate(member.accepted_at) : pending ? "Aguardando" : "—"}</td>
