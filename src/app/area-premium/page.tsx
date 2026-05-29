@@ -8,7 +8,7 @@ import { PublicAppShell } from "@/components/public/public-app-shell";
 import { PremiumToneRequestForm } from "@/components/public/premium-tone-request-form";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { canSubmitPremiumRequests } from "@/lib/auth/ministry-access";
-import { getGlobalTopKits, getRecommendedKits, getUserRecentActivities, getUserTopKits, type TopKit } from "@/lib/data/premium-analytics";
+import { getGlobalTopKits, getRecommendedKits, getUserPlayStreak, getUserRecentActivities, getUserTopKits, type TopKit } from "@/lib/data/premium-analytics";
 import { getPublishedKits } from "@/lib/data/public-kits";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -60,11 +60,12 @@ export default async function AreaPremiumPage({
   const userId = context.profile?.id ?? "";
   const supabaseAdmin = createSupabaseAdminClient() as any;
 
-  const [topYou, topSite, recommendedKits, activities, allKits, premiumRequestsResponse] = await Promise.all([
+  const [topYou, topSite, recommendedKits, activities, playStreak, allKits, premiumRequestsResponse] = await Promise.all([
     userId ? getUserTopKits(userId, 5).catch(() => []) : Promise.resolve([]),
     getGlobalTopKits(5).catch(() => []),
     userId ? getRecommendedKits(userId, 6).catch(() => []) : Promise.resolve([]),
     userId ? getUserRecentActivities(userId, 10).catch(() => []) : Promise.resolve([]),
+    userId ? getUserPlayStreak(userId).catch(() => 0) : Promise.resolve(0),
     getPublishedKits().catch(() => []),
     userId
       ? supabaseAdmin
@@ -114,7 +115,7 @@ export default async function AreaPremiumPage({
               <div className="grid content-center gap-4 sm:grid-cols-2">
                 {[
                   [String(totalUserPlays), "Reproduções", Headphones],
-                  [activities.length ? "1" : "0", "Dias seguidos", Sparkles],
+                  [String(playStreak), "Dias seguidos", Sparkles],
                   [String(userPremiumRequests.length), "Solicitações", MessageCircle],
                   [joinedAt, "Membro desde", Crown],
                 ].map(([value, label, Icon]) => (
