@@ -55,17 +55,25 @@ export async function POST(request: Request) {
     return redirectToMinisterio(request, error.message || "Não foi possível remover o integrante.");
   }
 
-  await admin.from("ministry_activity_logs").insert({
-    ministry_id: member.ministry_id,
-    actor_id: context.profile.id,
-    action: "member.removed",
-    metadata: {
-      member_id: member.id,
-      user_id: member.user_id,
-      email: member.invited_email,
-      removed_at: now,
-    },
-  });
+  try {
+    const { error: logError } = await admin.from("ministry_activity_logs").insert({
+      ministry_id: member.ministry_id,
+      actor_id: context.profile.id,
+      action: "member.removed",
+      metadata: {
+        member_id: member.id,
+        user_id: member.user_id,
+        email: member.invited_email,
+        removed_at: now,
+      },
+    });
+
+    if (logError && logError.code !== "42P01") {
+      console.error("[ministerio.remove] Falha ao registrar log de remoção", logError);
+    }
+  } catch (logError) {
+    console.error("[ministerio.remove] Log de remoção ignorado", logError);
+  }
 
   return redirectToMinisterio(request, "Integrante removido e vaga liberada.");
 }
