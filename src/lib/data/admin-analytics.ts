@@ -29,6 +29,15 @@ type AccessLogRow = {
   profiles?: { full_name?: string | null; email?: string | null } | null;
 };
 
+type UsageTrackingRow = {
+  id: string;
+  user_id?: string | null;
+  action?: string | null;
+  metadata?: Record<string, any> | null;
+  created_at?: string | null;
+  profiles?: { full_name?: string | null; email?: string | null } | null;
+};
+
 const safe = <T,>(value: T, fallback: T): T => value ?? fallback;
 const norm = (value?: string | null) => (value ?? "").toLowerCase().trim();
 
@@ -92,17 +101,46 @@ async function getBaseLogs(filters: AnalyticsFilters): Promise<AccessLogRow[]> {
   return filterRows((legacyResponse.data ?? []) as AccessLogRow[], filters);
 }
 
+async function getUsageTracking(filters: AnalyticsFilters): Promise<UsageTrackingRow[]> {
+  const supabase = createSupabaseAdminClient() as any;
+  const since = sinceDate(filters.period ?? "30");
+  const fullSelect = "id,user_id,action,metadata,created_at,profiles(full_name,email)";
+  const fallbackSelect = "id,user_id,action,metadata,created_at";
+
+  const response = await supabase
+    .from("usage_tracking")
+    .select(fullSelect)
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(3000);
+
+  if (!response.error) return (response.data ?? []) as UsageTrackingRow[];
+
+  const fallback = await supabase
+    .from("usage_tracking")
+    .select(fallbackSelect)
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(3000);
+
+  if (fallback.error) return [];
+  return (fallback.data ?? []) as UsageTrackingRow[];
+}
+
 export async function getAdminAnalyticsSummary(filters: AnalyticsFilters) {
   const supabase = createSupabaseAdminClient() as any;
-  const [logs, subscriptions, plans] = await Promise.all([
+  const [logs, usage, subscriptions, plans] = await Promise.all([
     getBaseLogs(filters),
+    getUsageTracking(filters),
     supabase.from("subscriptions").select("id,user_id,plan_id,status,billing_cycle").eq("status", "active").then((r: any) => r.data ?? []),
     supabase.from("plans").select("id,slug,name").then((r: any) => r.data ?? []),
   ]);
 
   const allowedLogs = logs.filter(isAllowed);
   const deniedLogs = logs.filter(isDenied);
+  const premiumGateViews = usage.filter((row) => row.action === "premium_gate_viewed");
   const uniqueUsers = new Set(allowedLogs.map((l) => l.user_id).filter(Boolean));
+  const uniqueGateUsers = new Set(premiumGateViews.map((l) => l.user_id).filter(Boolean));
   const uniqueSessions = new Set(allowedLogs.map((l) => l.session_id ?? l.id).filter(Boolean));
   const days = Number(filters.period ?? "30");
   const planById = new Map((plans as any[]).map((p) => [p.id, p.slug]));
@@ -112,6 +150,8 @@ export async function getAdminAnalyticsSummary(filters: AnalyticsFilters) {
   return {
     plays: allowedLogs.length,
     denied: deniedLogs.length,
+    gateViews: premiumGateViews.length,
+    uniqueGateUsers: uniqueGateUsers.size,
     totalAttempts,
     denyRate: totalAttempts ? Number(((deniedLogs.length / totalAttempts) * 100).toFixed(1)) : 0,
     uniqueUsers: uniqueUsers.size,
@@ -188,6 +228,17 @@ export async function getTopGatePages(filters: AnalyticsFilters) {
   return topN(map);
 }
 
+export async function getTopPremiumGateKits(filters: AnalyticsFilters) {
+  const usage = await getUsageTracking(filters);
+  const map = new Map<string, number>();
+  usage.filter((row) => row.action === "premium_gate_viewed").forEach((row) => {
+    const metadata = row.metadata ?? {};
+    const kitId = String(metadata.kitId ?? metadata.kit_id ?? "kit não informado");
+    map.set(kitId, (map.get(kitId) ?? 0) + 1);
+  });
+  return topN(map);
+}
+
 export async function getRecentPlays(filters: AnalyticsFilters) {
   const logs = (await getBaseLogs(filters)).filter(isAllowed);
   return logs.slice(0, 50).map((row) => ({
@@ -216,6 +267,21 @@ export async function getRecentDenied(filters: AnalyticsFilters) {
     reason: row.reason ?? "motivo não informado",
     page: row.page_path ?? "não informado",
   }));
+}
+
+export async function getRecentPremiumGateViews(filters: AnalyticsFilters) {
+  const usage = await getUsageTracking(filters);
+  return usage.filter((row) => row.action === "premium_gate_viewed").slice(0, 30).map((row) => {
+    const metadata = row.metadata ?? {};
+    return {
+      when: row.created_at ?? "",
+      user: row.profiles?.full_name ?? row.profiles?.email ?? row.user_id ?? "Usuário não informado",
+      feature: String(metadata.feature ?? "não informado"),
+      kitId: String(metadata.kitId ?? metadata.kit_id ?? "não informado"),
+      userPlan: String(metadata.userPlan ?? metadata.user_plan ?? "não informado"),
+      requiredPlan: String(metadata.requiredPlan ?? metadata.required_plan ?? "não informado"),
+    };
+  });
 }
 
 export async function getPremiumRequestsSummary(_filters?: AnalyticsFilters) {
