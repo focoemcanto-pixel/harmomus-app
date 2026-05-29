@@ -11,6 +11,7 @@ function statusLabel(status?: string | null) {
   const normalized = String(status ?? "").toLowerCase();
   if (normalized === "active") return "Ativo";
   if (normalized === "pending") return "Pendente";
+  if (normalized === "invited") return "Convidado";
   if (normalized === "trialing") return "Em teste";
   if (normalized === "removed") return "Removido";
   return status || "—";
@@ -85,7 +86,7 @@ export default async function MinisterioPage() {
       {canManage ? <MinistryOnboardingModal ministryId={context.ministry.ministryId} remainingSeats={remainingSeats} /> : null}
 
       <main className="min-h-screen bg-gradient-to-b from-[#020617] via-[#060b1a] to-[#12051d] px-4 py-8 text-white md:px-8">
-        <section className="mx-auto max-w-6xl">
+        <section className="mx-auto max-w-6xl space-y-6">
           <div className="overflow-hidden rounded-[2rem] border border-cyan-300/20 bg-gradient-to-br from-[#0b1120] via-[#140d27] to-[#06111f] p-6 shadow-[0_30px_100px_rgba(34,211,238,0.16)] md:p-10">
             <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
               <div>
@@ -136,6 +137,97 @@ export default async function MinisterioPage() {
             <div className="mt-7 h-3 overflow-hidden rounded-full bg-white/10">
               <div className="h-full rounded-full bg-gradient-to-r from-cyan-300 to-fuchsia-400" style={{ width: `${usagePercent}%` }} />
             </div>
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+            <section id="convidar-integrante" className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-6 shadow-[0_20px_80px_rgba(0,0,0,0.22)]">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Convites</p>
+                  <h2 className="mt-2 text-2xl font-semibold">Cadastrar integrantes</h2>
+                  <p className="mt-2 text-sm leading-6 text-zinc-300">
+                    Envie o convite pelo e-mail. Os membros recebem acesso Premium aos kits, mas não podem solicitar novas músicas ou tons.
+                  </p>
+                </div>
+              </div>
+
+              {canManage ? (
+                <form action="/api/ministerio/invite" method="post" className="mt-6 space-y-3">
+                  <input
+                    name="name"
+                    placeholder="Nome do integrante"
+                    className="h-12 w-full rounded-2xl border border-white/15 bg-black/25 px-4 text-sm text-white outline-none ring-cyan-300/30 placeholder:text-zinc-500 focus:ring"
+                  />
+
+                  <input
+                    name="email"
+                    type="email"
+                    required
+                    placeholder="email@integrante.com"
+                    className="h-12 w-full rounded-2xl border border-white/15 bg-black/25 px-4 text-sm text-white outline-none ring-cyan-300/30 placeholder:text-zinc-500 focus:ring"
+                  />
+
+                  <button
+                    disabled={remainingSeats <= 0}
+                    className="h-12 w-full rounded-2xl bg-gradient-to-r from-cyan-300 to-fuchsia-400 text-sm font-semibold text-slate-950 shadow-[0_18px_50px_rgba(34,211,238,0.18)] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {remainingSeats <= 0 ? "Limite de vagas atingido" : "Enviar convite premium"}
+                  </button>
+                </form>
+              ) : (
+                <div className="mt-6 rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-zinc-300">
+                  Apenas o responsável do plano ministerial pode cadastrar integrantes.
+                </div>
+              )}
+            </section>
+
+            <section className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-6 shadow-[0_20px_80px_rgba(0,0,0,0.22)]">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Equipe</p>
+                  <h2 className="mt-2 text-2xl font-semibold">Integrantes</h2>
+                  <p className="mt-1 text-sm text-zinc-400">Acompanhe quem já está usando o acesso Premium do ministério.</p>
+                </div>
+
+                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-zinc-300">
+                  {activeSeats}/{seatLimit}
+                </span>
+              </div>
+
+              <div className="mt-6 space-y-3">
+                {members.map((member: any) => (
+                  <div key={member.id} className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-black/20 p-4 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p className="font-semibold text-white">{member.invited_name || "Integrante"}</p>
+                      <p className="mt-1 text-sm text-zinc-400">{member.invited_email || "E-mail não informado"}</p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full border border-cyan-300/25 bg-cyan-400/10 px-3 py-1 text-xs font-semibold text-cyan-100">
+                        {member.role === "owner" ? "Responsável" : "Membro"}
+                      </span>
+                      <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-zinc-200">
+                        {statusLabel(member.status)}
+                      </span>
+                      {canManage && member.role !== "owner" ? (
+                        <form action="/api/ministerio/remove" method="post">
+                          <input type="hidden" name="member_id" value={member.id} />
+                          <button className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-rose-300/20 bg-rose-500/10 text-rose-100 transition hover:bg-rose-500/20" aria-label="Remover integrante">
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </form>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+
+                {!members.length ? (
+                  <div className="rounded-2xl border border-dashed border-white/10 bg-black/20 p-6 text-center text-sm text-zinc-400">
+                    Nenhum integrante cadastrado ainda.
+                  </div>
+                ) : null}
+              </div>
+            </section>
           </div>
         </section>
       </main>
