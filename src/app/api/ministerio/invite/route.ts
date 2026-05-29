@@ -15,6 +15,21 @@ function normalizeEmail(value: FormDataEntryValue | null) {
   return String(value ?? "").trim().toLowerCase();
 }
 
+function emailStatusMessage(action: "created" | "resent", result: Awaited<ReturnType<typeof sendMinistryInviteEmail>>) {
+  const actionLabel = action === "created" ? "Convite criado" : "Novo link gerado";
+
+  if (result.sent) {
+    const idText = result.providerMessageId ? ` ID Resend: ${result.providerMessageId}.` : "";
+    return `${actionLabel}. O serviço de e-mail aceitou o envio.${idText} Acompanhe a entrega nos logs do Resend.`;
+  }
+
+  if (result.skipped) {
+    return `${actionLabel}, mas o e-mail não foi enviado: ${result.reason}. Use o link manualmente pela Central Ministerial.`;
+  }
+
+  return `${actionLabel}, mas houve falha ao enviar o e-mail: ${result.reason || "erro desconhecido"}. Use o link manualmente pela Central Ministerial.`;
+}
+
 export async function POST(request: Request) {
   const context = await getCurrentUserAccessContext();
 
@@ -55,6 +70,13 @@ export async function POST(request: Request) {
     if (error || !member?.id) return redirectToMinisterio(request, "Não foi possível reenviar o convite.");
 
     const inviteUrl = buildAbsoluteUrl(`/convite-ministerio/${member.invite_token}`, request.url);
+    console.log("[MINISTRY INVITE] resend preparing email", {
+      to: member.invited_email,
+      from: process.env.RESEND_FROM_EMAIL,
+      ministry: ministry.name,
+      memberId: member.id,
+    });
+
     const emailResult = await sendMinistryInviteEmail({
       to: member.invited_email,
       invitedName: member.invited_name,
@@ -62,8 +84,8 @@ export async function POST(request: Request) {
       inviteUrl,
     });
 
-    if (emailResult.sent) return redirectToMinisterio(request, "Convite reenviado por e-mail com sucesso.");
-    return redirectToMinisterio(request, "Novo link de convite gerado. Envie manualmente pela Central Ministerial.");
+    console.log("[MINISTRY INVITE] resend result", emailResult);
+    return redirectToMinisterio(request, emailStatusMessage("resent", emailResult));
   }
 
   const email = normalizeEmail(form.get("email"));
@@ -135,12 +157,5 @@ export async function POST(request: Request) {
   });
 
   console.log("[MINISTRY INVITE] resend response", emailResult);
-
-  if (emailResult.sent) {
-    console.log("[MINISTRY INVITE] SUCCESS");
-    return redirectToMinisterio(request, "Convite Premium enviado por e-mail com sucesso.");
-  }
-
-  console.error("[MINISTRY INVITE] FAILED", emailResult);
-  return redirectToMinisterio(request, "Convite Premium criado com sucesso. Envie o link manualmente pela Central Ministerial.");
+  return redirectToMinisterio(request, emailStatusMessage("created", emailResult));
 }
