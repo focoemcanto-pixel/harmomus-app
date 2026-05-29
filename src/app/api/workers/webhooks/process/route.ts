@@ -5,7 +5,25 @@ import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
 
 export const runtime = "nodejs";
 
-export async function POST() {
+function validateWorkerToken(request: Request) {
+  const expectedToken = process.env.HARMOMUS_WORKER_TOKEN;
+  const receivedToken = request.headers.get("x-harmomus-worker-token");
+
+  if (!expectedToken) {
+    return NextResponse.json({ success: false, error: "Worker token não configurado." }, { status: 503 });
+  }
+
+  if (!receivedToken || receivedToken !== expectedToken) {
+    return NextResponse.json({ success: false, error: "Não autorizado." }, { status: 401 });
+  }
+
+  return null;
+}
+
+export async function POST(request: Request) {
+  const authError = validateWorkerToken(request);
+  if (authError) return authError;
+
   const admin = createSupabaseAdminClient() as any;
 
   const { data: queueItems, error } = await admin
