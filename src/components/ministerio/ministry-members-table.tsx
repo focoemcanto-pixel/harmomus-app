@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { ExternalLink, RotateCcw, Trash2 } from "lucide-react";
+import { ExternalLink, RotateCcw } from "lucide-react";
 
 import { CopyInviteLink } from "@/components/ministerio/copy-invite-link";
+import { RemoveMemberButton } from "@/components/ministerio/remove-member-button";
 import { WhatsAppInviteLink } from "@/components/ministerio/whatsapp-invite-link";
 import { formatDate, PremiumPanel, roleLabel, statusLabel } from "@/components/ministerio/ministry-ui";
 import type { MinistryMemberRow } from "@/components/ministerio/types";
@@ -34,17 +35,6 @@ function ResendInviteButton({ memberId }: { memberId: string }) {
   );
 }
 
-function RemoveMemberButton({ memberId }: { memberId: string }) {
-  return (
-    <form action="/api/ministerio/remove" method="post">
-      <input type="hidden" name="member_id" value={memberId} />
-      <button className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-rose-300/20 bg-rose-500/10 px-3 text-xs font-semibold text-rose-100 transition hover:bg-rose-500/20" aria-label="Remover integrante">
-        <Trash2 className="h-3.5 w-3.5" /> Remover
-      </button>
-    </form>
-  );
-}
-
 function MemberActions({ member, pending, invitePath, canManage, canRemove, ministryName, name }: { member: MinistryMemberRow; pending: boolean; invitePath: string | null; canManage: boolean; canRemove: boolean; ministryName: string; name: string }) {
   const removable = canRemove && member.role !== "owner" && String(member.status) !== "removed";
 
@@ -60,7 +50,7 @@ function MemberActions({ member, pending, invitePath, canManage, canRemove, mini
         </>
       ) : null}
       {canManage && pending ? <ResendInviteButton memberId={member.id} /> : null}
-      {removable ? <RemoveMemberButton memberId={member.id} /> : null}
+      {removable ? <RemoveMemberButton memberId={member.id} memberName={name} /> : null}
     </div>
   );
 }
