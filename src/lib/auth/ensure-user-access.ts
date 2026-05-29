@@ -61,11 +61,25 @@ async function ensureProfile(admin: any, input: EnsureUserAccessInput) {
 
   const { data: existingProfile, error: existingError } = await admin
     .from("profiles")
-    .select("id, role, onboarding_status, onboarding_step")
+    .select("id, email, role, onboarding_status, onboarding_step")
     .eq("id", input.id)
     .maybeSingle();
 
   if (existingError) throw new Error(`Falha ao verificar perfil: ${existingError.message}`);
+
+  if (!existingProfile?.id && email) {
+    const { data: emailProfile, error: emailError } = await admin
+      .from("profiles")
+      .select("id, email")
+      .ilike("email", email)
+      .maybeSingle();
+
+    if (emailError) throw new Error(`Falha ao verificar e-mail do perfil: ${emailError.message}`);
+
+    if (emailProfile?.id && emailProfile.id !== input.id) {
+      throw new Error("Este e-mail já possui uma conta no Harmomus. Entre com este e-mail para aceitar o convite ou recupere sua senha.");
+    }
+  }
 
   const payload: Record<string, unknown> = {
     id: input.id,
@@ -101,7 +115,13 @@ async function ensureProfile(admin: any, input: EnsureUserAccessInput) {
     .from("profiles")
     .upsert(payload, { onConflict: "id" });
 
-  if (error) throw new Error(`Falha ao salvar perfil: ${error.message}`);
+  if (error) {
+    const message = String(error.message ?? "");
+    if (message.includes("profiles_email_key") || message.toLowerCase().includes("duplicate key")) {
+      throw new Error("Este e-mail já possui uma conta no Harmomus. Entre com este e-mail para aceitar o convite ou recupere sua senha.");
+    }
+    throw new Error(`Falha ao salvar perfil: ${message}`);
+  }
 }
 
 async function ensureSubscription(admin: any, userId: string, selectedPlanSlug: string) {
