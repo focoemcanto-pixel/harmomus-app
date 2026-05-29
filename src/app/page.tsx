@@ -3,12 +3,14 @@ import Link from "next/link";
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { HomeHorizontalCarousel } from "@/components/public/home-horizontal-carousel";
 import { MarketingFooter } from "@/components/public/marketing-footer";
-import { getPublishedKits } from "@/lib/data/public-kits";
+import { getPublishedKits, type PublicKit } from "@/lib/data/public-kits";
 import { getPublicHomeBanners } from "@/lib/data/home-banners";
 import { HomeHeroCarousel } from "@/components/public/home-hero-carousel";
 import { getPublicHomeSections } from "@/lib/data/home-sections";
 import { OFFICIAL_PLANS } from "@/lib/data/official-plans";
 import { SubscribeButton } from "@/components/public/subscribe-button";
+import { canAccessKit, normalizePlan } from "@/lib/access/access-engine";
+import { getCurrentSubscription } from "@/lib/access/current-subscription";
 
 export const revalidate = 300;
 
@@ -51,13 +53,22 @@ const MINISTERIAL_FEATURES = [
   "Solicitações centralizadas pelo responsável",
 ];
 
+function resolveLockedPlanLabel(kit: PublicKit) {
+  const allowed = Array.isArray(kit.allowedPlanSlugs) ? kit.allowedPlanSlugs : [];
+  if (kit.requiredPlan?.slug === "plus" || allowed.includes("plus")) return "PLUS";
+  if (kit.requiredPlan?.slug === "premium" || allowed.includes("premium")) return "PREMIUM";
+  return "PREMIUM";
+}
+
 export default async function HomePage() {
-  const [kits, homeBanners, homeSections] = await Promise.all([
+  const [kits, homeBanners, homeSections, subscription] = await Promise.all([
     getPublishedKits(),
     getPublicHomeBanners(),
     getPublicHomeSections(),
+    getCurrentSubscription(),
   ]);
 
+  const viewerPlan = normalizePlan(subscription.planSlug);
   const latestKits = kits.slice(0, 6);
 
   const categories = Array.from(
@@ -124,18 +135,36 @@ export default async function HomePage() {
           </div>
 
           <HomeHorizontalCarousel>
-            {latestKits.length ? latestKits.map((kit) => (
-              <Link key={kit.id} href={`/biblioteca/${kit.slug}`} className="group min-w-[82%] snap-start overflow-hidden rounded-2xl border border-white/15 bg-gradient-to-b from-white/10 to-white/5 shadow-[0_18px_40px_rgba(8,145,178,0.18)] transition hover:border-cyan-200/80 sm:min-w-[320px] md:min-w-[260px]">
-                <div className="relative overflow-hidden">
-                  <span className="absolute left-3 top-3 z-10 rounded-full bg-fuchsia-500/90 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-white">Novo</span>
-                  {kit.coverUrl ? <img src={kit.coverUrl} alt={kit.name} className="aspect-square w-full object-cover transition duration-500 group-hover:scale-105" /> : <div className="aspect-square w-full bg-gradient-to-br from-zinc-900 to-[#141828]" />}
-                </div>
-                <div className="p-4">
-                  <p className="truncate text-lg font-semibold text-white">{kit.name}</p>
-                  <p className="truncate text-sm text-zinc-300">{kit.artist}</p>
-                </div>
-              </Link>
-            )) : <div className="rounded-2xl border border-white/10 p-8 text-center text-zinc-300">Sem lançamentos publicados ainda.</div>}
+            {latestKits.length ? latestKits.map((kit) => {
+              const locked = !canAccessKit(viewerPlan, kit.allowedPlanSlugs);
+              const lockedPlan = resolveLockedPlanLabel(kit);
+              const lockedText = lockedPlan === "PLUS" ? "Exclusivo Plus/Premium" : "Exclusivo Premium";
+
+              return (
+                <Link key={kit.id} href={`/biblioteca/${kit.slug}`} className="group min-w-[82%] snap-start overflow-hidden rounded-2xl border border-white/15 bg-gradient-to-b from-white/10 to-white/5 shadow-[0_18px_40px_rgba(8,145,178,0.18)] transition hover:border-cyan-200/80 sm:min-w-[320px] md:min-w-[260px]">
+                  <div className="relative overflow-hidden">
+                    <span className="absolute left-3 top-3 z-10 rounded-full bg-fuchsia-500/90 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-white">Novo</span>
+                    {kit.coverUrl ? <img src={kit.coverUrl} alt={kit.name} className={`aspect-square w-full object-cover transition duration-500 group-hover:scale-105 ${locked ? "opacity-65" : ""}`} /> : <div className="aspect-square w-full bg-gradient-to-br from-zinc-900 to-[#141828]" />}
+                    {locked ? (
+                      <>
+                        <div className="absolute inset-0 bg-black/30" />
+                        <div className="absolute right-3 top-3 z-20 rounded-full border border-gold-300/50 bg-black/75 px-3 py-1 text-[11px] font-bold tracking-[0.14em] text-gold-100 shadow-lg">
+                          🔒 {lockedPlan}
+                        </div>
+                        <div className="absolute bottom-3 left-3 right-3 rounded-xl border border-white/15 bg-black/75 px-3 py-2 text-center backdrop-blur">
+                          <p className="text-xs font-semibold text-white">{lockedText}</p>
+                          <p className="mt-0.5 text-[11px] text-zinc-300">Faça upgrade para desbloquear</p>
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
+                  <div className="p-4">
+                    <p className="truncate text-lg font-semibold text-white">{kit.name}</p>
+                    <p className="truncate text-sm text-zinc-300">{kit.artist}</p>
+                  </div>
+                </Link>
+              );
+            }) : <div className="rounded-2xl border border-white/10 p-8 text-center text-zinc-300">Sem lançamentos publicados ainda.</div>}
           </HomeHorizontalCarousel>
         </section>
 
