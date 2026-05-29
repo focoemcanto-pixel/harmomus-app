@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentUserAccessContext, isMinistryOwner } from "@/lib/auth/current-user";
+import { buildAbsoluteUrl, sendMinistryAccessRemovedEmail } from "@/lib/email/ministry-invite-email";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 function redirectToMinisterio(request: Request, message?: string) {
@@ -27,7 +28,7 @@ export async function POST(request: Request) {
 
   const { data: member } = await admin
     .from("ministry_members")
-    .select("id,ministry_id,user_id,role,invited_email,status")
+    .select("id,ministry_id,user_id,role,invited_email,invited_name,status,ministry:ministries(name)")
     .eq("id", memberId)
     .eq("ministry_id", context.ministry.ministryId)
     .maybeSingle();
@@ -75,5 +76,27 @@ export async function POST(request: Request) {
     console.error("[ministerio.remove] Log de remoção ignorado", logError);
   }
 
-  return redirectToMinisterio(request, "Integrante removido e vaga liberada.");
+  if (member.invited_email) {
+    try {
+      const emailResult = await sendMinistryAccessRemovedEmail({
+        to: member.invited_email,
+        invitedName: member.invited_name,
+        ministryName: member.ministry?.name,
+        premiumUrl: buildAbsoluteUrl("/assinar?plan=premium", request.url),
+      });
+
+      console.log("[ministerio.remove] access removed email result", {
+        memberId: member.id,
+        email: member.invited_email,
+        sent: emailResult.sent,
+        skipped: emailResult.skipped,
+        status: emailResult.status,
+        reason: emailResult.reason,
+      });
+    } catch (emailError) {
+      console.error("[ministerio.remove] Falha ao enviar e-mail de remoção", emailError);
+    }
+  }
+
+  return redirectToMinisterio(request, "Integrante removido, vaga liberada e acesso Premium Ministerial encerrado.");
 }
