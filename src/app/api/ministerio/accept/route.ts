@@ -9,15 +9,17 @@ function redirectTo(url: string, request: Request, message?: string) {
   return NextResponse.redirect(target, 303);
 }
 
-export async function POST(request: Request) {
+function getLoginRedirect(request: Request, token: string) {
+  const next = `/api/ministerio/accept?token=${encodeURIComponent(token)}`;
+  return `/login?redirect=${encodeURIComponent(next)}`;
+}
+
+async function acceptInvite(request: Request, token: string) {
   const context = await getCurrentUserAccessContext();
 
   if (!context.profile?.id) {
-    return redirectTo("/login", request);
+    return redirectTo(getLoginRedirect(request, token), request);
   }
-
-  const form = await request.formData();
-  const token = String(form.get("token") ?? "").trim();
 
   if (!token) {
     return redirectTo("/", request, "Convite inválido.");
@@ -36,7 +38,7 @@ export async function POST(request: Request) {
   }
 
   if (member.status === "active") {
-    return redirectTo("/", request, "Este convite já foi utilizado.");
+    return redirectTo("/", request, "Este convite já está ativo nesta conta.");
   }
 
   if (member.status === "removed") {
@@ -86,5 +88,17 @@ export async function POST(request: Request) {
     return redirectTo(`/convite-ministerio/${token}`, request, error.message || "Não foi possível aceitar o convite.");
   }
 
-  return redirectTo("/", request, "Acesso Premium liberado com sucesso.");
+  return redirectTo("/", request, "Acesso Premium Ministerial liberado com sucesso.");
+}
+
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const token = String(url.searchParams.get("token") ?? "").trim();
+  return acceptInvite(request, token);
+}
+
+export async function POST(request: Request) {
+  const form = await request.formData();
+  const token = String(form.get("token") ?? "").trim();
+  return acceptInvite(request, token);
 }
