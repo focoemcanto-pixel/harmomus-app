@@ -59,6 +59,22 @@ async function getPlanById(supabase: any, planId: string) {
   return { ...plan, stripePriceId };
 }
 
+async function hasUsedTrial(supabase: any, userId: string) {
+  const { data, error } = await supabase
+    .from("subscriptions")
+    .select("id,trial_ends_at,stripe_subscription_id,gateway_subscription_id")
+    .eq("user_id", userId)
+    .not("trial_ends_at", "is", null)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Falha ao verificar uso de trial: ${error.message}`);
+  }
+
+  return Boolean(data?.id);
+}
+
 async function savePendingStripeSubscription(supabase: any, input: { userId: string; planId: string; customerId: string }) {
   if (!input.planId) throw new Error("Plano obrigatório para preparar assinatura.");
 
@@ -104,7 +120,7 @@ async function createStripeCheckoutWithSupabase(
 ) {
   assertStripeReady();
 
-  const [{ data: existing }, plan] = await Promise.all([
+  const [{ data: existing }, plan, trialAlreadyUsed] = await Promise.all([
     supabase
       .from("subscriptions")
       .select("*")
@@ -113,6 +129,7 @@ async function createStripeCheckoutWithSupabase(
       .limit(1)
       .maybeSingle(),
     getPlanById(supabase, planId),
+    hasUsedTrial(supabase, userId),
   ]);
 
   const customerId = await getOrCreateCustomer({
@@ -124,17 +141,19 @@ async function createStripeCheckoutWithSupabase(
   await savePendingStripeSubscription(supabase, { userId, planId, customerId });
 
   const base = resolveAppUrl(fallbackOrigin);
+  const trialDays = trialAlreadyUsed ? 0 : Number(plan.trial_days ?? 0);
 
   return createCheckoutSession({
     customerId,
     priceId: plan.stripePriceId,
     successUrl: `${base}/checkout/sucesso?session_id={CHECKOUT_SESSION_ID}`,
     cancelUrl: `${base}/checkout/cancelado`,
-    trialDays: plan.trial_days,
+    trialDays,
     metadata: {
       user_id: userId,
       email,
       plan_slug: plan.slug,
+      trial_already_used: trialAlreadyUsed ? "true" : "false",
       ...metadata,
     },
   });
