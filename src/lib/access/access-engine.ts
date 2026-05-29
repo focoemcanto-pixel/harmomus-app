@@ -2,9 +2,13 @@ export type AccessPlan = "free" | "plus" | "premium";
 
 const DEFAULT_ALLOWED_PLANS: AccessPlan[] = ["free", "plus", "premium"];
 
+function isMinistryPlan(plan: string) {
+  return plan === "ministry_10" || plan === "ministry_20" || plan === "ministry_40";
+}
+
 export function normalizePlan(plan: unknown): AccessPlan {
   const normalized = String(plan ?? "").trim().toLowerCase();
-  if (normalized === "premium") return "premium";
+  if (normalized === "premium" || isMinistryPlan(normalized)) return "premium";
   if (normalized === "plus") return "plus";
   return "free";
 }
