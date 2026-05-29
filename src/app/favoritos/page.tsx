@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Heart } from "lucide-react";
+import { Heart, ShieldCheck } from "lucide-react";
 
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { getUserFavoriteKits } from "@/lib/data/favorites";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -18,11 +19,28 @@ function formatDate(value?: string | null) {
   }
 }
 
+async function hasRemovedMinistryHistory(userId?: string | null) {
+  if (!userId) return false;
+  const admin = createSupabaseAdminClient() as any;
+  const { data } = await admin
+    .from("ministry_members")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("status", "removed")
+    .limit(1)
+    .maybeSingle();
+  return Boolean(data?.id);
+}
+
 export default async function FavoritosPage() {
   const context = await getCurrentUserAccessContext();
   if (context.isGuest) redirect("/login");
 
-  const favorites = await getUserFavoriteKits().catch(() => []);
+  const [favorites, wasRemovedFromMinistry] = await Promise.all([
+    getUserFavoriteKits().catch(() => []),
+    context.effectiveSlug === "free" ? hasRemovedMinistryHistory(context.profile?.id) : Promise.resolve(false),
+  ]);
+  const isFree = context.effectiveSlug === "free";
 
   return (
     <PublicAppShell>
@@ -39,6 +57,29 @@ export default async function FavoritosPage() {
             <h1 className="mt-5 text-4xl font-black md:text-5xl">Kits salvos para estudar depois</h1>
             <p className="mt-3 max-w-2xl text-zinc-300">Aqui ficam os kits que você marcou com coração na biblioteca.</p>
           </div>
+
+          {isFree && favorites.length ? (
+            <div className="mt-6 rounded-3xl border border-amber-300/25 bg-amber-500/10 p-5 text-sm leading-6 text-amber-50">
+              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                <div className="flex gap-3">
+                  <div className="mt-1 rounded-2xl border border-amber-300/25 bg-amber-300/10 p-2 text-amber-100">
+                    <ShieldCheck className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="font-bold text-white">Seus favoritos continuam salvos.</p>
+                    <p className="mt-1 text-amber-50/90">
+                      {wasRemovedFromMinistry
+                        ? "Seu acesso Premium Ministerial foi encerrado, mas seus kits favoritados permanecem na sua conta. Kits Premium continuam sujeitos ao bloqueio do plano atual."
+                        : "Você está no plano gratuito. Kits Premium favoritados permanecem salvos, mas podem exigir assinatura para reprodução completa."}
+                    </p>
+                  </div>
+                </div>
+                <Link href="/assinar?plan=premium" className="rounded-xl bg-cyan-300 px-4 py-2 text-center text-xs font-black text-slate-950 transition hover:bg-cyan-200 md:text-sm">
+                  Liberar Premium
+                </Link>
+              </div>
+            </div>
+          ) : null}
 
           {favorites.length ? (
             <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
