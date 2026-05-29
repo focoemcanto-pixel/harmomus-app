@@ -35,6 +35,7 @@ export function useKitAudioEngine() {
   const trackRef = useRef<KitTrack | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const preloaderRef = useRef<HTMLAudioElement | null>(null);
+  const preloadedSrcRef = useRef<string | null>(null);
   const pitchControllerRef = useRef<PitchPlaybackController | null>(null);
   const rafIdRef = useRef<number | null>(null);
   const sessionIdRef = useRef<string | null>(null);
@@ -46,7 +47,7 @@ export function useKitAudioEngine() {
   const requestSerialRef = useRef(0);
 
   const ensureAudio = useCallback(() => {
-    if (!audioRef.current) audioRef.current = createAudioElement("metadata");
+    if (!audioRef.current) audioRef.current = createAudioElement("auto");
     if (!preloaderRef.current) preloaderRef.current = createAudioElement("auto");
     audioRef.current.volume = volumeRef.current;
     audioRef.current.loop = loopRef.current;
@@ -98,6 +99,7 @@ export function useKitAudioEngine() {
       try { preloader.pause(); } catch {}
       preloader.removeAttribute("src");
       preloader.src = "";
+      preloadedSrcRef.current = null;
       try { preloader.load(); } catch {}
     }
   }, [hardInvalidatePlayback]);
@@ -120,17 +122,31 @@ export function useKitAudioEngine() {
     rafIdRef.current = requestAnimationFrame(update);
   }, [cancelRaf]);
 
+  const preloadTrack = useCallback((nextTrack: KitTrack) => {
+    if ((nextTrack.semitoneShift ?? 0) !== 0 || !nextTrack.src) return;
+    if (!preloaderRef.current) preloaderRef.current = createAudioElement("auto");
+
+    if (preloadedSrcRef.current === nextTrack.src && preloaderRef.current.src) return;
+
+    preloadedSrcRef.current = nextTrack.src;
+    preloaderRef.current.preload = "auto";
+    preloaderRef.current.src = nextTrack.src;
+    preloaderRef.current.load();
+  }, []);
+
   const playTrack = useCallback(async (nextTrack: KitTrack) => {
     if (!nextTrack.src) return;
 
     const identity = getTrackIdentity(nextTrack);
+    const canReusePreloader = (nextTrack.semitoneShift ?? 0) === 0 && preloadedSrcRef.current === nextTrack.src && preloaderRef.current?.src;
+
     hardInvalidatePlayback();
     const requestSerial = requestSerialRef.current;
 
     await runTransition(async () => {
       if (requestSerialRef.current !== requestSerial) return;
 
-      const audio = ensureAudio();
+      let audio = ensureAudio();
       const sessionId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
       sessionIdRef.current = sessionId;
       activeIdentityRef.current = identity;
@@ -141,10 +157,18 @@ export function useKitAudioEngine() {
       const abortController = new AbortController();
       abortRef.current = abortController;
 
-      audio.src = nextTrack.src;
+      if (canReusePreloader && preloaderRef.current) {
+        audioRef.current = preloaderRef.current;
+        audio = audioRef.current;
+        preloaderRef.current = createAudioElement("auto");
+        preloadedSrcRef.current = null;
+      } else {
+        audio.src = nextTrack.src;
+        audio.load();
+      }
+
       audio.volume = volumeRef.current;
       audio.loop = loopRef.current;
-      audio.load();
 
       const isStillCurrent = () => (
         !abortController.signal.aborted &&
@@ -196,13 +220,6 @@ export function useKitAudioEngine() {
     await playTrack(trackRef.current);
   }, [isPlaying, playTrack]);
 
-  const preloadTrack = useCallback((nextTrack: KitTrack) => {
-    if ((nextTrack.semitoneShift ?? 0) !== 0 || !nextTrack.src) return;
-    if (!preloaderRef.current) preloaderRef.current = createAudioElement("auto");
-    preloaderRef.current.src = nextTrack.src;
-    preloaderRef.current.load();
-  }, []);
-
   const seekTo = useCallback((seconds: number) => {
     const audio = audioRef.current;
     const sessionId = sessionIdRef.current;
@@ -223,6 +240,7 @@ export function useKitAudioEngine() {
     volumeRef.current = next;
     setVolume(next);
     if (audioRef.current) audioRef.current.volume = next;
+    if (preloaderRef.current) preloaderRef.current.volume = next;
   }, []);
 
   const setLoopValue = useCallback((value: boolean) => {
