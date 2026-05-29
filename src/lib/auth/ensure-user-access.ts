@@ -57,11 +57,12 @@ async function getPlanIdBySlug(admin: any, slug: string) {
 async function ensureProfile(admin: any, input: EnsureUserAccessInput) {
   const email = normalizeEmail(input.email);
   const fullName = normalizeName(input);
+  const avatarUrl = String(input.avatarUrl ?? "").trim() || null;
   const now = new Date().toISOString();
 
   const { data: existingProfile, error: existingError } = await admin
     .from("profiles")
-    .select("id, email, role, onboarding_status, onboarding_step")
+    .select("id, email, full_name, avatar_url, role, onboarding_status, onboarding_step")
     .eq("id", input.id)
     .maybeSingle();
 
@@ -83,9 +84,9 @@ async function ensureProfile(admin: any, input: EnsureUserAccessInput) {
 
   const payload: Record<string, unknown> = {
     id: input.id,
-    email: email || null,
-    full_name: fullName,
-    avatar_url: input.avatarUrl ?? null,
+    email: email || existingProfile?.email || null,
+    full_name: fullName ?? existingProfile?.full_name ?? null,
+    avatar_url: avatarUrl ?? existingProfile?.avatar_url ?? null,
     role: normalizeRole(existingProfile?.role),
     updated_at: now,
   };
