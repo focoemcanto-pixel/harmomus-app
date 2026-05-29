@@ -5,6 +5,13 @@ type SendMinistryInviteEmailInput = {
   inviteUrl: string;
 };
 
+type SendMinistryAccessRemovedEmailInput = {
+  to: string;
+  invitedName?: string | null;
+  ministryName?: string | null;
+  premiumUrl: string;
+};
+
 type SendMinistryInviteEmailResult = {
   sent: boolean;
   skipped: boolean;
@@ -44,7 +51,7 @@ export function buildAbsoluteUrl(path: string, requestUrl?: string) {
   return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
-export async function sendMinistryInviteEmail(input: SendMinistryInviteEmailInput): Promise<SendMinistryInviteEmailResult> {
+async function sendResendEmail({ to, subject, html }: { to: string; subject: string; html: string }): Promise<SendMinistryInviteEmailResult> {
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.RESEND_FROM_EMAIL;
 
@@ -56,6 +63,59 @@ export async function sendMinistryInviteEmail(input: SendMinistryInviteEmailInpu
     return { sent: false, skipped: true, reason: "RESEND_FROM_EMAIL não configurada", status: null, providerMessageId: null };
   }
 
+  try {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: getSender(from),
+        to,
+        subject,
+        html,
+      }),
+    });
+
+    const rawBody = await response.text().catch(() => "");
+    let parsedBody: any = null;
+
+    try {
+      parsedBody = rawBody ? JSON.parse(rawBody) : null;
+    } catch {
+      parsedBody = null;
+    }
+
+    if (!response.ok) {
+      return {
+        sent: false,
+        skipped: false,
+        reason: parsedBody?.message || parsedBody?.error || rawBody || `Resend retornou ${response.status}`,
+        status: response.status,
+        providerMessageId: parsedBody?.id ?? null,
+      };
+    }
+
+    return {
+      sent: true,
+      skipped: false,
+      reason: null,
+      status: response.status,
+      providerMessageId: parsedBody?.id ?? null,
+    };
+  } catch (error) {
+    return {
+      sent: false,
+      skipped: false,
+      reason: error instanceof Error ? error.message : "Erro desconhecido ao chamar Resend",
+      status: null,
+      providerMessageId: null,
+    };
+  }
+}
+
+export async function sendMinistryInviteEmail(input: SendMinistryInviteEmailInput): Promise<SendMinistryInviteEmailResult> {
   const ministryName = escapeHtml(input.ministryName || "seu ministério");
   const invitedName = escapeHtml(input.invitedName || "Olá");
   const invitedEmail = escapeHtml(input.to);
@@ -101,54 +161,52 @@ export async function sendMinistryInviteEmail(input: SendMinistryInviteEmailInpu
     </div>
   `;
 
-  try {
-    const response = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: getSender(from),
-        to: input.to,
-        subject,
-        html,
-      }),
-    });
+  return sendResendEmail({ to: input.to, subject, html });
+}
 
-    const rawBody = await response.text().catch(() => "");
-    let parsedBody: any = null;
+export async function sendMinistryAccessRemovedEmail(input: SendMinistryAccessRemovedEmailInput): Promise<SendMinistryInviteEmailResult> {
+  const ministryName = escapeHtml(input.ministryName || "seu ministério");
+  const invitedName = escapeHtml(input.invitedName || "Olá");
+  const premiumUrl = escapeHtml(input.premiumUrl);
 
-    try {
-      parsedBody = rawBody ? JSON.parse(rawBody) : null;
-    } catch {
-      parsedBody = null;
-    }
+  const subject = "Seu acesso Premium Ministerial foi encerrado";
+  const html = `
+    <div style="margin:0;padding:0;background:#020617;color:#ffffff;font-family:Arial,Helvetica,sans-serif;">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#020617;margin:0;padding:0;">
+        <tr>
+          <td align="center" style="padding:28px 14px;">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:640px;background:#080d1b;border:1px solid #7f1d1d;border-radius:24px;overflow:hidden;">
+              <tr>
+                <td style="padding:30px 26px 12px 26px;">
+                  <div style="font-size:12px;letter-spacing:4px;text-transform:uppercase;color:#fca5a5;font-weight:700;margin-bottom:18px;">Acesso Ministerial</div>
+                  <h1 style="font-size:32px;line-height:1.12;margin:0 0 18px 0;color:#ffffff;font-weight:800;">${invitedName}, seu acesso ministerial foi encerrado</h1>
+                  <p style="font-size:16px;line-height:1.7;color:#d4d4d8;margin:0 0 24px 0;">O responsável por ${ministryName} removeu seu acesso Premium Ministerial no Harmomus.</p>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:0 26px 26px 26px;">
+                  <div style="border:1px solid rgba(255,255,255,.14);border-radius:18px;padding:18px;background:#050914;color:#d4d4d8;font-size:14px;line-height:1.65;">
+                    Sua conta Harmomus continua existindo normalmente, agora com acesso gratuito. Para continuar usando os recursos Premium, você pode assinar um plano individual.
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td align="left" style="padding:0 26px 30px 26px;">
+                  <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                    <tr>
+                      <td bgcolor="#67e8f9" style="border-radius:14px;background:#67e8f9;">
+                        <a href="${premiumUrl}" target="_blank" style="display:inline-block;padding:15px 24px;border-radius:14px;background:#67e8f9;color:#020617;font-size:15px;font-weight:800;text-decoration:none;">Assinar Premium individual</a>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </div>
+  `;
 
-    if (!response.ok) {
-      return {
-        sent: false,
-        skipped: false,
-        reason: parsedBody?.message || parsedBody?.error || rawBody || `Resend retornou ${response.status}`,
-        status: response.status,
-        providerMessageId: parsedBody?.id ?? null,
-      };
-    }
-
-    return {
-      sent: true,
-      skipped: false,
-      reason: null,
-      status: response.status,
-      providerMessageId: parsedBody?.id ?? null,
-    };
-  } catch (error) {
-    return {
-      sent: false,
-      skipped: false,
-      reason: error instanceof Error ? error.message : "Erro desconhecido ao chamar Resend",
-      status: null,
-      providerMessageId: null,
-    };
-  }
+  return sendResendEmail({ to: input.to, subject, html });
 }
