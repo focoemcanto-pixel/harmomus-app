@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { PublicAppShell } from "@/components/public/public-app-shell";
@@ -5,6 +6,7 @@ import { CancelSubscriptionButton } from "./cancel-subscription-button";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { getCustomerPaymentMethods, getStripeSubscription, listCustomerInvoices } from "@/lib/stripe/client";
 import { getPlans } from "@/lib/data/plans";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const STATUS_LABELS: Record<string, string> = {
   active: "Ativa",
@@ -75,11 +77,7 @@ function normalizeInvoices(invoices: any[], currentSubscriptionId?: string | nul
       const total = Number(invoice.total ?? invoice.amount_paid ?? 0);
       const isZeroTrialInvoice = total === 0 && String(invoice.billing_reason ?? "").includes("subscription_create");
       if (isZeroTrialInvoice && seen.has("trial-zero-invoice")) return false;
-
-      const key = isZeroTrialInvoice
-        ? "trial-zero-invoice"
-        : String(invoice.id ?? invoice.number ?? `${invoice.created}-${invoice.total}-${invoice.status}`);
-
+      const key = isZeroTrialInvoice ? "trial-zero-invoice" : String(invoice.id ?? invoice.number ?? `${invoice.created}-${invoice.total}-${invoice.status}`);
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -91,9 +89,87 @@ function getInvoiceUrl(invoice: any) {
   return invoice.hosted_invoice_url ?? invoice.invoice_pdf ?? null;
 }
 
+function InfoCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div className="rounded-2xl border border-white/15 bg-white/5 p-4">
+      <p className="text-xs uppercase tracking-[0.12em] text-zinc-300">{label}</p>
+      <p className="mt-2 text-xl font-semibold text-white">{value}</p>
+      {hint ? <p className="mt-2 text-xs text-zinc-400">{hint}</p> : null}
+    </div>
+  );
+}
+
+async function getMinistryBillingInfo(context: Awaited<ReturnType<typeof getCurrentUserAccessContext>>) {
+  if (!context.ministry?.ministryId) return null;
+  const admin = createSupabaseAdminClient() as any;
+  const [{ data: ministry }, { data: owner }] = await Promise.all([
+    admin.from("ministries").select("id,name,status,plan_type,owner_id").eq("id", context.ministry.ministryId).maybeSingle(),
+    admin
+      .from("ministry_members")
+      .select("user_id,invited_email,invited_name,profile:profiles(email,full_name)")
+      .eq("ministry_id", context.ministry.ministryId)
+      .eq("role", "owner")
+      .maybeSingle(),
+  ]);
+
+  return {
+    ministryName: ministry?.name || "seu ministério",
+    ministryStatus: String(ministry?.status ?? "active"),
+    ownerName: owner?.profile?.full_name || owner?.invited_name || "Responsável do ministério",
+    ownerEmail: owner?.profile?.email || owner?.invited_email || "Gerenciado pelo responsável",
+  };
+}
+
 export default async function AssinaturaPage({ searchParams }: { searchParams?: Promise<{ error?: string }> }) {
   const [context, params] = await Promise.all([getCurrentUserAccessContext(), searchParams]);
   if (context.isGuest) redirect("/login");
+
+  const isMinistryPremium = Boolean(context.ministry);
+  const ministryInfo = isMinistryPremium ? await getMinistryBillingInfo(context) : null;
+
+  if (isMinistryPremium) {
+    return (
+      <PublicAppShell>
+        <main className="min-h-screen bg-gradient-to-b from-[#020617] via-[#060b1a] to-[#09031a] p-4 text-white md:p-8">
+          <section className="mx-auto max-w-5xl rounded-[2rem] border border-cyan-300/20 bg-gradient-to-br from-[#0b1120] via-[#120d24] to-[#0a0f1f] p-6 shadow-[0_30px_80px_rgba(34,211,238,0.22)] md:p-10">
+            <p className="text-xs uppercase tracking-[0.22em] text-cyan-200">Painel de assinatura</p>
+            <h1 className="mt-3 text-3xl font-semibold md:text-4xl">Premium Ministerial ativo</h1>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-300">
+              Seu acesso Premium foi concedido por um plano ministerial. A cobrança e a gestão das vagas são administradas pelo responsável do ministério.
+            </p>
+
+            <div className="mt-8 grid gap-4 md:grid-cols-4">
+              <InfoCard label="Plano atual" value="Premium Ministerial" hint="Benefício vinculado ao ministério" />
+              <InfoCard label="Status do acesso" value="Ativo" hint="Enquanto você fizer parte do ministério" />
+              <InfoCard label="Concedido por" value={ministryInfo?.ministryName ?? "Ministério"} />
+              <InfoCard label="Cobrança" value="Administrada pelo ministério" hint="Você não possui cobrança individual neste acesso" />
+            </div>
+
+            <div className="mt-8 rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-5 text-sm text-emerald-50">
+              <h2 className="text-lg font-semibold text-white">Seu acesso está liberado</h2>
+              <p className="mt-2 leading-6">
+                Você pode acessar os kits, tons e recursos Premium disponíveis para integrantes. Solicitações de novas músicas e tons continuam centralizadas no responsável do ministério.
+              </p>
+            </div>
+
+            <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.04] p-5">
+              <h2 className="text-lg font-semibold">Responsável pelo plano</h2>
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <InfoCard label="Responsável" value={ministryInfo?.ownerName ?? "Responsável do ministério"} />
+                <InfoCard label="Contato" value={ministryInfo?.ownerEmail ?? "Gerenciado pelo ministério"} />
+              </div>
+            </div>
+
+            <div className="mt-8 flex flex-wrap gap-3">
+              <Link href="/" className="rounded-xl bg-cyan-300 px-5 py-3 text-sm font-semibold text-slate-950">Ver site</Link>
+              <Link href="/todos-os-kits" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-zinc-100 hover:bg-white/10">Ver kits</Link>
+              <Link href="/assinar?plan=premium" className="rounded-xl border border-fuchsia-300/40 bg-fuchsia-500/10 px-5 py-3 text-sm font-semibold text-fuchsia-100">Assinar Premium individual</Link>
+            </div>
+          </section>
+        </main>
+      </PublicAppShell>
+    );
+  }
 
   const plans = await getPlans();
   const currentPlan = context.plan?.name ?? (context.effectiveSlug === "premium" ? "Premium" : context.effectiveSlug === "plus" ? "Plus" : "Free");
@@ -119,21 +195,16 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
     ]);
 
     invoices = normalizeInvoices(Array.isArray(invoiceResponse?.data) ? invoiceResponse.data : [], subscriptionId);
-
     const card = paymentMethodsResponse?.data?.[0]?.card;
     paymentMethodLabel = card ? `${String(card.brand ?? "Cartão").toUpperCase()} •••• ${card.last4}` : "Não cadastrado";
-
     const interval = stripeSubscription?.items?.data?.[0]?.price?.recurring?.interval;
     billingCycle = billingCycleLabel(interval);
-
     const currentPeriodEndIso = stripeTimestampToIso(stripeSubscription?.current_period_end);
     const trialEndIso = stripeTimestampToIso(stripeSubscription?.trial_end);
-
     if (currentPeriodEndIso) {
       nextBillingDate = currentPeriodEndIso;
       periodEndDate = currentPeriodEndIso;
     }
-
     if (trialEndIso) {
       trialEndDate = trialEndIso;
       if (status === "trialing") {
@@ -175,16 +246,16 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
           ) : null}
 
           <div className="mt-8 grid gap-4 md:grid-cols-4">
-            <div className="rounded-2xl border border-white/15 bg-white/5 p-4"><p className="text-xs uppercase tracking-[0.12em] text-zinc-300">Plano atual</p><p className="mt-2 text-2xl font-semibold">{currentPlan}</p></div>
-            <div className="rounded-2xl border border-white/15 bg-white/5 p-4"><p className="text-xs uppercase tracking-[0.12em] text-zinc-300">Status da assinatura</p><p className="mt-2 text-xl font-semibold text-emerald-300">{STATUS_LABELS[status] ?? status}</p></div>
-            <div className="rounded-2xl border border-white/15 bg-white/5 p-4"><p className="text-xs uppercase tracking-[0.12em] text-zinc-300">Próxima cobrança</p><p className="mt-2 text-xl font-semibold">{nextBillingLabel}</p></div>
-            <div className="rounded-2xl border border-white/15 bg-white/5 p-4"><p className="text-xs uppercase tracking-[0.12em] text-zinc-300">Método de pagamento</p><p className="mt-2 text-xl font-semibold">{paymentMethodLabel}</p></div>
+            <InfoCard label="Plano atual" value={currentPlan} />
+            <InfoCard label="Status da assinatura" value={STATUS_LABELS[status] ?? status} />
+            <InfoCard label="Próxima cobrança" value={nextBillingLabel} />
+            <InfoCard label="Método de pagamento" value={paymentMethodLabel} />
           </div>
 
           <div className="mt-4 grid gap-4 md:grid-cols-3">
-            <div className="rounded-2xl border border-white/15 bg-white/5 p-4"><p className="text-xs uppercase tracking-[0.12em] text-zinc-300">Ciclo</p><p className="mt-2 text-xl font-semibold">{billingCycle}</p></div>
-            <div className="rounded-2xl border border-white/15 bg-white/5 p-4"><p className="text-xs uppercase tracking-[0.12em] text-zinc-300">Renovação</p><p className="mt-2 text-xl font-semibold">{renewalStatus}</p></div>
-            <div className="rounded-2xl border border-white/15 bg-white/5 p-4"><p className="text-xs uppercase tracking-[0.12em] text-zinc-300">Fim do teste</p><p className="mt-2 text-xl font-semibold">{status === "trialing" ? formatDate(trialEndDate) : "—"}</p></div>
+            <InfoCard label="Ciclo" value={billingCycle} />
+            <InfoCard label="Renovação" value={renewalStatus} />
+            <InfoCard label="Fim do teste" value={status === "trialing" ? formatDate(trialEndDate) : "—"} />
           </div>
 
           {params?.error ? <p className="mt-4 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">{params.error}</p> : null}
