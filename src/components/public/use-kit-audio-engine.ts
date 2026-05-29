@@ -18,9 +18,19 @@ function getTrackIdentity(track: KitTrack | null | undefined) {
 function createAudioElement(preload: "metadata" | "auto") {
   const audio = new Audio();
   audio.preload = preload;
-  audio.crossOrigin = "anonymous";
   audio.setAttribute("playsinline", "true");
   return audio;
+}
+
+function normalizePlaybackError(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  if (/operation is not supported|not supported source|no supported source|media resource/i.test(message)) {
+    return "Não foi possível iniciar este áudio. Tente clicar novamente.";
+  }
+  if (/play\(\) request was interrupted|aborted/i.test(message)) {
+    return null;
+  }
+  return message || "Não foi possível reproduzir este áudio agora.";
 }
 
 export function useKitAudioEngine() {
@@ -79,7 +89,6 @@ export function useKitAudioEngine() {
       try { audio.pause(); } catch {}
       try { audio.currentTime = 0; } catch {}
       audio.removeAttribute("src");
-      audio.src = "";
       try { audio.load(); } catch {}
     }
 
@@ -98,7 +107,6 @@ export function useKitAudioEngine() {
     if (preloader) {
       try { preloader.pause(); } catch {}
       preloader.removeAttribute("src");
-      preloader.src = "";
       preloadedSrcRef.current = null;
       try { preloader.load(); } catch {}
     }
@@ -157,11 +165,13 @@ export function useKitAudioEngine() {
       const abortController = new AbortController();
       abortRef.current = abortController;
 
+      let reusedPreloader = false;
       if (canReusePreloader && preloaderRef.current) {
         audioRef.current = preloaderRef.current;
         audio = audioRef.current;
         preloaderRef.current = createAudioElement("auto");
         preloadedSrcRef.current = null;
+        reusedPreloader = true;
       } else {
         audio.src = nextTrack.src;
         audio.load();
@@ -182,7 +192,19 @@ export function useKitAudioEngine() {
         const shift = nextTrack.semitoneShift ?? 0;
         if (shift === 0) {
           if (!isStillCurrent()) return;
-          await audio.play();
+          try {
+            await audio.play();
+          } catch (firstPlayError) {
+            if (!reusedPreloader || !isStillCurrent()) throw firstPlayError;
+
+            const fallbackAudio = createAudioElement("auto");
+            fallbackAudio.src = nextTrack.src;
+            fallbackAudio.volume = volumeRef.current;
+            fallbackAudio.loop = loopRef.current;
+            audioRef.current = fallbackAudio;
+            audio = fallbackAudio;
+            await fallbackAudio.play();
+          }
         } else {
           if (!isStillCurrent()) return;
           const pitchController = await getPitchEngine().createPlayback({ audio, semitoneShift: shift, signal: abortController.signal });
@@ -200,7 +222,7 @@ export function useKitAudioEngine() {
       } catch (error) {
         if (!isStillCurrent()) return;
         setIsPlaying(false);
-        setErrorMessage(error instanceof Error ? error.message : "Não foi possível reproduzir este áudio agora.");
+        setErrorMessage(normalizePlaybackError(error));
       }
     });
   }, [ensureAudio, hardInvalidatePlayback, runTransition, startRafLoop]);
