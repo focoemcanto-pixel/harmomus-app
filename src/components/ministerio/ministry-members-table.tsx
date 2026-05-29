@@ -15,6 +15,56 @@ function statusClass(status?: string | null) {
   return "border-white/10 bg-white/5 text-zinc-200";
 }
 
+function OpenInviteLink({ href }: { href: string }) {
+  return (
+    <Link href={href} className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-3 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-500/20">
+      <ExternalLink className="h-3.5 w-3.5" /> Abrir
+    </Link>
+  );
+}
+
+function ResendInviteButton({ memberId }: { memberId: string }) {
+  return (
+    <form action="/api/ministerio/invite" method="post">
+      <input type="hidden" name="resend_member_id" value={memberId} />
+      <button className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-3 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-500/20" aria-label="Gerar novo convite">
+        <RotateCcw className="h-3.5 w-3.5" /> Reenviar
+      </button>
+    </form>
+  );
+}
+
+function RemoveMemberButton({ memberId }: { memberId: string }) {
+  return (
+    <form action="/api/ministerio/remove" method="post">
+      <input type="hidden" name="member_id" value={memberId} />
+      <button className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-rose-300/20 bg-rose-500/10 px-3 text-xs font-semibold text-rose-100 transition hover:bg-rose-500/20" aria-label="Remover integrante">
+        <Trash2 className="h-3.5 w-3.5" /> Remover
+      </button>
+    </form>
+  );
+}
+
+function MemberActions({ member, pending, invitePath, canManage, canRemove, ministryName, name }: { member: MinistryMemberRow; pending: boolean; invitePath: string | null; canManage: boolean; canRemove: boolean; ministryName: string; name: string }) {
+  const removable = canRemove && member.role !== "owner" && String(member.status) !== "removed";
+
+  if (!pending && !removable) return <span className="text-xs text-zinc-500">—</span>;
+
+  return (
+    <div className="flex flex-wrap items-center justify-start gap-2 lg:justify-end">
+      {pending && invitePath ? (
+        <>
+          <OpenInviteLink href={invitePath} />
+          <CopyInviteLink href={invitePath} />
+          <WhatsAppInviteLink href={invitePath} invitedName={member.invited_name || name} ministryName={ministryName} />
+        </>
+      ) : null}
+      {canManage && pending ? <ResendInviteButton memberId={member.id} /> : null}
+      {removable ? <RemoveMemberButton memberId={member.id} /> : null}
+    </div>
+  );
+}
+
 export function MinistryMembersTable({ members, canRemove, canManage, ministryName }: { members: MinistryMemberRow[]; canRemove: boolean; canManage: boolean; ministryName: string }) {
   return (
     <PremiumPanel id="integrantes" className="overflow-hidden p-0">
@@ -27,72 +77,89 @@ export function MinistryMembersTable({ members, canRemove, canManage, ministryNa
       </div>
 
       {members.length ? (
-        <div className="overflow-x-auto">
-          <table className="min-w-[1120px] w-full text-left text-sm">
-            <thead className="border-y border-white/10 bg-white/[0.04] text-xs uppercase tracking-[0.12em] text-zinc-400">
-              <tr>
-                <th className="px-4 py-3">Nome</th>
-                <th className="px-4 py-3">Email</th>
-                <th className="px-4 py-3">Função</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Convite</th>
-                <th className="px-4 py-3">Aceite</th>
-                <th className="px-4 py-3 text-right">Ações</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/10">
-              {members.map((member) => {
-                const email = member.profile?.email || member.invited_email || "—";
-                const name = member.profile?.full_name || member.invited_name || "Integrante";
-                const pending = ["pending", "invited"].includes(String(member.status));
-                const invitePath = member.invite_token ? `/convite-ministerio/${member.invite_token}` : null;
+        <>
+          <div className="hidden overflow-x-auto md:block">
+            <table className="min-w-[980px] w-full text-left text-sm">
+              <thead className="border-y border-white/10 bg-white/[0.04] text-xs uppercase tracking-[0.12em] text-zinc-400">
+                <tr>
+                  <th className="px-4 py-3">Integrante</th>
+                  <th className="px-4 py-3">Função</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Convite</th>
+                  <th className="px-4 py-3">Aceite</th>
+                  <th className="px-4 py-3 text-right">Ações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/10">
+                {members.map((member) => {
+                  const email = member.profile?.email || member.invited_email || "—";
+                  const name = member.profile?.full_name || member.invited_name || "Integrante";
+                  const pending = ["pending", "invited"].includes(String(member.status));
+                  const invitePath = member.invite_token ? `/convite-ministerio/${member.invite_token}` : null;
 
-                return (
-                  <tr key={member.id} className="align-top transition hover:bg-white/[0.035]">
-                    <td className="px-4 py-4 font-semibold text-white">{name}</td>
-                    <td className="px-4 py-4 text-zinc-300">{email}</td>
-                    <td className="px-4 py-4 text-zinc-300">{roleLabel(member.role)}</td>
-                    <td className="px-4 py-4"><span className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusClass(member.status)}`}>{statusLabel(member.status)}</span></td>
-                    <td className="px-4 py-4 text-zinc-400">
-                      <div>{formatDate(member.invited_at || member.created_at)}</div>
-                      {pending && invitePath ? (
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                          <Link href={invitePath} className="inline-flex items-center gap-1 text-xs font-semibold text-cyan-200 underline-offset-4 hover:underline">
-                            <ExternalLink className="h-3.5 w-3.5" /> Abrir convite
-                          </Link>
-                          <CopyInviteLink href={invitePath} />
-                          <WhatsAppInviteLink href={invitePath} invitedName={member.invited_name || name} ministryName={ministryName} />
-                        </div>
-                      ) : null}
-                    </td>
-                    <td className="px-4 py-4 text-zinc-400">{member.accepted_at ? formatDate(member.accepted_at) : pending ? "Aguardando" : "—"}</td>
-                    <td className="px-4 py-4">
-                      <div className="flex justify-end gap-2">
-                        {canManage && pending ? (
-                          <form action="/api/ministerio/invite" method="post">
-                            <input type="hidden" name="resend_member_id" value={member.id} />
-                            <button className="inline-flex h-9 items-center gap-2 rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-3 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-500/20" aria-label="Gerar novo convite">
-                              <RotateCcw className="h-3.5 w-3.5" /> Gerar novo convite
-                            </button>
-                          </form>
-                        ) : null}
-                        {canRemove && member.role !== "owner" && String(member.status) !== "removed" ? (
-                          <form action="/api/ministerio/remove" method="post">
-                            <input type="hidden" name="member_id" value={member.id} />
-                            <button className="inline-flex h-9 items-center gap-2 rounded-xl border border-rose-300/20 bg-rose-500/10 px-3 text-xs font-semibold text-rose-100 transition hover:bg-rose-500/20" aria-label="Remover integrante">
-                              <Trash2 className="h-3.5 w-3.5" /> Remover
-                            </button>
-                          </form>
-                        ) : null}
-                        {!pending && !(canRemove && member.role !== "owner") ? <span className="text-xs text-zinc-500">—</span> : null}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                  return (
+                    <tr key={member.id} className="align-top transition hover:bg-white/[0.035]">
+                      <td className="px-4 py-4">
+                        <p className="font-semibold text-white">{name}</p>
+                        <p className="mt-1 max-w-[260px] break-all text-xs text-zinc-400">{email}</p>
+                      </td>
+                      <td className="px-4 py-4 text-zinc-300">{roleLabel(member.role)}</td>
+                      <td className="px-4 py-4"><span className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusClass(member.status)}`}>{statusLabel(member.status)}</span></td>
+                      <td className="px-4 py-4 text-zinc-400">
+                        <p>{formatDate(member.invited_at || member.created_at)}</p>
+                        {pending ? <p className="mt-1 text-xs text-amber-100/70">Aguardando aceite</p> : null}
+                      </td>
+                      <td className="px-4 py-4 text-zinc-400">{member.accepted_at ? formatDate(member.accepted_at) : pending ? "—" : "—"}</td>
+                      <td className="px-4 py-4">
+                        <MemberActions member={member} pending={pending} invitePath={invitePath} canManage={canManage} canRemove={canRemove} ministryName={ministryName} name={name} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="grid gap-3 p-4 md:hidden">
+            {members.map((member) => {
+              const email = member.profile?.email || member.invited_email || "—";
+              const name = member.profile?.full_name || member.invited_name || "Integrante";
+              const pending = ["pending", "invited"].includes(String(member.status));
+              const invitePath = member.invite_token ? `/convite-ministerio/${member.invite_token}` : null;
+
+              return (
+                <div key={member.id} className="rounded-3xl border border-white/10 bg-white/[0.035] p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-white">{name}</p>
+                      <p className="mt-1 break-all text-xs text-zinc-400">{email}</p>
+                    </div>
+                    <span className={`shrink-0 rounded-full border px-3 py-1 text-xs font-semibold ${statusClass(member.status)}`}>{statusLabel(member.status)}</span>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-2 gap-3 rounded-2xl border border-white/10 bg-black/20 p-3 text-xs text-zinc-400">
+                    <div>
+                      <p className="uppercase tracking-[0.12em] text-zinc-500">Função</p>
+                      <p className="mt-1 text-zinc-200">{roleLabel(member.role)}</p>
+                    </div>
+                    <div>
+                      <p className="uppercase tracking-[0.12em] text-zinc-500">Convite</p>
+                      <p className="mt-1 text-zinc-200">{formatDate(member.invited_at || member.created_at)}</p>
+                    </div>
+                    <div className="col-span-2">
+                      <p className="uppercase tracking-[0.12em] text-zinc-500">Aceite</p>
+                      <p className="mt-1 text-zinc-200">{member.accepted_at ? formatDate(member.accepted_at) : pending ? "Aguardando" : "—"}</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4">
+                    <MemberActions member={member} pending={pending} invitePath={invitePath} canManage={canManage} canRemove={canRemove} ministryName={ministryName} name={name} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
       ) : (
         <div className="m-5 rounded-2xl border border-dashed border-white/10 bg-black/20 p-8 text-center text-sm text-zinc-400 md:m-6">
           Nenhum integrante cadastrado ainda.
