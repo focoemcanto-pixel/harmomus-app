@@ -1,19 +1,38 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+
+import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export async function POST(request: Request) {
-  const body = (await request.json()) as { channel: "whatsapp" | "email"; target: string; content: string; provider?: string };
-  const supabase = await createClient();
+  const context = await getCurrentUserAccessContext();
+  if (!context.isAdmin) {
+    return NextResponse.json({ error: "Acesso negado." }, { status: 403 });
+  }
 
-  const payload = { ok: true, simulated: true, channel: body.channel, target: body.target };
-  const { error } = await supabase.from("communication_logs" as never).insert({
+  const body = (await request.json()) as {
+    channel: "whatsapp" | "email";
+    target: string;
+    content: string;
+    provider?: string;
+  };
+
+  const supabase = createSupabaseAdminClient() as any;
+  const payload = {
+    ok: true,
+    simulated: true,
     channel: body.channel,
-    provider: body.provider ?? "test",
-    status: "success",
+    target: body.target,
+    note: "Nenhum provider real de comunicação está configurado. Teste registrado como simulação.",
+  };
+
+  const { error } = await supabase.from("communication_logs").insert({
+    channel: body.channel,
+    provider: body.provider ?? "simulation",
+    status: "simulated",
     payload: body,
     response_payload: payload,
     error_message: null,
-  } as never);
+  });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json(payload);
