@@ -10,6 +10,10 @@ function redirectToMinisterio(request: Request, message?: string) {
   return NextResponse.redirect(url, 303);
 }
 
+function normalizeEmail(value?: string | null) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
 export async function POST(request: Request) {
   const context = await getCurrentUserAccessContext();
 
@@ -55,13 +59,33 @@ export async function POST(request: Request) {
     return redirectToMinisterio(request, "O plano ministerial não está ativo.");
   }
 
-  const { count: usedSeats } = await admin
+  const seatLimit = Number(ministry.seat_limit ?? 0) || Number(context.ministry.seatLimit ?? 0);
+
+  if (seatLimit <= 0) {
+    return redirectToMinisterio(request, "Não foi possível identificar o limite de vagas deste plano.");
+  }
+
+  const { data: activeDuplicates } = await admin
     .from("ministry_members")
-    .select("id", { count: "exact", head: true })
+    .select("id,user_id,invited_email,status")
     .eq("ministry_id", context.ministry.ministryId)
     .in("status", ["active", "pending", "invited"]);
 
-  if ((usedSeats ?? 0) >= Number(ministry.seat_limit ?? 0)) {
+  const memberEmail = normalizeEmail(member.invited_email);
+  const duplicate = (activeDuplicates ?? []).find((existing: any) => {
+    if (existing.id === member.id) return false;
+    const sameUser = member.user_id && existing.user_id === member.user_id;
+    const sameEmail = memberEmail && normalizeEmail(existing.invited_email) === memberEmail;
+    return sameUser || sameEmail;
+  });
+
+  if (duplicate) {
+    return redirectToMinisterio(request, "Este integrante já possui outro acesso ou convite ativo neste ministério.");
+  }
+
+  const usedSeats = (activeDuplicates ?? []).length;
+
+  if (usedSeats >= seatLimit) {
     return redirectToMinisterio(request, "Não há vagas livres para restaurar este integrante.");
   }
 
