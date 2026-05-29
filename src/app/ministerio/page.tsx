@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Crown, Mail, ShieldCheck, Sparkles, Users } from "lucide-react";
 
+import { ArchivedMembersPanel } from "@/components/ministerio/archived-members-panel";
 import { MinistryInviteCard } from "@/components/ministerio/ministry-invite-card";
 import { MinistryMembersTable } from "@/components/ministerio/ministry-members-table";
 import { MinistryShell, planLabel, PremiumPanel, statusLabel } from "@/components/ministerio/ministry-ui";
@@ -35,7 +36,7 @@ function metric(label: string, value: string | number, icon: React.ReactNode, hi
 function messageTone(message?: string | null) {
   const value = String(message ?? "").toLowerCase();
   if (!value) return null;
-  if (value.includes("sucesso") || value.includes("criado") || value.includes("reenviado") || value.includes("removido")) return "success";
+  if (value.includes("sucesso") || value.includes("criado") || value.includes("reenviado") || value.includes("removido") || value.includes("restaurado")) return "success";
   return "warning";
 }
 
@@ -81,11 +82,12 @@ export default async function MinisterioPage({ searchParams }: { searchParams?: 
       .from("ministry_members")
       .select("id,ministry_id,user_id,role,status,invited_email,invited_name,invite_token,invited_at,accepted_at,removed_at,created_at,updated_at")
       .eq("ministry_id", context.ministry.ministryId)
-      .neq("status", "removed")
       .order("created_at", { ascending: true }),
   ]);
 
-  const members = rawMembers ?? [];
+  const allMembers = rawMembers ?? [];
+  const members = allMembers.filter((member: any) => String(member.status) !== "removed");
+  const archivedMembers = allMembers.filter((member: any) => String(member.status) === "removed");
   const ministryPlanType = String(ministry?.plan_type ?? context.ministry.planType ?? planSlug ?? "").trim().toLowerCase();
   const seatLimit = Number(ministry?.seat_limit ?? 0) || Number(context.ministry.seatLimit ?? 0) || getMinistrySeatLimit(ministryPlanType);
   const usedSeats = members.filter((member: any) => ["active", "pending", "invited"].includes(String(member.status))).length;
@@ -157,6 +159,7 @@ export default async function MinisterioPage({ searchParams }: { searchParams?: 
         </div>
 
         <MinistryMembersTable members={members} canRemove={canRemove} canManage={canManage} ministryName={ministry?.name ?? "Ministério"} />
+        <ArchivedMembersPanel members={archivedMembers} canRestore={canRemove} />
       </MinistryShell>
     </>
   );
