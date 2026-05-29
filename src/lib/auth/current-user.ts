@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { ensureMinistryForSubscription, isMinistryPlanSlug } from "@/lib/data/ministry";
+import { ensureMinistryForSubscription, getMinistrySeatLimit, isMinistryPlanSlug } from "@/lib/data/ministry";
 import type { Database } from "@/types/database";
 
 export type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -85,32 +85,41 @@ function buildMinistryContextFromRows(membership: any, ministry: any): MinistryA
   const ministryActive = ministry && ["active", "trialing"].includes(String(ministry.status ?? "").toLowerCase());
   if (!membership || !ministryActive) return null;
 
+  const planType = String(ministry.plan_type ?? "");
+  const seatLimit = Number(ministry.seat_limit ?? 0) || getMinistrySeatLimit(planType);
+
   return {
     ministryId: ministry.id as string,
     role: membership.role as "owner" | "manager" | "member",
-    seatLimit: Number(ministry.seat_limit ?? 0),
-    planType: String(ministry.plan_type ?? ""),
+    seatLimit,
+    planType,
   };
 }
 
 async function getActiveMinistryMembership(admin: any, userId: string) {
-  const { data: membership } = await admin
+  const { data: memberships } = await admin
     .from("ministry_members")
-    .select("id,ministry_id,role,status")
+    .select("id,ministry_id,role,status,created_at")
     .eq("user_id", userId)
     .eq("status", "active")
-    .maybeSingle();
+    .order("created_at", { ascending: false })
+    .limit(10);
 
-  if (!membership?.ministry_id) return null;
+  for (const membership of memberships ?? []) {
+    if (!membership?.ministry_id) continue;
 
-  const { data: ministry } = await admin
-    .from("ministries")
-    .select("id,status,seat_limit,plan_type")
-    .eq("id", membership.ministry_id)
-    .maybeSingle();
+    const { data: ministry } = await admin
+      .from("ministries")
+      .select("id,status,seat_limit,plan_type,created_at")
+      .eq("id", membership.ministry_id)
+      .maybeSingle();
 
-  if (!ministry) return null;
-  return { ...membership, ministry };
+    if (ministry && ["active", "trialing"].includes(String(ministry.status ?? "").toLowerCase())) {
+      return { ...membership, ministry };
+    }
+  }
+
+  return null;
 }
 
 export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessContext> {
