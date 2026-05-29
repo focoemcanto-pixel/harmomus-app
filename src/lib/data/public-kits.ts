@@ -82,6 +82,15 @@ function getAudioStreamUrl(file: Database["public"]["Tables"]["kit_audio_files"]
   return `/api/audio/${file.id}`;
 }
 
+function resolveRequiredPlan(
+  kit: Database["public"]["Tables"]["kits"]["Row"],
+  plansMap: Map<string, Database["public"]["Tables"]["plans"]["Row"]>,
+) {
+  const raw = String((kit as any).required_plan ?? "").trim();
+  if (!raw) return null;
+  return plansMap.get(raw) ?? Array.from(plansMap.values()).find((plan) => plan.slug === raw) ?? null;
+}
+
 function mapKit(
   kit: Database["public"]["Tables"]["kits"]["Row"] & {
     original_tone?: string | null;
@@ -124,7 +133,7 @@ function mapKit(
   }
 
   const category = kit.category_id ? categoriesMap.get(kit.category_id) ?? null : null;
-  const requiredPlan = kit.required_plan ? plansMap.get(kit.required_plan) ?? null : null;
+  const requiredPlan = resolveRequiredPlan(kit, plansMap);
   const allowedPlanSlugs: ("free" | "plus" | "premium")[] = Array.isArray((kit as any).allowed_plan_slugs) && (kit as any).allowed_plan_slugs.length
     ? Array.from(new Set(((kit as any).allowed_plan_slugs as unknown[]).map((slug) => normalizePlan(slug))))
     : requiredPlan?.slug === "premium"
@@ -166,28 +175,34 @@ async function getPublicClient() {
   return (await createClient()) as any;
 }
 
-export async function getPublishedKits(): Promise<PublicKit[]> {
-  const supabase = await getPublicClient();
-  const [{ data: kits, error: kitsError }, { data: categories, error: categoriesError }, { data: plans, error: plansError }, { data: files, error: filesError }] = await Promise.all([
-    supabase.from("kits").select("*").eq("published", true).order("created_at", { ascending: false }),
+async function getPlanAndCategoryMaps(supabase: any) {
+  const [{ data: categories, error: categoriesError }, { data: plans, error: plansError }] = await Promise.all([
     supabase.from("categories").select("*"),
     supabase.from("plans").select("*"),
-    supabase.from("kit_audio_files").select("*"),
   ]);
 
-  if (kitsError) throw new Error(`Falha ao buscar kits públicos: ${kitsError.message}`);
   if (categoriesError) throw new Error(`Falha ao buscar categorias: ${categoriesError.message}`);
   if (plansError) throw new Error(`Falha ao buscar planos: ${plansError.message}`);
-  if (filesError) throw new Error(`Falha ao buscar áudios: ${filesError.message}`);
 
   const categoriesRows = (categories ?? []) as Database["public"]["Tables"]["categories"]["Row"][];
   const plansRows = (plans ?? []) as Database["public"]["Tables"]["plans"]["Row"][];
-  const filesRows = (files ?? []) as Database["public"]["Tables"]["kit_audio_files"]["Row"][];
+  return {
+    categoriesMap: new Map(categoriesRows.map((row) => [row.id, row])),
+    plansMap: new Map(plansRows.map((row) => [row.id, row])),
+  };
+}
+
+export async function getPublishedKits(): Promise<PublicKit[]> {
+  const supabase = await getPublicClient();
+  const [{ data: kits, error: kitsError }, maps] = await Promise.all([
+    supabase.from("kits").select("*").eq("published", true).order("created_at", { ascending: false }),
+    getPlanAndCategoryMaps(supabase),
+  ]);
+
+  if (kitsError) throw new Error(`Falha ao buscar kits públicos: ${kitsError.message}`);
+
   const kitsRows = (kits ?? []) as (Database["public"]["Tables"]["kits"]["Row"] & any)[];
-  const categoriesMap = new Map(categoriesRows.map((row) => [row.id, row]));
-  const plansMap = new Map(plansRows.map((row) => [row.id, row]));
-  const filesByKit = groupFilesByKit(filesRows);
-  return kitsRows.map((kit) => mapKit(kit, categoriesMap, plansMap, filesByKit.get(kit.id) ?? []));
+  return kitsRows.map((kit) => mapKit(kit, maps.categoriesMap, maps.plansMap, []));
 }
 
 export async function getPublicKits({ limit }: { limit?: number } = {}): Promise<PublicKit[]> {
