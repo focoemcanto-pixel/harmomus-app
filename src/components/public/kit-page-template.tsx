@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AccessCounter } from "@/components/public/access-counter";
 import { AccessStatusBadge } from "@/components/public/access-status-badge";
+import { FavoriteKitButton } from "@/components/public/favorite-kit-button";
 import { HarmomusPlayer } from "@/components/public/harmomus-player";
 import { KitActionsMenu } from "@/components/public/kit-actions-menu";
 import { LoginRequiredModal } from "@/components/public/login-required-modal";
@@ -18,6 +19,7 @@ import { formatToneLabel, normalizeTone, resolveToneTrack, sortTonesByChromaticO
 interface KitPageTemplateProps {
   kit: PublicKit;
   accessContext: any;
+  favoriteButton?: React.ReactNode;
 }
 
 type AudioSource = "original" | "generated";
@@ -167,7 +169,7 @@ function mapApiTonesToPublicToneGroups(tones: AudioFilesApiTone[]) {
   return sortTonesByChromaticOrder(Array.from(groups.keys())).map((tone) => groups.get(tone)!).filter(Boolean);
 }
 
-export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
+export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageTemplateProps) {
   const audioEngine = useKitAudioEngine();
   const { stopPlayback } = audioEngine;
   const [liveKit, setLiveKit] = useState<PublicKit>(kit);
@@ -332,7 +334,7 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
         <div className="grid gap-8 md:grid-cols-[280px_1fr] md:gap-10">
           <img src={liveKit.coverUrl ?? "https://placehold.co/600x600/101114/f4f4f5?text=Harmomus"} alt={liveKit.name} className="aspect-square w-full rounded-xl border border-white/10 object-cover" />
           <div>
-            <div className="mb-2 flex justify-end">
+            <div className="mb-2 flex flex-wrap justify-end gap-2">
               <KitActionsMenu
                 kitName={liveKit.name}
                 kitSlug={liveKit.slug}
@@ -341,6 +343,7 @@ export function KitPageTemplate({ kit, accessContext }: KitPageTemplateProps) {
                 canRequestSongsAndTones={accessContext.canRequestSongsAndTones}
                 onPremiumRequired={openPremiumToneUpgrade}
               />
+              {favoriteButton}
             </div>
             <h1 className="mt-2 text-3xl font-semibold text-white">{liveKit.name}</h1>
             <div className="mt-3"><AccessStatusBadge planSlug={accessContext.effectiveSlug} /></div>
