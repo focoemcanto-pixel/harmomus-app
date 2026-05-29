@@ -4,14 +4,29 @@ import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { uploadKitCoverToR2 } from "@/lib/r2/upload";
 
+const MAX_AVATAR_SIZE_BYTES = 2 * 1024 * 1024;
+const ALLOWED_AVATAR_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+
 export async function POST(request: Request) {
   try {
     const context = await getCurrentUserAccessContext();
-    if (context.isGuest || !context.profile?.id) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    if (context.isGuest || !context.profile?.id) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
 
     const form = await request.formData();
     const file = form.get("file");
-    if (!(file instanceof File)) return NextResponse.json({ error: "Arquivo inválido" }, { status: 400 });
+    if (!(file instanceof File)) {
+      return NextResponse.json({ error: "Arquivo inválido" }, { status: 400 });
+    }
+
+    if (!ALLOWED_AVATAR_TYPES.has(file.type)) {
+      return NextResponse.json({ error: "Envie uma imagem JPG, PNG, WEBP ou GIF." }, { status: 400 });
+    }
+
+    if (file.size > MAX_AVATAR_SIZE_BYTES) {
+      return NextResponse.json({ error: "Imagem muito grande. Envie arquivos de até 2MB." }, { status: 400 });
+    }
 
     const uploaded = await uploadKitCoverToR2({ file, slug: context.profile.id, context: "profile-avatar" });
     const supabaseAdmin = createSupabaseAdminClient();
