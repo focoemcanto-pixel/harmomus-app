@@ -118,6 +118,14 @@ function getInvoiceUrl(invoice: any) {
   return invoice.hosted_invoice_url ?? invoice.invoice_pdf ?? null;
 }
 
+function ministryPlanLabel(planType?: string | null) {
+  const normalized = String(planType ?? "").toLowerCase();
+  if (normalized === "ministry_40") return "Ministerial 40";
+  if (normalized === "ministry_20") return "Ministerial 20";
+  if (normalized === "ministry_10") return "Ministerial 10";
+  return "Premium Ministerial";
+}
+
 function InfoCard({
   label,
   value,
@@ -143,14 +151,35 @@ async function getMinistryBillingInfo(
 ) {
   if (!context.ministry?.ministryId) return null;
   const admin = createSupabaseAdminClient() as any;
-  const { data: ministry } = await admin
-    .from("ministries")
-    .select("id,name")
-    .eq("id", context.ministry.ministryId)
-    .maybeSingle();
+  const [{ data: ministry }, { data: members }] = await Promise.all([
+    admin
+      .from("ministries")
+      .select("id,name,status,plan_type,seat_limit")
+      .eq("id", context.ministry.ministryId)
+      .maybeSingle(),
+    admin
+      .from("ministry_members")
+      .select("id,status")
+      .eq("ministry_id", context.ministry.ministryId),
+  ]);
+
+  const activeStatuses = new Set(["active", "pending", "invited"]);
+  const usedSeats = (members ?? []).filter((member: any) =>
+    activeStatuses.has(String(member.status ?? "")),
+  ).length;
+  const archivedCount = (members ?? []).filter(
+    (member: any) => String(member.status ?? "") === "removed",
+  ).length;
+  const seatLimit = Number(ministry?.seat_limit ?? context.ministry.seatLimit ?? 0);
 
   return {
     ministryName: ministry?.name || "seu ministério",
+    ministryStatus: String(ministry?.status ?? "active"),
+    planType: String(ministry?.plan_type ?? context.ministry.planType ?? ""),
+    seatLimit,
+    usedSeats,
+    remainingSeats: Math.max(0, seatLimit - usedSeats),
+    archivedCount,
   };
 }
 
@@ -169,8 +198,11 @@ export default async function AssinaturaPage({
   const ministryInfo = isMinistryPremium
     ? await getMinistryBillingInfo(context)
     : null;
+  const ministryRole = String(context.ministry?.role ?? "").toLowerCase();
+  const canManageMinistry = ministryRole === "owner" || ministryRole === "manager" || ministryRole === "admin";
 
   if (isMinistryPremium) {
+    const title = canManageMinistry ? ministryPlanLabel(ministryInfo?.planType) : "Premium Ministerial";
     return (
       <PublicAppShell>
         <main className="min-h-screen bg-gradient-to-b from-[#020617] via-[#060b1a] to-[#09031a] p-4 text-white md:p-8">
@@ -179,29 +211,51 @@ export default async function AssinaturaPage({
               Painel de assinatura
             </p>
             <h1 className="mt-3 text-3xl font-semibold md:text-4xl">
-              Minha conta
+              {canManageMinistry ? "Plano Ministerial" : "Minha conta"}
             </h1>
 
             <div className="mt-8 rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-6">
               <p className="text-xs uppercase tracking-[0.18em] text-cyan-100">
-                Premium Ministerial
+                {canManageMinistry ? "Gestão do plano" : "Premium Ministerial"}
               </p>
               <h2 className="mt-3 text-2xl font-semibold text-white">
-                Premium Ministerial
+                {title}
               </h2>
               <p className="mt-3 text-sm leading-6 text-cyan-50">
-                Seu acesso Premium é fornecido por{" "}
-                {ministryInfo?.ministryName ?? "seu ministério"}.
+                {canManageMinistry
+                  ? `Você administra o acesso Premium Ministerial de ${ministryInfo?.ministryName ?? "seu ministério"}.`
+                  : `Seu acesso Premium é fornecido por ${ministryInfo?.ministryName ?? "seu ministério"}.`}
               </p>
             </div>
 
-            <div className="mt-8 grid gap-4 md:grid-cols-3">
-              <InfoCard label="Plano atual" value="Premium Ministerial" />
-              <InfoCard label="Status do acesso" value="Ativo" />
-              <InfoCard
-                label="Ministério"
-                value={ministryInfo?.ministryName ?? "Ministério"}
-              />
+            {canManageMinistry ? (
+              <div className="mt-8 grid gap-4 md:grid-cols-4">
+                <InfoCard label="Plano atual" value={title} />
+                <InfoCard label="Status do plano" value={STATUS_LABELS[ministryInfo?.ministryStatus ?? "active"] ?? "Ativo"} />
+                <InfoCard label="Vagas usadas" value={`${ministryInfo?.usedSeats ?? 0}/${ministryInfo?.seatLimit ?? context.ministry?.seatLimit ?? 0}`} hint={`${ministryInfo?.remainingSeats ?? 0} livres`} />
+                <InfoCard label="Arquivados" value={String(ministryInfo?.archivedCount ?? 0)} hint="Histórico preservado" />
+              </div>
+            ) : (
+              <div className="mt-8 grid gap-4 md:grid-cols-3">
+                <InfoCard label="Plano atual" value="Premium Ministerial" />
+                <InfoCard label="Status do acesso" value="Ativo" hint="Enquanto você fizer parte do ministério" />
+                <InfoCard
+                  label="Ministério"
+                  value={ministryInfo?.ministryName ?? "Ministério"}
+                />
+              </div>
+            )}
+
+            <div className="mt-8 rounded-2xl border border-white/10 bg-white/[0.04] p-5 text-sm leading-6 text-zinc-300">
+              {canManageMinistry ? (
+                <p>
+                  A cobrança e as vagas deste plano são gerenciadas pelo responsável ministerial. Use a Central Ministerial para convidar, remover, arquivar ou restaurar integrantes.
+                </p>
+              ) : (
+                <p>
+                  Você não possui uma cobrança individual vinculada a este acesso. A gestão do plano, das vagas e dos convites é feita pelo responsável do ministério.
+                </p>
+              )}
             </div>
 
             <div className="mt-8 flex flex-wrap gap-3">
@@ -217,6 +271,21 @@ export default async function AssinaturaPage({
               >
                 Ver kits
               </a>
+              {canManageMinistry ? (
+                <a
+                  href="/ministerio"
+                  className="rounded-xl border border-emerald-300/40 bg-emerald-500/10 px-5 py-3 text-sm font-semibold text-emerald-100"
+                >
+                  Gerenciar ministério
+                </a>
+              ) : (
+                <a
+                  href="/assinar?plan=premium"
+                  className="rounded-xl border border-fuchsia-300/40 bg-fuchsia-500/10 px-5 py-3 text-sm font-semibold text-fuchsia-100"
+                >
+                  Assinar Premium individual
+                </a>
+              )}
             </div>
           </section>
         </main>
