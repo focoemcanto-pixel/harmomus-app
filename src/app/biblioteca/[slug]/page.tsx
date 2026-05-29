@@ -59,8 +59,11 @@ export default async function BibliotecaKitPage({ params }: { params: Promise<{ 
   return (
     <PublicAppShell>
       <GlobalAudioPlayerProvider key={kit.id}>
-        <KitPageTemplate kit={kit} accessContext={{ ...current, ...accessContext, canRequestSongsAndTones: canRequestSongsAndTones({ isAdmin: current.isAdmin, ministryRole: current.ministry?.role ?? null, effectiveSlug: current.effectiveSlug }) }} />
-        {!current.isGuest ? <FavoriteKitButton kitId={kit.id} initialFavorited={initialFavorited} /> : null}
+        <KitPageTemplate
+          kit={kit}
+          accessContext={{ ...current, ...accessContext, canRequestSongsAndTones: canRequestSongsAndTones({ isAdmin: current.isAdmin, ministryRole: current.ministry?.role ?? null, effectiveSlug: current.effectiveSlug }) }}
+          favoriteButton={!current.isGuest ? <FavoriteKitButton kitId={kit.id} initialFavorited={initialFavorited} /> : null}
+        />
       </GlobalAudioPlayerProvider>
     </PublicAppShell>
   );

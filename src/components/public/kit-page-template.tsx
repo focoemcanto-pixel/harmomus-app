@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { AccessCounter } from "@/components/public/access-counter";
 import { AccessStatusBadge } from "@/components/public/access-status-badge";
-import { FavoriteKitButton } from "@/components/public/favorite-kit-button";
 import { HarmomusPlayer } from "@/components/public/harmomus-player";
 import { KitActionsMenu } from "@/components/public/kit-actions-menu";
 import { LoginRequiredModal } from "@/components/public/login-required-modal";
