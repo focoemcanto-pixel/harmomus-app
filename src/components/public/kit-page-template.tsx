@@ -196,13 +196,9 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
     }
 
     void hydrateAudioFiles();
-    const interval = window.setInterval(() => {
-      void hydrateAudioFiles();
-    }, 5000);
 
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
     };
   }, [kit.id]);
 
