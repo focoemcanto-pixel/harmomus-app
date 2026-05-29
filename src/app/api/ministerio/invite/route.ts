@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentUserAccessContext, isMinistryManager } from "@/lib/auth/current-user";
+import { buildAbsoluteUrl, sendMinistryInviteEmail } from "@/lib/email/ministry-invite-email";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 function redirectToMinisterio(request: Request, message?: string) {
@@ -26,19 +27,43 @@ export async function POST(request: Request) {
   const admin = createSupabaseAdminClient() as any;
   const now = new Date().toISOString();
 
+  const { data: ministry } = await admin
+    .from("ministries")
+    .select("id,name,seat_limit,status")
+    .eq("id", context.ministry.ministryId)
+    .maybeSingle();
+
+  if (!ministry?.id) {
+    return redirectToMinisterio(request, "Central ministerial não encontrada.");
+  }
+
+  if (!["active", "trialing"].includes(String(ministry.status ?? "").toLowerCase())) {
+    return redirectToMinisterio(request, "Seu plano ministerial não está ativo.");
+  }
+
   if (resendMemberId) {
-    const { error } = await admin
+    const newToken = crypto.randomUUID();
+    const { data: member, error } = await admin
       .from("ministry_members")
-      .update({
-        invite_token: crypto.randomUUID(),
-        invited_at: now,
-        updated_at: now,
-      })
+      .update({ invite_token: newToken, invited_at: now, updated_at: now })
       .eq("id", resendMemberId)
       .eq("ministry_id", context.ministry.ministryId)
-      .in("status", ["pending", "invited"]);
+      .in("status", ["pending", "invited"])
+      .select("id,invited_email,invited_name,invite_token")
+      .single();
 
-    return redirectToMinisterio(request, error ? "Não foi possível reenviar o convite." : "Convite reenviado com sucesso.");
+    if (error || !member?.id) return redirectToMinisterio(request, "Não foi possível reenviar o convite.");
+
+    const inviteUrl = buildAbsoluteUrl(`/convite-ministerio/${member.invite_token}`, request.url);
+    const emailResult = await sendMinistryInviteEmail({
+      to: member.invited_email,
+      invitedName: member.invited_name,
+      ministryName: ministry.name,
+      inviteUrl,
+    });
+
+    if (emailResult.sent) return redirectToMinisterio(request, "Convite reenviado por e-mail com sucesso.");
+    return redirectToMinisterio(request, "Novo link de convite gerado. Envie manualmente pela Central Ministerial.");
   }
 
   const email = normalizeEmail(form.get("email"));
@@ -47,20 +72,6 @@ export async function POST(request: Request) {
 
   if (!email || !email.includes("@") || !["member", "manager"].includes(role)) {
     return redirectToMinisterio(request, "Informe dados válidos para o convite.");
-  }
-
-  const { data: ministry, error: ministryError } = await admin
-    .from("ministries")
-    .select("id,seat_limit,status")
-    .eq("id", context.ministry.ministryId)
-    .maybeSingle();
-
-  if (ministryError || !ministry?.id) {
-    return redirectToMinisterio(request, "Central ministerial não encontrada.");
-  }
-
-  if (!["active", "trialing"].includes(String(ministry.status ?? "").toLowerCase())) {
-    return redirectToMinisterio(request, "Seu plano ministerial não está ativo.");
   }
 
   const { data: members } = await admin
@@ -85,19 +96,37 @@ export async function POST(request: Request) {
     .ilike("email", email)
     .maybeSingle();
 
-  const { error } = await admin.from("ministry_members").insert({
-    ministry_id: context.ministry.ministryId,
-    user_id: profile?.id ?? null,
-    invited_email: email,
-    invited_name: name || profile?.full_name || "Integrante",
-    role,
-    status: profile?.id ? "pending" : "invited",
-    invite_token: crypto.randomUUID(),
-    invited_by: context.profile.id,
-    invited_at: now,
-    created_at: now,
-    updated_at: now,
+  const inviteToken = crypto.randomUUID();
+  const { data: insertedMember, error } = await admin
+    .from("ministry_members")
+    .insert({
+      ministry_id: context.ministry.ministryId,
+      user_id: profile?.id ?? null,
+      invited_email: email,
+      invited_name: name || profile?.full_name || "Integrante",
+      role,
+      status: profile?.id ? "pending" : "invited",
+      invite_token: inviteToken,
+      invited_by: context.profile.id,
+      invited_at: now,
+      created_at: now,
+      updated_at: now,
+    })
+    .select("id,invited_email,invited_name,invite_token")
+    .single();
+
+  if (error || !insertedMember?.id) {
+    return redirectToMinisterio(request, error?.message || "Falha ao preparar convite.");
+  }
+
+  const inviteUrl = buildAbsoluteUrl(`/convite-ministerio/${insertedMember.invite_token}`, request.url);
+  const emailResult = await sendMinistryInviteEmail({
+    to: insertedMember.invited_email,
+    invitedName: insertedMember.invited_name,
+    ministryName: ministry.name,
+    inviteUrl,
   });
 
-  return redirectToMinisterio(request, error ? error.message || "Falha ao preparar convite." : "Convite Premium criado com sucesso.");
+  if (emailResult.sent) return redirectToMinisterio(request, "Convite Premium enviado por e-mail com sucesso.");
+  return redirectToMinisterio(request, "Convite Premium criado com sucesso. Envie o link manualmente pela Central Ministerial.");
 }
