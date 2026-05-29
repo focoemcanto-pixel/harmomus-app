@@ -1,19 +1,41 @@
 import { canSavePlaylist } from "@/lib/access/access-engine";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
 import { createClient } from "@/lib/supabase/server";
 
 const MAX_KITS = 20;
 
-async function ensurePlaylistAccess() {
+async function getAuthenticatedPlaylistUser() {
   const current = await getCurrentUserAccessContext();
 
   if (!canSavePlaylist(current.effectiveSlug)) {
     throw new Error("Playlists disponíveis apenas para Plus e Premium.");
   }
 
-  return current;
+  const authClient = await createClient();
+  const { data: auth } = await authClient.auth.getUser();
+  const user = auth.user;
+
+  if (!user) throw new Error("Faça login para gerenciar suas playlists.");
+
+  return { current, user };
+}
+
+async function validatePlaylistOwner(playlistId: string) {
+  const { user } = await getAuthenticatedPlaylistUser();
+  const supabase = createSupabaseAdminClient() as any;
+
+  const { data: playlist, error } = await supabase
+    .from("playlists")
+    .select("id,user_id,name,slug,is_public")
+    .eq("id", playlistId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  if (!playlist?.id) throw new Error("Playlist não encontrada ou sem permissão.");
+
+  return { supabase, playlist, user };
 }
 
 export type PlaylistTrackVoice = "todos" | "tenor" | "contralto" | "soprano" | "baritono";
@@ -66,7 +88,15 @@ export interface UserPlaylistSummary {
 }
 
 function toSlug(value: string): string {
-  return value.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9\s-]/g, "").trim().replace(/\s+/g, "-").replace(/-+/g, "-").slice(0, 60) || "playlist";
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 60) || "playlist";
 }
 
 async function generateUniqueSlug(baseName: string): Promise<string> {
@@ -74,13 +104,13 @@ async function generateUniqueSlug(baseName: string): Promise<string> {
   const base = toSlug(baseName);
   let slug = base;
 
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 8; i++) {
     const { data } = await supabase.from("playlists").select("id").eq("slug", slug).maybeSingle();
     if (!data) return slug;
     slug = `${base}-${Math.random().toString(36).slice(2, 6)}`;
   }
 
-  return `${base}-${Date.now().toString(36).slice(-4)}`;
+  return `${base}-${Date.now().toString(36).slice(-6)}`;
 }
 
 export async function getCurrentUserPlaylists(): Promise<UserPlaylistSummary[]> {
@@ -115,7 +145,6 @@ export async function getCurrentUserPlaylists(): Promise<UserPlaylistSummary[]> 
 
   for (const item of items ?? []) {
     if (!item.kits?.published) continue;
-
     const current = itemsByPlaylist.get(item.playlist_id) ?? [];
     current.push(item);
     itemsByPlaylist.set(item.playlist_id, current);
@@ -123,7 +152,6 @@ export async function getCurrentUserPlaylists(): Promise<UserPlaylistSummary[]> 
 
   return playlists.map((playlist: any) => {
     const playlistItems = itemsByPlaylist.get(playlist.id) ?? [];
-
     const normalizedKits = playlistItems.map((item: any) => ({
       id: item.kits.id,
       name: item.kits.name,
@@ -145,8 +173,7 @@ export async function getCurrentUserPlaylists(): Promise<UserPlaylistSummary[]> 
 }
 
 export async function searchPublishedKits(query: string) {
-  const supabase = (await createClient()) as any;
-
+  const supabase = createSupabaseAdminClient() as any;
   let q = supabase
     .from("kits")
     .select("id, slug, name, artist, cover_url, category_id")
@@ -158,9 +185,7 @@ export async function searchPublishedKits(query: string) {
   }
 
   const { data, error } = await q.order("created_at", { ascending: false });
-
   if (error) throw new Error(error.message);
-
   return data ?? [];
 }
 
@@ -187,7 +212,6 @@ async function getPlaylistItems(supabase: any, playlistId: string) {
     .order("position", { ascending: true });
 
   if (fallbackError) throw new Error(fallbackError.message);
-
   return fallbackData ?? [];
 }
 
@@ -198,13 +222,10 @@ async function getAudioFilesForPlaylist(supabase: any, kitIds: string[]) {
   const tessituraSelect = `${baseSelect}, min_midi_note, max_midi_note, detected_min_midi_note, detected_max_midi_note, tessitura_confidence, tessitura_source`;
 
   const { data, error } = await supabase.from("kit_audio_files").select(tessituraSelect).in("kit_id", kitIds);
-
   if (!error) return data ?? [];
 
   const { data: fallbackData, error: fallbackError } = await supabase.from("kit_audio_files").select(baseSelect).in("kit_id", kitIds);
-
   if (fallbackError) throw new Error(fallbackError.message);
-
   return fallbackData ?? [];
 }
 
@@ -221,31 +242,22 @@ export async function getPlaylistBySlug(slug: string): Promise<PublicPlaylist | 
   if (!playlist || !playlist.is_public) return null;
 
   const items = await getPlaylistItems(supabase, playlist.id);
-
   const catIds = Array.from(new Set((items ?? []).map((i: any) => i.kits.category_id).filter(Boolean)));
-
-  const { data: categories } = catIds.length
-    ? await supabase.from("categories").select("id, name, slug").in("id", catIds)
-    : { data: [] };
-
+  const { data: categories } = catIds.length ? await supabase.from("categories").select("id, name, slug").in("id", catIds) : { data: [] };
   const cmap = new Map((categories ?? []).map((c: any) => [c.id, c]));
-
   const kitIds = (items ?? []).map((i: any) => i.kits.id);
   const audioFiles = await getAudioFilesForPlaylist(supabase, kitIds);
 
   const normalizeVoice = (value: string): PlaylistTrackVoice => {
     const normalized = value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-
     if (normalized.includes("soprano")) return "soprano";
     if (normalized.includes("contralto")) return "contralto";
     if (normalized.includes("tenor")) return "tenor";
     if (normalized.includes("baritono")) return "baritono";
-
     return "todos";
   };
 
   const filesByKitId = new Map<string, any[]>();
-
   for (const file of audioFiles ?? []) {
     const list = filesByKitId.get(file.kit_id) ?? [];
     list.push(file);
@@ -286,20 +298,13 @@ export async function getPlaylistBySlug(slug: string): Promise<PublicPlaylist | 
 }
 
 export async function createPlaylist({ name, kitIds }: { name: string; kitIds: string[] }) {
-  await ensurePlaylistAccess();
+  const { user } = await getAuthenticatedPlaylistUser();
 
   if (!name.trim()) throw new Error("Nome obrigatório.");
 
-  const uniqueKitIds = Array.from(new Set(kitIds));
-
+  const uniqueKitIds = Array.from(new Set(kitIds.filter(Boolean)));
   if (uniqueKitIds.length === 0) throw new Error("Selecione ao menos 1 kit.");
   if (uniqueKitIds.length > MAX_KITS) throw new Error("Máximo de 20 kits por playlist.");
-
-  const authClient = await createClient();
-  const { data: auth } = await authClient.auth.getUser();
-  const user = auth.user;
-
-  if (!user) throw new Error("Faça login para criar sua playlist.");
 
   const supabase = createSupabaseAdminClient() as any;
 
@@ -313,7 +318,6 @@ export async function createPlaylist({ name, kitIds }: { name: string; kitIds: s
 
   const allowedIds = new Set((publishedKits ?? []).map((k: any) => k.id));
   const filtered = uniqueKitIds.filter((id) => allowedIds.has(id));
-
   if (!filtered.length) throw new Error("Nenhum kit publicado válido.");
 
   const slug = await generateUniqueSlug(name);
@@ -326,29 +330,36 @@ export async function createPlaylist({ name, kitIds }: { name: string; kitIds: s
 
   if (error) throw new Error(error.message);
 
-  const items = filtered.map((kit_id, idx) => ({
-    playlist_id: playlist.id,
-    kit_id,
-    position: idx + 1,
-  }));
-
+  const items = filtered.map((kit_id, idx) => ({ playlist_id: playlist.id, kit_id, position: idx + 1 }));
   const { error: itemErr } = await supabase.from("playlist_items").insert(items);
 
-  if (itemErr) throw new Error(itemErr.message);
+  if (itemErr) {
+    await supabase.from("playlists").delete().eq("id", playlist.id).eq("user_id", user.id);
+    throw new Error(itemErr.message);
+  }
 
   return playlist;
 }
 
 export async function addKitToPlaylist(playlistId: string, kitId: string) {
-  await ensurePlaylistAccess();
+  if (!playlistId || !kitId) throw new Error("Playlist e kit são obrigatórios.");
+  const { supabase, playlist } = await validatePlaylistOwner(playlistId);
 
-  const supabase = createSupabaseAdminClient() as any;
+  const { data: kit, error: kitError } = await supabase
+    .from("kits")
+    .select("id,published")
+    .eq("id", kitId)
+    .eq("published", true)
+    .maybeSingle();
+
+  if (kitError) throw new Error(kitError.message);
+  if (!kit?.id) throw new Error("Kit não encontrado ou indisponível.");
 
   const { data: existing } = await supabase
     .from("playlist_items")
     .select("id")
-    .eq("playlist_id", playlistId)
-    .eq("kit_id", kitId)
+    .eq("playlist_id", playlist.id)
+    .eq("kit_id", kit.id)
     .maybeSingle();
 
   if (existing) return;
@@ -356,27 +367,28 @@ export async function addKitToPlaylist(playlistId: string, kitId: string) {
   const { count } = await supabase
     .from("playlist_items")
     .select("id", { count: "exact", head: true })
-    .eq("playlist_id", playlistId);
+    .eq("playlist_id", playlist.id);
 
-  if ((count ?? 0) >= MAX_KITS) {
-    throw new Error("Limite de 20 kits atingido.");
-  }
+  if ((count ?? 0) >= MAX_KITS) throw new Error("Limite de 20 kits atingido.");
 
-  await supabase.from("playlist_items").insert({
-    playlist_id: playlistId,
-    kit_id: kitId,
+  const { error } = await supabase.from("playlist_items").insert({
+    playlist_id: playlist.id,
+    kit_id: kit.id,
     position: (count ?? 0) + 1,
   });
+
+  if (error) throw new Error(error.message);
 }
 
 export async function removeKitFromPlaylist(playlistId: string, kitId: string) {
-  await ensurePlaylistAccess();
+  if (!playlistId || !kitId) throw new Error("Playlist e kit são obrigatórios.");
+  const { supabase, playlist } = await validatePlaylistOwner(playlistId);
 
-  const supabase = createSupabaseAdminClient() as any;
-
-  await supabase
+  const { error } = await supabase
     .from("playlist_items")
     .delete()
-    .eq("playlist_id", playlistId)
+    .eq("playlist_id", playlist.id)
     .eq("kit_id", kitId);
+
+  if (error) throw new Error(error.message);
 }
