@@ -5,6 +5,14 @@ type SendMinistryInviteEmailInput = {
   inviteUrl: string;
 };
 
+type SendMinistryInviteEmailResult = {
+  sent: boolean;
+  skipped: boolean;
+  reason: string | null;
+  providerMessageId?: string | null;
+  status?: number | null;
+};
+
 function getBaseUrl() {
   return (
     process.env.NEXT_PUBLIC_APP_URL ||
@@ -22,12 +30,16 @@ export function buildAbsoluteUrl(path: string, requestUrl?: string) {
   return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
-export async function sendMinistryInviteEmail(input: SendMinistryInviteEmailInput) {
+export async function sendMinistryInviteEmail(input: SendMinistryInviteEmailInput): Promise<SendMinistryInviteEmailResult> {
   const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.RESEND_FROM_EMAIL || "Harmomus <convites@harmomus.com>";
+  const from = process.env.RESEND_FROM_EMAIL;
 
   if (!apiKey) {
-    return { sent: false, skipped: true, reason: "RESEND_API_KEY não configurada" };
+    return { sent: false, skipped: true, reason: "RESEND_API_KEY não configurada", status: null, providerMessageId: null };
+  }
+
+  if (!from) {
+    return { sent: false, skipped: true, reason: "RESEND_FROM_EMAIL não configurada", status: null, providerMessageId: null };
   }
 
   const ministryName = input.ministryName || "seu ministério";
@@ -53,24 +65,54 @@ export async function sendMinistryInviteEmail(input: SendMinistryInviteEmailInpu
     </div>
   `;
 
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      from,
-      to: input.to,
-      subject,
-      html,
-    }),
-  });
+  try {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from,
+        to: input.to,
+        subject,
+        html,
+      }),
+    });
 
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    return { sent: false, skipped: false, reason: detail || `Resend retornou ${response.status}` };
+    const rawBody = await response.text().catch(() => "");
+    let parsedBody: any = null;
+
+    try {
+      parsedBody = rawBody ? JSON.parse(rawBody) : null;
+    } catch {
+      parsedBody = null;
+    }
+
+    if (!response.ok) {
+      return {
+        sent: false,
+        skipped: false,
+        reason: parsedBody?.message || parsedBody?.error || rawBody || `Resend retornou ${response.status}`,
+        status: response.status,
+        providerMessageId: parsedBody?.id ?? null,
+      };
+    }
+
+    return {
+      sent: true,
+      skipped: false,
+      reason: null,
+      status: response.status,
+      providerMessageId: parsedBody?.id ?? null,
+    };
+  } catch (error) {
+    return {
+      sent: false,
+      skipped: false,
+      reason: error instanceof Error ? error.message : "Erro desconhecido ao chamar Resend",
+      status: null,
+      providerMessageId: null,
+    };
   }
-
-  return { sent: true, skipped: false, reason: null };
 }
