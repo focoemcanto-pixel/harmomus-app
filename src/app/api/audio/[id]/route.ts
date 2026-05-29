@@ -91,7 +91,6 @@ async function logAudioAccess(payload: {
 
   if (!error) return;
 
-  // Compatibilidade com bancos que ainda não receberam as colunas novas de analytics.
   await supabase.from("audio_access_logs").insert({
     user_id: payload.user_id,
     kit_id: payload.kit_id,
@@ -102,7 +101,14 @@ async function logAudioAccess(payload: {
   });
 }
 
+function runAfterResponse(task: () => Promise<void>) {
+  void task().catch((error) => {
+    console.warn("[audio] tarefa pós-resposta falhou", error);
+  });
+}
+
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const startedAt = Date.now();
   const { id } = await params;
   const supabase = await createClient();
 
@@ -202,10 +208,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const status = range ? 206 : 200;
   const headers = new Headers();
   headers.set("Content-Type", resolveAudioContentType(audioFile.file_type, streamResponse.ContentType));
-  headers.set("Cache-Control", "private, max-age=60, must-revalidate");
+  headers.set("Cache-Control", "private, max-age=300, stale-while-revalidate=300");
   headers.set("Accept-Ranges", "bytes");
   headers.set("Content-Disposition", `inline; filename="${audioFile.name}.${audioFile.file_type}"`);
   headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
+  headers.set("X-Audio-Route-TTFB", String(Date.now() - startedAt));
 
   if (streamResponse.ETag) headers.set("ETag", streamResponse.ETag);
   if (streamResponse.LastModified) headers.set("Last-Modified", streamResponse.LastModified.toUTCString());
@@ -218,16 +225,16 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   if (shouldTrackPlayback) {
-    await logAudioAccess({
-      user_id: context.profile?.id ?? null,
-      kit_id: kit.id,
-      audio_file_id: audioFile.id,
-      status: "allowed",
-      reason: "ok",
-      ...analyticsContext,
-    });
+    runAfterResponse(async () => {
+      await logAudioAccess({
+        user_id: context.profile?.id ?? null,
+        kit_id: kit.id,
+        audio_file_id: audioFile.id,
+        status: "allowed",
+        reason: "ok",
+        ...analyticsContext,
+      });
 
-    try {
       await dispatchWebhookEvent({
         event: "kit.downloaded",
         source: "audio.stream",
@@ -244,9 +251,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           downloaded_at: new Date().toISOString(),
         },
       });
-    } catch (webhookError) {
-      console.warn("[audio] webhook kit.downloaded falhou", webhookError);
-    }
+    });
   }
 
   return new Response(streamBody.transformToWebStream(), { status, headers });
