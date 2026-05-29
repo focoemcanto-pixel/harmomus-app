@@ -29,7 +29,7 @@ function isActiveSubscription(status?: string | null) {
 }
 
 export default async function MinisterioPage() {
-  let context = await getCurrentUserAccessContext();
+  const context = await getCurrentUserAccessContext();
 
   if (context.isGuest) redirect("/login");
 
@@ -54,18 +54,20 @@ export default async function MinisterioPage() {
 
   const supabase = (await createClient()) as any;
 
-  const [{ data: ministry }, { data: members }] = await Promise.all([
+  const [{ data: ministry }, { data: rawMembers }] = await Promise.all([
     supabase.from("ministries").select("*").eq("id", context.ministry.ministryId).single(),
     supabase
       .from("ministry_members")
-      .select("id,user_id,role,status,invited_email,invited_name,profiles:profiles(full_name,email,avatar_url)")
+      .select("id,user_id,role,status,invited_email,invited_name")
       .eq("ministry_id", context.ministry.ministryId)
       .neq("status", "removed")
       .order("created_at"),
   ]);
 
-  const activeSeats = (members ?? []).filter((m: any) => ["active", "pending"].includes(m.status)).length;
-  const pendingSeats = (members ?? []).filter((m: any) => m.status === "pending").length;
+  const members = rawMembers ?? [];
+
+  const activeSeats = members.filter((m: any) => ["active", "pending"].includes(m.status)).length;
+  const pendingSeats = members.filter((m: any) => m.status === "pending").length;
   const remainingSeats = Math.max(0, Number(ministry?.seat_limit ?? 0) - activeSeats);
   const usagePercent = Math.min(100, Math.round((activeSeats / Number(ministry?.seat_limit || 1)) * 100));
 
@@ -184,18 +186,18 @@ export default async function MinisterioPage() {
               </div>
 
               <div className="mt-6 space-y-3">
-                {(members ?? []).map((member: any) => (
+                {members.map((member: any) => (
                   <div
                     key={member.id}
                     className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-black/20 p-4 md:flex-row md:items-center md:justify-between"
                   >
                     <div>
                       <p className="font-semibold text-white">
-                        {member.invited_name || member.profiles?.full_name || "Integrante"}
+                        {member.invited_name || "Integrante"}
                       </p>
 
                       <p className="mt-1 text-sm text-zinc-400">
-                        {member.profiles?.email || member.invited_email}
+                        {member.invited_email}
                       </p>
                     </div>
 
