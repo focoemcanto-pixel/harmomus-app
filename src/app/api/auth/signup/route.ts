@@ -30,6 +30,11 @@ function isPaidPlan(plan: PlanSlug) {
   return plan !== "free";
 }
 
+function isDuplicateAccountMessage(message: string) {
+  const lower = message.toLowerCase();
+  return lower.includes("already") || lower.includes("registered") || lower.includes("exists") || lower.includes("duplicate");
+}
+
 function getMinistryInviteToken(path: string) {
   const match = path.match(/^\/convite-ministerio\/([^/?#]+)/);
   return match?.[1] ? decodeURIComponent(match[1]) : "";
@@ -240,6 +245,35 @@ async function createPaidCheckoutAccount(input: {
 
   if (createError || !created?.user?.id) {
     const message = String(createError?.message ?? "Não foi possível criar a conta.");
+
+    if (isDuplicateAccountMessage(message)) {
+      const { data: existingProfile, error: profileLookupError } = await admin
+        .from("profiles")
+        .select("id,email,onboarding_status,onboarding_step")
+        .eq("email", input.email)
+        .maybeSingle();
+
+      if (profileLookupError) throw new Error(profileLookupError.message);
+
+      if (existingProfile?.id && String(existingProfile.onboarding_step ?? "") === "waiting_payment") {
+        await ensureUserAccess({ id: existingProfile.id, email: input.email, fullName: input.fullName, selectedPlanSlug: input.plan });
+
+        const { error: retryProfileError } = await admin
+          .from("profiles")
+          .update({
+            full_name: input.fullName,
+            phone: input.phone,
+            onboarding_status: "pending_email_confirmation",
+            onboarding_step: "waiting_payment",
+            updated_at: now,
+          })
+          .eq("id", existingProfile.id);
+
+        if (retryProfileError) throw new Error(retryProfileError.message);
+        return existingProfile.id as string;
+      }
+    }
+
     throw new Error(message);
   }
 
