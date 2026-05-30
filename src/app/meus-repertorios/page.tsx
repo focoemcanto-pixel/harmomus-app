@@ -35,11 +35,39 @@ function countItemsByRepertoire(items: any[] | null | undefined) {
   return counts;
 }
 
+function NoMinistryAccessState() {
+  return (
+    <PublicAppShell>
+      <main className="min-h-screen bg-gradient-to-b from-[#050816] via-[#080b18] to-[#06070c] px-4 py-8 text-white md:px-8">
+        <section className="mx-auto max-w-4xl">
+          <div className="overflow-hidden rounded-[2rem] border border-amber-300/20 bg-gradient-to-br from-[#0b1120] via-[#120d24] to-[#06111f] p-6 shadow-[0_30px_100px_rgba(245,158,11,0.14)] md:p-10">
+            <div className="inline-flex items-center gap-2 rounded-full border border-amber-300/25 bg-amber-400/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-amber-100">
+              <ShieldCheck className="h-4 w-4" /> Acesso ministerial não encontrado
+            </div>
+            <h1 className="mt-5 text-3xl font-black tracking-tight md:text-5xl">Convite ministerial pendente</h1>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-300 md:text-base">
+              Esta conta ainda não está vinculada a um ministério ativo. Para ver repertórios compartilhados, aceite o convite enviado pela liderança ou peça um novo convite para este mesmo e-mail.
+            </p>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <Link href="/todos-os-kits" className="rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-cyan-200">
+                Explorar kits
+              </Link>
+              <Link href="/assinatura" className="rounded-2xl border border-white/10 px-5 py-3 text-sm font-bold text-zinc-100 transition hover:bg-white/10">
+                Ver assinatura
+              </Link>
+            </div>
+          </div>
+        </section>
+      </main>
+    </PublicAppShell>
+  );
+}
+
 export default async function MeusRepertoriosPage() {
   const context = await getCurrentUserAccessContext();
 
   if (context.isGuest) redirect("/login");
-  if (!context.ministry?.ministryId) redirect("/");
+  if (!context.ministry?.ministryId) return <NoMinistryAccessState />;
 
   const admin = createSupabaseAdminClient() as any;
 
