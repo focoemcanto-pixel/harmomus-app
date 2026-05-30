@@ -2,6 +2,7 @@ import { revalidatePath } from "next/cache";
 
 import { PageHeader } from "@/components/admin/page-header";
 import { getPlans, updatePlan } from "@/lib/data/plans";
+import { setFlashToast } from "@/lib/flash";
 
 function formatCurrency(cents?: number | null) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format((cents ?? 0) / 100);
@@ -33,20 +34,28 @@ export default async function AdminPlanosPage() {
   async function savePlan(formData: FormData) {
     "use server";
     const id = String(formData.get("id") ?? "");
-    const features = normalizeFeatures(formData.get("features_json"));
+    const name = String(formData.get("name") ?? "").trim();
 
-    await updatePlan(id, {
-      name: String(formData.get("name") ?? ""),
-      slug: String(formData.get("slug") ?? ""),
-      price_cents: Number(formData.get("price_cents") ?? 0),
-      description: String(formData.get("description") ?? ""),
-      trial_days: formData.get("trial_enabled") === "on" ? Number(formData.get("trial_days") ?? 0) : 0,
-      stripe_price_id: String(formData.get("stripe_price_id") ?? "") || null,
-      hierarchy_level: Number(formData.get("hierarchy_level") ?? 0),
-      status: String(formData.get("status") ?? "active") as "active" | "inactive",
-      features,
-      updated_at: new Date().toISOString(),
-    });
+    try {
+      const features = normalizeFeatures(formData.get("features_json"));
+
+      await updatePlan(id, {
+        name,
+        slug: String(formData.get("slug") ?? ""),
+        price_cents: Number(formData.get("price_cents") ?? 0),
+        description: String(formData.get("description") ?? ""),
+        trial_days: formData.get("trial_enabled") === "on" ? Number(formData.get("trial_days") ?? 0) : 0,
+        stripe_price_id: String(formData.get("stripe_price_id") ?? "") || null,
+        hierarchy_level: Number(formData.get("hierarchy_level") ?? 0),
+        status: String(formData.get("status") ?? "active") as "active" | "inactive",
+        features,
+        updated_at: new Date().toISOString(),
+      });
+
+      await setFlashToast("success", `Plano ${name || "selecionado"} atualizado com sucesso.`);
+    } catch (error) {
+      await setFlashToast("error", error instanceof Error ? error.message : "Não foi possível salvar o plano.");
+    }
 
     revalidatePath("/admin/planos");
     revalidatePath("/assinar");
