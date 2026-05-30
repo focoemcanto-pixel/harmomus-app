@@ -9,12 +9,14 @@ interface AllKitsListItem {
   name: string;
   artist: string;
   categoryName: string | null;
+  requiredPlanSlug?: string | null;
+  allowedPlanSlugs?: string[];
 }
 
 const INITIAL_VISIBLE_COUNT = 36;
 const LOAD_MORE_COUNT = 24;
 
-export function AllKitsList({ kits }: { kits: AllKitsListItem[] }) {
+export function AllKitsList({ kits, planSlug: _planSlug }: { kits: AllKitsListItem[]; planSlug?: string }) {
   const [query, setQuery] = useState("");
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_COUNT);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
