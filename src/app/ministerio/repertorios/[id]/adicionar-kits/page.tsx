@@ -14,8 +14,8 @@ type PageParams = {
 };
 
 type SearchParams = {
-  q?: string;
-  message?: string;
+  q?: string | string[];
+  message?: string | string[];
 };
 
 type KitRow = {
@@ -25,6 +25,19 @@ type KitRow = {
   artist: string | null;
   cover_url: string | null;
 };
+
+function getParamValue(value?: string | string[]) {
+  if (Array.isArray(value)) return value[0] ?? "";
+  return value ?? "";
+}
+
+function sanitizeSearchTerm(value: string) {
+  return value
+    .trim()
+    .replace(/[,%()]/g, " ")
+    .replace(/\s+/g, " ")
+    .slice(0, 80);
+}
 
 async function addKitToRepertoire(formData: FormData) {
   "use server";
@@ -102,7 +115,8 @@ export default async function AddKitsToRepertoirePage({ params, searchParams }: 
   if (!isMinistryManager(context)) redirect("/");
 
   const admin = createSupabaseAdminClient() as any;
-  const query = String(resolvedSearchParams.q ?? "").trim();
+  const query = sanitizeSearchTerm(getParamValue(resolvedSearchParams.q));
+  const message = getParamValue(resolvedSearchParams.message);
 
   const { data: repertoire, error: repertoireError } = await admin
     .from("ministry_repertoires")
@@ -131,7 +145,8 @@ export default async function AddKitsToRepertoirePage({ params, searchParams }: 
     .limit(36);
 
   if (query) {
-    kitsQuery = kitsQuery.or(`name.ilike.%${query}%,artist.ilike.%${query}%`);
+    const escapedQuery = query.replace(/[%_]/g, "");
+    kitsQuery = kitsQuery.or(`name.ilike.%${escapedQuery}%,artist.ilike.%${escapedQuery}%`);
   }
 
   const { data: kits, error: kitsError } = await kitsQuery;
@@ -164,6 +179,7 @@ export default async function AddKitsToRepertoirePage({ params, searchParams }: 
             <input
               name="q"
               defaultValue={query}
+              maxLength={80}
               placeholder="Buscar por música ou artista"
               className="w-full rounded-2xl border border-white/10 bg-black/20 py-3 pl-11 pr-4 text-sm text-white outline-none placeholder:text-zinc-500 focus:border-cyan-300/50"
             />
@@ -173,9 +189,9 @@ export default async function AddKitsToRepertoirePage({ params, searchParams }: 
           </button>
         </form>
 
-        {resolvedSearchParams.message ? (
+        {message ? (
           <div className="mt-5 rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-4 text-sm text-cyan-50">
-            {resolvedSearchParams.message}
+            {message}
           </div>
         ) : null}
 
