@@ -314,6 +314,7 @@ export default async function MeuRepertorioDetalhePage({
   const isReady = Boolean(readyRow?.ready);
   const studiedCount = repertoireItems.filter((item) => progressMap.get(item.id)?.studied).length;
   const canConfirmReady = repertoireItems.length > 0 && studiedCount >= repertoireItems.length;
+  const progressPercent = repertoireItems.length ? Math.round((studiedCount / repertoireItems.length) * 100) : 0;
 
   return (
     <PublicAppShell>
