@@ -1,6 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { BarChart3, ExternalLink, MessageSquareText, Music2, Trash2, Wand2 } from "lucide-react";
 
+import { ConfirmSubmitButton } from "@/components/admin/confirm-submit-button";
 import { deletePremiumRequest, getPremiumRequests, getPremiumRequestStats, updatePremiumRequestStatus, type PremiumRequestStatus } from "@/lib/data/premium-analytics";
 
 export const dynamic = "force-dynamic";
@@ -177,7 +178,7 @@ export default async function PremiumRequestsAdminPage({ searchParams }: { searc
                       </form>
                       <form action={remove}>
                         <input type="hidden" name="id" value={row.id} />
-                        <button className="inline-flex items-center gap-1 rounded-lg border border-red-400/40 bg-red-500/15 px-3 py-2 text-xs font-bold text-red-200"><Trash2 size={13} />Deletar</button>
+                        <ConfirmSubmitButton message={`Tem certeza que deseja deletar esta solicitação premium? ${summarizeRequest(row)}`} className="inline-flex items-center gap-1 rounded-lg border border-red-400/40 bg-red-500/15 px-3 py-2 text-xs font-bold text-red-200 transition hover:bg-red-500/25"><Trash2 size={13} />Deletar</ConfirmSubmitButton>
                       </form>
                     </div>
                   </td>
