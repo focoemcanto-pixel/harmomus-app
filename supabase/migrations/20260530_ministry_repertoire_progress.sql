@@ -6,6 +6,7 @@ create table if not exists public.ministry_repertoire_progress (
   user_id uuid not null references public.profiles(id) on delete cascade,
   studied boolean not null default false,
   studied_at timestamptz,
+  study_status text not null default 'not_studied' check (study_status in ('not_studied', 'studied', 'doubt', 'review')),
   ready boolean not null default false,
   ready_at timestamptz,
   created_at timestamptz not null default now(),
@@ -23,6 +24,7 @@ create unique index if not exists ministry_repertoire_ready_unique_idx
 create index if not exists ministry_repertoire_progress_repertoire_id_idx on public.ministry_repertoire_progress(repertoire_id);
 create index if not exists ministry_repertoire_progress_user_id_idx on public.ministry_repertoire_progress(user_id);
 create index if not exists ministry_repertoire_progress_item_id_idx on public.ministry_repertoire_progress(repertoire_item_id);
+create index if not exists ministry_repertoire_progress_study_status_idx on public.ministry_repertoire_progress(repertoire_id, user_id, study_status) where repertoire_item_id is not null;
 
 alter table public.ministry_repertoire_progress enable row level security;
 

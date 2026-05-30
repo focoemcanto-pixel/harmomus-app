@@ -33,13 +33,27 @@ type RepertoireItem = {
   kits: KitRow | null;
 };
 
+type StudyStatus = "not_studied" | "studied" | "doubt" | "review";
+
 type ProgressRow = {
   repertoire_item_id: string | null;
   studied: boolean;
   studied_at: string | null;
+  study_status?: StudyStatus | null;
   ready?: boolean | null;
   ready_at?: string | null;
 };
+
+const STUDY_STATUSES: StudyStatus[] = ["not_studied", "studied", "doubt", "review"];
+
+function normalizeStudyStatus(row?: ProgressRow | null): StudyStatus {
+  if (row?.study_status && STUDY_STATUSES.includes(row.study_status)) return row.study_status;
+  return row?.studied ? "studied" : "not_studied";
+}
+
+function statusIsStudied(status: StudyStatus) {
+  return status === "studied";
+}
 
 function formatDate(value?: string | null, fallback = "—") {
   if (!value) return fallback;
@@ -65,7 +79,7 @@ async function assertRepertoireAccess(input: {
   return repertoire;
 }
 
-async function toggleStudied(formData: FormData) {
+async function updateStudyStatus(formData: FormData) {
   "use server";
 
   const context = await getCurrentUserAccessContext();
@@ -75,7 +89,9 @@ async function toggleStudied(formData: FormData) {
   const repertoireId = String(formData.get("repertoire_id") ?? "").trim();
   const itemId = String(formData.get("item_id") ?? "").trim();
   const kitId = String(formData.get("kit_id") ?? "").trim();
-  const nextStudied = String(formData.get("next_studied") ?? "") === "true";
+  const requestedStatus = String(formData.get("study_status") ?? "not_studied") as StudyStatus;
+  const studyStatus = STUDY_STATUSES.includes(requestedStatus) ? requestedStatus : "not_studied";
+  const nextStudied = statusIsStudied(studyStatus);
 
   if (!repertoireId || !itemId || !kitId) redirect("/meus-repertorios");
 
@@ -93,6 +109,7 @@ async function toggleStudied(formData: FormData) {
   if (!item?.id) notFound();
 
   const now = new Date().toISOString();
+  const studiedAt = nextStudied ? now : null;
 
   const { data: existing, error: existingError } = await admin
     .from("ministry_repertoire_progress")
@@ -108,8 +125,9 @@ async function toggleStudied(formData: FormData) {
     const { error } = await admin
       .from("ministry_repertoire_progress")
       .update({
+        study_status: studyStatus,
         studied: nextStudied,
-        studied_at: nextStudied ? now : null,
+        studied_at: studiedAt,
         updated_at: now,
       })
       .eq("id", existing.id);
@@ -121,8 +139,9 @@ async function toggleStudied(formData: FormData) {
       repertoire_item_id: itemId,
       kit_id: kitId,
       user_id: context.profile.id,
+      study_status: studyStatus,
       studied: nextStudied,
-      studied_at: nextStudied ? now : null,
+      studied_at: studiedAt,
       ready: false,
       created_at: now,
       updated_at: now,
@@ -268,7 +287,7 @@ export default async function MeuRepertorioDetalhePage({
       .order("position", { ascending: true }),
     admin
       .from("ministry_repertoire_progress")
-      .select("repertoire_item_id,studied,studied_at,ready,ready_at")
+      .select("repertoire_item_id,studied,studied_at,study_status,ready,ready_at")
       .eq("repertoire_id", repertoire.id)
       .eq("user_id", context.profile.id),
   ]);
@@ -319,6 +338,9 @@ export default async function MeuRepertorioDetalhePage({
               <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2">
                 <Music2 className="h-4 w-4 text-cyan-200" /> {repertoireItems.length} música{repertoireItems.length === 1 ? "" : "s"}
               </span>
+              <span className="inline-flex items-center gap-2 rounded-full border border-cyan-300/25 bg-cyan-400/10 px-4 py-2 text-cyan-100">
+                <ShieldCheck className="h-4 w-4" /> {studiedCount} de {repertoireItems.length} músicas estudadas
+              </span>
               {isReady ? (
                 <span className="inline-flex items-center gap-2 rounded-full border border-emerald-300/25 bg-emerald-400/10 px-4 py-2 text-emerald-100">
                   <ShieldCheck className="h-4 w-4" /> Pronto para tocar
@@ -329,9 +351,19 @@ export default async function MeuRepertorioDetalhePage({
 
           {repertoireItems.length ? (
             <div className="mt-8 grid gap-4">
+              <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
+                <div className="flex items-center justify-between gap-4 text-sm font-semibold text-zinc-200">
+                  <span>Progresso de estudo</span>
+                  <span>{progressPercent}%</span>
+                </div>
+                <div className="mt-3 h-3 overflow-hidden rounded-full bg-white/10">
+                  <div className="h-full rounded-full bg-cyan-300 transition-all" style={{ width: `${progressPercent}%` }} />
+                </div>
+                <p className="mt-2 text-xs text-zinc-400">{studiedCount} de {repertoireItems.length} músicas estudadas nesta escala.</p>
+              </div>
               <MinistryPlaylistPlayer
                 repertoireId={repertoire.id}
-                toggleStudiedAction={toggleStudied}
+                updateStudyStatusAction={updateStudyStatus}
                 tracks={repertoireItems.flatMap((item) => {
                   const kit = item.kits;
                   if (!kit) return [];
@@ -345,7 +377,7 @@ export default async function MeuRepertorioDetalhePage({
                       coverUrl: kit.cover_url,
                       href: `/biblioteca/${kit.slug}`,
                       kitId: item.kit_id ?? kit.id,
-                      studied: Boolean(progressMap.get(item.id)?.studied),
+                      studyStatus: normalizeStudyStatus(progressMap.get(item.id)),
                     },
                   ];
                 })}

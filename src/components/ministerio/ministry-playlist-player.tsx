@@ -2,7 +2,9 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { CheckCircle2, ChevronLeft, ChevronRight, Circle, Clock3, ExternalLink, Music2, Play } from "lucide-react";
+import { CheckCircle2, ChevronLeft, ChevronRight, Circle, CircleHelp, Clock3, ExternalLink, Music2, Play, RotateCcw } from "lucide-react";
+
+type StudyStatus = "not_studied" | "studied" | "doubt" | "review";
 
 type MinistryPlaylistTrack = {
   id: string;
@@ -12,16 +14,58 @@ type MinistryPlaylistTrack = {
   coverUrl: string | null;
   href: string;
   kitId?: string | null;
-  studied?: boolean;
+  studyStatus?: StudyStatus;
 };
+
+const STUDY_STATUS_OPTIONS: Array<{ status: StudyStatus; label: string; icon: typeof Circle; className: string; activeClassName: string }> = [
+  {
+    status: "not_studied",
+    label: "Não estudada",
+    icon: Circle,
+    className: "border-white/10 bg-white/[0.04] text-zinc-100 hover:bg-white/10",
+    activeClassName: "border-zinc-300/30 bg-zinc-300/10 text-zinc-100",
+  },
+  {
+    status: "studied",
+    label: "Estudei",
+    icon: CheckCircle2,
+    className: "border-emerald-300/25 bg-emerald-400/10 text-emerald-100 hover:bg-emerald-400/20",
+    activeClassName: "border-emerald-300/40 bg-emerald-400/20 text-emerald-50",
+  },
+  {
+    status: "doubt",
+    label: "Tenho dúvida",
+    icon: CircleHelp,
+    className: "border-amber-300/25 bg-amber-400/10 text-amber-100 hover:bg-amber-400/20",
+    activeClassName: "border-amber-300/40 bg-amber-400/20 text-amber-50",
+  },
+  {
+    status: "review",
+    label: "Preciso revisar",
+    icon: RotateCcw,
+    className: "border-fuchsia-300/25 bg-fuchsia-400/10 text-fuchsia-100 hover:bg-fuchsia-400/20",
+    activeClassName: "border-fuchsia-300/40 bg-fuchsia-400/20 text-fuchsia-50",
+  },
+];
+
+function statusLabel(status: StudyStatus) {
+  return STUDY_STATUS_OPTIONS.find((option) => option.status === status)?.label ?? "Não estudada";
+}
+
+function statusBadgeClass(status: StudyStatus) {
+  if (status === "studied") return "border-emerald-300/30 bg-emerald-300/10 text-emerald-100";
+  if (status === "doubt") return "border-amber-300/30 bg-amber-300/10 text-amber-100";
+  if (status === "review") return "border-fuchsia-300/30 bg-fuchsia-300/10 text-fuchsia-100";
+  return "border-white/10 bg-white/[0.04] text-zinc-300";
+}
 
 type MinistryPlaylistPlayerProps = {
   tracks: MinistryPlaylistTrack[];
   repertoireId?: string;
-  toggleStudiedAction?: (formData: FormData) => Promise<void>;
+  updateStudyStatusAction?: (formData: FormData) => Promise<void>;
 };
 
-export function MinistryPlaylistPlayer({ tracks, repertoireId, toggleStudiedAction }: MinistryPlaylistPlayerProps) {
+export function MinistryPlaylistPlayer({ tracks, repertoireId, updateStudyStatusAction }: MinistryPlaylistPlayerProps) {
   const [currentIndex, setCurrentIndex] = useState<number | null>(null);
   const [lastPlayedIndex, setLastPlayedIndex] = useState<number | null>(null);
 
@@ -115,6 +159,7 @@ export function MinistryPlaylistPlayer({ tracks, repertoireId, toggleStudiedActi
           const isCurrent = index === currentIndex;
           const isNext = currentIndex !== null && index === currentIndex + 1;
           const isLastPlayed = index === lastPlayedIndex;
+          const studyStatus = track.studyStatus ?? "not_studied";
 
           return (
             <div
@@ -143,25 +188,34 @@ export function MinistryPlaylistPlayer({ tracks, repertoireId, toggleStudiedActi
                     {isCurrent ? <span className="rounded-full bg-cyan-300 px-2 py-1 text-slate-950">Atual</span> : null}
                     {isNext ? <span className="rounded-full border border-emerald-300/30 bg-emerald-300/10 px-2 py-1 text-emerald-100">Próxima</span> : null}
                     {isLastPlayed ? <span className="rounded-full border border-fuchsia-300/30 bg-fuchsia-300/10 px-2 py-1 text-fuchsia-100">Última reproduzida</span> : null}
-                    {track.studied ? (
-                      <span className="rounded-full border border-emerald-300/30 bg-emerald-300/10 px-2 py-1 text-emerald-100">Estudada</span>
-                    ) : null}
+                    <span className={`rounded-full border px-2 py-1 ${statusBadgeClass(studyStatus)}`}>{statusLabel(studyStatus)}</span>
                   </div>
                 </div>
               </button>
 
               <div className="flex flex-wrap gap-2 md:justify-end">
-                {toggleStudiedAction && repertoireId ? (
-                  <form action={toggleStudiedAction}>
-                    <input type="hidden" name="repertoire_id" value={repertoireId} />
-                    <input type="hidden" name="item_id" value={track.id} />
-                    <input type="hidden" name="kit_id" value={track.kitId ?? ""} />
-                    <input type="hidden" name="next_studied" value={track.studied ? "false" : "true"} />
-                    <button className={`inline-flex w-fit items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${track.studied ? "border border-emerald-300/30 bg-emerald-400/10 text-emerald-100 hover:bg-emerald-400/20" : "border border-white/10 bg-white/[0.04] text-zinc-100 hover:bg-white/10"}`}>
-                      {track.studied ? <CheckCircle2 className="h-4 w-4" /> : <Circle className="h-4 w-4" />}
-                      {track.studied ? "Estudada" : "Estudei"}
-                    </button>
-                  </form>
+                {updateStudyStatusAction && repertoireId ? (
+                  <div className="flex flex-wrap gap-2 md:justify-end">
+                    {STUDY_STATUS_OPTIONS.map((option) => {
+                      const Icon = option.icon;
+                      const isActive = studyStatus === option.status;
+
+                      return (
+                        <form key={option.status} action={updateStudyStatusAction}>
+                          <input type="hidden" name="repertoire_id" value={repertoireId} />
+                          <input type="hidden" name="item_id" value={track.id} />
+                          <input type="hidden" name="kit_id" value={track.kitId ?? ""} />
+                          <input type="hidden" name="study_status" value={option.status} />
+                          <button
+                            disabled={isActive}
+                            className={`inline-flex w-fit items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition disabled:cursor-default ${isActive ? option.activeClassName : option.className}`}
+                          >
+                            <Icon className="h-4 w-4" /> {option.label}
+                          </button>
+                        </form>
+                      );
+                    })}
+                  </div>
                 ) : null}
                 <Link href={track.href} className="inline-flex w-fit items-center gap-2 rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-zinc-200 transition hover:bg-white/10">
                   Abrir música <ExternalLink className="h-4 w-4" />

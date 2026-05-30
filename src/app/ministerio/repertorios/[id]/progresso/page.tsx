@@ -26,14 +26,35 @@ type MemberRow = {
   } | null;
 };
 
+type StudyStatus = "not_studied" | "studied" | "doubt" | "review";
+
 type ProgressRow = {
   user_id: string;
   repertoire_item_id: string | null;
   studied: boolean;
   studied_at: string | null;
+  study_status?: StudyStatus | null;
   ready: boolean;
   ready_at: string | null;
 };
+
+type ItemRow = {
+  id: string;
+  position: number | null;
+  kit_id: string | null;
+};
+
+type KitRow = {
+  id: string;
+  name: string;
+};
+
+const STUDY_STATUSES: StudyStatus[] = ["not_studied", "studied", "doubt", "review"];
+
+function normalizeStudyStatus(row?: ProgressRow | null): StudyStatus {
+  if (row?.study_status && STUDY_STATUSES.includes(row.study_status)) return row.study_status;
+  return row?.studied ? "studied" : "not_studied";
+}
 
 function memberName(member: MemberRow) {
   return member.profiles?.full_name || member.invited_name || member.profiles?.email || member.invited_email || "Integrante";
@@ -78,8 +99,9 @@ export default async function RepertoireProgressPage({ params }: { params: Promi
   const [itemsResult, membersResult, progressResult] = await Promise.all([
     admin
       .from("ministry_repertoire_items")
-      .select("id")
-      .eq("repertoire_id", repertoire.id),
+      .select("id,position,kit_id")
+      .eq("repertoire_id", repertoire.id)
+      .order("position", { ascending: true }),
     admin
       .from("ministry_members")
       .select("id,user_id,invited_name,invited_email,role,status,profiles(full_name,email)")
@@ -88,7 +110,7 @@ export default async function RepertoireProgressPage({ params }: { params: Promi
       .order("created_at", { ascending: true }),
     admin
       .from("ministry_repertoire_progress")
-      .select("user_id,repertoire_item_id,studied,studied_at,ready,ready_at")
+      .select("user_id,repertoire_item_id,studied,studied_at,study_status,ready,ready_at")
       .eq("repertoire_id", repertoire.id),
   ]);
 
@@ -96,7 +118,22 @@ export default async function RepertoireProgressPage({ params }: { params: Promi
   if (membersResult.error) throw new Error(membersResult.error.message);
   if (progressResult.error) throw new Error(progressResult.error.message);
 
-  const totalItems = (itemsResult.data ?? []).length;
+  const items = (itemsResult.data ?? []) as ItemRow[];
+  const totalItems = items.length;
+  const kitIds = Array.from(new Set(items.map((item) => item.kit_id).filter(Boolean))) as string[];
+  const { data: kits, error: kitsError } = kitIds.length
+    ? await admin.from("kits").select("id,name").in("id", kitIds)
+    : { data: [], error: null };
+
+  if (kitsError) throw new Error(kitsError.message);
+
+  const kitNameById = new Map(((kits ?? []) as KitRow[]).map((kit) => [kit.id, kit.name]));
+  const itemLabelById = new Map(
+    items.map((item) => [
+      item.id,
+      `${item.position ?? "—"}. ${item.kit_id ? kitNameById.get(item.kit_id) ?? "Música da escala" : "Música da escala"}`,
+    ]),
+  );
   const members = ((membersResult.data ?? []) as MemberRow[]).filter((member) => member.user_id);
   const progressRows = (progressResult.data ?? []) as ProgressRow[];
 
@@ -109,9 +146,11 @@ export default async function RepertoireProgressPage({ params }: { params: Promi
 
   const rows = members.map((member) => {
     const userProgress = progressByUser.get(String(member.user_id)) ?? [];
-    const studiedRows = userProgress.filter((row) => row.repertoire_item_id && row.studied);
+    const studiedRows = userProgress.filter((row) => row.repertoire_item_id && normalizeStudyStatus(row) === "studied");
+    const doubtRows = userProgress.filter((row) => row.repertoire_item_id && normalizeStudyStatus(row) === "doubt");
+    const reviewRows = userProgress.filter((row) => row.repertoire_item_id && normalizeStudyStatus(row) === "review");
     const readyRow = userProgress.find((row) => !row.repertoire_item_id && row.ready);
-    const lastActivity = [...studiedRows.map((row) => row.studied_at), readyRow?.ready_at]
+    const lastActivity = [...studiedRows.map((row) => row.studied_at), ...doubtRows.map((row) => row.studied_at), ...reviewRows.map((row) => row.studied_at), readyRow?.ready_at]
       .filter(Boolean)
       .sort()
       .at(-1) ?? null;
@@ -121,6 +160,8 @@ export default async function RepertoireProgressPage({ params }: { params: Promi
       ready: Boolean(readyRow?.ready),
       readyAt: readyRow?.ready_at ?? null,
       lastActivity,
+      doubtSongs: doubtRows.map((row) => itemLabelById.get(String(row.repertoire_item_id)) ?? "Música da escala"),
+      reviewSongs: reviewRows.map((row) => itemLabelById.get(String(row.repertoire_item_id)) ?? "Música da escala"),
       percent: totalItems > 0 ? Math.round((studiedRows.length / totalItems) * 100) : 0,
     };
   });
@@ -160,7 +201,7 @@ export default async function RepertoireProgressPage({ params }: { params: Promi
           <div>
             <p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Preparação</p>
             <h2 className="mt-2 text-2xl font-semibold">Status dos integrantes</h2>
-            <p className="mt-1 text-sm text-zinc-400">Acompanhe quem estudou as músicas e quem confirmou que está pronto.</p>
+            <p className="mt-1 text-sm text-zinc-400">Acompanhe percentual estudado, dúvidas e revisões pendentes de cada integrante.</p>
           </div>
           <Link href={`/ministerio/repertorios/${repertoire.id}`} className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10">
             Ver repertório
@@ -169,23 +210,33 @@ export default async function RepertoireProgressPage({ params }: { params: Promi
 
         {rows.length ? (
           <div className="mt-6 overflow-hidden rounded-3xl border border-white/10 bg-black/20">
-            <div className="grid grid-cols-[1.4fr_0.8fr_0.8fr_1fr] gap-3 border-b border-white/10 px-4 py-3 text-xs uppercase tracking-[0.14em] text-zinc-500">
+            <div className="grid grid-cols-[1.3fr_0.8fr_0.9fr_0.9fr_0.8fr] gap-3 border-b border-white/10 px-4 py-3 text-xs uppercase tracking-[0.14em] text-zinc-500">
               <span>Integrante</span>
               <span>Estudadas</span>
+              <span>Músicas com dúvida</span>
+              <span>Para revisar</span>
               <span>Pronto</span>
-              <span>Última atividade</span>
             </div>
             {rows.map((row) => (
-              <div key={row.member.id} className="grid grid-cols-1 gap-3 border-b border-white/10 px-4 py-4 last:border-b-0 md:grid-cols-[1.4fr_0.8fr_0.8fr_1fr] md:items-center">
+              <div key={row.member.id} className="grid grid-cols-1 gap-3 border-b border-white/10 px-4 py-4 last:border-b-0 md:grid-cols-[1.3fr_0.8fr_0.9fr_0.9fr_0.8fr] md:items-center">
                 <div>
                   <p className="font-semibold text-white">{memberName(row.member)}</p>
                   <p className="text-xs text-zinc-500">{memberEmail(row.member)}</p>
                 </div>
                 <div>
-                  <p className="font-semibold text-white">{row.studiedCount}/{totalItems}</p>
+                  <p className="font-semibold text-white">{row.percent}%</p>
+                  <p className="text-xs text-zinc-500">{row.studiedCount}/{totalItems} estudadas</p>
                   <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
                     <div className="h-full rounded-full bg-cyan-300" style={{ width: `${row.percent}%` }} />
                   </div>
+                </div>
+                <div>
+                  <p className="font-semibold text-amber-100">{row.doubtSongs.length}</p>
+                  <p className="mt-1 line-clamp-2 text-xs text-zinc-500">{row.doubtSongs.length ? row.doubtSongs.join(", ") : "Nenhuma"}</p>
+                </div>
+                <div>
+                  <p className="font-semibold text-fuchsia-100">{row.reviewSongs.length}</p>
+                  <p className="mt-1 line-clamp-2 text-xs text-zinc-500">{row.reviewSongs.length ? row.reviewSongs.join(", ") : "Nenhuma"}</p>
                 </div>
                 <div>
                   {row.ready ? (
@@ -198,7 +249,7 @@ export default async function RepertoireProgressPage({ params }: { params: Promi
                     </span>
                   )}
                 </div>
-                <p className="text-sm text-zinc-400">{row.lastActivity ? formatDate(row.lastActivity) : "Sem atividade"}</p>
+
               </div>
             ))}
           </div>
