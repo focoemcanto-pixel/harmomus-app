@@ -1,6 +1,7 @@
 import { revalidatePath } from "next/cache";
 
 import { PageHeader } from "@/components/admin/page-header";
+import { setFlashToast } from "@/lib/flash";
 import { createClient } from "@/lib/supabase/server";
 
 function buildSlug(value: string) {
@@ -20,21 +21,27 @@ async function saveCategory(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const slugInput = String(formData.get("slug") ?? "").trim();
 
-  if (!name) throw new Error("Nome da categoria é obrigatório.");
+  try {
+    if (!name) throw new Error("Nome da categoria é obrigatório.");
 
-  const payload = {
-    name,
-    slug: slugInput ? buildSlug(slugInput) : buildSlug(name),
-    description: String(formData.get("description") ?? "").trim() || null,
-    cover_url: String(formData.get("cover_url") ?? "").trim() || null,
-  };
+    const payload = {
+      name,
+      slug: slugInput ? buildSlug(slugInput) : buildSlug(name),
+      description: String(formData.get("description") ?? "").trim() || null,
+      cover_url: String(formData.get("cover_url") ?? "").trim() || null,
+    };
 
-  if (id) {
-    const { error } = await supabase.from("categories").update(payload).eq("id", id);
-    if (error) throw new Error(`Falha ao atualizar categoria: ${error.message}`);
-  } else {
-    const { error } = await supabase.from("categories").insert(payload);
-    if (error) throw new Error(`Falha ao criar categoria: ${error.message}`);
+    if (id) {
+      const { error } = await supabase.from("categories").update(payload).eq("id", id);
+      if (error) throw new Error(`Falha ao atualizar categoria: ${error.message}`);
+      await setFlashToast("success", `Categoria ${name} atualizada com sucesso.`);
+    } else {
+      const { error } = await supabase.from("categories").insert(payload);
+      if (error) throw new Error(`Falha ao criar categoria: ${error.message}`);
+      await setFlashToast("success", `Categoria ${name} criada com sucesso.`);
+    }
+  } catch (error) {
+    await setFlashToast("error", error instanceof Error ? error.message : "Não foi possível salvar a categoria.");
   }
 
   revalidatePath("/admin/categorias");
