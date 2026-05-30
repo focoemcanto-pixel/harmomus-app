@@ -558,7 +558,9 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
                 <section className={`space-y-2 rounded-2xl border p-4 text-sm shadow-[0_18px_45px_rgba(0,0,0,0.22)] ${harmomusIaStatusClass(currentVoiceTessitura.status)}`}>
                   <p><span className="font-semibold text-white">Status:</span> {currentVoiceTessitura.statusLabel}</p>
                   <p><span className="font-semibold text-white">Motivo:</span> {currentVoiceTessitura.reason}</p>
-                  <p><span className="font-semibold text-white">Recomendação:</span> {currentVoiceTessitura.recommendation}</p>
+                  {currentVoiceTessitura.recommendation ? (
+                    <p><span className="font-semibold text-white">Recomendação:</span> {currentVoiceTessitura.recommendation}</p>
+                  ) : null}
                 </section>
               ) : null}
 

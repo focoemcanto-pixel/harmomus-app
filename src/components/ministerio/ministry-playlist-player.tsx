@@ -143,6 +143,7 @@ export function MinistryPlaylistPlayer({ tracks, repertoireId, updateStudyStatus
     const kitId = currentTrack?.kitId;
     if (!kitId || audioCache[kitId]) return;
 
+    const resolvedKitId = kitId;
     let cancelled = false;
 
     async function loadAudio() {
@@ -150,7 +151,7 @@ export function MinistryPlaylistPlayer({ tracks, repertoireId, updateStudyStatus
       setAudioError(null);
 
       try {
-        const response = await fetch(`/api/kits/${kitId}/audio-files`, { cache: "no-store" });
+        const response = await fetch(`/api/kits/${resolvedKitId}/audio-files`, { cache: "no-store" });
         const data = await response.json().catch(() => null);
 
         if (!response.ok) throw new Error(data?.error || "Não foi possível carregar os áudios desta música.");
@@ -159,7 +160,7 @@ export function MinistryPlaylistPlayer({ tracks, repertoireId, updateStudyStatus
         if (!resolved.streamUrl) throw new Error("Nenhum áudio disponível para esta música.");
 
         if (!cancelled) {
-          setAudioCache((current) => ({ ...current, [kitId]: resolved }));
+          setAudioCache((current) => ({ ...current, [resolvedKitId]: resolved }));
         }
       } catch (error) {
         if (!cancelled) setAudioError(error instanceof Error ? error.message : "Erro ao carregar áudio.");
