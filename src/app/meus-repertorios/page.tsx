@@ -35,19 +35,17 @@ function countItemsByRepertoire(items: any[] | null | undefined) {
   return counts;
 }
 
-function NoMinistryAccessState() {
+function ErrorState({ title, message }: { title: string; message: string }) {
   return (
     <PublicAppShell>
       <main className="min-h-screen bg-gradient-to-b from-[#050816] via-[#080b18] to-[#06070c] px-4 py-8 text-white md:px-8">
         <section className="mx-auto max-w-4xl">
           <div className="overflow-hidden rounded-[2rem] border border-amber-300/20 bg-gradient-to-br from-[#0b1120] via-[#120d24] to-[#06111f] p-6 shadow-[0_30px_100px_rgba(245,158,11,0.14)] md:p-10">
             <div className="inline-flex items-center gap-2 rounded-full border border-amber-300/25 bg-amber-400/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-amber-100">
-              <ShieldCheck className="h-4 w-4" /> Acesso ministerial não encontrado
+              <ShieldCheck className="h-4 w-4" /> Atenção
             </div>
-            <h1 className="mt-5 text-3xl font-black tracking-tight md:text-5xl">Convite ministerial pendente</h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-300 md:text-base">
-              Esta conta ainda não está vinculada a um ministério ativo. Para ver repertórios compartilhados, aceite o convite enviado pela liderança ou peça um novo convite para este mesmo e-mail.
-            </p>
+            <h1 className="mt-5 text-3xl font-black tracking-tight md:text-5xl">{title}</h1>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-300 md:text-base">{message}</p>
             <div className="mt-6 flex flex-wrap gap-3">
               <Link href="/todos-os-kits" className="rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-cyan-200">
                 Explorar kits
@@ -63,39 +61,62 @@ function NoMinistryAccessState() {
   );
 }
 
+function getErrorMessage(error: unknown) {
+  if (!error) return "Erro desconhecido.";
+  if (typeof error === "string") return error;
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && "message" in error) return String((error as { message?: unknown }).message ?? "Erro desconhecido.");
+  return "Erro desconhecido.";
+}
+
 export default async function MeusRepertoriosPage() {
   const context = await getCurrentUserAccessContext();
 
   if (context.isGuest) redirect("/login");
-  if (!context.ministry?.ministryId) return <NoMinistryAccessState />;
+  if (!context.ministry?.ministryId) {
+    return (
+      <ErrorState
+        title="Convite ministerial pendente"
+        message="Esta conta ainda não está vinculada a um ministério ativo. Para ver repertórios compartilhados, aceite o convite enviado pela liderança ou peça um novo convite para este mesmo e-mail."
+      />
+    );
+  }
 
   const admin = createSupabaseAdminClient() as any;
 
-  const [{ data: ministry }, { data: repertoires, error }] = await Promise.all([
-    admin.from("ministries").select("id,name").eq("id", context.ministry.ministryId).maybeSingle(),
-    admin
-      .from("ministry_repertoires")
-      .select("id,name,description,event_date,created_at")
-      .eq("ministry_id", context.ministry.ministryId)
-      .eq("archived", false)
-      .order("event_date", { ascending: true, nullsFirst: false })
-      .order("created_at", { ascending: false }),
-  ]);
+  const ministryResult = await admin.from("ministries").select("id,name").eq("id", context.ministry.ministryId).maybeSingle();
+  const repertoireResult = await admin
+    .from("ministry_repertoires")
+    .select("id,name,description,event_date,created_at")
+    .eq("ministry_id", context.ministry.ministryId)
+    .eq("archived", false)
+    .order("event_date", { ascending: true, nullsFirst: false })
+    .order("created_at", { ascending: false });
 
-  if (error) throw new Error(error.message);
+  if (ministryResult.error || repertoireResult.error) {
+    const message = getErrorMessage(ministryResult.error ?? repertoireResult.error);
+    console.error("[MeusRepertoriosPage] failed to load repertoires", ministryResult.error ?? repertoireResult.error);
+    return <ErrorState title="Não foi possível carregar seus repertórios" message={message} />;
+  }
 
-  const repertoireIds = (repertoires ?? []).map((repertoire: any) => repertoire.id).filter(Boolean);
-  const { data: itemRows, error: itemCountError } = repertoireIds.length
+  const ministry = ministryResult.data;
+  const repertoires = repertoireResult.data ?? [];
+  const repertoireIds = repertoires.map((repertoire: any) => repertoire.id).filter(Boolean);
+  const itemResult = repertoireIds.length
     ? await admin
         .from("ministry_repertoire_items")
         .select("id,repertoire_id")
         .in("repertoire_id", repertoireIds)
     : { data: [], error: null };
 
-  if (itemCountError) throw new Error(itemCountError.message);
+  if (itemResult.error) {
+    const message = getErrorMessage(itemResult.error);
+    console.error("[MeusRepertoriosPage] failed to load repertoire items", itemResult.error);
+    return <ErrorState title="Não foi possível carregar os kits dos repertórios" message={message} />;
+  }
 
-  const itemCounts = countItemsByRepertoire(itemRows);
-  const rows = ((repertoires ?? []) as any[]).map((repertoire) => ({
+  const itemCounts = countItemsByRepertoire(itemResult.data);
+  const rows = (repertoires as any[]).map((repertoire) => ({
     ...repertoire,
     kitCount: itemCounts.get(String(repertoire.id)) ?? 0,
   })) as RepertoireRow[];
