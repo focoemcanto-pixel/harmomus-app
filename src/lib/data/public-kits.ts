@@ -4,7 +4,7 @@ import { normalizeTone, sortTonesByChromaticOrder } from "@/lib/music/tones";
 import type { Database } from "@/types/database";
 
 export type UserTier = "guest" | "free" | "plus" | "premium";
-export type VoiceType = "todos" | "tenor" | "contralto" | "soprano";
+export type VoiceType = "todos" | "tenor" | "contralto" | "soprano" | "baritono";
 export type AudioSourceType = "original" | "generated";
 
 export interface PublicKitAudioFile {
@@ -64,6 +64,7 @@ const VOICE_MAP: Record<string, VoiceType> = {
   tenor: "tenor",
   contralto: "contralto",
   soprano: "soprano",
+  baritono: "baritono",
 };
 
 function normalizeVoice(value: string): VoiceType {

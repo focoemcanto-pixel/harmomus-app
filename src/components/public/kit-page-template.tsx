@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AccessCounter } from "@/components/public/access-counter";
 import { AccessStatusBadge } from "@/components/public/access-status-badge";
 import { HarmomusPlayer } from "@/components/public/harmomus-player";
@@ -52,6 +52,8 @@ type AudioFilesApiTone = {
 };
 
 const CHROMATIC_ORDER = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"] as const;
+const PRELOAD_VOICE_ORDER: VoiceType[] = ["todos", "tenor", "contralto", "soprano", "baritono"];
+const MAX_BACKGROUND_PRELOADS_PER_TONE = 4;
 
 function normalizeAudioSource(value: unknown): AudioSource {
   return value === "generated" ? "generated" : "original";
@@ -88,6 +90,7 @@ function normalizeVoice(value: string | null | undefined): VoiceType {
   if (normalized.includes("soprano")) return "soprano";
   if (normalized.includes("contralto")) return "contralto";
   if (normalized.includes("tenor")) return "tenor";
+  if (normalized.includes("baritono")) return "baritono";
   return "todos";
 }
 
@@ -144,6 +147,30 @@ function getClosestToneStep(currentTone: string, availableTones: string[], direc
   }
 
   return null;
+}
+
+function withPreloadHint(src: string) {
+  try {
+    const url = new URL(src, window.location.origin);
+    url.searchParams.set("preload", "1");
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    const separator = src.includes("?") ? "&" : "?";
+    return `${src}${separator}preload=1`;
+  }
+}
+
+function getTonePreloadFiles(kit: PublicKit, tone: string) {
+  const group = getToneGroup(kit, tone);
+  if (!group) return [];
+
+  const seen = new Set<string>();
+  return PRELOAD_VOICE_ORDER.flatMap((voice) => {
+    const file = group.voices[voice];
+    if (!file?.streamUrl || seen.has(file.streamUrl)) return [];
+    seen.add(file.streamUrl);
+    return [file];
+  }).slice(0, MAX_BACKGROUND_PRELOADS_PER_TONE);
 }
 
 function mapApiTonesToPublicToneGroups(tones: AudioFilesApiTone[]) {
@@ -236,6 +263,10 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
 
   const [selectedTone, setSelectedTone] = useState<string>(initialTone);
   const [selectedVoice, setSelectedVoice] = useState<VoiceType>("todos");
+  const [freeAccessCount, setFreeAccessCount] = useState<number>(accessContext.play.stats?.uniqueKitCount24h ?? 0);
+  const [hasCountedCurrentKit, setHasCountedCurrentKit] = useState<boolean>(Boolean(accessContext.play.stats?.accessedKitIds?.includes(kit.id)));
+  const preloadAudiosRef = useRef<HTMLAudioElement[]>([]);
+  const preloadedToneKeysRef = useRef<Set<string>>(new Set());
   const [loginOpen, setLoginOpen] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [toneMenuOpen, setToneMenuOpen] = useState(false);
@@ -355,6 +386,47 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
     if (fallback) setSelectedTone(fallback);
   }, [selectedTone, toneOptions]);
 
+  useEffect(() => {
+    return () => {
+      for (const audio of preloadAudiosRef.current) {
+        try { audio.pause(); } catch {}
+        audio.removeAttribute("src");
+        try { audio.load(); } catch {}
+      }
+      preloadAudiosRef.current = [];
+      preloadedToneKeysRef.current.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!accessContext.play.allowed || !selectedTone) return;
+
+    const normalizedTone = normalizeTone(selectedTone) ?? selectedTone;
+    const preloadKey = `${liveKit.id}:${normalizedTone}`;
+    if (preloadedToneKeysRef.current.has(preloadKey)) return;
+
+    const filesToPreload = getTonePreloadFiles(liveKit, normalizedTone);
+    if (filesToPreload.length === 0) return;
+
+    preloadedToneKeysRef.current.add(preloadKey);
+
+    const audios = filesToPreload.map((file) => {
+      const audio = new Audio();
+      audio.preload = "auto";
+      audio.src = withPreloadHint(file.streamUrl);
+      audio.load();
+      return audio;
+    });
+
+    preloadAudiosRef.current.push(...audios);
+  }, [accessContext.play.allowed, liveKit, selectedTone]);
+
+  function handleAllowedPlayback() {
+    if (accessContext.effectiveSlug !== "free" || hasCountedCurrentKit) return;
+    setHasCountedCurrentKit(true);
+    setFreeAccessCount((current) => Math.min(current + 1, accessContext.play.stats?.limit ?? 3));
+  }
+
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,#1f2840_0%,#06070c_40%)] px-4 py-6 md:px-8 md:py-10">
       <section className="mx-auto max-w-6xl rounded-2xl border border-white/10 bg-surface/80 p-4 shadow-premium backdrop-blur md:p-8">
@@ -456,6 +528,7 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
                 title={`Tom ${formatToneLabel(selectedTone)} • Voz ${voiceLabel(selectedVoice)}`}
                 canPlay={canPlaySelected}
                 semitoneShift={0}
+                onAllowedPlayback={handleAllowedPlayback}
                 onBlocked={() => {
                   if (accessContext.play.reason === "guest") setLoginOpen(true);
                   else {
@@ -514,7 +587,7 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
               )}
 
               {accessContext.effectiveSlug === "free" ? (
-                <AccessCounter value={accessContext.play.stats?.uniqueKitCount24h ?? 0} limit={accessContext.play.stats?.limit ?? 3} />
+                <AccessCounter value={freeAccessCount} limit={accessContext.play.stats?.limit ?? 3} />
               ) : null}
             </div>
           </div>

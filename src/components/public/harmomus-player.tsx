@@ -12,6 +12,7 @@ interface HarmomusPlayerProps {
   canPlay: boolean;
   semitoneShift?: number;
   onBlocked: () => void;
+  onAllowedPlayback?: () => void;
 }
 
 function parseTrackMeta(title: string) {
@@ -23,7 +24,7 @@ function parseTrackMeta(title: string) {
   };
 }
 
-export function HarmomusPlayer({ engine, src, title, canPlay, semitoneShift = 0, onBlocked }: HarmomusPlayerProps) {
+export function HarmomusPlayer({ engine, src, title, canPlay, semitoneShift = 0, onBlocked, onAllowedPlayback }: HarmomusPlayerProps) {
   const {
     track,
     isPlaying,
@@ -66,6 +67,7 @@ export function HarmomusPlayer({ engine, src, title, canPlay, semitoneShift = 0,
 
     if (isCurrentTrack) {
       await togglePlay();
+      onAllowedPlayback?.();
       return;
     }
 
@@ -75,6 +77,7 @@ export function HarmomusPlayer({ engine, src, title, canPlay, semitoneShift = 0,
       semitoneShift,
       trackId,
     });
+    onAllowedPlayback?.();
   }
 
   return (

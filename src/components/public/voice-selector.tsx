@@ -2,7 +2,7 @@
 
 import type { VoiceType } from "@/lib/data/public-kits";
 
-const VOICES: VoiceType[] = ["todos", "tenor", "contralto", "soprano"];
+const VOICES: VoiceType[] = ["todos", "tenor", "contralto", "soprano", "baritono"];
 
 interface VoiceSelectorProps {
   selectedVoice: VoiceType;

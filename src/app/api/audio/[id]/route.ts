@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
-import { resolveKitAccess } from "@/lib/access/access-rules";
+import { registerKitAccess, resolveKitAccess } from "@/lib/access/access-rules";
 import type { PublicKit } from "@/lib/data/public-kits";
 import { getAudioStream } from "@/lib/r2/get-audio-stream";
 import { createClient } from "@/lib/supabase/server";
@@ -160,7 +160,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   const range = parseRangeHeader(request.headers.get("range"));
-  const shouldTrackPlayback = shouldCountPlayback(range);
+  const isPreloadRequest = request.nextUrl.searchParams.get("preload") === "1";
+  const shouldTrackPlayback = !isPreloadRequest && shouldCountPlayback(range);
 
   let streamResponse: Awaited<ReturnType<typeof getAudioStream>>;
   try {
@@ -199,6 +200,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   if (shouldTrackPlayback) {
     runAfterResponse(async () => {
+      if (context.effectiveSlug === "free" && context.profile?.id) {
+        await registerKitAccess(context.profile.id, kit.id);
+      }
       await logAudioAccess({ user_id: context.profile?.id ?? null, kit_id: kit.id, audio_file_id: audioFile.id, status: "allowed", reason: "ok", ...analyticsContext });
       await dispatchWebhookEvent({ event: "audio.played", source: "audio.stream", recipient: { name: context.profile?.full_name ?? null, email: context.profile?.email ?? null, phone: context.profile?.phone ?? null }, data: { kit: { id: kit.id, slug: kit.slug, nome: kit.name }, categoria: requiredPlan?.slug ?? null, usuario: { id: context.profile?.id ?? null, email: context.profile?.email ?? null }, arquivo: { id: audioFile.id, nome: audioFile.name, tom: audioFile.tone }, played_at: new Date().toISOString() } });
     });
