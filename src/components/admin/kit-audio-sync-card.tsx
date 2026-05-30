@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { analyzeAudioUrlPitch } from "@/lib/audio/pitch-analysis";
 import { midiToBrazilianNote } from "@/lib/music-notes";
-import { calculateToneRecommendation, type ToneRecommendation } from "@/lib/recommendation-engine";
+import { calculateToneRecommendation, getRecommendationPriority, type ToneRecommendation } from "@/lib/recommendation-engine";
 import { getVocalProfile, type VocalProfileType } from "@/lib/vocal-profiles";
 import { getSignedSemitoneDistance, normalizeTone, sortTonesByChromaticOrder } from "@/lib/music/tones";
 import type { KitAudioFile, KitAudioToneGroup } from "@/types/kit-audio";
@@ -58,9 +58,8 @@ type AnalysisJob = {
 
 const RECOMMENDATION_BADGE_STYLES: Record<ToneRecommendation["risk"], string> = {
   ideal: "border-emerald-400/40 bg-emerald-500/15 text-emerald-100",
-  safe: "border-emerald-400/40 bg-emerald-500/15 text-emerald-100",
-  warning: "border-amber-400/40 bg-amber-500/15 text-amber-100",
-  risky: "border-red-400/40 bg-red-500/15 text-red-100",
+  comfortable_limit: "border-amber-400/40 bg-amber-500/15 text-amber-100",
+  reorganization_recommended: "border-red-400/40 bg-red-500/15 text-red-100",
   incomplete: "border-zinc-400/30 bg-zinc-500/10 text-zinc-200",
 };
 
@@ -241,7 +240,7 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
     });
   }, [tones, jobs]);
 
-  const bestRecommendationsByVoice = useMemo(() => {
+  const criticalRecommendationsByVoice = useMemo(() => {
     const result: Array<{ voice: VocalProfileType; voiceLabel: string; tone: string; recommendation: ToneRecommendation }> = [];
 
     (["tenor", "contralto", "soprano"] as const).forEach((voice) => {
@@ -252,7 +251,7 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
           .filter((candidate): candidate is { tone: string; recommendation: ToneRecommendation } => candidate.recommendation !== null && candidate.recommendation.risk !== "incomplete"),
       );
 
-      const best = candidates.sort((a, b) => b.recommendation.score - a.recommendation.score)[0];
+      const best = candidates.sort((a, b) => getRecommendationPriority(b.recommendation.risk) - getRecommendationPriority(a.recommendation.risk))[0];
       if (best) {
         result.push({ voice, voiceLabel: getVocalProfile(voice)?.label ?? voice, ...best });
       }
@@ -611,7 +610,7 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
         <div className="border-b border-cyan-300/20 p-4">
           <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-200">Harmomus IA Analysis</p>
           <h3 className="mt-1 text-base font-semibold text-white">Status da análise de tessitura via IA</h3>
-          <p className="mt-1 text-xs text-cyan-100/80">Em breve: tessitura, comfort range, notas e recomendações. Por enquanto: status e logs.</p>
+          <p className="mt-1 text-xs text-cyan-100/80">Exibe tessitura detectada, zona confortável e recomendação textual de redistribuição vocal, sem alterar áudio, player ou tom.</p>
         </div>
         <div className="grid gap-2 p-3 sm:grid-cols-4">
           {["pending", "processing", "completed", "failed"].map((status) => (
@@ -675,22 +674,28 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
       ) : null}
 
       <div className="mb-4 rounded-lg border border-cyan-400/20 bg-cyan-500/5 p-4">
-        <h3 className="text-sm font-semibold text-cyan-100">Recomendação geral por voz</h3>
-        <p className="mt-1 text-xs text-cyan-100/70">Resumo calculado com o conforto detectado pela IA (comfort_min_midi/comfort_max_midi) e exibido com conversão BR.</p>
+        <h3 className="text-sm font-semibold text-cyan-100">Auditoria Harmomus IA por voz</h3>
+        <p className="mt-1 text-xs text-cyan-100/70">Resumo calculado com a tessitura detectada pela IA. Não altera áudio, player ou tom automaticamente.</p>
         <div className="mt-3 grid gap-2 sm:grid-cols-3">
           {(["tenor", "contralto", "soprano"] as const).map((voice) => {
-            const item = bestRecommendationsByVoice.find((recommendation) => recommendation.voice === voice);
+            const item = criticalRecommendationsByVoice.find((recommendation) => recommendation.voice === voice);
             const voiceLabel = getVocalProfile(voice)?.label ?? voice;
 
             return (
               <div key={voice} className="rounded-xl border border-cyan-400/20 bg-black/20 p-3">
-                <span className="block text-xs text-cyan-100/70">Melhor tom para {voiceLabel}</span>
+                <span className="block text-xs text-cyan-100/70">Estado mais crítico para {voiceLabel}</span>
                 {item ? (
                   <>
-                    <span className="mt-1 block text-lg font-bold text-cyan-100">{item.tone}</span>
-                    <span className={`mt-2 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${getRecommendationBadgeClass(item.recommendation.risk)}`}>{item.recommendation.label} • Score {item.recommendation.score}</span>
+                    <span className="mt-1 block text-lg font-bold text-cyan-100">Tom {item.tone}</span>
+                    <span className={`mt-2 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${getRecommendationBadgeClass(item.recommendation.risk)}`}>{item.recommendation.label}</span>
                     <span className="mt-2 block text-[11px] text-cyan-100/75">Confortável detectado: {item.recommendation.display.comfortRange}</span>
                     <span className="block text-[11px] text-cyan-100/75">Perfil vocal analisado: {item.recommendation.display.profileComfortRange}</span>
+                    <span className="mt-2 block text-[11px] text-cyan-100/80">{item.recommendation.explanation}</span>
+                    {item.recommendation.redistributionActions.length > 0 ? (
+                      <ul className="mt-2 list-disc space-y-1 pl-4 text-[11px] text-cyan-50/80">
+                        {item.recommendation.redistributionActions.map((action) => <li key={`${voice}-${item.tone}-${action}`}>{action}</li>)}
+                      </ul>
+                    ) : null}
                   </>
                 ) : (
                   <span className="mt-2 block text-xs text-cyan-100/60">Análise incompleta — reanalisar.</span>
@@ -716,7 +721,7 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
 
                     return (
                       <span key={`${toneGroup.tone}-${file.id ?? file.key}-recommendation`} className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${getRecommendationBadgeClass(recommendation.risk)}`}>
-                        {formatProfileVoice(file.voice) ?? file.voice}: {recommendation.label} • {recommendation.score}
+                        {formatProfileVoice(file.voice) ?? file.voice}: {recommendation.label}
                       </span>
                     );
                   })}
@@ -773,11 +778,16 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
                                     <span className="block text-[11px] text-cyan-100/80">Confortável detectado: {recommendation?.display.comfortRange ?? "— → —"}</span>
                                     {file.voice !== "todos" ? <span className="block text-[11px] text-cyan-100/80">Perfil vocal analisado: {formatProfileVoice(file.voice) ?? "—"}</span> : null}
                                     {file.voice !== "todos" ? <span className="block text-[11px] text-cyan-100/80">Conforto do perfil: {recommendation?.display.profileComfortRange ?? "— → —"}</span> : null}
-                                    {recommendation ? <span className="block text-[11px] font-semibold text-cyan-100">Score: {recommendation.score}/100 • Overflow: {recommendation.overflowSemitones} semitom{recommendation.overflowSemitones === 1 ? "" : "s"}</span> : null}
+                                    {recommendation ? <span className="block text-[11px] font-semibold text-cyan-100">Classificação: {recommendation.label} • Overflow: {recommendation.overflowSemitones} semitom{recommendation.overflowSemitones === 1 ? "" : "s"}</span> : null}
                                     {recommendation ? <span className="block max-w-[220px] text-[11px] text-cyan-100/80">{recommendation.explanation}</span> : null}
+                                    {recommendation?.redistributionActions.length ? (
+                                      <ul className="mt-1 max-w-[240px] list-disc space-y-0.5 pl-4 text-left text-[11px] text-cyan-50/80">
+                                        {recommendation.redistributionActions.map((action) => <li key={`${file.id ?? file.key}-${action}`}>{action}</li>)}
+                                      </ul>
+                                    ) : null}
                                     {confidence ? <span className="block text-[11px] text-cyan-100/80">Confiança: {confidence}</span> : null}
                                     {job.analysis_method ? <span className="block text-[11px] text-cyan-100/80">Método: {job.analysis_method}</span> : null}
-                                    {recommendation ? <span className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${getRecommendationBadgeClass(recommendation.risk)}`}>{recommendation.label} • Score {recommendation.score}</span> : null}
+                                    {recommendation ? <span className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${getRecommendationBadgeClass(recommendation.risk)}`}>{recommendation.label}</span> : null}
                                     <span className="block max-w-[220px] truncate text-[11px] text-cyan-100/70">{job.error_message ?? (recommendation?.risk === "incomplete" ? "Análise incompleta — reanalisar" : log ?? "sem logs")}</span>
                                   </>
                                 );

@@ -1,7 +1,8 @@
 import { midiToBrazilianNote } from "@/lib/music-notes";
 import { getVocalProfile, type VocalProfileType } from "@/lib/vocal-profiles";
 
-export type RecommendationRisk = "ideal" | "safe" | "warning" | "risky" | "incomplete";
+export type RecommendationRisk = "ideal" | "comfortable_limit" | "reorganization_recommended" | "incomplete";
+export type TessituraOverflowDirection = "high" | "low" | "both" | "none";
 
 export interface ToneRecommendationInput {
   voiceType: VocalProfileType | string;
@@ -13,11 +14,12 @@ export interface ToneRecommendationInput {
 }
 
 export interface ToneRecommendation {
-  score: number;
   risk: RecommendationRisk;
   label: string;
   explanation: string;
   overflowSemitones: number;
+  overflowDirection: TessituraOverflowDirection;
+  redistributionActions: string[];
   display: {
     detectedRange: string;
     comfortRange: string;
@@ -26,6 +28,41 @@ export interface ToneRecommendation {
 }
 
 const INCOMPLETE_RANGE = "— → —";
+
+const RECOMMENDATION_PRIORITY: Record<RecommendationRisk, number> = {
+  reorganization_recommended: 3,
+  comfortable_limit: 2,
+  ideal: 1,
+  incomplete: 0,
+};
+
+const HIGH_REDISTRIBUTION_RULES: Record<VocalProfileType, string[]> = {
+  soprano: [
+    "Soprano recebe a linha do contralto.",
+    "Contralto recebe a linha do tenor.",
+    "Tenor recebe a linha do soprano uma oitava abaixo.",
+  ],
+  contralto: [
+    "Contralto recebe a linha do tenor.",
+    "Avaliar a redistribuição correspondente entre soprano e tenor para manter a função harmônica.",
+  ],
+  tenor: ["Tenor recebe a linha do soprano uma oitava abaixo."],
+};
+
+const LOW_REDISTRIBUTION_RULES: Record<VocalProfileType, string[]> = {
+  soprano: [
+    "Soprano retoma uma linha mais aguda: avaliar a linha do tenor uma oitava acima.",
+    "Tenor pode assumir a linha do contralto.",
+    "Contralto pode assumir a linha do soprano, se a condução harmônica permitir.",
+  ],
+  contralto: [
+    "Contralto retoma uma linha mais aguda: avaliar a linha do tenor uma oitava acima ou a linha do soprano.",
+    "Tenor pode assumir a linha original do contralto quando a região baixa ficar pesada.",
+  ],
+  tenor: [
+    "Tenor retoma uma linha mais aguda: avaliar a linha do contralto ou do soprano uma oitava abaixo conforme a função harmônica.",
+  ],
+};
 
 function isNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
@@ -36,30 +73,55 @@ function formatRange(min?: number | null, max?: number | null) {
   return `${midiToBrazilianNote(min)} → ${midiToBrazilianNote(max)}`;
 }
 
-function buildIncompleteRecommendation(input: ToneRecommendationInput): ToneRecommendation {
+function buildDisplay(input: ToneRecommendationInput) {
   const profile = getVocalProfile(input.voiceType);
 
   return {
-    score: 0,
-    risk: "incomplete",
-    label: "⚪ Incompleto",
-    explanation: "Análise incompleta — reanalisar.",
-    overflowSemitones: 0,
-    display: {
-      detectedRange: formatRange(input.detectedMinMidi, input.detectedMaxMidi),
-      comfortRange: formatRange(input.comfortMinMidi, input.comfortMaxMidi),
-      profileComfortRange: profile ? formatRange(profile.comfortMinMidi, profile.comfortMaxMidi) : INCOMPLETE_RANGE,
-    },
-  };
-}
-
-export function calculateToneRecommendation(input: ToneRecommendationInput): ToneRecommendation {
-  const profile = getVocalProfile(input.voiceType);
-  const display = {
     detectedRange: formatRange(input.detectedMinMidi, input.detectedMaxMidi),
     comfortRange: formatRange(input.comfortMinMidi, input.comfortMaxMidi),
     profileComfortRange: profile ? formatRange(profile.comfortMinMidi, profile.comfortMaxMidi) : INCOMPLETE_RANGE,
   };
+}
+
+function buildIncompleteRecommendation(input: ToneRecommendationInput): ToneRecommendation {
+  return {
+    risk: "incomplete",
+    label: "⚪ Análise incompleta",
+    explanation: "A Harmomus IA ainda não tem min/max e região confortável suficientes para validar este nipe.",
+    overflowSemitones: 0,
+    overflowDirection: "none",
+    redistributionActions: ["Reanalisar a Tessitura IA antes de decidir redistribuição vocal."],
+    display: buildDisplay(input),
+  };
+}
+
+function getOverflowDirection(belowComfort: number, aboveComfort: number): TessituraOverflowDirection {
+  if (belowComfort > 0 && aboveComfort > 0) return "both";
+  if (aboveComfort > 0) return "high";
+  if (belowComfort > 0) return "low";
+  return "none";
+}
+
+function getRedistributionActions(voice: VocalProfileType, direction: TessituraOverflowDirection) {
+  if (direction === "high") return HIGH_REDISTRIBUTION_RULES[voice];
+  if (direction === "low") return LOW_REDISTRIBUTION_RULES[voice];
+  if (direction === "both") {
+    return [
+      "A linha ultrapassa conforto nas duas extremidades; revisar condução do nipe antes de qualquer mudança de tom.",
+      ...HIGH_REDISTRIBUTION_RULES[voice],
+      ...LOW_REDISTRIBUTION_RULES[voice],
+    ];
+  }
+  return [];
+}
+
+export function getRecommendationPriority(risk: RecommendationRisk) {
+  return RECOMMENDATION_PRIORITY[risk] ?? 0;
+}
+
+export function calculateToneRecommendation(input: ToneRecommendationInput): ToneRecommendation {
+  const profile = getVocalProfile(input.voiceType);
+  const display = buildDisplay(input);
 
   if (
     !profile ||
@@ -76,49 +138,42 @@ export function calculateToneRecommendation(input: ToneRecommendationInput): Ton
   const belowComfort = Math.max(0, profile.comfortMinMidi - input.comfortMinMidi);
   const aboveComfort = Math.max(0, input.comfortMaxMidi - profile.comfortMaxMidi);
   const overflowSemitones = Math.max(belowComfort, aboveComfort);
-  const detectedInsideComfort = input.detectedMinMidi >= profile.comfortMinMidi && input.detectedMaxMidi <= profile.comfortMaxMidi;
+  const overflowDirection = getOverflowDirection(belowComfort, aboveComfort);
+  const directionText = overflowDirection === "high" ? "acima" : overflowDirection === "low" ? "abaixo" : "fora";
 
-  if (outsideAbsolute) {
+  if (outsideAbsolute || overflowSemitones > profile.warningMargin) {
     return {
-      score: 40,
-      risk: "risky",
-      label: "🔴 Arriscado",
-      explanation: "Esse tom passa da extensão segura do naipe.",
+      risk: "reorganization_recommended",
+      label: "🔴 Reorganização recomendada",
+      explanation: outsideAbsolute
+        ? `A linha passa da extensão segura do ${profile.label.toLowerCase()}; a Harmomus IA recomenda redistribuição vocal textual, sem alterar áudio, player ou tom.`
+        : `A linha ultrapassa ${overflowSemitones} semitom${overflowSemitones === 1 ? "" : "s"} ${directionText} da região confortável do ${profile.label.toLowerCase()}.`,
       overflowSemitones,
+      overflowDirection,
+      redistributionActions: getRedistributionActions(profile.type, overflowDirection),
       display,
     };
   }
 
-  if (overflowSemitones === 0) {
+  if (overflowSemitones > 0) {
     return {
-      score: detectedInsideComfort ? 100 : 92,
-      risk: detectedInsideComfort ? "ideal" : "safe",
-      label: detectedInsideComfort ? "🟢 Ideal" : "🟢 Seguro",
-      explanation: detectedInsideComfort
-        ? `Esse tom fica dentro da região confortável do ${profile.label.toLowerCase()}.`
-        : `A região confortável detectada fica dentro da zona confortável do ${profile.label.toLowerCase()}.`,
+      risk: "comfortable_limit",
+      label: "🟡 Limite confortável",
+      explanation: `A linha encosta no limite confortável do ${profile.label.toLowerCase()} (${overflowSemitones} semitom${overflowSemitones === 1 ? "" : "s"} ${directionText}); validar no ensaio antes de redistribuir.`,
       overflowSemitones,
-      display,
-    };
-  }
-
-  if (overflowSemitones <= profile.warningMargin) {
-    return {
-      score: Math.max(60, 85 - overflowSemitones * 5),
-      risk: "warning",
-      label: "🟡 Atenção",
-      explanation: `Esse tom ultrapassa em ${overflowSemitones} semitom${overflowSemitones === 1 ? "" : "s"} a zona confortável.`,
-      overflowSemitones,
+      overflowDirection,
+      redistributionActions: ["Manter a linha original por enquanto e observar fadiga, afinação e emissão no ensaio."],
       display,
     };
   }
 
   return {
-    score: Math.max(0, 59 - (overflowSemitones - profile.warningMargin) * 8),
-    risk: "risky",
-    label: "🔴 Arriscado",
-    explanation: `Esse tom ultrapassa em ${overflowSemitones} semitom${overflowSemitones === 1 ? "" : "s"} a zona confortável.`,
+    risk: "ideal",
+    label: "🟢 Ideal",
+    explanation: `A linha fica dentro da região confortável do ${profile.label.toLowerCase()}.`,
     overflowSemitones,
+    overflowDirection,
+    redistributionActions: ["Manter distribuição vocal original."],
     display,
   };
 }
