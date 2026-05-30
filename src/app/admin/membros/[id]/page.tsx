@@ -5,6 +5,7 @@ import { ConfirmSubmitButton } from "@/components/admin/confirm-submit-button";
 import { PageHeader } from "@/components/admin/page-header";
 import { cancelMemberSubscription, deleteMember, getMemberById, reactivateMemberSubscription, updateMemberSubscription } from "@/lib/data/members";
 import { getPlans } from "@/lib/data/plans";
+import { setFlashToast } from "@/lib/flash";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -58,7 +59,14 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
     const userId = String(formData.get("user_id") ?? "");
     const planId = String(formData.get("plan_id") ?? "");
     const status = String(formData.get("status") ?? "inactive") as any;
-    await updateMemberSubscription(userId, { plan_id: planId || undefined, status });
+
+    try {
+      await updateMemberSubscription(userId, { plan_id: planId || undefined, status });
+      await setFlashToast("success", "Plano/status do membro atualizado com sucesso.");
+    } catch (error) {
+      await setFlashToast("error", error instanceof Error ? error.message : "Não foi possível atualizar este membro.");
+    }
+
     revalidatePath(`/admin/membros/${userId}`);
     revalidatePath("/admin/membros");
   }
@@ -66,7 +74,14 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
   async function cancel(formData: FormData) {
     "use server";
     const userId = String(formData.get("user_id") ?? "");
-    await cancelMemberSubscription(userId);
+
+    try {
+      await cancelMemberSubscription(userId);
+      await setFlashToast("success", "Assinatura cancelada com sucesso.");
+    } catch (error) {
+      await setFlashToast("error", error instanceof Error ? error.message : "Não foi possível cancelar a assinatura.");
+    }
+
     revalidatePath(`/admin/membros/${userId}`);
     revalidatePath("/admin/membros");
   }
@@ -74,7 +89,14 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
   async function reactivate(formData: FormData) {
     "use server";
     const userId = String(formData.get("user_id") ?? "");
-    await reactivateMemberSubscription(userId);
+
+    try {
+      await reactivateMemberSubscription(userId);
+      await setFlashToast("success", "Assinatura reativada com sucesso.");
+    } catch (error) {
+      await setFlashToast("error", error instanceof Error ? error.message : "Não foi possível reativar a assinatura.");
+    }
+
     revalidatePath(`/admin/membros/${userId}`);
     revalidatePath("/admin/membros");
   }
@@ -82,7 +104,14 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
   async function remove(formData: FormData) {
     "use server";
     const userId = String(formData.get("user_id") ?? "");
-    await deleteMember(userId);
+
+    try {
+      await deleteMember(userId);
+      await setFlashToast("success", "Membro excluído definitivamente com sucesso.");
+    } catch (error) {
+      await setFlashToast("error", error instanceof Error ? error.message : "Não foi possível excluir o membro.");
+    }
+
     revalidatePath("/admin/membros");
     redirect("/admin/membros");
   }
@@ -159,8 +188,8 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
         </div>
         <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
           <button className="rounded-xl bg-gold-500/20 px-5 py-3 text-sm font-semibold text-gold-300 transition hover:bg-gold-500/30">Salvar alteração</button>
-          <ConfirmSubmitButton formAction={cancel} message="Tem certeza que deseja cancelar a assinatura deste membro?" className="rounded-xl border border-red-500/50 px-5 py-3 text-sm font-semibold text-red-300 transition hover:bg-red-500/10">Cancelar assinatura</ConfirmSubmitButton>
-          <ConfirmSubmitButton formAction={reactivate} message="Tem certeza que deseja reativar a assinatura deste membro?" className="rounded-xl border border-emerald-500/50 px-5 py-3 text-sm font-semibold text-emerald-300 transition hover:bg-emerald-500/10">Reativar assinatura</ConfirmSubmitButton>
+          <ConfirmSubmitButton formAction={cancel} message="Tem certeza que deseja cancelar a assinatura deste membro?" title="Cancelar assinatura?" confirmLabel="Sim, cancelar" className="rounded-xl border border-red-500/50 px-5 py-3 text-sm font-semibold text-red-300 transition hover:bg-red-500/10">Cancelar assinatura</ConfirmSubmitButton>
+          <ConfirmSubmitButton formAction={reactivate} message="Tem certeza que deseja reativar a assinatura deste membro?" title="Reativar assinatura?" confirmLabel="Sim, reativar" className="rounded-xl border border-emerald-500/50 px-5 py-3 text-sm font-semibold text-emerald-300 transition hover:bg-emerald-500/10">Reativar assinatura</ConfirmSubmitButton>
         </div>
       </form>
 
@@ -168,7 +197,7 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
         <input type="hidden" name="user_id" value={profile.id ?? id} />
         <h3 className="text-lg font-semibold text-red-200">Zona de risco</h3>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-red-100/80">Excluir este membro remove o usuário do Auth, perfil, assinatura, playlists e registros vinculados. Use apenas para cadastros de teste, duplicados ou casos de suporte já conferidos.</p>
-        <ConfirmSubmitButton message="Atenção: esta ação é definitiva e removerá usuário, assinatura, playlists e dados vinculados. Deseja continuar?" className="mt-5 rounded-xl border border-red-400/70 px-5 py-3 text-sm font-semibold text-red-200 transition hover:bg-red-500/10">Excluir definitivamente</ConfirmSubmitButton>
+        <ConfirmSubmitButton title="Excluir membro definitivamente?" confirmLabel="Sim, excluir membro" message="Atenção: esta ação é definitiva e removerá usuário, assinatura, playlists e dados vinculados. Deseja continuar?" className="mt-5 rounded-xl border border-red-400/70 px-5 py-3 text-sm font-semibold text-red-200 transition hover:bg-red-500/10">Excluir definitivamente</ConfirmSubmitButton>
       </form>
     </section>
   );
