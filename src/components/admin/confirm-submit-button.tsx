@@ -93,7 +93,6 @@ export function ConfirmSubmitButton({
                 <button
                   type="submit"
                   formAction={formAction}
-                  onClick={() => setOpen(false)}
                   className="inline-flex h-11 items-center justify-center rounded-2xl border border-red-400/60 bg-red-500/20 px-5 text-sm font-semibold text-red-100 transition hover:bg-red-500/30"
                 >
                   {confirmLabel}
