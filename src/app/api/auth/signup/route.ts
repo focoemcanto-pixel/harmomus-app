@@ -35,10 +35,14 @@ function getMinistryInviteToken(path: string) {
   return match?.[1] ? decodeURIComponent(match[1]) : "";
 }
 
-function getPostSignupNext(plan: PlanSlug, redirectTo: string) {
+function getPostSignupNext(plan: PlanSlug, redirectTo: string, email?: string) {
   const inviteToken = getMinistryInviteToken(redirectTo);
   if (inviteToken) return `/api/ministerio/accept?token=${encodeURIComponent(inviteToken)}`;
-  return plan === "free" ? "/cadastro/sucesso?plan=free" : "/checkout/sucesso";
+  if (plan === "free") {
+    const query = email ? `&email=${encodeURIComponent(email)}` : "";
+    return `/cadastro/sucesso?plan=free${query}`;
+  }
+  return "/checkout/sucesso";
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
@@ -300,7 +304,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const next = getPostSignupNext(plan, redirectTo);
+  const next = getPostSignupNext(plan, redirectTo, email);
   const { data, error: createError } = await supabase.auth.signUp({
     email,
     password: pass,
