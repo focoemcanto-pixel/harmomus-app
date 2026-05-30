@@ -7,6 +7,7 @@ import { getCheckoutSession, getStripeSubscription } from "@/lib/stripe/client";
 import { mapStripeStatus } from "@/lib/stripe/status";
 
 const WHATSAPP_PREMIUM_URL = "https://chat.whatsapp.com/FNU6Xl5t6qD0VfGA2EQ0IW?mode=gi_t";
+const ACCESS_READY_STATUSES = new Set(["active", "trialing"]);
 
 type CheckoutSuccessProps = {
   searchParams?: Promise<{ session_id?: string }> | { session_id?: string };
@@ -14,7 +15,9 @@ type CheckoutSuccessProps = {
 
 type SyncCheckoutResult = {
   synced: boolean;
+  accessReady: boolean;
   planSlug: string | null;
+  subscriptionStatus: string | null;
   error: string | null;
   onboardingStatus: string | null;
   customerEmail: string | null;
@@ -57,6 +60,17 @@ function getCustomerEmailFromSession(session: any) {
   return normalizeEmail(session?.metadata?.email ?? session?.customer_details?.email ?? session?.customer_email);
 }
 
+function isAccessReady(status: string | null) {
+  return ACCESS_READY_STATUSES.has(String(status ?? "").toLowerCase());
+}
+
+function planDisplayName(planSlug: string | null) {
+  if (planSlug === "plus") return "Plus";
+  if (planSlug === "premium") return "Premium";
+  if (planSlug?.startsWith("ministry_")) return "Ministerial";
+  return "Plus/Premium";
+}
+
 async function resendSignupConfirmation(supabase: any, email: string | null) {
   if (!email) return false;
 
@@ -77,10 +91,7 @@ async function resendSignupConfirmation(supabase: any, email: string | null) {
   return true;
 }
 
-
 async function findProfileForCheckout(admin: any, userId: string | null, email: string | null) {
-  console.log("[checkout.success.findProfileForCheckout] buscando profile", { metadata_user_id: userId, metadata_email: email });
-
   if (userId) {
     const response = await admin
       .from("profiles")
@@ -88,17 +99,8 @@ async function findProfileForCheckout(admin: any, userId: string | null, email: 
       .eq("id", userId)
       .maybeSingle();
 
-    console.log("[checkout.success.findProfileForCheckout] resultado por user_id", {
-      profile_encontrado: Boolean(response.data?.id),
-      profile: response.data ?? null,
-      supabase_error: response.error ?? null,
-      supabase_response: response,
-    });
-
-    if (response.error) console.error("[checkout.success.findProfileForCheckout] erro Supabase por user_id", response);
+    if (response.error) console.error("[checkout.success.findProfileForCheckout] erro Supabase por user_id", response.error);
     if (response.data?.id) return response.data;
-  } else {
-    console.error("[checkout.success.findProfileForCheckout] USER_ID_MISSING", { metadata_email: email });
   }
 
   if (email) {
@@ -108,14 +110,7 @@ async function findProfileForCheckout(admin: any, userId: string | null, email: 
       .ilike("email", email)
       .maybeSingle();
 
-    console.log("[checkout.success.findProfileForCheckout] resultado por email", {
-      profile_encontrado: Boolean(response.data?.id),
-      profile: response.data ?? null,
-      supabase_error: response.error ?? null,
-      supabase_response: response,
-    });
-
-    if (response.error) console.error("[checkout.success.findProfileForCheckout] erro Supabase por email", response);
+    if (response.error) console.error("[checkout.success.findProfileForCheckout] erro Supabase por email", response.error);
     if (response.data?.id) return response.data;
   }
 
@@ -123,74 +118,56 @@ async function findProfileForCheckout(admin: any, userId: string | null, email: 
   return null;
 }
 
+function syncResult(input: Partial<SyncCheckoutResult>): SyncCheckoutResult {
+  const status = input.subscriptionStatus ?? null;
+  return {
+    synced: input.synced ?? false,
+    accessReady: input.accessReady ?? isAccessReady(status),
+    planSlug: input.planSlug ?? null,
+    subscriptionStatus: status,
+    error: input.error ?? null,
+    onboardingStatus: input.onboardingStatus ?? "pending_email_confirmation",
+    customerEmail: input.customerEmail ?? null,
+    confirmationEmailResent: input.confirmationEmailResent ?? false,
+  };
+}
+
 async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResult> {
   if (!sessionId) {
-    return { synced: false, planSlug: null, error: "Sessão não informada.", onboardingStatus: "pending_email_confirmation", customerEmail: null, confirmationEmailResent: false };
+    return syncResult({ error: "Sessão não informada." });
   }
 
   try {
-    console.log("[checkout.success.syncCheckoutSession] início", { session_id: sessionId });
-
     const session = await getCheckoutSession(sessionId);
     const subscriptionId = getSubscriptionIdFromSession(session);
     const embeddedSubscription = session.subscription && typeof session.subscription === "object" ? session.subscription : null;
-
-    console.log("[checkout.success.syncCheckoutSession] sessão Stripe recebida", {
-      session_id: sessionId,
-      session_mode: session?.mode ?? null,
-      session_customer: getCustomerIdFromSession(session),
-      session_subscription: subscriptionId,
-      session_customer_email: session?.customer_email ?? session?.customer_details?.email ?? null,
-      session_metadata: session?.metadata ?? null,
-      metadata_user_id: session?.metadata?.user_id ?? null,
-      metadata_email: session?.metadata?.email ?? null,
-    });
-
-    if (!session?.metadata?.user_id) console.error("[checkout.success.syncCheckoutSession] USER_ID_MISSING", { session_id: sessionId, metadata: session?.metadata ?? null });
-    if (!subscriptionId && !embeddedSubscription?.id) console.error("[checkout.success.syncCheckoutSession] SESSION_SUBSCRIPTION_NULL", { session_id: sessionId, session_subscription: session?.subscription ?? null });
-
     const subscription = subscriptionId ? await getStripeSubscription(subscriptionId) : embeddedSubscription;
     const priceId = normalize(subscription?.items?.data?.[0]?.price?.id);
     const planSlug = normalize(subscription?.metadata?.plan_slug)?.toLowerCase() ?? normalize(session?.metadata?.plan_slug)?.toLowerCase() ?? getPlanSlugFromPrice(priceId);
     const metadataUserId = normalize(session?.metadata?.user_id) ?? normalize(subscription?.metadata?.user_id);
     const customerId = getStripeId(subscription?.customer) ?? getCustomerIdFromSession(session);
     const customerEmail = normalizeEmail(session?.metadata?.email) ?? getCustomerEmailFromSession(session);
-
-    console.log("[checkout.success.syncCheckoutSession] dados extraídos para sincronização", {
-      session_id: sessionId,
-      subscription_encontrada_no_stripe: Boolean(subscription?.id),
-      stripe_status: subscription?.status ?? null,
-      customer_id: customerId,
-      subscription_id: subscription?.id ?? subscriptionId ?? null,
-      price_id: priceId,
-      current_period_end: subscription?.current_period_end ? new Date(subscription.current_period_end * 1000).toISOString() : null,
-      metadata_user_id: metadataUserId,
-      metadata_email: customerEmail,
-      subscription_metadata: subscription?.metadata ?? null,
-    });
-
     const supabase = await createClient();
     let confirmationEmailResent = false;
 
     if (!planSlug) {
-      return { synced: false, planSlug: null, error: "Plano não identificado pelo Stripe.", onboardingStatus: "pending_email_confirmation", customerEmail, confirmationEmailResent };
+      return syncResult({ planSlug: null, error: "Plano não identificado pelo Stripe.", customerEmail, confirmationEmailResent });
     }
 
     const admin = createSupabaseAdminClient() as any;
     const planResponse = await admin.from("plans").select("id, slug").eq("slug", planSlug).maybeSingle();
     const { data: plan } = planResponse;
 
-    console.log("[checkout.success.syncCheckoutSession] plano resolvido", { plan_slug: planSlug, plan: plan ?? null, supabase_error: planResponse.error ?? null, supabase_response: planResponse });
-    if (planResponse.error) console.error("[checkout.success.syncCheckoutSession] erro Supabase ao buscar plano", planResponse);
+    if (planResponse.error) console.error("[checkout.success.syncCheckoutSession] erro Supabase ao buscar plano", planResponse.error);
 
     if (!plan?.id) {
-      return { synced: false, planSlug, error: `Plano ${planSlug} não encontrado no banco.`, onboardingStatus: "pending_email_confirmation", customerEmail, confirmationEmailResent };
+      return syncResult({ planSlug, error: `Plano ${planSlug} não encontrado no banco.`, customerEmail, confirmationEmailResent });
     }
 
     if (!subscription?.id) {
       console.error("[checkout.success.syncCheckoutSession] SESSION_SUBSCRIPTION_NULL", { session_id: sessionId, session_subscription: session?.subscription ?? null });
       if (customerEmail) confirmationEmailResent = await resendSignupConfirmation(supabase, customerEmail);
-      return { synced: false, planSlug, error: null, onboardingStatus: "pending_email_confirmation", customerEmail, confirmationEmailResent };
+      return syncResult({ planSlug, error: null, customerEmail, confirmationEmailResent });
     }
 
     const profile = await findProfileForCheckout(admin, metadataUserId, customerEmail);
@@ -198,14 +175,7 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
 
     if (!profile?.id) {
       if (customerEmail) confirmationEmailResent = await resendSignupConfirmation(supabase, customerEmail);
-      return {
-        synced: false,
-        planSlug,
-        error: null,
-        onboardingStatus: "pending_email_confirmation",
-        customerEmail,
-        confirmationEmailResent,
-      };
+      return syncResult({ planSlug, error: null, onboardingStatus: "pending_email_confirmation", customerEmail, confirmationEmailResent });
     }
 
     const status = mapStripeStatus(subscription.status ?? "incomplete");
@@ -231,8 +201,6 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
       updated_at: now,
     };
 
-    console.log("[checkout.success.syncCheckoutSession] payload salvo no banco", payload);
-
     const existingResponse = await admin
       .from("subscriptions")
       .select("id")
@@ -240,19 +208,16 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
       .maybeSingle();
     const { data: existing } = existingResponse;
 
-    console.log("[checkout.success.syncCheckoutSession] assinatura local existente", { existing: existing ?? null, supabase_error: existingResponse.error ?? null, supabase_response: existingResponse });
-    if (existingResponse.error) console.error("[checkout.success.syncCheckoutSession] erro Supabase ao buscar assinatura local", existingResponse);
+    if (existingResponse.error) console.error("[checkout.success.syncCheckoutSession] erro Supabase ao buscar assinatura local", existingResponse.error);
 
     const result = existing?.id
       ? await admin.from("subscriptions").update(payload).eq("id", existing.id).select()
       : await admin.from("subscriptions").insert(payload).select();
 
-    console.log("[checkout.success.syncCheckoutSession] resposta Supabase ao salvar assinatura", result);
-
     if (result.error) {
-      console.error("[checkout.success] Falha ao sincronizar assinatura", result);
+      console.error("[checkout.success] Falha ao sincronizar assinatura", result.error);
       if (customerEmail) confirmationEmailResent = await resendSignupConfirmation(supabase, customerEmail);
-      return { synced: false, planSlug, error: null, onboardingStatus: "pending_email_confirmation", customerEmail, confirmationEmailResent };
+      return syncResult({ planSlug, subscriptionStatus: status, error: null, onboardingStatus: "pending_email_confirmation", customerEmail, confirmationEmailResent });
     }
 
     const profileUpdateResponse = await admin
@@ -261,94 +226,92 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
       .eq("id", profile.id)
       .select("id,email,onboarding_status,onboarding_step");
 
-    console.log("[checkout.success.syncCheckoutSession] resposta Supabase ao atualizar profile", profileUpdateResponse);
-    if (profileUpdateResponse.error) console.error("[checkout.success.syncCheckoutSession] erro Supabase ao atualizar profile", profileUpdateResponse);
+    if (profileUpdateResponse.error) console.error("[checkout.success.syncCheckoutSession] erro Supabase ao atualizar profile", profileUpdateResponse.error);
 
     if (onboardingStatus === "pending_email_confirmation" && customerEmail) {
       confirmationEmailResent = await resendSignupConfirmation(supabase, customerEmail);
     }
 
-    return {
-      synced: true,
-      planSlug,
-      error: null,
-      onboardingStatus,
-      customerEmail,
-      confirmationEmailResent,
-    };
+    return syncResult({ synced: true, planSlug, subscriptionStatus: status, error: null, onboardingStatus, customerEmail, confirmationEmailResent });
   } catch (error) {
     console.error("[checkout.success] Erro inesperado", error);
-    return {
-      synced: false,
-      planSlug: null,
-      error: error instanceof Error ? error.message : "Erro desconhecido.",
-      onboardingStatus: "pending_email_confirmation",
-      customerEmail: null,
-      confirmationEmailResent: false,
-    };
+    return syncResult({ error: error instanceof Error ? error.message : "Erro desconhecido." });
   }
 }
-
 
 export default async function CheckoutSucesso({ searchParams }: CheckoutSuccessProps) {
   const resolvedSearchParams = await searchParams;
   const sessionId = resolvedSearchParams?.session_id ?? null;
   const sync = await syncCheckoutSession(resolvedSearchParams?.session_id);
-  const planName = sync.planSlug === "plus" ? "Plus" : sync.planSlug === "premium" ? "Premium" : "Plus/Premium";
+  const planName = planDisplayName(sync.planSlug);
   const firstSignupFlow = sync.onboardingStatus === "pending_email_confirmation";
+  const accessReady = sync.accessReady;
+  const eyebrow = accessReady ? (firstSignupFlow ? "Pagamento aprovado" : `Onboarding ${planName}`) : "Pagamento em processamento";
+  const title = accessReady
+    ? firstSignupFlow
+      ? "Parabéns! Seu Harmomus está quase pronto 🎉"
+      : `Bem-vindo(a) ao Harmomus ${planName} 🎉`
+    : "Sua assinatura está sendo confirmada";
 
   return (
     <main className="min-h-screen bg-zinc-950 p-6 text-white">
       <div className="mx-auto mt-10 max-w-3xl rounded-3xl border border-emerald-500/30 bg-zinc-900/90 p-8 shadow-2xl md:p-10">
-        <p className="text-xs uppercase tracking-[0.2em] text-emerald-300">
-          {firstSignupFlow ? "Pagamento aprovado" : `Onboarding ${planName}`}
-        </p>
+        <p className="text-xs uppercase tracking-[0.2em] text-emerald-300">{eyebrow}</p>
 
-        <h1 className="mt-3 text-3xl font-semibold text-white md:text-4xl">
-          {firstSignupFlow ? "Parabéns! Seu Harmomus está quase pronto 🎉" : `Bem-vindo(a) ao Harmomus ${planName} 🎉`}
-        </h1>
+        <h1 className="mt-3 text-3xl font-semibold text-white md:text-4xl">{title}</h1>
 
         <p className="mt-4 text-zinc-300">
-          {firstSignupFlow
-            ? "Seu pagamento foi confirmado. Agora falta apenas confirmar seu e-mail para liberar o primeiro login e acessar sua conta premium."
-            : sync.synced
-              ? "Sua assinatura foi sincronizada e os recursos do seu plano já estão liberados na sua conta."
-              : "Seu pagamento foi confirmado no Stripe, mas a sincronização automática ainda precisa ser concluída."}
+          {accessReady
+            ? firstSignupFlow
+              ? "Seu pagamento foi confirmado. Agora falta apenas confirmar seu e-mail para liberar o primeiro login e acessar sua conta."
+              : "Sua assinatura foi sincronizada e os recursos do seu plano já estão liberados na sua conta."
+            : "Recebemos seu retorno do checkout, mas o Stripe ainda não confirmou a assinatura como ativa. Assim que o pagamento ou período de teste for confirmado, o acesso será liberado automaticamente."}
         </p>
 
-        {firstSignupFlow ? (
+        {firstSignupFlow && accessReady ? (
           <div className="mt-6">
             <EmailConfirmationState variant="premium" email={sync.customerEmail ?? ""} allowEmailEdit allowResend sessionId={sessionId} />
           </div>
         ) : null}
 
-        {!sync.synced && !firstSignupFlow && sync.error ? (
+        {!sync.synced && sync.error ? (
           <div className="mt-6 rounded-2xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100">
             Sincronização pendente: {sync.error}. Volte para Assinatura após alguns instantes.
           </div>
         ) : null}
 
+        {!accessReady ? (
+          <div className="mt-6 rounded-2xl border border-cyan-400/30 bg-cyan-400/10 p-4 text-sm text-cyan-100">
+            Status atual: {sync.subscriptionStatus ?? "pendente"}. O sistema não libera Plus/Premium enquanto a assinatura não estiver ativa ou em teste ativo.
+          </div>
+        ) : null}
+
         <div className="mt-8 rounded-2xl border border-zinc-700 bg-zinc-950/70 p-5">
           <h2 className="text-lg font-semibold text-emerald-200">
-            {firstSignupFlow ? "Depois de confirmar o e-mail" : "Benefícios liberados agora"}
+            {accessReady ? (firstSignupFlow ? "Depois de confirmar o e-mail" : "Benefícios liberados agora") : "Próximos passos"}
           </h2>
           <ul className="mt-3 space-y-2 text-sm text-zinc-300">
             <li>• Seu plano ficará vinculado à conta criada no cadastro.</li>
-            <li>• Após o primeiro login, você poderá acessar os kits liberados para seu plano.</li>
+            <li>• O acesso pago só é liberado quando o Stripe confirmar status ativo ou teste ativo.</li>
             <li>• Seus dados de assinatura serão gerenciados com segurança pelo Stripe.</li>
           </ul>
         </div>
 
         <div className="mt-8 flex flex-wrap gap-3">
-          {firstSignupFlow ? (
+          {firstSignupFlow && accessReady ? (
             <Link href="/login" className="rounded-xl bg-emerald-400 px-5 py-3 text-sm font-semibold text-zinc-950">
               Já confirmei, fazer login
             </Link>
-          ) : (
+          ) : accessReady ? (
             <>
               <a href={WHATSAPP_PREMIUM_URL} target="_blank" rel="noreferrer" className="rounded-xl bg-emerald-400 px-5 py-3 text-sm font-semibold text-zinc-950">Entrar no Grupo Premium</a>
               <Link href="/biblioteca" className="rounded-xl border border-zinc-600 px-5 py-3 text-sm font-semibold text-zinc-100">Explorar catálogo</Link>
               <Link href="/assinatura" className="rounded-xl border border-cyan-400/40 bg-cyan-500/10 px-5 py-3 text-sm font-semibold text-cyan-100">Gerenciar assinatura</Link>
+            </>
+          ) : (
+            <>
+              <Link href="/assinatura" className="rounded-xl border border-cyan-400/40 bg-cyan-500/10 px-5 py-3 text-sm font-semibold text-cyan-100">Ver status da assinatura</Link>
+              <Link href="/biblioteca" className="rounded-xl border border-zinc-600 px-5 py-3 text-sm font-semibold text-zinc-100">Voltar ao catálogo</Link>
             </>
           )}
         </div>
