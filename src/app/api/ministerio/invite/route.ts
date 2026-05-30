@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentUserAccessContext, isMinistryManager } from "@/lib/auth/current-user";
+import { getMinistrySeatLimit } from "@/lib/data/ministry";
 import { buildAbsoluteUrl, sendMinistryInviteEmail } from "@/lib/email/ministry-invite-email";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -31,6 +32,15 @@ function emailStatusMessage(action: "created" | "resent", result: Awaited<Return
   return `Convite gerado, mas não conseguimos enviar o e-mail agora. Use os botões Copiar link ou WhatsApp e tente reenviar mais tarde.`;
 }
 
+function resolveSeatLimit(ministry: any, context: Awaited<ReturnType<typeof getCurrentUserAccessContext>>) {
+  const directLimit = Number(ministry?.seat_limit ?? 0);
+  if (directLimit > 0) return directLimit;
+  const planType = String(ministry?.plan_type ?? context.ministry?.planType ?? "").trim().toLowerCase();
+  const planLimit = getMinistrySeatLimit(planType);
+  if (planLimit > 0) return planLimit;
+  return Number(context.ministry?.seatLimit ?? 0);
+}
+
 export async function POST(request: Request) {
   const context = await getCurrentUserAccessContext();
 
@@ -45,7 +55,7 @@ export async function POST(request: Request) {
 
   const { data: ministry } = await admin
     .from("ministries")
-    .select("id,name,seat_limit,status")
+    .select("id,name,seat_limit,plan_type,status")
     .eq("id", context.ministry.ministryId)
     .maybeSingle();
 
@@ -110,8 +120,13 @@ export async function POST(request: Request) {
     return redirectToMinisterio(request, "Esse integrante já possui acesso ou convite pendente.");
   }
 
+  const seatLimit = resolveSeatLimit(ministry, context);
+  if (seatLimit <= 0) {
+    return redirectToMinisterio(request, "Não foi possível identificar o limite de vagas deste plano.");
+  }
+
   const usedSeats = (allMembers ?? []).filter((member: any) => ["active", "pending", "invited"].includes(String(member.status))).length;
-  if (usedSeats >= Number(ministry.seat_limit ?? 0)) {
+  if (usedSeats >= seatLimit) {
     return redirectToMinisterio(request, "Você atingiu o limite de vagas do seu plano.");
   }
 
