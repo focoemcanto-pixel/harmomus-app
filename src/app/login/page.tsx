@@ -19,11 +19,16 @@ function HarmomusLogo({ logoUrl, appName }: { logoUrl?: string; appName: string 
   );
 }
 
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string; redirect?: string }> }) {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string; redirect?: string; confirmed?: string; message?: string }> }) {
   const params = await searchParams;
   const settings = await getAdminSettings();
   const redirectTo = normalizeRedirect(String(params.redirect ?? ""));
   const error = params.error ? decodeURIComponent(String(params.error)) : "";
+  const successMessage = params.confirmed === "1"
+    ? "E-mail validado com sucesso. Faça seu primeiro login para acessar o Harmomus."
+    : params.message
+      ? decodeURIComponent(String(params.message))
+      : "";
 
   const appName = settings.branding.appName || "Harmomus";
   const logoUrl = settings.branding.logoUrl || "";
@@ -51,7 +56,12 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
               <div className="mx-auto max-w-md">
                 <p className="text-center text-sm text-zinc-300">Bem-vindo de volta</p>
                 <h1 className="mt-2 text-center text-4xl font-semibold text-white">Entrar no {appName}</h1>
-<LoginFlow redirectTo={redirectTo} error={error} />
+                {successMessage ? (
+                  <div className="mt-5 rounded-2xl border border-emerald-300/35 bg-emerald-500/10 p-4 text-center text-sm font-medium leading-6 text-emerald-100">
+                    {successMessage}
+                  </div>
+                ) : null}
+                <LoginFlow redirectTo={redirectTo} error={error} />
                 <div className="mt-7 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-center text-sm text-zinc-300">
                   Ainda não tem conta? <Link href={`/cadastro?redirect=${encodeURIComponent(redirectTo)}`} className="font-semibold text-emerald-300 hover:text-emerald-200">Crie sua conta gratuitamente</Link>
                 </div>
