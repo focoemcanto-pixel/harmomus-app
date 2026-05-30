@@ -36,8 +36,8 @@ const navGroups: AdminNavGroup[] = [
     items: [{ label: "Dashboard", href: "/admin", icon: LayoutDashboard }],
   },
   {
-    label: "Conteúdo",
-    description: "Biblioteca e home",
+    label: "Biblioteca",
+    description: "Kits, categorias e vitrine",
     items: [
       { label: "Kits Vocais", href: "/admin/kits", icon: Waves },
       { label: "Categorias", href: "/admin/categorias", icon: Tags },
@@ -65,18 +65,10 @@ const navGroups: AdminNavGroup[] = [
   },
   {
     label: "Marketing",
-    description: "Comunicação e métricas",
+    description: "Métricas e comunicação",
     items: [
       { label: "Analytics", href: "/admin/analytics", icon: BarChart3 },
-      { label: "Comunicação", href: "/admin/comunicacao", icon: Send },
-      { label: "Campanhas", href: "/admin/comunicacao/campanhas", icon: Send },
-      { label: "Audiência", href: "/admin/comunicacao/audiencia", icon: Send },
-      { label: "Segmentos", href: "/admin/comunicacao/segmentos", icon: Send },
-      { label: "Templates", href: "/admin/comunicacao/templates", icon: Send },
-      { label: "Automação", href: "/admin/comunicacao/automacao", icon: Send },
-      { label: "WhatsApp", href: "/admin/comunicacao/whatsapp", icon: Send },
-      { label: "E-mails", href: "/admin/comunicacao/e-mails", icon: Send },
-      { label: "Logs", href: "/admin/comunicacao/logs", icon: Send },
+      { label: "Central de Comunicação", href: "/admin/comunicacao", icon: Send },
     ],
   },
   {
