@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 
+import { FlashToastProvider } from "@/components/feedback/flash-toast-provider";
 import { getAdminSettings } from "@/lib/data/admin-settings";
 
 import "./globals.css";
@@ -63,7 +64,10 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="pt-BR">
-      <body>{children}</body>
+      <body>
+        {children}
+        <FlashToastProvider />
+      </body>
     </html>
   );
 }
