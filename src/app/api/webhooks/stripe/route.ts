@@ -146,11 +146,26 @@ async function getProfileForWebhook(supabase: any, userId: string) {
   return data ?? null;
 }
 
-async function saveSubscriptionByUserId(supabase: any, payload: Record<string, unknown>) {
+async function findExistingSubscriptionForSave(supabase: any, payload: Record<string, unknown>) {
+  const stripeSubscriptionId = normalize(payload.stripe_subscription_id ?? payload.gateway_subscription_id);
+
+  if (stripeSubscriptionId) {
+    const { data: byStripeSubscription, error } = await supabase
+      .from("subscriptions")
+      .select("id")
+      .or(`stripe_subscription_id.eq.${stripeSubscriptionId},gateway_subscription_id.eq.${stripeSubscriptionId}`)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) return { data: null, error };
+    if (byStripeSubscription?.id) return { data: byStripeSubscription, error: null };
+  }
+
   const userId = String(payload.user_id ?? "").trim();
   if (!userId) return { data: null, error: new Error("user_id ausente no payload de assinatura") };
 
-  const { data: existing, error: existingError } = await supabase
+  const { data: byUser, error } = await supabase
     .from("subscriptions")
     .select("id")
     .eq("user_id", userId)
@@ -158,10 +173,16 @@ async function saveSubscriptionByUserId(supabase: any, payload: Record<string, u
     .limit(1)
     .maybeSingle();
 
-  if (existingError) return { data: null, error: existingError };
+  return { data: byUser ?? null, error };
+}
 
-  const response = existing?.id
-    ? await supabase.from("subscriptions").update(payload).eq("id", existing.id).select("id")
+async function saveSubscriptionIdempotently(supabase: any, payload: Record<string, unknown>) {
+  const existingResponse = await findExistingSubscriptionForSave(supabase, payload);
+
+  if (existingResponse.error) return { data: null, error: existingResponse.error };
+
+  const response = existingResponse.data?.id
+    ? await supabase.from("subscriptions").update(payload).eq("id", existingResponse.data.id).select("id")
     : await supabase.from("subscriptions").insert({ ...payload, created_at: new Date().toISOString() }).select("id");
 
   if (response.error) console.error("[stripe.webhook] Falha ao salvar assinatura", response.error);
@@ -173,7 +194,7 @@ async function downgradeToFree(supabase: any, userId: string, patch: Record<stri
   if (error) console.error("[stripe.webhook] Falha ao buscar plano free", error);
   if (!freePlan?.id) return;
 
-  await saveSubscriptionByUserId(supabase, {
+  await saveSubscriptionIdempotently(supabase, {
     user_id: userId,
     plan_id: freePlan.id,
     ...patch,
@@ -296,7 +317,7 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
     return null;
   }
 
-  const saveResponse = await saveSubscriptionByUserId(supabase, {
+  const saveResponse = await saveSubscriptionIdempotently(supabase, {
     user_id: userId,
     plan_id: plan.id,
     status,
