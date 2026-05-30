@@ -327,17 +327,6 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
   }
 
   function handleSelectVoice(voice: VoiceType) {
-    if (!accessContext.tone.allowed && voice !== "todos") {
-      setUpgradeConfig({
-        title: "Vozes separadas são um recurso Premium.",
-        message: "Assine o Premium para estudar soprano, contralto e tenor separadamente.",
-        ctaLabel: "Fazer upgrade para Premium",
-        ctaHref: "/assinar?plan=premium",
-      });
-      setUpgradeOpen(true);
-      return;
-    }
-
     stopPlayback();
     setSelectedVoice(voice);
   }
