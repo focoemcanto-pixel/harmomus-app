@@ -1,8 +1,48 @@
-import { getSignedSemitoneDistance, normalizeTone } from "@/lib/music/tones";
+import { CHROMATIC_TONES_SHARP, getSignedSemitoneDistance, normalizeTone, type CanonicalTone } from "@/lib/music/tones";
 
 export type VocalRangeType = "tenor" | "contralto" | "soprano" | "baritono";
 export type TessituraStatus = "comfortable" | "extended" | "extreme" | "unsafe";
 export type VocalRiskLevel = "safe" | "attention" | "risky";
+
+export type HarmomusIaStatus = "ideal" | "comfortable-limit" | "reorganize";
+export type GroupTessituraVoice = Exclude<VocalRangeType, "baritono">;
+
+export interface TessituraSourceFile {
+  tone: string;
+  voice: GroupTessituraVoice;
+  minMidi: number;
+  maxMidi: number;
+  confidence?: number | null;
+}
+
+export interface VoiceToneCompatibility {
+  voice: GroupTessituraVoice;
+  label: string;
+  status: HarmomusIaStatus;
+  statusLabel: "Ideal" | "Limite confortável" | "Reorganização recomendada";
+  semaphore: "🟢" | "🟡" | "🔴";
+  compatibility: number;
+  targetMidiRange: { min: number; max: number } | null;
+  sourceTone: string | null;
+  semitoneShift: number | null;
+  recommendation: string;
+  reason: string;
+}
+
+export interface GroupToneCompatibility {
+  tone: CanonicalTone;
+  status: HarmomusIaStatus;
+  statusLabel: "Ideal" | "Limite confortável" | "Reorganização recomendada";
+  compatibility: number;
+  recommendation: string;
+  reason: string;
+  voices: VoiceToneCompatibility[];
+}
+
+export interface BestToneForGroupRecommendation extends GroupToneCompatibility {
+  evaluatedTones: GroupToneCompatibility[];
+  justification: string;
+}
 
 export interface VocalZone {
   minMidi: number;
@@ -334,3 +374,204 @@ export function classifyOfficialVoiceRange(
   return { level: "risky", label: "Arriscado", overflowSemitones, outsideAbsoluteRange, reason };
 }
 
+
+const GROUP_VOICES: GroupTessituraVoice[] = ["soprano", "contralto", "tenor"];
+const HARMOMUS_STATUS_WEIGHT: Record<HarmomusIaStatus, number> = {
+  ideal: 3,
+  "comfortable-limit": 2,
+  reorganize: 1,
+};
+
+function clampCompatibility(value: number) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function getRangeOverflow(minMidi: number, maxMidi: number, zone: VocalZone) {
+  return Math.max(0, zone.minMidi - minMidi) + Math.max(0, maxMidi - zone.maxMidi);
+}
+
+function statusMeta(status: HarmomusIaStatus): Pick<VoiceToneCompatibility, "statusLabel" | "semaphore"> {
+  if (status === "ideal") return { statusLabel: "Ideal", semaphore: "🟢" };
+  if (status === "comfortable-limit") return { statusLabel: "Limite confortável", semaphore: "🟡" };
+  return { statusLabel: "Reorganização recomendada", semaphore: "🔴" };
+}
+
+function classifyGroupVoice(minMidi: number, maxMidi: number, voice: GroupTessituraVoice) {
+  const officialRange = OFFICIAL_VOCAL_RANGES[voice];
+  const comfortableOverflow = getRangeOverflow(minMidi, maxMidi, officialRange.comfortable);
+  const absoluteOverflow = getRangeOverflow(minMidi, maxMidi, officialRange.absolute);
+  const nearComfortLimit =
+    minMidi < officialRange.comfortable.minMidi + officialRange.warningMarginSemitones
+    || maxMidi > officialRange.comfortable.maxMidi - officialRange.warningMarginSemitones;
+
+  if (absoluteOverflow > 0) {
+    return {
+      status: "reorganize" as const,
+      compatibility: clampCompatibility(35 - absoluteOverflow * 8),
+      reason: `A linha ultrapassa a extensão absoluta de ${officialRange.label} em ${absoluteOverflow} semitom(ns).`,
+    };
+  }
+
+  if (comfortableOverflow > 0) {
+    return {
+      status: "comfortable-limit" as const,
+      compatibility: clampCompatibility(78 - comfortableOverflow * 5),
+      reason: `A linha fica dentro da extensão possível de ${officialRange.label}, mas sai da zona confortável em ${comfortableOverflow} semitom(ns).`,
+    };
+  }
+
+  if (nearComfortLimit) {
+    return {
+      status: "comfortable-limit" as const,
+      compatibility: 88,
+      reason: `A linha cabe na zona confortável de ${officialRange.label}, porém trabalha perto do limite do nipe.`,
+    };
+  }
+
+  return {
+    status: "ideal" as const,
+    compatibility: 100,
+    reason: `A linha permanece centralizada na zona confortável de ${officialRange.label}.`,
+  };
+}
+
+function pickBestSourceForVoice(files: TessituraSourceFile[], voice: GroupTessituraVoice, targetTone: CanonicalTone) {
+  let best: { file: TessituraSourceFile; semitoneShift: number; distance: number } | null = null;
+
+  for (const file of files) {
+    if (file.voice !== voice) continue;
+    const sourceTone = normalizeTone(file.tone);
+    if (!sourceTone) continue;
+    const semitoneShift = getSignedSemitoneDistance(sourceTone, targetTone);
+    if (semitoneShift === null) continue;
+    const distance = Math.abs(semitoneShift);
+    const confidencePenalty = typeof file.confidence === "number" ? Math.max(0, 1 - file.confidence) : 0.15;
+    const scoreDistance = distance + confidencePenalty;
+    if (!best || scoreDistance < best.distance) best = { file, semitoneShift, distance: scoreDistance };
+  }
+
+  return best;
+}
+
+function buildVoiceCompatibility(files: TessituraSourceFile[], voice: GroupTessituraVoice, targetTone: CanonicalTone): VoiceToneCompatibility {
+  const source = pickBestSourceForVoice(files, voice, targetTone);
+  const label = OFFICIAL_VOCAL_RANGES[voice].label;
+
+  if (!source) {
+    const meta = statusMeta("reorganize");
+    return {
+      voice,
+      label,
+      status: "reorganize",
+      ...meta,
+      compatibility: 0,
+      targetMidiRange: null,
+      sourceTone: null,
+      semitoneShift: null,
+      recommendation: `Inclua ou analise a linha de ${label} para ativar a recomendação completa.`,
+      reason: `Não há dados de tessitura salvos para ${label}.`,
+    };
+  }
+
+  const targetMin = applySemitoneShift(source.file.minMidi, source.semitoneShift);
+  const targetMax = applySemitoneShift(source.file.maxMidi, source.semitoneShift);
+  const classified = classifyGroupVoice(targetMin, targetMax, voice);
+  const meta = statusMeta(classified.status);
+  const direction = directionText(source.semitoneShift);
+  const recommendation = classified.status === "ideal"
+    ? `${label} pode estudar este tom com boa margem de conforto.`
+    : classified.status === "comfortable-limit"
+      ? `${label} pode usar este tom, com atenção às notas de borda no ensaio.`
+      : `Reorganize a linha de ${label} ou escolha outro tom para proteger o nipe.`;
+
+  return {
+    voice,
+    label,
+    status: classified.status,
+    ...meta,
+    compatibility: classified.compatibility,
+    targetMidiRange: { min: targetMin, max: targetMax },
+    sourceTone: normalizeTone(source.file.tone),
+    semitoneShift: source.semitoneShift,
+    recommendation,
+    reason: `${classified.reason} Projeção ${direction} a partir de ${normalizeTone(source.file.tone) ?? source.file.tone}.`,
+  };
+}
+
+function summarizeToneCompatibility(tone: CanonicalTone, voices: VoiceToneCompatibility[]): GroupToneCompatibility {
+  const compatibility = clampCompatibility(voices.reduce((sum, voice) => sum + voice.compatibility, 0) / Math.max(1, voices.length));
+  const worst = voices.reduce<HarmomusIaStatus>((current, voice) => (
+    HARMOMUS_STATUS_WEIGHT[voice.status] < HARMOMUS_STATUS_WEIGHT[current] ? voice.status : current
+  ), "ideal");
+  const meta = statusMeta(worst);
+  const riskyVoices = voices.filter((voice) => voice.status === "reorganize").map((voice) => voice.label);
+  const limitVoices = voices.filter((voice) => voice.status === "comfortable-limit").map((voice) => voice.label);
+
+  const recommendation = riskyVoices.length > 0
+    ? `Reorganização recomendada para ${riskyVoices.join(", ")}.`
+    : limitVoices.length > 0
+      ? `Tom utilizável, com atenção para ${limitVoices.join(", ")}.`
+      : "Tom ideal para soprano, contralto e tenor.";
+
+  const reason = riskyVoices.length > 0
+    ? `Compatibilidade média de ${compatibility}% porque um ou mais nipes saem da extensão segura.`
+    : limitVoices.length > 0
+      ? `Compatibilidade média de ${compatibility}%: todos cabem, mas há nipes próximos ao limite confortável.`
+      : `Compatibilidade média de ${compatibility}% com as linhas dentro da zona confortável dos três nipes.`;
+
+  return {
+    tone,
+    status: worst,
+    ...meta,
+    compatibility,
+    recommendation,
+    reason,
+    voices,
+  };
+}
+
+export function evaluateGroupTessituraForTone(files: TessituraSourceFile[], tone: string): GroupToneCompatibility | null {
+  if (files.length === 0) return null;
+
+  const normalizedTone = normalizeTone(tone);
+  if (!normalizedTone) return null;
+
+  const voices = GROUP_VOICES.map((voice) => buildVoiceCompatibility(files, voice, normalizedTone));
+  return summarizeToneCompatibility(normalizedTone, voices);
+}
+
+export function findBestToneForGroup(files: TessituraSourceFile[]): BestToneForGroupRecommendation | null {
+  if (files.length === 0) return null;
+
+  const evaluatedTones = CHROMATIC_TONES_SHARP
+    .map((tone) => evaluateGroupTessituraForTone(files, tone))
+    .filter((tone): tone is GroupToneCompatibility => Boolean(tone));
+
+  if (evaluatedTones.length === 0) return null;
+
+  const best = evaluatedTones.reduce((currentBest, candidate) => {
+    if (candidate.compatibility !== currentBest.compatibility) {
+      return candidate.compatibility > currentBest.compatibility ? candidate : currentBest;
+    }
+    if (HARMOMUS_STATUS_WEIGHT[candidate.status] !== HARMOMUS_STATUS_WEIGHT[currentBest.status]) {
+      return HARMOMUS_STATUS_WEIGHT[candidate.status] > HARMOMUS_STATUS_WEIGHT[currentBest.status] ? candidate : currentBest;
+    }
+    return candidate.tone < currentBest.tone ? candidate : currentBest;
+  }, evaluatedTones[0]);
+
+  const idealVoices = best.voices.filter((voice) => voice.status === "ideal").map((voice) => voice.label);
+  const limitedVoices = best.voices.filter((voice) => voice.status === "comfortable-limit").map((voice) => voice.label);
+  const reorganizeVoices = best.voices.filter((voice) => voice.status === "reorganize").map((voice) => voice.label);
+
+  const details = [
+    idealVoices.length ? `${idealVoices.join(", ")} em zona ideal` : null,
+    limitedVoices.length ? `${limitedVoices.join(", ")} em limite confortável` : null,
+    reorganizeVoices.length ? `${reorganizeVoices.join(", ")} pedindo reorganização` : null,
+  ].filter(Boolean).join("; ");
+
+  return {
+    ...best,
+    evaluatedTones,
+    justification: details ? `Escolhido por equilibrar os nipes: ${details}.` : best.reason,
+  };
+}
