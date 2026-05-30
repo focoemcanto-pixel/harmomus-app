@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, CalendarDays, ListMusic, Music2, PlayCircle } from "lucide-react";
+import { ArrowLeft, CalendarDays, CheckCircle2, Circle, ListMusic, Music2, PlayCircle } from "lucide-react";
 
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
@@ -16,6 +16,7 @@ type PageParams = {
 type RepertoireItem = {
   id: string;
   position: number;
+  kit_id?: string | null;
   kits: {
     id: string;
     slug: string;
@@ -27,11 +28,88 @@ type RepertoireItem = {
   } | null;
 };
 
+type ProgressRow = {
+  repertoire_item_id: string | null;
+  studied: boolean;
+  studied_at: string | null;
+};
+
 function formatDate(value?: string | null, fallback = "—") {
   if (!value) return fallback;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return fallback;
   return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+async function toggleStudied(formData: FormData) {
+  "use server";
+
+  const context = await getCurrentUserAccessContext();
+  if (context.isGuest) redirect("/login");
+  if (!context.ministry?.ministryId || !context.profile?.id) redirect("/");
+
+  const repertoireId = String(formData.get("repertoire_id") ?? "").trim();
+  const itemId = String(formData.get("item_id") ?? "").trim();
+  const kitId = String(formData.get("kit_id") ?? "").trim();
+  const nextStudied = String(formData.get("next_studied") ?? "") === "true";
+
+  if (!repertoireId || !itemId || !kitId) redirect("/meus-repertorios");
+
+  const admin = createSupabaseAdminClient() as any;
+
+  const { data: item, error: itemError } = await admin
+    .from("ministry_repertoire_items")
+    .select("id,kit_id,repertoire_id,ministry_repertoires(id,ministry_id,archived)")
+    .eq("id", itemId)
+    .eq("repertoire_id", repertoireId)
+    .maybeSingle();
+
+  if (itemError) throw new Error(itemError.message);
+
+  const itemMinistryId = item?.ministry_repertoires?.ministry_id;
+  const archived = Boolean(item?.ministry_repertoires?.archived);
+  if (!item?.id || archived || itemMinistryId !== context.ministry.ministryId) notFound();
+
+  const now = new Date().toISOString();
+
+  const { data: existing, error: existingError } = await admin
+    .from("ministry_repertoire_progress")
+    .select("id")
+    .eq("repertoire_id", repertoireId)
+    .eq("repertoire_item_id", itemId)
+    .eq("user_id", context.profile.id)
+    .maybeSingle();
+
+  if (existingError) throw new Error(existingError.message);
+
+  if (existing?.id) {
+    const { error } = await admin
+      .from("ministry_repertoire_progress")
+      .update({
+        studied: nextStudied,
+        studied_at: nextStudied ? now : null,
+        updated_at: now,
+      })
+      .eq("id", existing.id);
+
+    if (error) throw new Error(error.message);
+  } else {
+    const { error } = await admin.from("ministry_repertoire_progress").insert({
+      repertoire_id: repertoireId,
+      repertoire_item_id: itemId,
+      kit_id: kitId,
+      user_id: context.profile.id,
+      studied: nextStudied,
+      studied_at: nextStudied ? now : null,
+      ready: false,
+      created_at: now,
+      updated_at: now,
+    });
+
+    if (error) throw new Error(error.message);
+  }
+
+  redirect(`/meus-repertorios/${repertoireId}`);
 }
 
 export default async function MeuRepertorioDetalhePage({ params }: { params: Promise<PageParams> }) {
@@ -41,7 +119,7 @@ export default async function MeuRepertorioDetalhePage({ params }: { params: Pro
   ]);
 
   if (context.isGuest) redirect("/login");
-  if (!context.ministry?.ministryId) redirect("/");
+  if (!context.ministry?.ministryId || !context.profile?.id) redirect("/");
 
   const admin = createSupabaseAdminClient() as any;
 
@@ -58,15 +136,27 @@ export default async function MeuRepertorioDetalhePage({ params }: { params: Pro
   if (error) throw new Error(error.message);
   if (!repertoire?.id || repertoire.archived) notFound();
 
-  const { data: items, error: itemsError } = await admin
-    .from("ministry_repertoire_items")
-    .select("id,position,kits(id,slug,name,artist,cover_url,original_tone,default_tone)")
-    .eq("repertoire_id", repertoire.id)
-    .order("position", { ascending: true });
+  const [{ data: items, error: itemsError }, { data: progressRows, error: progressError }] = await Promise.all([
+    admin
+      .from("ministry_repertoire_items")
+      .select("id,position,kit_id,kits(id,slug,name,artist,cover_url,original_tone,default_tone)")
+      .eq("repertoire_id", repertoire.id)
+      .order("position", { ascending: true }),
+    admin
+      .from("ministry_repertoire_progress")
+      .select("repertoire_item_id,studied,studied_at")
+      .eq("repertoire_id", repertoire.id)
+      .eq("user_id", context.profile.id),
+  ]);
 
   if (itemsError) throw new Error(itemsError.message);
+  if (progressError) throw new Error(progressError.message);
 
   const repertoireItems = (items ?? []) as RepertoireItem[];
+  const progressMap = new Map(
+    ((progressRows ?? []) as ProgressRow[]).map((row) => [String(row.repertoire_item_id), row]),
+  );
+  const studiedCount = repertoireItems.filter((item) => progressMap.get(item.id)?.studied).length;
 
   return (
     <PublicAppShell>
@@ -89,7 +179,7 @@ export default async function MeuRepertorioDetalhePage({ params }: { params: Pro
                 <CalendarDays className="h-4 w-4 text-cyan-200" /> {repertoire.event_date ? formatDate(repertoire.event_date) : `Criado em ${formatDate(repertoire.created_at)}`}
               </span>
               <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2">
-                <Music2 className="h-4 w-4 text-cyan-200" /> {repertoireItems.length} kit{repertoireItems.length === 1 ? "" : "s"}
+                <Music2 className="h-4 w-4 text-cyan-200" /> {studiedCount}/{repertoireItems.length} estudadas
               </span>
             </div>
           </div>
@@ -98,9 +188,11 @@ export default async function MeuRepertorioDetalhePage({ params }: { params: Pro
             <div className="mt-8 grid gap-4">
               {repertoireItems.map((item) => {
                 const kit = item.kits;
+                const progress = progressMap.get(item.id);
+                const studied = Boolean(progress?.studied);
                 if (!kit) return null;
                 return (
-                  <div key={item.id} className="overflow-hidden rounded-3xl border border-white/10 bg-white/[0.045] shadow-xl transition hover:border-cyan-300/30 hover:bg-white/[0.07]">
+                  <div key={item.id} className={`overflow-hidden rounded-3xl border shadow-xl transition ${studied ? "border-emerald-300/30 bg-emerald-400/[0.08]" : "border-white/10 bg-white/[0.045] hover:border-cyan-300/30 hover:bg-white/[0.07]"}`}>
                     <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between md:p-5">
                       <div className="flex items-center gap-4">
                         <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-white/5 text-lg font-black text-zinc-300">
@@ -116,13 +208,30 @@ export default async function MeuRepertorioDetalhePage({ params }: { params: Pro
                                 Tom: {kit.default_tone || kit.original_tone}
                               </span>
                             ) : null}
+                            {studied ? (
+                              <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300/25 bg-emerald-400/10 px-3 py-1 text-emerald-100">
+                                <CheckCircle2 className="h-3.5 w-3.5" /> Estudada
+                              </span>
+                            ) : null}
                           </div>
                         </div>
                       </div>
 
-                      <Link href={`/biblioteca/${kit.slug}`} className="inline-flex w-fit items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-cyan-200">
-                        <PlayCircle className="h-4 w-4" /> Estudar kit
-                      </Link>
+                      <div className="flex flex-wrap gap-2">
+                        <form action={toggleStudied}>
+                          <input type="hidden" name="repertoire_id" value={repertoire.id} />
+                          <input type="hidden" name="item_id" value={item.id} />
+                          <input type="hidden" name="kit_id" value={item.kit_id ?? kit.id} />
+                          <input type="hidden" name="next_studied" value={studied ? "false" : "true"} />
+                          <button className={`inline-flex w-fit items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-black transition ${studied ? "border border-emerald-300/30 bg-emerald-400/10 text-emerald-100 hover:bg-emerald-400/20" : "border border-white/10 bg-white/[0.04] text-zinc-100 hover:bg-white/10"}`}>
+                            {studied ? <CheckCircle2 className="h-4 w-4" /> : <Circle className="h-4 w-4" />}
+                            {studied ? "Estudada" : "Estudei"}
+                          </button>
+                        </form>
+                        <Link href={`/biblioteca/${kit.slug}`} className="inline-flex w-fit items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-cyan-200">
+                          <PlayCircle className="h-4 w-4" /> Estudar kit
+                        </Link>
+                      </div>
                     </div>
                   </div>
                 );
