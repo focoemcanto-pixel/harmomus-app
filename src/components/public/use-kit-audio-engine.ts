@@ -68,20 +68,36 @@ function normalizePlaybackError(error: unknown) {
   if (/operation is not supported|not supported source|no supported source|media resource/i.test(message)) {
     return "Não foi possível iniciar este áudio. Tente clicar novamente.";
   }
-  if (/play\(\) request was interrupted|aborted/i.test(message)) {
-    return null;
-  }
+  if (/play\(\) request was interrupted|aborted/i.test(message)) return null;
   return message || "Não foi possível reproduzir este áudio agora.";
 }
 
+function normalizeArtworkSrc(value: unknown) {
+  const src = String(value ?? "").trim();
+  if (!src) return "";
+  if (/^https?:\/\//i.test(src)) return src;
+  if (typeof window !== "undefined" && src.startsWith("/")) return `${window.location.origin}${src}`;
+  return src;
+}
+
 function artworkFromTrack(track: KitTrack) {
-  const src = track.artworkUrl?.trim();
+  const src = normalizeArtworkSrc(track.artworkUrl);
   if (!src) return undefined;
+
+  // iOS Safari is picky with artwork metadata. Avoid forcing a MIME type because
+  // kit covers may be jpg, png, webp or transformed by Cloudflare/R2.
   return [
-    { src, sizes: "96x96", type: "image/jpeg" },
-    { src, sizes: "256x256", type: "image/jpeg" },
-    { src, sizes: "512x512", type: "image/jpeg" },
+    { src, sizes: "512x512" },
+    { src, sizes: "256x256" },
+    { src, sizes: "96x96" },
   ];
+}
+
+function setPlaybackState(state: MediaSessionPlaybackState) {
+  if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
+  try {
+    navigator.mediaSession.playbackState = state;
+  } catch {}
 }
 
 function updateMediaSessionMetadata(track: KitTrack) {
@@ -170,10 +186,8 @@ export function useKitAudioEngine() {
     requestSerialRef.current += 1;
     sessionIdRef.current = null;
     activeIdentityRef.current = "";
-
     abortRef.current?.abort("hard-invalidate");
     abortRef.current = null;
-
     cancelRaf();
 
     try { pitchControllerRef.current?.dispose(); } catch {}
@@ -185,6 +199,7 @@ export function useKitAudioEngine() {
       try { audio.currentTime = 0; } catch {}
     }
 
+    setPlaybackState("none");
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(0);
@@ -262,12 +277,14 @@ export function useKitAudioEngine() {
       setTrack(nextTrack);
       trackRef.current = nextTrack;
       updateMediaSessionMetadata(nextTrack);
+      setPlaybackState("playing");
       setMediaSessionActionHandlers({
         play: () => { void playTrack(nextTrack); },
         pause: () => {
           const currentAudio = audioRef.current;
           try { pitchControllerRef.current?.pause(); } catch {}
           try { currentAudio?.pause(); } catch {}
+          setPlaybackState("paused");
           setIsPlaying(false);
         },
         seekbackward: () => {
@@ -301,7 +318,6 @@ export function useKitAudioEngine() {
 
       metric.fetchStartAt = nowPerf();
       logPlaybackMetric(metric, "FETCH_AUDIO_START");
-
       audio.volume = volumeRef.current;
       audio.loop = loopRef.current;
 
@@ -320,6 +336,8 @@ export function useKitAudioEngine() {
         }
         metric.playingAt = nowPerf();
         logPlaybackMetric(metric, "AUDIO_PLAYING");
+        updateMediaSessionMetadata(nextTrack);
+        setPlaybackState("playing");
       };
       audio.addEventListener("canplay", onCanPlay, { once: true });
       audio.addEventListener("playing", onPlaying, { once: true });
@@ -341,7 +359,6 @@ export function useKitAudioEngine() {
             await audio.play();
           } catch (firstPlayError) {
             if (!reusedPreloader || !isStillCurrent()) throw firstPlayError;
-
             const fallbackAudio = getCachedAudio(`${identity}::fallback`, nextTrack.src, "auto");
             fallbackAudio.volume = volumeRef.current;
             fallbackAudio.loop = loopRef.current;
@@ -362,10 +379,13 @@ export function useKitAudioEngine() {
         }
 
         if (!isStillCurrent()) return;
+        updateMediaSessionMetadata(nextTrack);
+        setPlaybackState("playing");
         setIsPlaying(true);
         startRafLoop(sessionId, requestSerial, identity);
       } catch (error) {
         if (!isStillCurrent()) return;
+        setPlaybackState("paused");
         setIsPlaying(false);
         setErrorMessage(normalizePlaybackError(error));
       }
@@ -380,6 +400,7 @@ export function useKitAudioEngine() {
       abortRef.current?.abort("pause");
       try { pitchControllerRef.current?.pause(); } catch {}
       audio.pause();
+      setPlaybackState("paused");
       setIsPlaying(false);
       return;
     }
