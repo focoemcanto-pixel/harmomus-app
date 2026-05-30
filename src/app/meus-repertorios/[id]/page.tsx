@@ -13,19 +13,21 @@ type PageParams = {
   id: string;
 };
 
+type KitRow = {
+  id: string;
+  slug: string;
+  name: string;
+  artist: string | null;
+  cover_url: string | null;
+  original_tone: string | null;
+  default_tone: string | null;
+};
+
 type RepertoireItem = {
   id: string;
   position: number;
   kit_id?: string | null;
-  kits: {
-    id: string;
-    slug: string;
-    name: string;
-    artist: string | null;
-    cover_url: string | null;
-    original_tone: string | null;
-    default_tone: string | null;
-  } | null;
+  kits: KitRow | null;
 };
 
 type ProgressRow = {
@@ -43,6 +45,23 @@ function formatDate(value?: string | null, fallback = "—") {
   return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
+async function assertRepertoireAccess(input: {
+  admin: any;
+  repertoireId: string;
+  ministryId: string;
+}) {
+  const { data: repertoire, error } = await input.admin
+    .from("ministry_repertoires")
+    .select("id,ministry_id,archived")
+    .eq("id", input.repertoireId)
+    .eq("ministry_id", input.ministryId)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  if (!repertoire?.id || repertoire.archived) notFound();
+  return repertoire;
+}
+
 async function toggleStudied(formData: FormData) {
   "use server";
 
@@ -58,19 +77,17 @@ async function toggleStudied(formData: FormData) {
   if (!repertoireId || !itemId || !kitId) redirect("/meus-repertorios");
 
   const admin = createSupabaseAdminClient() as any;
+  await assertRepertoireAccess({ admin, repertoireId, ministryId: context.ministry.ministryId });
 
   const { data: item, error: itemError } = await admin
     .from("ministry_repertoire_items")
-    .select("id,kit_id,repertoire_id,ministry_repertoires(id,ministry_id,archived)")
+    .select("id,kit_id,repertoire_id")
     .eq("id", itemId)
     .eq("repertoire_id", repertoireId)
     .maybeSingle();
 
   if (itemError) throw new Error(itemError.message);
-
-  const itemMinistryId = item?.ministry_repertoires?.ministry_id;
-  const archived = Boolean(item?.ministry_repertoires?.archived);
-  if (!item?.id || archived || itemMinistryId !== context.ministry.ministryId) notFound();
+  if (!item?.id) notFound();
 
   const now = new Date().toISOString();
 
@@ -137,16 +154,7 @@ async function toggleReady(formData: FormData) {
   if (!repertoireId) redirect("/meus-repertorios");
 
   const admin = createSupabaseAdminClient() as any;
-
-  const { data: repertoire, error: repertoireError } = await admin
-    .from("ministry_repertoires")
-    .select("id,ministry_id,archived")
-    .eq("id", repertoireId)
-    .eq("ministry_id", context.ministry.ministryId)
-    .maybeSingle();
-
-  if (repertoireError) throw new Error(repertoireError.message);
-  if (!repertoire?.id || repertoire.archived) notFound();
+  await assertRepertoireAccess({ admin, repertoireId, ministryId: context.ministry.ministryId });
 
   const [{ count: totalItems }, { count: studiedItems }] = await Promise.all([
     admin
@@ -208,6 +216,16 @@ async function toggleReady(formData: FormData) {
   redirect(`/meus-repertorios/${repertoireId}`);
 }
 
+function mergeItemsWithKits(items: any[] | null | undefined, kits: KitRow[] | null | undefined) {
+  const kitsById = new Map((kits ?? []).map((kit) => [String(kit.id), kit]));
+  return (items ?? []).map((item: any) => ({
+    id: item.id,
+    position: Number(item.position ?? 0),
+    kit_id: item.kit_id ?? null,
+    kits: item.kit_id ? kitsById.get(String(item.kit_id)) ?? null : null,
+  })) as RepertoireItem[];
+}
+
 export default async function MeuRepertorioDetalhePage({ params }: { params: Promise<PageParams> }) {
   const [context, resolvedParams] = await Promise.all([
     getCurrentUserAccessContext(),
@@ -232,10 +250,10 @@ export default async function MeuRepertorioDetalhePage({ params }: { params: Pro
   if (error) throw new Error(error.message);
   if (!repertoire?.id || repertoire.archived) notFound();
 
-  const [{ data: items, error: itemsError }, { data: progressRows, error: progressError }] = await Promise.all([
+  const [{ data: rawItems, error: itemsError }, { data: progressRows, error: progressError }] = await Promise.all([
     admin
       .from("ministry_repertoire_items")
-      .select("id,position,kit_id,kits(id,slug,name,artist,cover_url,original_tone,default_tone)")
+      .select("id,position,kit_id")
       .eq("repertoire_id", repertoire.id)
       .order("position", { ascending: true }),
     admin
@@ -248,7 +266,17 @@ export default async function MeuRepertorioDetalhePage({ params }: { params: Pro
   if (itemsError) throw new Error(itemsError.message);
   if (progressError) throw new Error(progressError.message);
 
-  const repertoireItems = (items ?? []) as RepertoireItem[];
+  const kitIds = Array.from(new Set((rawItems ?? []).map((item: any) => item.kit_id).filter(Boolean)));
+  const { data: kits, error: kitsError } = kitIds.length
+    ? await admin
+        .from("kits")
+        .select("id,slug,name,artist,cover_url,original_tone,default_tone")
+        .in("id", kitIds)
+    : { data: [], error: null };
+
+  if (kitsError) throw new Error(kitsError.message);
+
+  const repertoireItems = mergeItemsWithKits(rawItems, kits as KitRow[]);
   const allProgressRows = (progressRows ?? []) as ProgressRow[];
   const progressMap = new Map(
     allProgressRows.filter((row) => row.repertoire_item_id).map((row) => [String(row.repertoire_item_id), row]),
@@ -360,9 +388,11 @@ export default async function MeuRepertorioDetalhePage({ params }: { params: Pro
                   <form action={toggleReady}>
                     <input type="hidden" name="repertoire_id" value={repertoire.id} />
                     <input type="hidden" name="next_ready" value={isReady ? "false" : "true"} />
-                    <button disabled={!isReady && !canConfirmReady} className={`inline-flex w-fit items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-50 ${isReady ? "border border-emerald-300/30 bg-emerald-400/10 text-emerald-100 hover:bg-emerald-400/20" : "bg-cyan-300 text-slate-950 hover:bg-cyan-200"}`}>
-                      <ShieldCheck className="h-4 w-4" />
-                      {isReady ? "Desmarcar pronto" : "Confirmar pronto"}
+                    <button
+                      disabled={!isReady && !canConfirmReady}
+                      className="inline-flex w-fit items-center justify-center gap-2 rounded-2xl bg-emerald-400 px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <ShieldCheck className="h-4 w-4" /> {isReady ? "Desmarcar pronto" : "Confirmar pronto"}
                     </button>
                   </form>
                 </div>
@@ -373,9 +403,9 @@ export default async function MeuRepertorioDetalhePage({ params }: { params: Pro
               <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-400/10 text-cyan-100">
                 <Music2 className="h-7 w-7" />
               </div>
-              <h2 className="mt-5 text-2xl font-black text-white">Este repertório ainda não possui kits</h2>
+              <h2 className="mt-5 text-2xl font-black text-white">Nenhuma música adicionada ainda</h2>
               <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-zinc-400">
-                Quando a liderança adicionar músicas, elas aparecerão aqui para estudo.
+                Quando a liderança adicionar kits, eles aparecerão aqui para estudo.
               </p>
             </div>
           )}
