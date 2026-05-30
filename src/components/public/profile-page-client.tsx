@@ -9,8 +9,8 @@ type TouchPoint = { clientX: number; clientY: number };
 
 const AVATAR_SIZE = 720;
 const CROP_SIZE = 320;
-const MIN_ZOOM = 1;
-const MAX_ZOOM = 4;
+const MIN_ZOOM = 0.6;
+const MAX_ZOOM = 5;
 
 function distance(a: TouchPoint, b: TouchPoint) {
   return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
@@ -49,8 +49,8 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
   const [passwordResetMessage, setPasswordResetMessage] = useState("");
   const [open, setOpen] = useState(false);
   const [imageSrc, setImageSrc] = useState<string | null>(null);
-  const [zoom, setZoom] = useState(1.25);
-  const [rotation, setRotation] = useState(0);
+  const [zoom, setZoom] = useState(1);
+  const [rotation] = useState(0);
   const [position, setPosition] = useState<Point>({ x: 0, y: 0 });
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -96,8 +96,7 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
   }
 
   function resetEditor() {
-    setZoom(1.25);
-    setRotation(0);
+    setZoom(1);
     setPosition({ x: 0, y: 0 });
     dragRef.current = null;
     pinchRef.current = null;
@@ -149,7 +148,7 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
     ctx.translate(AVATAR_SIZE / 2, AVATAR_SIZE / 2);
     ctx.rotate((rotation * Math.PI) / 180);
 
-    const baseScale = Math.max(CROP_SIZE / img.width, CROP_SIZE / img.height);
+    const baseScale = Math.min(CROP_SIZE / img.width, CROP_SIZE / img.height);
     const exportScale = AVATAR_SIZE / CROP_SIZE;
     const drawW = img.width * baseScale * zoom * exportScale;
     const drawH = img.height * baseScale * zoom * exportScale;
@@ -223,6 +222,7 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
   }
 
   function handleTouchMove(event: TouchEvent<HTMLDivElement>) {
+    event.preventDefault();
     if (event.touches.length === 2 && pinchRef.current) {
       const current = distance(event.touches[0], event.touches[1]);
       setZoom(clamp(pinchRef.current.zoom * (current / pinchRef.current.distance), MIN_ZOOM, MAX_ZOOM));
@@ -295,56 +295,33 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
       <a href="/logout" className="mt-8 inline-block rounded-lg border border-rose-300/40 px-4 py-2 text-rose-200">Logout</a>
     </section>
 
-    {open ? <div className="fixed inset-0 z-50 bg-black/90 text-white backdrop-blur-md md:grid md:place-items-center md:p-6">
-      <div className="flex h-[100dvh] w-full flex-col overflow-hidden bg-gradient-to-br from-[#0d1324] to-[#06080f] md:h-auto md:max-h-[92vh] md:max-w-3xl md:rounded-3xl md:border md:border-white/15 md:shadow-2xl">
+    {open ? <div className="fixed inset-0 z-50 bg-black/95 text-white backdrop-blur-md md:grid md:place-items-center md:p-6">
+      <div className="flex h-[100dvh] w-full flex-col overflow-hidden bg-[#070b14] md:h-auto md:max-h-[92vh] md:max-w-xl md:rounded-3xl md:border md:border-white/15 md:shadow-2xl">
         <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-4 py-4 md:px-6">
           <div>
-            <h3 className="text-xl font-semibold">Ajustar foto de perfil</h3>
-            <p className="mt-1 text-xs text-zinc-400">Arraste, amplie, rotacione e salve o recorte circular.</p>
+            <h3 className="text-xl font-semibold">Ajustar foto</h3>
+            <p className="mt-1 text-xs text-zinc-400">Use a pinça para aproximar e arraste para posicionar.</p>
           </div>
           <button className="rounded-full border border-white/15 px-3 py-1.5 text-sm text-zinc-200" onClick={() => { setOpen(false); endGesture(); }}>Fechar</button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-4 py-5 md:px-6">
+        <div className="flex flex-1 items-center justify-center overflow-hidden px-4 py-6">
           {imageSrc ? (
-            <div className="grid gap-6 md:grid-cols-[1fr_220px] md:items-start">
-              <div>
-                <div
-                  className="relative mx-auto grid h-[320px] w-[320px] max-w-full touch-none place-items-center overflow-hidden rounded-3xl border border-white/15 bg-black/40"
-                  onMouseDown={handleMouseDown}
-                  onMouseMove={handleMouseMove}
-                  onMouseUp={endGesture}
-                  onMouseLeave={endGesture}
-                  onTouchStart={handleTouchStart}
-                  onTouchMove={handleTouchMove}
-                  onTouchEnd={endGesture}
-                >
-                  <img src={imageSrc} alt="Prévia" draggable={false} className="absolute left-1/2 top-1/2 max-h-none max-w-none select-none" style={editorImageStyle} />
-                  <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0_49%,rgba(0,0,0,0.62)_50%)]" />
-                  <div className="pointer-events-none absolute inset-0 rounded-full border-2 border-cyan-200/70 shadow-[0_0_30px_rgba(34,211,238,0.25)]" />
-                  <div className="pointer-events-none absolute bottom-3 rounded-full bg-black/60 px-3 py-1 text-[11px] text-zinc-200">Arraste para posicionar</div>
-                </div>
-
-                <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-                  <label className="block text-xs font-semibold uppercase tracking-[0.16em] text-zinc-400">Zoom</label>
-                  <input type="range" min={MIN_ZOOM} max={MAX_ZOOM} step="0.01" value={zoom} onChange={(e) => setZoom(Number(e.target.value))} className="mt-3 w-full" />
-                  <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.16em] text-zinc-400">Rotação</label>
-                  <input type="range" min="-180" max="180" step="1" value={rotation} onChange={(e) => setRotation(Number(e.target.value))} className="mt-3 w-full" />
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <button type="button" onClick={resetEditor} className="rounded-xl border border-white/15 px-3 py-2 text-sm text-zinc-200 hover:bg-white/10">Resetar</button>
-                    <button type="button" onClick={() => setRotation((value) => value - 90)} className="rounded-xl border border-white/15 px-3 py-2 text-sm text-zinc-200 hover:bg-white/10">Girar -90°</button>
-                    <button type="button" onClick={() => setRotation((value) => value + 90)} className="rounded-xl border border-white/15 px-3 py-2 text-sm text-zinc-200 hover:bg-white/10">Girar +90°</button>
-                  </div>
-                </div>
-              </div>
-
-              <aside className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-                <p className="text-sm font-semibold text-white">Preview</p>
-                <div className="relative mx-auto mt-4 h-32 w-32 overflow-hidden rounded-full border border-cyan-300/40 bg-black/40">
-                  <img src={imageSrc} alt="Preview circular" draggable={false} className="absolute left-1/2 top-1/2 max-h-none max-w-none select-none" style={editorImageStyle} />
-                </div>
-                <p className="mt-4 text-xs leading-relaxed text-zinc-400">A imagem será otimizada em WEBP e salva em formato quadrado, ideal para perfil.</p>
-              </aside>
+            <div
+              className="relative h-[320px] w-[320px] max-w-full touch-none overflow-hidden rounded-3xl bg-black/40"
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={endGesture}
+              onMouseLeave={endGesture}
+              onDoubleClick={resetEditor}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={endGesture}
+            >
+              <img src={imageSrc} alt="Prévia" draggable={false} className="absolute left-1/2 top-1/2 max-h-full max-w-full select-none" style={editorImageStyle} />
+              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0_49%,rgba(0,0,0,0.68)_50%)]" />
+              <div className="pointer-events-none absolute inset-0 rounded-full border-2 border-cyan-200/75 shadow-[0_0_30px_rgba(34,211,238,0.22)]" />
+              <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-black/60 px-3 py-1 text-[11px] text-zinc-200">Pinça para ampliar • arraste para mover</div>
             </div>
           ) : (
             <button
@@ -357,7 +334,7 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
             >
               <span>
                 <span className="block text-lg font-semibold">Escolher imagem</span>
-                <span className="mt-2 block text-sm text-zinc-400">JPG, PNG ou WEBP. Você poderá cortar antes de salvar.</span>
+                <span className="mt-2 block text-sm text-zinc-400">JPG, PNG ou WEBP. Você poderá ajustar antes de salvar.</span>
               </span>
             </button>
           )}
