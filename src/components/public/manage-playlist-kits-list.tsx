@@ -16,22 +16,35 @@ type ManagePlaylistKitsListProps = {
   removeKitAction: (formData: FormData) => Promise<void>;
 };
 
-function RemoveButton() {
+function RemoveButton({ confirming, onRequestConfirm }: { confirming: boolean; onRequestConfirm: () => void }) {
   const { pending } = useFormStatus();
+
+  if (!confirming) {
+    return (
+      <button
+        type="button"
+        onClick={onRequestConfirm}
+        className="rounded-lg border border-red-500/20 bg-red-500/10 px-2 py-1 text-[11px] font-medium text-red-300 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        Remover
+      </button>
+    );
+  }
 
   return (
     <button
       type="submit"
       disabled={pending}
-      className="rounded-lg border border-red-500/20 bg-red-500/10 px-2 py-1 text-[11px] font-medium text-red-300 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+      className="rounded-lg border border-red-400/30 bg-red-500/20 px-2 py-1 text-[11px] font-semibold text-red-100 transition hover:bg-red-500/30 disabled:cursor-not-allowed disabled:opacity-60"
     >
-      {pending ? "Removendo..." : "Remover"}
+      {pending ? "Removendo..." : "Confirmar"}
     </button>
   );
 }
 
 export function ManagePlaylistKitsList({ playlistId, kits, removeKitAction }: ManagePlaylistKitsListProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [confirmingKitId, setConfirmingKitId] = useState<string | null>(null);
 
   if (kits.length === 0) {
     return (
@@ -46,28 +59,41 @@ export function ManagePlaylistKitsList({ playlistId, kits, removeKitAction }: Ma
 
   return (
     <div className="space-y-2">
-      {visibleKits.map((kit) => (
-        <div key={kit.id} className="flex items-center gap-3 rounded-xl bg-black/20 px-3 py-2">
-          <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-white/5">
-            {kit.cover_url ? (
-              <img src={kit.cover_url} alt={kit.name} className="h-full w-full object-cover" />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center text-[10px] text-zinc-500">Kit</div>
-            )}
-          </div>
+      {visibleKits.map((kit) => {
+        const isConfirming = confirmingKitId === kit.id;
 
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-white">{kit.name}</p>
-            <p className="truncate text-xs text-zinc-400">{kit.artist}</p>
-          </div>
+        return (
+          <div key={kit.id} className="flex items-center gap-3 rounded-xl bg-black/20 px-3 py-2">
+            <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-white/5">
+              {kit.cover_url ? (
+                <img src={kit.cover_url} alt={kit.name} className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-[10px] text-zinc-500">Kit</div>
+              )}
+            </div>
 
-          <form action={removeKitAction}>
-            <input type="hidden" name="playlistId" value={playlistId} />
-            <input type="hidden" name="kitId" value={kit.id} />
-            <RemoveButton />
-          </form>
-        </div>
-      ))}
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-white">{kit.name}</p>
+              <p className="truncate text-xs text-zinc-400">{isConfirming ? "Remover este kit da playlist?" : kit.artist}</p>
+            </div>
+
+            <form action={removeKitAction} className="flex items-center gap-2">
+              <input type="hidden" name="playlistId" value={playlistId} />
+              <input type="hidden" name="kitId" value={kit.id} />
+              <RemoveButton confirming={isConfirming} onRequestConfirm={() => setConfirmingKitId(kit.id)} />
+              {isConfirming ? (
+                <button
+                  type="button"
+                  onClick={() => setConfirmingKitId(null)}
+                  className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-medium text-zinc-300 transition hover:bg-white/10"
+                >
+                  Cancelar
+                </button>
+              ) : null}
+            </form>
+          </div>
+        );
+      })}
 
       {kits.length > 3 ? (
         <button
