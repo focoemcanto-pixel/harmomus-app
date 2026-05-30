@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { ensureUserAccess } from "@/lib/auth/ensure-user-access";
 import { createClient } from "@/lib/supabase/server";
 
+// Supabase pode enviar type=recovery para redefinição de senha e type=signup para confirmação de cadastro.
 type OtpType = "signup" | "magiclink" | "recovery" | "invite" | "email" | "email_change";
 
 function normalizeNext(raw: string | null) {
@@ -63,13 +64,16 @@ export async function GET(request: Request) {
       .eq("id", user.id)
       .maybeSingle();
 
-    if (String(profile?.onboarding_status ?? "") === "email_confirmed") {
+    const onboardingStatus = String(profile?.onboarding_status ?? "");
+    const now = new Date().toISOString();
+
+    if (["pending_email_confirmation", "email_confirmed"].includes(onboardingStatus)) {
       await (supabase as any)
         .from("profiles")
         .update({
           onboarding_status: "onboarding_completed",
           onboarding_step: "completed",
-          updated_at: new Date().toISOString(),
+          updated_at: now,
         })
         .eq("id", user.id);
     }
