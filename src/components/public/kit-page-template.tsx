@@ -51,6 +51,8 @@ type AudioFilesApiTone = {
   files?: AudioFilesApiFile[];
 };
 
+const CHROMATIC_ORDER = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"] as const;
+
 function normalizeAudioSource(value: unknown): AudioSource {
   return value === "generated" ? "generated" : "original";
 }
@@ -125,6 +127,23 @@ function getArrangementGuidance(analysis: TargetVoiceTessituraAnalysis | null, s
 
 function getToneGroup(kit: PublicKit, tone: string): PublicKitToneGroup | null {
   return kit.tones.find((toneGroup) => normalizeTone(toneGroup.tone) === normalizeTone(tone)) ?? null;
+}
+
+function getClosestToneStep(currentTone: string, availableTones: string[], direction: -1 | 1) {
+  const current = normalizeTone(currentTone);
+  if (!current) return null;
+
+  const availableSet = new Set(availableTones.map((tone) => normalizeTone(tone)).filter(Boolean));
+  const currentIndex = CHROMATIC_ORDER.indexOf(current as (typeof CHROMATIC_ORDER)[number]);
+  if (currentIndex < 0 || availableSet.size === 0) return null;
+
+  for (let step = 1; step <= CHROMATIC_ORDER.length; step += 1) {
+    const nextIndex = (currentIndex + direction * step + CHROMATIC_ORDER.length) % CHROMATIC_ORDER.length;
+    const candidate = CHROMATIC_ORDER[nextIndex];
+    if (candidate !== current && availableSet.has(candidate)) return candidate;
+  }
+
+  return null;
 }
 
 function mapApiTonesToPublicToneGroups(tones: AudioFilesApiTone[]) {
@@ -248,7 +267,6 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
     });
   }, [availableTones, selectedVoice]);
   const selectedToneOption = toneOptions.find((option) => normalizeTone(option.tone) === normalizeTone(selectedTone)) ?? toneOptions[0] ?? null;
-  const selectedToneIndex = Math.max(0, toneOptions.findIndex((option) => normalizeTone(option.tone) === normalizeTone(selectedTone)));
   const tracksForSelectedVoice = useMemo(
     () => liveKit.tones.flatMap((toneGroup) => {
       const preferred = toneGroup.voices[selectedVoice] ?? toneGroup.voices.todos;
@@ -321,9 +339,9 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
   }
 
   function handleToneStep(direction: -1 | 1) {
-    if (!toneOptions.length) return;
-    const nextIndex = (selectedToneIndex + direction + toneOptions.length) % toneOptions.length;
-    handleSelectTone(toneOptions[nextIndex].tone);
+    const nextTone = getClosestToneStep(selectedTone, toneOptions.map((option) => option.tone), direction);
+    if (!nextTone) return;
+    handleSelectTone(nextTone);
   }
 
   function handleSelectVoice(voice: VoiceType) {
