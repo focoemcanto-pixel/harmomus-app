@@ -12,7 +12,7 @@ import { VoiceSelector } from "@/components/public/voice-selector";
 import { useKitAudioEngine } from "@/components/public/use-kit-audio-engine";
 import { midiToBrazilianNote } from "@/lib/audio/pitch-analysis";
 import type { PublicKit, PublicKitAudioFile, PublicKitToneGroup, VoiceType } from "@/lib/data/public-kits";
-import { analyzeTargetVoiceTessitura, type TargetVoiceTessituraAnalysis, type VocalRangeType } from "@/lib/music/tessitura";
+import { analyzeTargetVoiceTessitura, evaluateGroupTessituraForTone, findBestToneForGroup, type GroupToneCompatibility, type TargetVoiceTessituraAnalysis, type TessituraSourceFile, type VocalRangeType } from "@/lib/music/tessitura";
 import { formatToneLabel, normalizeTone, resolveToneTrack, sortTonesByChromaticOrder } from "@/lib/music/tones";
 
 interface KitPageTemplateProps {
@@ -98,6 +98,33 @@ function getMidiRange(file: PublicKitAudioFile | null) {
   const max = file.maxMidiNote ?? file.detectedMaxMidiNote;
   if (typeof min !== "number" || typeof max !== "number") return null;
   return { min, max };
+}
+
+function buildTessituraSourceFiles(kit: PublicKit): TessituraSourceFile[] {
+  return kit.tones.flatMap((toneGroup) => (["soprano", "contralto", "tenor"] as const).flatMap((voice) => {
+    const file = toneGroup.voices[voice];
+    const range = getMidiRange(file ?? null);
+    if (!file || !range) return [];
+
+    return [{
+      tone: toneGroup.tone,
+      voice,
+      minMidi: range.min,
+      maxMidi: range.max,
+      confidence: file.tessituraConfidence,
+    }];
+  }));
+}
+
+function midiRangeLabel(range: { min: number; max: number } | null) {
+  if (!range) return "sem dados";
+  return `${midiToBrazilianNote(range.min)}–${midiToBrazilianNote(range.max)}`;
+}
+
+function harmomusIaStatusClass(status: GroupToneCompatibility["status"]) {
+  if (status === "ideal") return "border-emerald-400/25 bg-emerald-500/10 text-emerald-100";
+  if (status === "comfortable-limit") return "border-amber-300/25 bg-amber-400/10 text-amber-100";
+  return "border-rose-300/25 bg-rose-500/10 text-rose-100";
 }
 
 function toAnalyzableVoice(voice: VoiceType): VocalRangeType | null {
@@ -312,6 +339,18 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
 
   const arrangementGuidance = getArrangementGuidance(tessituraAnalysis, selectedVoice, isModulated);
 
+  const tessituraSourceFiles = useMemo(() => buildTessituraSourceFiles(liveKit), [liveKit]);
+  const currentGroupTessitura = useMemo(
+    () => evaluateGroupTessituraForTone(tessituraSourceFiles, selectedTone),
+    [selectedTone, tessituraSourceFiles],
+  );
+  const bestToneForGroup = useMemo(() => findBestToneForGroup(tessituraSourceFiles), [tessituraSourceFiles]);
+  const canUseBestTone = Boolean(
+    bestToneForGroup
+    && normalizeTone(bestToneForGroup.tone) !== normalizeTone(selectedTone)
+    && toneOptions.some((option) => normalizeTone(option.tone) === normalizeTone(bestToneForGroup.tone)),
+  );
+
   useEffect(() => {
     if (!accessContext.play.allowed || !selectedTone) return;
 
@@ -373,6 +412,11 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
     stopPlayback();
     setSelectedTone(normalizedTone);
     setToneMenuOpen(false);
+  }
+
+  function handleUseRecommendedTone() {
+    if (!bestToneForGroup) return;
+    handleSelectTone(bestToneForGroup.tone);
   }
 
   function handleToneStep(direction: -1 | 1) {
@@ -523,6 +567,63 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
                   }
                 }}
               />
+
+              {currentGroupTessitura ? (
+                <section className={`rounded-2xl border p-4 shadow-[0_18px_45px_rgba(0,0,0,0.22)] ${harmomusIaStatusClass(currentGroupTessitura.status)}`}>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-[0.18em] text-current/70">Harmomus IA</p>
+                      <h2 className="mt-1 text-lg font-semibold text-white">{currentGroupTessitura.statusLabel}</h2>
+                    </div>
+                    <span className="rounded-full border border-white/15 bg-black/20 px-3 py-1 text-xs font-bold text-white">
+                      {currentGroupTessitura.compatibility}% compatível
+                    </span>
+                  </div>
+
+                  <div className="mt-3 space-y-2 text-sm text-white/85">
+                    <p><span className="font-semibold text-white">Recomendação:</span> {currentGroupTessitura.recommendation}</p>
+                    <p><span className="font-semibold text-white">Motivo:</span> {currentGroupTessitura.reason}</p>
+                  </div>
+
+                  <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                    {currentGroupTessitura.voices.map((voice) => (
+                      <div key={voice.voice} className="rounded-xl border border-white/10 bg-black/20 p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm font-semibold text-white">{voice.label}</span>
+                          <span className="text-lg" aria-label={voice.statusLabel}>{voice.semaphore}</span>
+                        </div>
+                        <p className="mt-1 text-xs font-medium text-white/75">{voice.statusLabel}</p>
+                        <p className="mt-1 text-[11px] text-white/55">{voice.compatibility}% • {midiRangeLabel(voice.targetMidiRange)}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {bestToneForGroup ? (
+                    <div className="mt-4 rounded-xl border border-white/10 bg-black/25 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-bold uppercase tracking-[0.16em] text-violet-100/70">Melhor tom para esta equipe</p>
+                          <p className="mt-1 text-base font-semibold text-white">
+                            {formatToneLabel(bestToneForGroup.tone)} • {bestToneForGroup.compatibility}% compatível
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleUseRecommendedTone}
+                          disabled={!canUseBestTone}
+                          className="rounded-full border border-gold-300/40 bg-gold-400/15 px-4 py-2 text-xs font-bold text-gold-100 transition hover:bg-gold-400/25 disabled:cursor-not-allowed disabled:opacity-45"
+                        >
+                          Usar tom recomendado
+                        </button>
+                      </div>
+                      <p className="mt-2 text-xs text-white/70">{bestToneForGroup.justification}</p>
+                      {!canUseBestTone && normalizeTone(bestToneForGroup.tone) !== normalizeTone(selectedTone) ? (
+                        <p className="mt-2 text-[11px] text-amber-100/80">O tom recomendado precisa existir como arquivo real para ser usado no player público.</p>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </section>
+              ) : null}
 
               {selectedVoice === "todos" ? (
                 <div className={`rounded-xl border px-4 py-3 text-xs ${
