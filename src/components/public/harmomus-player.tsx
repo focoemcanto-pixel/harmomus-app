@@ -12,6 +12,10 @@ interface HarmomusPlayerProps {
   canPlay: boolean;
   semitoneShift?: number;
   onBlocked: () => void;
+  mediaTitle?: string;
+  mediaArtist?: string;
+  mediaAlbum?: string;
+  artworkUrl?: string | null;
 }
 
 function parseTrackMeta(title: string) {
@@ -23,7 +27,38 @@ function parseTrackMeta(title: string) {
   };
 }
 
-export function HarmomusPlayer({ engine, src, title, canPlay, semitoneShift = 0, onBlocked }: HarmomusPlayerProps) {
+function inferKitTitle() {
+  if (typeof document === "undefined") return "Harmomus";
+  return document.querySelector("h1")?.textContent?.trim() || "Harmomus";
+}
+
+function inferKitArtwork() {
+  if (typeof document === "undefined") return null;
+  const images = Array.from(document.querySelectorAll("main img")) as HTMLImageElement[];
+  const cover = images.find((img) => img.currentSrc || img.src);
+  return cover?.currentSrc || cover?.src || null;
+}
+
+function normalizeArtworkUrl(url: string | null | undefined) {
+  const value = String(url ?? "").trim();
+  if (!value) return null;
+  if (/^https?:\/\//i.test(value)) return value;
+  if (typeof window !== "undefined" && value.startsWith("/")) return `${window.location.origin}${value}`;
+  return value;
+}
+
+export function HarmomusPlayer({
+  engine,
+  src,
+  title,
+  canPlay,
+  semitoneShift = 0,
+  onBlocked,
+  mediaTitle,
+  mediaArtist,
+  mediaAlbum,
+  artworkUrl,
+}: HarmomusPlayerProps) {
   const {
     track,
     isPlaying,
@@ -48,8 +83,28 @@ export function HarmomusPlayer({ engine, src, title, canPlay, semitoneShift = 0,
     [src, title, trackMeta.voice, trackMeta.tone, semitoneShift],
   );
 
+  const mediaMetadata = useMemo(() => {
+    const kitTitle = mediaTitle?.trim() || inferKitTitle();
+    const details = title.replace(/^Tom\s+/i, "Tom ");
+    return {
+      mediaTitle: kitTitle,
+      mediaArtist: mediaArtist?.trim() || details || "Harmomus",
+      mediaAlbum: mediaAlbum?.trim() || "Harmomus",
+      artworkUrl: normalizeArtworkUrl(artworkUrl) || normalizeArtworkUrl(inferKitArtwork()),
+    };
+  }, [mediaTitle, mediaArtist, mediaAlbum, artworkUrl, title]);
+
   const currentSemitoneShift = track?.semitoneShift ?? 0;
-  const candidateTrack: KitTrack = useMemo(() => ({ src: src ?? "", title, semitoneShift, trackId }), [src, title, semitoneShift, trackId]);
+  const candidateTrack: KitTrack = useMemo(() => ({
+    src: src ?? "",
+    title,
+    semitoneShift,
+    trackId,
+    mediaTitle: mediaMetadata.mediaTitle,
+    mediaArtist: mediaMetadata.mediaArtist,
+    mediaAlbum: mediaMetadata.mediaAlbum,
+    artworkUrl: mediaMetadata.artworkUrl,
+  }), [src, title, semitoneShift, trackId, mediaMetadata]);
   const isCurrentTrack = Boolean(track && src && currentSemitoneShift === semitoneShift && engineIsCurrentTrack(candidateTrack));
 
   useEffect(() => {
@@ -75,12 +130,7 @@ export function HarmomusPlayer({ engine, src, title, canPlay, semitoneShift = 0,
       return;
     }
 
-    await playTrack({
-      src,
-      title,
-      semitoneShift,
-      trackId,
-    });
+    await playTrack(candidateTrack);
   }
 
   return (
