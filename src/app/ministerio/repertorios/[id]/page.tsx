@@ -33,8 +33,8 @@ export default async function RepertoireDetailPage({ params }: { params: Promise
 
   if (context.isGuest) redirect("/login");
   if (!context.ministry) redirect("/assinatura");
-  if (!isMinistryManager(context)) redirect("/");
 
+  const canManage = isMinistryManager(context);
   const admin = createSupabaseAdminClient() as any;
 
   const { data: repertoire, error } = await admin
@@ -63,9 +63,11 @@ export default async function RepertoireDetailPage({ params }: { params: Promise
         <Link href="/ministerio/repertorios" className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10">
           <ArrowLeft className="h-4 w-4" /> Voltar para repertórios
         </Link>
-        <Link href={`/ministerio/repertorios/${repertoire.id}/adicionar-kits`} className="inline-flex items-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200">
-          <Plus className="h-4 w-4" /> Adicionar kits
-        </Link>
+        {canManage ? (
+          <Link href={`/ministerio/repertorios/${repertoire.id}/adicionar-kits`} className="inline-flex items-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200">
+            <Plus className="h-4 w-4" /> Adicionar kits
+          </Link>
+        ) : null}
       </div>
 
       <div className="overflow-hidden rounded-[2rem] border border-cyan-300/20 bg-gradient-to-br from-[#0b1120]/95 via-[#140d27]/95 to-[#06111f]/95 p-6 shadow-[0_30px_100px_rgba(34,211,238,0.16)] md:p-10">
@@ -89,11 +91,17 @@ export default async function RepertoireDetailPage({ params }: { params: Promise
           <div>
             <p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Kits do repertório</p>
             <h2 className="mt-2 text-2xl font-semibold">Músicas para estudar</h2>
-            <p className="mt-1 text-sm text-zinc-400">Estes kits formarão o repertório compartilhado com os integrantes do ministério.</p>
+            <p className="mt-1 text-sm text-zinc-400">
+              {canManage
+                ? "Estes kits formarão o repertório compartilhado com os integrantes do ministério."
+                : "Estes são os kits definidos pelo responsável do seu ministério para estudo."}
+            </p>
           </div>
-          <Link href={`/ministerio/repertorios/${repertoire.id}/adicionar-kits`} className="inline-flex w-fit items-center gap-2 rounded-2xl border border-cyan-300/25 bg-cyan-400/10 px-4 py-3 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-400/20">
-            <Plus className="h-4 w-4" /> Adicionar kits
-          </Link>
+          {canManage ? (
+            <Link href={`/ministerio/repertorios/${repertoire.id}/adicionar-kits`} className="inline-flex w-fit items-center gap-2 rounded-2xl border border-cyan-300/25 bg-cyan-400/10 px-4 py-3 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-400/20">
+              <Plus className="h-4 w-4" /> Adicionar kits
+            </Link>
+          ) : null}
         </div>
 
         {repertoireItems.length ? (
@@ -127,11 +135,15 @@ export default async function RepertoireDetailPage({ params }: { params: Promise
             </div>
             <h3 className="mt-5 text-2xl font-semibold text-white">Nenhum kit adicionado ainda</h3>
             <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-zinc-400">
-              Adicione os kits que sua equipe precisa estudar neste repertório.
+              {canManage
+                ? "Adicione os kits que sua equipe precisa estudar neste repertório."
+                : "Quando o responsável adicionar kits, eles aparecerão aqui."}
             </p>
-            <Link href={`/ministerio/repertorios/${repertoire.id}/adicionar-kits`} className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200">
-              <Plus className="h-4 w-4" /> Adicionar primeiro kit
-            </Link>
+            {canManage ? (
+              <Link href={`/ministerio/repertorios/${repertoire.id}/adicionar-kits`} className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200">
+                <Plus className="h-4 w-4" /> Adicionar primeiro kit
+              </Link>
+            ) : null}
           </div>
         )}
       </PremiumPanel>
