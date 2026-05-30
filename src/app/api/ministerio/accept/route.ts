@@ -38,7 +38,10 @@ async function acceptInvite(request: Request, token: string) {
   }
 
   if (member.status === "active") {
-    return redirectTo("/", request, "Este convite já está ativo nesta conta.");
+    if (member.user_id === context.profile.id) {
+      return redirectTo("/", request, "Seu acesso ministerial já está ativo.");
+    }
+    return redirectTo("/", request, "Este convite já foi usado por outra conta.");
   }
 
   if (member.status === "removed") {
@@ -62,14 +65,15 @@ async function acceptInvite(request: Request, token: string) {
     return redirectTo(`/convite-ministerio/${token}`, request, "Entre com o e-mail correto para aceitar o convite.");
   }
 
-  const { count: usedSeats } = await admin
+  const { data: occupiedSeats } = await admin
     .from("ministry_members")
-    .select("id", { count: "exact", head: true })
+    .select("id")
     .eq("ministry_id", member.ministry_id)
     .in("status", ["active", "pending", "invited"]);
 
+  const usedSeatsExcludingCurrentInvite = (occupiedSeats ?? []).filter((seat: any) => seat.id !== member.id).length;
   const seatLimit = Number(ministry.seat_limit ?? 0);
-  if (seatLimit > 0 && (usedSeats ?? 0) >= seatLimit) {
+  if (seatLimit > 0 && usedSeatsExcludingCurrentInvite >= seatLimit) {
     return redirectTo(`/convite-ministerio/${token}`, request, "O limite de vagas deste ministério foi atingido.");
   }
 
@@ -83,7 +87,8 @@ async function acceptInvite(request: Request, token: string) {
       accepted_at: now,
       updated_at: now,
     })
-    .eq("id", member.id);
+    .eq("id", member.id)
+    .in("status", ["pending", "invited"]);
 
   if (error) {
     return redirectTo(`/convite-ministerio/${token}`, request, error.message || "Não foi possível aceitar o convite.");
