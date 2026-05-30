@@ -2,13 +2,10 @@ import Link from "next/link";
 import { BarChart3, CreditCard, Database, Home, Library, MessageSquareText, Settings, Sparkles, Tags, Users, Waves } from "lucide-react";
 
 import { PageHeader } from "@/components/admin/page-header";
+import { createClient } from "@/lib/supabase/server";
 
-const quickStats = [
-  { label: "Biblioteca", value: "Kits e categorias", helper: "Conteúdo musical e vitrine pública" },
-  { label: "Assinaturas", value: "Planos e membros", helper: "Acesso, cobrança e suporte" },
-  { label: "Marketing", value: "Analytics e comunicação", helper: "Campanhas, audiência e canais" },
-  { label: "Sistema", value: "Integrações", helper: "Webhooks, migração e ajustes" },
-];
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 const groups = [
   {
@@ -50,7 +47,35 @@ const groups = [
   },
 ];
 
-export default function AdminPage() {
+async function getCount(supabase: any, table: string, filter?: (query: any) => any) {
+  const baseQuery = supabase.from(table).select("*", { count: "exact", head: true });
+  const query = filter ? filter(baseQuery) : baseQuery;
+  const { count, error } = await query;
+  if (error) return null;
+  return count ?? 0;
+}
+
+export default async function AdminPage() {
+  const supabase = (await createClient()) as any;
+
+  const [kitsCount, publishedKitsCount, categoriesCount, profilesCount, activeSubscriptionsCount, plansCount, bannersCount, homeSectionsCount] = await Promise.all([
+    getCount(supabase, "kits"),
+    getCount(supabase, "kits", (query) => query.eq("published", true)),
+    getCount(supabase, "categories"),
+    getCount(supabase, "profiles"),
+    getCount(supabase, "subscriptions", (query) => query.in("status", ["active", "trialing"])),
+    getCount(supabase, "plans", (query) => query.eq("status", "active")),
+    getCount(supabase, "home_banners", (query) => query.eq("is_active", true)),
+    getCount(supabase, "home_sections", (query) => query.eq("active", true)),
+  ]);
+
+  const quickStats = [
+    { label: "Kits publicados", value: publishedKitsCount ?? "-", helper: `${kitsCount ?? "-"} kits cadastrados` },
+    { label: "Categorias", value: categoriesCount ?? "-", helper: "Organização da biblioteca" },
+    { label: "Membros", value: profilesCount ?? "-", helper: `${activeSubscriptionsCount ?? "-"} assinaturas ativas` },
+    { label: "Vitrine ativa", value: (bannersCount ?? 0) + (homeSectionsCount ?? 0), helper: `${bannersCount ?? "-"} banners • ${homeSectionsCount ?? "-"} blocos` },
+  ];
+
   return (
     <section className="space-y-8">
       <div className="overflow-hidden rounded-3xl border border-gold-500/20 bg-gradient-to-br from-gold-500/10 via-surface to-background p-5 shadow-premium sm:p-7">
@@ -59,10 +84,28 @@ export default function AdminPage() {
           {quickStats.map((stat) => (
             <div key={stat.label} className="rounded-2xl border border-border/80 bg-background/60 p-4">
               <p className="text-xs uppercase tracking-[0.18em] text-gold-300">{stat.label}</p>
-              <p className="mt-2 text-sm font-semibold text-foreground">{stat.value}</p>
+              <p className="mt-2 text-3xl font-semibold text-foreground">{stat.value}</p>
               <p className="mt-1 text-xs leading-5 text-muted">{stat.helper}</p>
             </div>
           ))}
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <div className="rounded-3xl border border-border bg-surface p-5 shadow-premium">
+          <p className="text-xs uppercase tracking-[0.2em] text-emerald-300">Saúde do conteúdo</p>
+          <p className="mt-2 text-lg font-semibold text-white">{publishedKitsCount ?? "-"} kits disponíveis</p>
+          <p className="mt-1 text-sm text-muted">Conteúdo publicado e pronto para consumo na biblioteca.</p>
+        </div>
+        <div className="rounded-3xl border border-border bg-surface p-5 shadow-premium">
+          <p className="text-xs uppercase tracking-[0.2em] text-cyan-300">Planos ativos</p>
+          <p className="mt-2 text-lg font-semibold text-white">{plansCount ?? "-"} plano(s)</p>
+          <p className="mt-1 text-sm text-muted">Planos disponíveis para controle de acesso e assinatura.</p>
+        </div>
+        <div className="rounded-3xl border border-border bg-surface p-5 shadow-premium">
+          <p className="text-xs uppercase tracking-[0.2em] text-amber-300">Operação visual</p>
+          <p className="mt-2 text-lg font-semibold text-white">{(bannersCount ?? 0) + (homeSectionsCount ?? 0)} item(ns) ativos</p>
+          <p className="mt-1 text-sm text-muted">Banners e blocos da home atualmente ativos.</p>
         </div>
       </div>
 
