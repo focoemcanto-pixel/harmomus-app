@@ -80,7 +80,7 @@ export default async function MinisterioPage({ searchParams }: { searchParams?: 
     supabase.from("ministries").select("*").eq("id", context.ministry.ministryId).single(),
     supabase
       .from("ministry_members")
-      .select("id,ministry_id,user_id,role,status,invited_email,invited_name,invite_token,invited_at,accepted_at,removed_at,created_at,updated_at")
+      .select("id,ministry_id,user_id,role,status,vocal_primary,vocal_secondary,invited_email,invited_name,invite_token,invited_at,accepted_at,removed_at,created_at,updated_at")
       .eq("ministry_id", context.ministry.ministryId)
       .order("created_at", { ascending: true }),
   ]);

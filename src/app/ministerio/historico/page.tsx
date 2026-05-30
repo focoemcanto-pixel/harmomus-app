@@ -39,6 +39,7 @@ function actionLabel(action?: string | null) {
     "member.restored": "Integrante restaurado",
     "member.promoted": "Permissão promovida",
     "member.demoted": "Permissão rebaixada",
+    "member.vocal_profile_updated": "Perfil vocal atualizado",
     "repertoire.created": "Repertório criado",
     "repertoire.kit_added": "Kit adicionado",
   };
