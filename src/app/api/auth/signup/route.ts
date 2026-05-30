@@ -157,26 +157,13 @@ async function createConfirmedMinistryMemberAccount(input: {
     .eq("invite_token", input.token)
     .maybeSingle();
 
-  if (inviteError || !invite?.id) {
-    throw new Error("Convite não encontrado ou expirado.");
-  }
-
-  if (!["invited", "pending"].includes(String(invite.status))) {
-    throw new Error("Este convite não está mais disponível.");
-  }
+  if (inviteError || !invite?.id) throw new Error("Convite não encontrado ou expirado.");
+  if (!["invited", "pending"].includes(String(invite.status))) throw new Error("Este convite não está mais disponível.");
 
   const inviteEmail = String(invite.invited_email ?? "").trim().toLowerCase();
-  if (inviteEmail !== input.email) {
-    throw new Error("Use o mesmo e-mail que recebeu o convite ministerial.");
-  }
-
-  if (!invite.ministry?.id || !["active", "trialing"].includes(String(invite.ministry.status ?? "").toLowerCase())) {
-    throw new Error("O plano ministerial não está ativo.");
-  }
-
-  if (invite.user_id) {
-    throw new Error("Este convite já está vinculado a uma conta. Entre com esse e-mail para aceitar.");
-  }
+  if (inviteEmail !== input.email) throw new Error("Use o mesmo e-mail que recebeu o convite ministerial.");
+  if (!invite.ministry?.id || !["active", "trialing"].includes(String(invite.ministry.status ?? "").toLowerCase())) throw new Error("O plano ministerial não está ativo.");
+  if (invite.user_id) throw new Error("Este convite já está vinculado a uma conta. Entre com esse e-mail para aceitar.");
 
   const { data: created, error: createError } = await admin.auth.admin.createUser({
     email: input.email,
@@ -194,37 +181,20 @@ async function createConfirmedMinistryMemberAccount(input: {
 
   if (createError || !created?.user?.id) {
     const message = String(createError?.message ?? "Não foi possível criar a conta.");
-    if (message.toLowerCase().includes("already") || message.toLowerCase().includes("registered") || message.toLowerCase().includes("exists")) {
-      throw new Error("Este e-mail já possui conta. Entre com esse e-mail para aceitar o convite ou recupere sua senha.");
-    }
+    if (message.toLowerCase().includes("already") || message.toLowerCase().includes("registered") || message.toLowerCase().includes("exists")) throw new Error("Este e-mail já possui conta. Entre com esse e-mail para aceitar o convite ou recupere sua senha.");
     throw new Error(message);
   }
 
-  await ensureUserAccess({
-    id: created.user.id,
-    email: input.email,
-    fullName: input.fullName,
-    selectedPlanSlug: "free",
-  });
+  await ensureUserAccess({ id: created.user.id, email: input.email, fullName: input.fullName, selectedPlanSlug: "free" });
 
   const { error: memberError } = await admin
     .from("ministry_members")
-    .update({
-      user_id: created.user.id,
-      status: "active",
-      accepted_at: now,
-      updated_at: now,
-    })
+    .update({ user_id: created.user.id, status: "active", accepted_at: now, updated_at: now })
     .eq("id", invite.id);
 
-  if (memberError) {
-    throw new Error(memberError.message || "Não foi possível ativar o convite ministerial.");
-  }
+  if (memberError) throw new Error(memberError.message || "Não foi possível ativar o convite ministerial.");
 
-  const { error: loginError } = await input.supabase.auth.signInWithPassword({
-    email: input.email,
-    password: input.password,
-  });
+  const { error: loginError } = await input.supabase.auth.signInWithPassword({ email: input.email, password: input.password });
 
   if (loginError) {
     const loginUrl = new URL("/login", input.request.url);
@@ -253,7 +223,7 @@ async function createPaidCheckoutAccount(input: {
   const { data: created, error: createError } = await admin.auth.admin.createUser({
     email: input.email,
     password: input.password,
-    email_confirm: true,
+    email_confirm: false,
     user_metadata: {
       full_name: input.fullName,
       username: input.username,
@@ -269,24 +239,14 @@ async function createPaidCheckoutAccount(input: {
     throw new Error(message);
   }
 
-  await ensureUserAccess({
-    id: created.user.id,
-    email: input.email,
-    fullName: input.fullName,
-    selectedPlanSlug: input.plan,
-  });
+  await ensureUserAccess({ id: created.user.id, email: input.email, fullName: input.fullName, selectedPlanSlug: input.plan });
 
   const { error: profileError } = await admin
     .from("profiles")
-    .update({
-      onboarding_status: "checkout_started",
-      onboarding_step: "waiting_payment",
-      updated_at: now,
-    })
+    .update({ onboarding_status: "pending_email_confirmation", onboarding_step: "waiting_payment", updated_at: now })
     .eq("id", created.user.id);
 
   if (profileError) throw new Error(profileError.message);
-
   return created.user.id as string;
 }
 
@@ -297,8 +257,8 @@ export async function POST(request: Request) {
   const username = slugifyUsername(String(formData.get("username") ?? ""));
   const phoneMasked = formatPhoneBR(String(formData.get("phone") ?? ""));
   const phone = normalizePhoneInternational(phoneMasked);
-  const password = String(formData.get("password") ?? "");
-  const confirmPassword = String(formData.get("confirm_password") ?? "");
+  const pass = String(formData.get("password") ?? "");
+  const confirmPass = String(formData.get("confirm_password") ?? "");
   const plan = String(formData.get("plan") ?? "free").toLowerCase() as PlanSlug;
   const redirectTo = safeRedirect(String(formData.get("redirect") ?? ""));
   const utmSource = String(formData.get("utm_source") ?? "");
@@ -311,8 +271,8 @@ export async function POST(request: Request) {
   if (!username) return fail("Informe um nome de usuário válido.", "username");
   if (!email || !email.includes("@")) return fail("Confira o e-mail informado e tente novamente.", "email");
   if (!phone || phone.replace(/\D/g, "").length < 12) return fail("Informe um WhatsApp válido.", "phone");
-  if (password.length < 6) return fail("A senha precisa ter pelo menos 6 caracteres.", "password");
-  if (password !== confirmPassword) return fail("As senhas não conferem.", "confirm_password");
+  if (pass.length < 6) return fail("A senha precisa ter pelo menos 6 caracteres.", "password");
+  if (pass !== confirmPass) return fail("As senhas não conferem.", "confirm_password");
 
   const supabase = await createClient();
   const origin = new URL(request.url).origin;
@@ -321,31 +281,8 @@ export async function POST(request: Request) {
 
   if (isMinistryInviteSignup) {
     try {
-      const response = await createConfirmedMinistryMemberAccount({
-        request,
-        supabase,
-        token: inviteToken,
-        email,
-        password,
-        fullName,
-        username,
-        phone,
-        plan,
-        origin,
-      });
-
-      runSignupSideEffectsAsync({
-        supabase,
-        plan,
-        origin,
-        fullName,
-        email,
-        phone,
-        username,
-        utmSource,
-        utmCampaign,
-      });
-
+      const response = await createConfirmedMinistryMemberAccount({ request, supabase, token: inviteToken, email, password: pass, fullName, username, phone, plan, origin });
+      runSignupSideEffectsAsync({ supabase, plan, origin, fullName, email, phone, username, utmSource, utmCampaign });
       return response;
     } catch (error) {
       return fail(error instanceof Error ? error.message : "Não foi possível ativar o convite ministerial.", "form");
@@ -354,18 +291,8 @@ export async function POST(request: Request) {
 
   if (isPaidPlan(plan)) {
     try {
-      const userId = await withTimeout(
-        createPaidCheckoutAccount({ email, password, fullName, username, phone, plan, origin }),
-        5000,
-        "createPaidCheckoutAccount",
-      );
-
-      const session = await withTimeout(
-        startStripeCheckoutForSignup(userId, email, plan, origin),
-        10000,
-        "startStripeCheckoutForSignup",
-      );
-
+      const userId = await withTimeout(createPaidCheckoutAccount({ email, password: pass, fullName, username, phone, plan, origin }), 5000, "createPaidCheckoutAccount");
+      const session = await withTimeout(startStripeCheckoutForSignup(userId, email, plan, origin), 10000, "startStripeCheckoutForSignup");
       return NextResponse.redirect(session.url, 303);
     } catch (error) {
       const mapped = mapSupabaseError(error instanceof Error ? error.message : "Não foi possível iniciar o checkout agora.");
@@ -376,18 +303,10 @@ export async function POST(request: Request) {
   const next = getPostSignupNext(plan, redirectTo);
   const { data, error: createError } = await supabase.auth.signUp({
     email,
-    password,
+    password: pass,
     options: {
       emailRedirectTo: `${origin}/auth/confirm/callback?next=${encodeURIComponent(next)}`,
-      data: {
-        full_name: fullName,
-        username,
-        phone,
-        plan_slug: plan,
-        origin,
-        utm_source: utmSource,
-        utm_campaign: utmCampaign,
-      },
+      data: { full_name: fullName, username, phone, plan_slug: plan, origin, utm_source: utmSource, utm_campaign: utmCampaign },
     },
   });
 
@@ -397,41 +316,15 @@ export async function POST(request: Request) {
   }
 
   const userId = data.user?.id;
-
-  if (!userId) {
-    return fail("Sua conta foi criada, mas não conseguimos concluir o acesso automaticamente. Tente entrar novamente.", "form");
-  }
+  if (!userId) return fail("Sua conta foi criada, mas não conseguimos concluir o acesso automaticamente. Tente entrar novamente.", "form");
 
   try {
-    await withTimeout(
-      ensureUserAccess({
-        id: userId,
-        email,
-        fullName,
-        selectedPlanSlug: plan,
-      }),
-      5000,
-      "ensureUserAccess",
-    );
+    await withTimeout(ensureUserAccess({ id: userId, email, fullName, selectedPlanSlug: plan }), 5000, "ensureUserAccess");
   } catch (accessError) {
     console.error("[signup] Failed to prepare local user access", accessError);
-    return fail(
-      accessError instanceof Error ? accessError.message : "Não foi possível preparar sua conta agora.",
-      "form",
-    );
+    return fail(accessError instanceof Error ? accessError.message : "Não foi possível preparar sua conta agora.", "form");
   }
 
-  runSignupSideEffectsAsync({
-    supabase,
-    plan,
-    origin,
-    fullName,
-    email,
-    phone,
-    username,
-    utmSource,
-    utmCampaign,
-  });
-
+  runSignupSideEffectsAsync({ supabase, plan, origin, fullName, email, phone, username, utmSource, utmCampaign });
   return NextResponse.redirect(new URL(next, request.url), 303);
 }
