@@ -1,6 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+import { ConfirmSubmitButton } from "@/components/admin/confirm-submit-button";
 import { PageHeader } from "@/components/admin/page-header";
 import { cancelMemberSubscription, deleteMember, getMemberById, reactivateMemberSubscription, updateMemberSubscription } from "@/lib/data/members";
 import { getPlans } from "@/lib/data/plans";
@@ -16,6 +17,21 @@ function formatDate(value?: string | null) {
     return new Date(value).toLocaleString("pt-BR");
   } catch {
     return "-";
+  }
+}
+
+function statusBadgeClass(status?: string | null) {
+  switch (status) {
+    case "active":
+    case "trialing":
+      return "border-emerald-400/40 bg-emerald-500/10 text-emerald-200";
+    case "pending":
+      return "border-amber-400/40 bg-amber-500/10 text-amber-200";
+    case "canceled":
+    case "inactive":
+      return "border-red-400/40 bg-red-500/10 text-red-200";
+    default:
+      return "border-border bg-surface-muted text-muted";
   }
 }
 
@@ -84,19 +100,22 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
     <section className="space-y-6">
       <PageHeader title="Detalhe do Membro" description="Gerencie plano, status, assinatura e ações administrativas." />
 
-      <div className="rounded-2xl border border-border bg-surface p-6 shadow-premium">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+      <div className="overflow-hidden rounded-3xl border border-border bg-gradient-to-br from-surface via-surface to-background shadow-premium">
+        <div className="flex flex-col gap-5 p-5 sm:p-6 md:flex-row md:items-center md:justify-between">
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-gold-300">Membro</p>
-            <h2 className="mt-2 text-2xl font-semibold text-white">{profile.full_name ?? "Sem nome"}</h2>
-            <p className="text-sm text-muted">{profile.email ?? "Sem e-mail"}</p>
+            <p className="text-xs uppercase tracking-[0.24em] text-gold-300">Membro</p>
+            <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">{profile.full_name ?? "Sem nome"}</h2>
+            <p className="mt-1 text-sm text-muted">{profile.email ?? "Sem e-mail"}</p>
           </div>
-          <a href="/admin/membros" className="rounded-xl border border-border px-4 py-2 text-sm text-muted hover:text-white">Voltar</a>
+          <div className="flex flex-wrap items-center gap-3">
+            <span className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] ${statusBadgeClass(currentStatus)}`}>{currentStatus}</span>
+            <a href="/admin/membros" className="rounded-xl border border-border px-4 py-2 text-sm text-muted transition hover:border-gold-500/40 hover:text-white">Voltar</a>
+          </div>
         </div>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
-        <div className="rounded-2xl border border-border bg-surface p-6 shadow-premium">
+        <div className="rounded-3xl border border-border bg-surface p-5 shadow-premium sm:p-6">
           <h3 className="text-lg font-semibold text-white">Dados do perfil</h3>
           <div className="mt-4 grid gap-3 text-sm text-muted md:grid-cols-2">
             <p><strong className="text-white">Nome:</strong> {profile.full_name ?? "-"}</p>
@@ -108,7 +127,7 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
           </div>
         </div>
 
-        <div className="rounded-2xl border border-border bg-surface p-6 shadow-premium">
+        <div className="rounded-3xl border border-border bg-surface p-5 shadow-premium sm:p-6">
           <h3 className="text-lg font-semibold text-white">Assinatura</h3>
           <div className="mt-4 grid gap-3 text-sm text-muted md:grid-cols-2">
             <p><strong className="text-white">Plano atual:</strong> {member.plan?.name ?? "Free"}</p>
@@ -121,34 +140,35 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
         </div>
       </div>
 
-      <form action={save} className="rounded-2xl border border-border bg-surface p-6 shadow-premium">
+      <form action={save} className="rounded-3xl border border-border bg-surface p-5 shadow-premium sm:p-6">
         <input type="hidden" name="user_id" value={profile.id ?? id} />
         <h3 className="text-lg font-semibold text-white">Alterar plano/status</h3>
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
+        <p className="mt-1 text-sm text-muted">Use esta área para ajustes administrativos manuais, suporte e correções de acesso.</p>
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
           <label className="text-sm text-muted">Plano
-            <select name="plan_id" defaultValue={currentPlanId} className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3 text-white">
+            <select name="plan_id" defaultValue={currentPlanId} className="mt-2 h-12 w-full rounded-xl border border-border bg-background px-3 text-white outline-none transition focus:border-gold-500/50">
               <option value="">Free</option>
               {plans.map((plan: any) => <option key={plan.id} value={plan.id}>{plan.name}</option>)}
             </select>
           </label>
           <label className="text-sm text-muted">Status
-            <select name="status" defaultValue={currentStatus} className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3 text-white">
+            <select name="status" defaultValue={currentStatus} className="mt-2 h-12 w-full rounded-xl border border-border bg-background px-3 text-white outline-none transition focus:border-gold-500/50">
               {STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status}</option>)}
             </select>
           </label>
         </div>
-        <div className="mt-5 flex flex-wrap gap-3">
-          <button className="rounded-xl bg-gold-500/20 px-5 py-3 text-sm font-semibold text-gold-300 hover:bg-gold-500/30">Salvar alteração</button>
-          <button formAction={cancel} className="rounded-xl border border-red-500/50 px-5 py-3 text-sm font-semibold text-red-300 hover:bg-red-500/10">Cancelar assinatura</button>
-          <button formAction={reactivate} className="rounded-xl border border-emerald-500/50 px-5 py-3 text-sm font-semibold text-emerald-300 hover:bg-emerald-500/10">Reativar assinatura</button>
+        <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+          <button className="rounded-xl bg-gold-500/20 px-5 py-3 text-sm font-semibold text-gold-300 transition hover:bg-gold-500/30">Salvar alteração</button>
+          <ConfirmSubmitButton formAction={cancel} message="Tem certeza que deseja cancelar a assinatura deste membro?" className="rounded-xl border border-red-500/50 px-5 py-3 text-sm font-semibold text-red-300 transition hover:bg-red-500/10">Cancelar assinatura</ConfirmSubmitButton>
+          <ConfirmSubmitButton formAction={reactivate} message="Tem certeza que deseja reativar a assinatura deste membro?" className="rounded-xl border border-emerald-500/50 px-5 py-3 text-sm font-semibold text-emerald-300 transition hover:bg-emerald-500/10">Reativar assinatura</ConfirmSubmitButton>
         </div>
       </form>
 
-      <form action={remove} className="rounded-2xl border border-red-500/40 bg-red-500/5 p-6 shadow-premium">
+      <form action={remove} className="rounded-3xl border border-red-500/40 bg-red-500/5 p-5 shadow-premium sm:p-6">
         <input type="hidden" name="user_id" value={profile.id ?? id} />
-        <h3 className="text-lg font-semibold text-red-200">Excluir membro</h3>
-        <p className="mt-2 text-sm text-red-100/80">Remove o usuário do Auth, perfil, assinatura e playlists vinculadas. Use apenas para cadastros de teste ou duplicados.</p>
-        <button className="mt-4 rounded-xl border border-red-400/70 px-5 py-3 text-sm font-semibold text-red-200 hover:bg-red-500/10">Excluir definitivamente</button>
+        <h3 className="text-lg font-semibold text-red-200">Zona de risco</h3>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-red-100/80">Excluir este membro remove o usuário do Auth, perfil, assinatura, playlists e registros vinculados. Use apenas para cadastros de teste, duplicados ou casos de suporte já conferidos.</p>
+        <ConfirmSubmitButton message="Atenção: esta ação é definitiva e removerá usuário, assinatura, playlists e dados vinculados. Deseja continuar?" className="mt-5 rounded-xl border border-red-400/70 px-5 py-3 text-sm font-semibold text-red-200 transition hover:bg-red-500/10">Excluir definitivamente</ConfirmSubmitButton>
       </form>
     </section>
   );
