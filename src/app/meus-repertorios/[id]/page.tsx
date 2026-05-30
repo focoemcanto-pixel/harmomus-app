@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, CalendarDays, CheckCircle2, Circle, ListMusic, Music2, PlayCircle, ShieldCheck } from "lucide-react";
+import { ArrowLeft, CalendarDays, ListMusic, Music2, ShieldCheck } from "lucide-react";
 
+import { MinistryPlaylistPlayer } from "@/components/ministerio/ministry-playlist-player";
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -19,8 +20,6 @@ type KitRow = {
   name: string;
   artist: string | null;
   cover_url: string | null;
-  original_tone: string | null;
-  default_tone: string | null;
 };
 
 type RepertoireItem = {
@@ -270,7 +269,7 @@ export default async function MeuRepertorioDetalhePage({ params }: { params: Pro
   const { data: kits, error: kitsError } = kitIds.length
     ? await admin
         .from("kits")
-        .select("id,slug,name,artist,cover_url,original_tone,default_tone")
+        .select("id,slug,name,artist,cover_url")
         .in("id", kitIds)
     : { data: [], error: null };
 
@@ -291,12 +290,12 @@ export default async function MeuRepertorioDetalhePage({ params }: { params: Pro
       <main className="min-h-screen bg-gradient-to-b from-[#050816] via-[#080b18] to-[#06070c] px-4 py-8 text-white md:px-8">
         <section className="mx-auto max-w-6xl">
           <Link href="/meus-repertorios" className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10">
-            <ArrowLeft className="h-4 w-4" /> Voltar para meus repertórios
+            <ArrowLeft className="h-4 w-4" /> Voltar para Minha Escala
           </Link>
 
           <div className="mt-6 overflow-hidden rounded-[2rem] border border-cyan-300/20 bg-gradient-to-br from-[#0b1120] via-[#120d24] to-[#06111f] p-6 shadow-[0_30px_100px_rgba(34,211,238,0.16)] md:p-10">
             <div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/25 bg-cyan-400/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100">
-              <ListMusic className="h-4 w-4" /> Repertório compartilhado
+              <ListMusic className="h-4 w-4" /> Playlist Ministerial
             </div>
             <h1 className="mt-5 text-3xl font-black tracking-tight md:text-5xl">{repertoire.name}</h1>
             {repertoire.description ? <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-300 md:text-base">{repertoire.description}</p> : null}
@@ -307,7 +306,7 @@ export default async function MeuRepertorioDetalhePage({ params }: { params: Pro
                 <CalendarDays className="h-4 w-4 text-cyan-200" /> {repertoire.event_date ? formatDate(repertoire.event_date) : `Criado em ${formatDate(repertoire.created_at)}`}
               </span>
               <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2">
-                <Music2 className="h-4 w-4 text-cyan-200" /> {studiedCount}/{repertoireItems.length} estudadas
+                <Music2 className="h-4 w-4 text-cyan-200" /> {repertoireItems.length} música{repertoireItems.length === 1 ? "" : "s"}
               </span>
               {isReady ? (
                 <span className="inline-flex items-center gap-2 rounded-full border border-emerald-300/25 bg-emerald-400/10 px-4 py-2 text-emerald-100">
@@ -319,67 +318,38 @@ export default async function MeuRepertorioDetalhePage({ params }: { params: Pro
 
           {repertoireItems.length ? (
             <div className="mt-8 grid gap-4">
-              {repertoireItems.map((item) => {
-                const kit = item.kits;
-                const progress = progressMap.get(item.id);
-                const studied = Boolean(progress?.studied);
-                if (!kit) return null;
-                return (
-                  <div key={item.id} className={`overflow-hidden rounded-3xl border shadow-xl transition ${studied ? "border-emerald-300/30 bg-emerald-400/[0.08]" : "border-white/10 bg-white/[0.045] hover:border-cyan-300/30 hover:bg-white/[0.07]"}`}>
-                    <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between md:p-5">
-                      <div className="flex items-center gap-4">
-                        <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-white/5 text-lg font-black text-zinc-300">
-                          {kit.cover_url ? <img src={kit.cover_url} alt={kit.name} className="h-full w-full object-cover" /> : item.position}
-                        </div>
-                        <div>
-                          <p className="text-xs uppercase tracking-[0.16em] text-cyan-200">Música #{item.position}</p>
-                          <h2 className="mt-1 text-2xl font-black text-white">{kit.name}</h2>
-                          <p className="mt-1 text-sm text-zinc-400">{kit.artist || "Kit vocal"}</p>
-                          <div className="mt-3 flex flex-wrap gap-2 text-xs text-zinc-300">
-                            {kit.default_tone || kit.original_tone ? (
-                              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
-                                Tom: {kit.default_tone || kit.original_tone}
-                              </span>
-                            ) : null}
-                            {studied ? (
-                              <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300/25 bg-emerald-400/10 px-3 py-1 text-emerald-100">
-                                <CheckCircle2 className="h-3.5 w-3.5" /> Estudada
-                              </span>
-                            ) : null}
-                          </div>
-                        </div>
-                      </div>
+              <MinistryPlaylistPlayer
+                repertoireId={repertoire.id}
+                toggleStudiedAction={toggleStudied}
+                tracks={repertoireItems.flatMap((item) => {
+                  const kit = item.kits;
+                  if (!kit) return [];
 
-                      <div className="flex flex-wrap gap-2">
-                        <form action={toggleStudied}>
-                          <input type="hidden" name="repertoire_id" value={repertoire.id} />
-                          <input type="hidden" name="item_id" value={item.id} />
-                          <input type="hidden" name="kit_id" value={item.kit_id ?? kit.id} />
-                          <input type="hidden" name="next_studied" value={studied ? "false" : "true"} />
-                          <button className={`inline-flex w-fit items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-black transition ${studied ? "border border-emerald-300/30 bg-emerald-400/10 text-emerald-100 hover:bg-emerald-400/20" : "border border-white/10 bg-white/[0.04] text-zinc-100 hover:bg-white/10"}`}>
-                            {studied ? <CheckCircle2 className="h-4 w-4" /> : <Circle className="h-4 w-4" />}
-                            {studied ? "Estudada" : "Estudei"}
-                          </button>
-                        </form>
-                        <Link href={`/biblioteca/${kit.slug}`} className="inline-flex w-fit items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-cyan-200">
-                          <PlayCircle className="h-4 w-4" /> Estudar kit
-                        </Link>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+                  return [
+                    {
+                      id: item.id,
+                      position: item.position,
+                      name: kit.name,
+                      artist: kit.artist,
+                      coverUrl: kit.cover_url,
+                      href: `/biblioteca/${kit.slug}`,
+                      kitId: item.kit_id ?? kit.id,
+                      studied: Boolean(progressMap.get(item.id)?.studied),
+                    },
+                  ];
+                })}
+              />
 
               <div className={`rounded-3xl border p-6 shadow-xl ${isReady ? "border-emerald-300/30 bg-emerald-400/[0.08]" : canConfirmReady ? "border-cyan-300/25 bg-cyan-400/[0.08]" : "border-white/10 bg-white/[0.04]"}`}>
                 <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                   <div>
                     <p className="text-xs uppercase tracking-[0.16em] text-cyan-200">Confirmação final</p>
                     <h2 className="mt-2 text-2xl font-black text-white">
-                      {isReady ? "Você confirmou que está pronto" : "Estou pronto para tocar este repertório"}
+                      {isReady ? "Você confirmou que está pronto" : "Estou pronto para tocar esta escala"}
                     </h2>
                     <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-300">
                       {isReady
-                        ? "Sua liderança poderá acompanhar que você concluiu o estudo deste repertório."
+                        ? "Sua liderança poderá acompanhar que você concluiu o estudo desta escala."
                         : canConfirmReady
                           ? "Todas as músicas foram marcadas como estudadas. Agora você pode confirmar que está pronto para participar."
                           : "Marque todas as músicas como estudadas para liberar esta confirmação."}
@@ -405,7 +375,7 @@ export default async function MeuRepertorioDetalhePage({ params }: { params: Pro
               </div>
               <h2 className="mt-5 text-2xl font-black text-white">Nenhuma música adicionada ainda</h2>
               <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-zinc-400">
-                Quando a liderança adicionar kits, eles aparecerão aqui para estudo.
+                Quando a liderança adicionar músicas, elas aparecerão aqui para estudo.
               </p>
             </div>
           )}
