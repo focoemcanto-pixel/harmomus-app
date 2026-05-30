@@ -51,6 +51,17 @@ function toneStatusLabel(source: "original" | "generated" | null | undefined) {
   return source === "original" ? "Original" : "Harmomus IA";
 }
 
+function friendlyPlaybackError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (/not supported|no supported source|media|decode|failed/i.test(message)) {
+    return "Não foi possível iniciar este áudio agora. Tente tocar novamente ou escolha outro tom/voz.";
+  }
+  if (/not allowed|interrupted|abort/i.test(message)) {
+    return "A reprodução foi interrompida pelo navegador. Toque novamente para continuar.";
+  }
+  return "Não foi possível reproduzir este áudio agora.";
+}
+
 export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const pitchControllerRef = useRef<PitchPlaybackController | null>(null);
@@ -64,6 +75,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
   const [duration, setDuration] = useState(0);
   const [replayAtEnd, setReplayAtEnd] = useState(false);
   const [isLoadingPlayback, setIsLoadingPlayback] = useState(false);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
 
   const kits = playlist.kits;
   const currentKit = kits[currentKitIndex] ?? null;
@@ -126,17 +138,16 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
       try { audio.currentTime = 0; } catch {}
 
       if (nextSrc) {
-        if (audio.getAttribute("src") !== nextSrc && audio.src !== nextSrc) {
+        const currentSrc = audio.getAttribute("src") || audio.src || "";
+        if (currentSrc !== nextSrc) {
           audio.src = nextSrc;
         }
-        audio.load();
       } else {
         audio.removeAttribute("src");
-        audio.src = "";
-        try { audio.load(); } catch {}
       }
     }
 
+    setPlaybackError(null);
     setCurrentTime(0);
     setDuration(0);
     setIsPlaying(false);
@@ -213,9 +224,10 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
     const src = playableTrack?.streamUrl ?? null;
     if (!audio || !src || isLoadingPlayback) return;
 
-    const normalizedCurrentSrc = audio.currentSrc || audio.src || audio.getAttribute("src") || "";
-    if (!normalizedCurrentSrc.includes(src) && normalizedCurrentSrc !== src) {
+    const currentSrc = audio.getAttribute("src") || audio.currentSrc || audio.src || "";
+    if (currentSrc !== src) {
       resetPlayback(src);
+      audio.src = src;
     }
 
     if (isPlaying) {
@@ -228,6 +240,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
     const session = ++pitchSessionRef.current;
 
     try {
+      setPlaybackError(null);
       setIsLoadingPlayback(true);
 
       if (semitoneShift === 0) {
@@ -249,6 +262,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
       if (session === pitchSessionRef.current) setIsPlaying(true);
     } catch (error) {
       console.error("[PlaylistPlayer] playback failed", error);
+      setPlaybackError(friendlyPlaybackError(error));
       setIsPlaying(false);
     } finally {
       setIsLoadingPlayback(false);
@@ -287,15 +301,18 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,#1f2840_0%,#06070c_40%)] p-4 md:p-8">
       <audio
-        key={activeTrackKey}
         ref={audioRef}
-        preload="metadata"
-        src={playableTrack?.streamUrl ?? undefined}
+        preload="none"
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
         onEnded={() => {
           disposePitchController();
           next();
+        }}
+        onError={() => {
+          setPlaybackError("Não foi possível carregar este áudio. Tente novamente ou escolha outro tom/voz.");
+          setIsPlaying(false);
+          setIsLoadingPlayback(false);
         }}
         onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
         onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
@@ -364,6 +381,11 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
                 {!toneResolution?.isAvailable && selectedTone ? (
                   <p className="mt-2 rounded-xl border border-red-400/20 bg-red-400/10 px-3 py-2 text-xs text-red-200">
                     Este tom ainda não está disponível para este kit dentro do limite configurado.
+                  </p>
+                ) : null}
+                {playbackError ? (
+                  <p className="mt-2 rounded-xl border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">
+                    {playbackError}
                   </p>
                 ) : null}
               </div>
