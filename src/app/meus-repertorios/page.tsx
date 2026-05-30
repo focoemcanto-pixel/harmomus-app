@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { CalendarDays, ListMusic, Music2, ShieldCheck } from "lucide-react";
+import { CalendarDays, ListMusic, Music2, ShieldCheck, ArrowRight } from "lucide-react";
 
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
@@ -77,7 +77,7 @@ export default async function MeusRepertoriosPage() {
     return (
       <ErrorState
         title="Convite ministerial pendente"
-        message="Esta conta ainda não está vinculada a um ministério ativo. Para ver repertórios compartilhados, aceite o convite enviado pela liderança ou peça um novo convite para este mesmo e-mail."
+        message="Esta conta ainda não está vinculada a um ministério ativo. Para ver sua escala ministerial, aceite o convite enviado pela liderança ou peça um novo convite para este mesmo e-mail."
       />
     );
   }
@@ -96,7 +96,7 @@ export default async function MeusRepertoriosPage() {
   if (ministryResult.error || repertoireResult.error) {
     const message = getErrorMessage(ministryResult.error ?? repertoireResult.error);
     console.error("[MeusRepertoriosPage] failed to load repertoires", ministryResult.error ?? repertoireResult.error);
-    return <ErrorState title="Não foi possível carregar seus repertórios" message={message} />;
+    return <ErrorState title="Não foi possível carregar sua escala" message={message} />;
   }
 
   const ministry = ministryResult.data;
@@ -112,7 +112,7 @@ export default async function MeusRepertoriosPage() {
   if (itemResult.error) {
     const message = getErrorMessage(itemResult.error);
     console.error("[MeusRepertoriosPage] failed to load repertoire items", itemResult.error);
-    return <ErrorState title="Não foi possível carregar os kits dos repertórios" message={message} />;
+    return <ErrorState title="Não foi possível carregar as músicas da escala" message={message} />;
   }
 
   const itemCounts = countItemsByRepertoire(itemResult.data);
@@ -129,9 +129,9 @@ export default async function MeusRepertoriosPage() {
             <div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/25 bg-cyan-400/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100">
               <ShieldCheck className="h-4 w-4" /> Premium via Ministério
             </div>
-            <h1 className="mt-5 text-3xl font-black tracking-tight md:text-5xl">Meus Repertórios</h1>
+            <h1 className="mt-5 text-3xl font-black tracking-tight md:text-5xl">Minha Escala</h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-300 md:text-base">
-              Repertórios compartilhados por {ministry?.name ?? "seu ministério"} para você estudar os kits definidos pela liderança.
+              Escalas e cultos compartilhados por {ministry?.name ?? "seu ministério"} para você acompanhar a playlist musical definida pela liderança.
             </p>
           </div>
 
@@ -143,21 +143,26 @@ export default async function MeusRepertoriosPage() {
                   <Link
                     key={repertoire.id}
                     href={`/meus-repertorios/${repertoire.id}`}
-                    className="group rounded-3xl border border-white/10 bg-white/[0.045] p-5 shadow-xl transition hover:-translate-y-1 hover:border-cyan-300/35 hover:bg-white/[0.07]"
+                    className="group flex min-h-[230px] flex-col rounded-3xl border border-white/10 bg-white/[0.045] p-5 shadow-xl transition hover:-translate-y-1 hover:border-cyan-300/35 hover:bg-white/[0.07]"
                   >
                     <div className="flex items-start justify-between gap-4">
                       <div className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-3 text-cyan-100">
                         <ListMusic className="h-5 w-5" />
                       </div>
                       <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-bold text-zinc-300">
-                        {kitCount} kit{kitCount === 1 ? "" : "s"}
+                        {kitCount} música{kitCount === 1 ? "" : "s"}
                       </span>
                     </div>
                     <h2 className="mt-5 text-2xl font-black text-white group-hover:text-cyan-100">{repertoire.name}</h2>
                     {repertoire.description ? <p className="mt-2 line-clamp-2 text-sm leading-6 text-zinc-400">{repertoire.description}</p> : null}
-                    <div className="mt-5 flex items-center gap-2 text-xs text-zinc-400">
-                      <CalendarDays className="h-4 w-4" />
-                      {repertoire.event_date ? formatDate(repertoire.event_date) : `Criado em ${formatDate(repertoire.created_at)}`}
+                    <div className="mt-auto pt-5">
+                      <div className="flex items-center gap-2 text-xs text-zinc-400">
+                        <CalendarDays className="h-4 w-4" />
+                        {repertoire.event_date ? formatDate(repertoire.event_date) : `Criado em ${formatDate(repertoire.created_at)}`}
+                      </div>
+                      <span className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-4 py-3 text-sm font-black text-slate-950 transition group-hover:bg-cyan-200">
+                        Abrir <ArrowRight className="h-4 w-4" />
+                      </span>
                     </div>
                   </Link>
                 );
@@ -168,9 +173,9 @@ export default async function MeusRepertoriosPage() {
               <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-400/10 text-cyan-100">
                 <Music2 className="h-7 w-7" />
               </div>
-              <h2 className="mt-5 text-2xl font-black text-white">Nenhum repertório disponível ainda</h2>
+              <h2 className="mt-5 text-2xl font-black text-white">Nenhuma escala disponível ainda</h2>
               <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-zinc-400">
-                Quando a liderança do ministério criar repertórios, eles aparecerão aqui para você estudar.
+                Quando a liderança do ministério criar escalas ou cultos, eles aparecerão aqui como playlists para você acompanhar.
               </p>
               <Link href="/todos-os-kits" className="mt-6 inline-flex rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-cyan-200">
                 Explorar kits
