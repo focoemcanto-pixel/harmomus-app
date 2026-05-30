@@ -238,6 +238,58 @@ async function createConfirmedMinistryMemberAccount(input: {
   return NextResponse.redirect(target, 303);
 }
 
+async function createPaidCheckoutAccount(input: {
+  email: string;
+  password: string;
+  fullName: string;
+  username: string;
+  phone: string;
+  plan: PlanSlug;
+  origin: string;
+}) {
+  const admin = createSupabaseAdminClient() as any;
+  const now = new Date().toISOString();
+
+  const { data: created, error: createError } = await admin.auth.admin.createUser({
+    email: input.email,
+    password: input.password,
+    email_confirm: true,
+    user_metadata: {
+      full_name: input.fullName,
+      username: input.username,
+      phone: input.phone,
+      plan_slug: input.plan,
+      origin: input.origin,
+      checkout_flow: "paid_pre_checkout",
+    },
+  });
+
+  if (createError || !created?.user?.id) {
+    const message = String(createError?.message ?? "Não foi possível criar a conta.");
+    throw new Error(message);
+  }
+
+  await ensureUserAccess({
+    id: created.user.id,
+    email: input.email,
+    fullName: input.fullName,
+    selectedPlanSlug: input.plan,
+  });
+
+  const { error: profileError } = await admin
+    .from("profiles")
+    .update({
+      onboarding_status: "checkout_started",
+      onboarding_step: "waiting_payment",
+      updated_at: now,
+    })
+    .eq("id", created.user.id);
+
+  if (profileError) throw new Error(profileError.message);
+
+  return created.user.id as string;
+}
+
 export async function POST(request: Request) {
   const formData = await request.formData();
   const fullName = String(formData.get("full_name") ?? "").trim();
@@ -300,6 +352,27 @@ export async function POST(request: Request) {
     }
   }
 
+  if (isPaidPlan(plan)) {
+    try {
+      const userId = await withTimeout(
+        createPaidCheckoutAccount({ email, password, fullName, username, phone, plan, origin }),
+        5000,
+        "createPaidCheckoutAccount",
+      );
+
+      const session = await withTimeout(
+        startStripeCheckoutForSignup(userId, email, plan, origin),
+        10000,
+        "startStripeCheckoutForSignup",
+      );
+
+      return NextResponse.redirect(session.url, 303);
+    } catch (error) {
+      const mapped = mapSupabaseError(error instanceof Error ? error.message : "Não foi possível iniciar o checkout agora.");
+      return fail(mapped.message, mapped.field);
+    }
+  }
+
   const next = getPostSignupNext(plan, redirectTo);
   const { data, error: createError } = await supabase.auth.signUp({
     email,
@@ -359,24 +432,6 @@ export async function POST(request: Request) {
     utmSource,
     utmCampaign,
   });
-
-  if (isPaidPlan(plan)) {
-    try {
-      const session = await withTimeout(
-        startStripeCheckoutForSignup(userId, email, plan, origin),
-        10000,
-        "startStripeCheckoutForSignup",
-      );
-
-      return NextResponse.redirect(session.url, 303);
-    } catch (checkoutError) {
-      console.error("[signup] Failed to start checkout after paid signup", checkoutError);
-      return fail(
-        checkoutError instanceof Error ? checkoutError.message : "Não foi possível iniciar o checkout agora.",
-        "form",
-      );
-    }
-  }
 
   return NextResponse.redirect(new URL(next, request.url), 303);
 }
