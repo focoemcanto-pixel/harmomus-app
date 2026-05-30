@@ -21,7 +21,7 @@ export function MinistryOnboardingModal({ ministryId, remainingSeats }: { minist
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[90] grid place-items-center bg-black/70 px-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[90] grid min-h-[100dvh] place-items-center overflow-y-auto bg-black/70 px-4 py-8 backdrop-blur-sm">
       <div className="relative w-full max-w-2xl overflow-hidden rounded-[2rem] border border-cyan-300/25 bg-gradient-to-br from-[#08111f] via-[#170e2a] to-[#06111f] p-6 text-white shadow-[0_30px_120px_rgba(34,211,238,0.22)] md:p-8">
         <button
           type="button"
@@ -62,14 +62,14 @@ export function MinistryOnboardingModal({ ministryId, remainingSeats }: { minist
           <Link
             href="#convidar-integrante"
             onClick={close}
-            className="inline-flex h-12 flex-1 items-center justify-center rounded-2xl bg-gradient-to-r from-cyan-300 to-fuchsia-400 px-5 text-sm font-semibold text-slate-950 shadow-[0_18px_50px_rgba(34,211,238,0.18)]"
+            className="inline-flex h-14 flex-1 items-center justify-center rounded-2xl bg-gradient-to-r from-cyan-300 to-fuchsia-400 px-6 text-base font-extrabold text-slate-950 shadow-[0_18px_50px_rgba(34,211,238,0.24)] transition hover:brightness-110"
           >
             Cadastrar integrantes agora
           </Link>
           <button
             type="button"
             onClick={close}
-            className="h-12 rounded-2xl border border-white/15 bg-white/5 px-5 text-sm font-semibold text-white transition hover:bg-white/10"
+            className="h-14 rounded-2xl border border-white/15 bg-white/5 px-6 text-base font-bold text-white transition hover:bg-white/10"
           >
             Fazer isso depois
           </button>
