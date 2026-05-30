@@ -15,7 +15,7 @@ type RepertoireRow = {
   description: string | null;
   event_date: string | null;
   created_at: string;
-  ministry_repertoire_items?: { id: string }[];
+  kitCount: number;
 };
 
 function formatDate(value?: string | null, fallback = "—") {
@@ -23,6 +23,16 @@ function formatDate(value?: string | null, fallback = "—") {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return fallback;
   return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+function countItemsByRepertoire(items: any[] | null | undefined) {
+  const counts = new Map<string, number>();
+  for (const item of items ?? []) {
+    const repertoireId = String(item.repertoire_id ?? "");
+    if (!repertoireId) continue;
+    counts.set(repertoireId, (counts.get(repertoireId) ?? 0) + 1);
+  }
+  return counts;
 }
 
 export default async function MeusRepertoriosPage() {
@@ -37,7 +47,7 @@ export default async function MeusRepertoriosPage() {
     admin.from("ministries").select("id,name").eq("id", context.ministry.ministryId).maybeSingle(),
     admin
       .from("ministry_repertoires")
-      .select("id,name,description,event_date,created_at,ministry_repertoire_items(id)")
+      .select("id,name,description,event_date,created_at")
       .eq("ministry_id", context.ministry.ministryId)
       .eq("archived", false)
       .order("event_date", { ascending: true, nullsFirst: false })
@@ -46,7 +56,21 @@ export default async function MeusRepertoriosPage() {
 
   if (error) throw new Error(error.message);
 
-  const rows = (repertoires ?? []) as RepertoireRow[];
+  const repertoireIds = (repertoires ?? []).map((repertoire: any) => repertoire.id).filter(Boolean);
+  const { data: itemRows, error: itemCountError } = repertoireIds.length
+    ? await admin
+        .from("ministry_repertoire_items")
+        .select("id,repertoire_id")
+        .in("repertoire_id", repertoireIds)
+    : { data: [], error: null };
+
+  if (itemCountError) throw new Error(itemCountError.message);
+
+  const itemCounts = countItemsByRepertoire(itemRows);
+  const rows = ((repertoires ?? []) as any[]).map((repertoire) => ({
+    ...repertoire,
+    kitCount: itemCounts.get(String(repertoire.id)) ?? 0,
+  })) as RepertoireRow[];
 
   return (
     <PublicAppShell>
@@ -65,7 +89,7 @@ export default async function MeusRepertoriosPage() {
           {rows.length ? (
             <div className="mt-8 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
               {rows.map((repertoire) => {
-                const kitCount = repertoire.ministry_repertoire_items?.length ?? 0;
+                const kitCount = repertoire.kitCount;
                 return (
                   <Link
                     key={repertoire.id}
