@@ -8,6 +8,10 @@ export interface KitTrack {
   title: string;
   semitoneShift?: number;
   trackId?: string;
+  mediaTitle?: string;
+  mediaArtist?: string;
+  mediaAlbum?: string;
+  artworkUrl?: string | null;
 }
 
 function getTrackIdentity(track: KitTrack | null | undefined) {
@@ -68,6 +72,45 @@ function normalizePlaybackError(error: unknown) {
     return null;
   }
   return message || "Não foi possível reproduzir este áudio agora.";
+}
+
+function artworkFromTrack(track: KitTrack) {
+  const src = track.artworkUrl?.trim();
+  if (!src) return undefined;
+  return [
+    { src, sizes: "96x96", type: "image/jpeg" },
+    { src, sizes: "256x256", type: "image/jpeg" },
+    { src, sizes: "512x512", type: "image/jpeg" },
+  ];
+}
+
+function updateMediaSessionMetadata(track: KitTrack) {
+  if (typeof navigator === "undefined" || !("mediaSession" in navigator) || typeof MediaMetadata === "undefined") return;
+
+  try {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: track.mediaTitle || track.title || "Harmomus",
+      artist: track.mediaArtist || "Harmomus",
+      album: track.mediaAlbum || "Harmomus",
+      artwork: artworkFromTrack(track),
+    });
+  } catch (error) {
+    console.warn("[HarmomusPlayer] Could not update media session metadata", error);
+  }
+}
+
+function setMediaSessionActionHandlers(actions: {
+  play?: () => void;
+  pause?: () => void;
+  seekbackward?: () => void;
+  seekforward?: () => void;
+}) {
+  if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
+
+  try { navigator.mediaSession.setActionHandler("play", actions.play ?? null); } catch {}
+  try { navigator.mediaSession.setActionHandler("pause", actions.pause ?? null); } catch {}
+  try { navigator.mediaSession.setActionHandler("seekbackward", actions.seekbackward ?? null); } catch {}
+  try { navigator.mediaSession.setActionHandler("seekforward", actions.seekforward ?? null); } catch {}
 }
 
 export function useKitAudioEngine() {
@@ -218,6 +261,24 @@ export function useKitAudioEngine() {
       setErrorMessage(null);
       setTrack(nextTrack);
       trackRef.current = nextTrack;
+      updateMediaSessionMetadata(nextTrack);
+      setMediaSessionActionHandlers({
+        play: () => { void playTrack(nextTrack); },
+        pause: () => {
+          const currentAudio = audioRef.current;
+          try { pitchControllerRef.current?.pause(); } catch {}
+          try { currentAudio?.pause(); } catch {}
+          setIsPlaying(false);
+        },
+        seekbackward: () => {
+          const currentAudio = audioRef.current;
+          if (currentAudio) currentAudio.currentTime = Math.max(0, currentAudio.currentTime - 10);
+        },
+        seekforward: () => {
+          const currentAudio = audioRef.current;
+          if (currentAudio) currentAudio.currentTime = currentAudio.currentTime + 10;
+        },
+      });
 
       const abortController = new AbortController();
       abortRef.current = abortController;
