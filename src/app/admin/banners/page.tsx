@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { ConfirmSubmitButton } from "@/components/admin/confirm-submit-button";
 import { PageHeader } from "@/components/admin/page-header";
 import { deleteHomeBanner, getAdminHomeBanners, updateHomeBanner } from "@/lib/data/home-banners";
+import { setFlashToast } from "@/lib/flash";
 
 function formatDateTime(value?: string | null) {
   if (!value) return "Sem agenda";
@@ -28,8 +29,9 @@ export default async function AdminBannersPage() {
   async function saveBanner(formData: FormData) {
     "use server";
     const id = String(formData.get("id") ?? "");
+    const title = String(formData.get("title") ?? "").trim();
     const payload = {
-      title: String(formData.get("title") ?? "").trim(),
+      title,
       subtitle: String(formData.get("subtitle") ?? "").trim(),
       image_url: String(formData.get("image_url") ?? "").trim(),
       mobile_image_url: String(formData.get("mobile_image_url") ?? "").trim() || null,
@@ -42,11 +44,17 @@ export default async function AdminBannersPage() {
       ends_at: String(formData.get("ends_at") ?? "") || null,
     };
 
-    if (!id) {
-      const { createHomeBanner } = await import("@/lib/data/home-banners");
-      await createHomeBanner(payload);
-    } else {
-      await updateHomeBanner(id, payload);
+    try {
+      if (!id) {
+        const { createHomeBanner } = await import("@/lib/data/home-banners");
+        await createHomeBanner(payload);
+        await setFlashToast("success", `Banner ${title || "sem título"} criado com sucesso.`);
+      } else {
+        await updateHomeBanner(id, payload);
+        await setFlashToast("success", `Banner ${title || "sem título"} atualizado com sucesso.`);
+      }
+    } catch (error) {
+      await setFlashToast("error", error instanceof Error ? error.message : "Não foi possível salvar o banner.");
     }
 
     revalidatePath("/");
@@ -55,7 +63,16 @@ export default async function AdminBannersPage() {
 
   async function removeBanner(formData: FormData) {
     "use server";
-    await deleteHomeBanner(String(formData.get("id") ?? ""));
+    const id = String(formData.get("id") ?? "");
+    const title = String(formData.get("title") ?? "").trim();
+
+    try {
+      await deleteHomeBanner(id);
+      await setFlashToast("success", `Banner ${title || "selecionado"} excluído com sucesso.`);
+    } catch (error) {
+      await setFlashToast("error", error instanceof Error ? error.message : "Não foi possível excluir o banner.");
+    }
+
     revalidatePath("/");
     revalidatePath("/admin/banners");
   }
@@ -136,9 +153,10 @@ export default async function AdminBannersPage() {
 
                 <form action={removeBanner} className="rounded-2xl border border-red-500/30 bg-red-500/5 p-4">
                   <input type="hidden" name="id" value={banner.id} />
+                  <input type="hidden" name="title" value={banner.title || ""} />
                   <p className="text-sm font-semibold text-red-200">Zona de risco</p>
                   <p className="mt-1 text-xs text-red-100/70">Excluir remove este banner da administração e da home.</p>
-                  <ConfirmSubmitButton message={`Tem certeza que deseja excluir o banner \"${banner.title || "sem título"}\"?`} className="mt-3 rounded-xl border border-red-400/60 px-4 py-2.5 text-sm font-semibold text-red-200 transition hover:bg-red-500/10">
+                  <ConfirmSubmitButton title="Excluir banner?" confirmLabel="Sim, excluir banner" message={`Tem certeza que deseja excluir o banner \"${banner.title || "sem título"}\"?`} className="mt-3 rounded-xl border border-red-400/60 px-4 py-2.5 text-sm font-semibold text-red-200 transition hover:bg-red-500/10">
                     Excluir banner
                   </ConfirmSubmitButton>
                 </form>

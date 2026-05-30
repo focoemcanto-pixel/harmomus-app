@@ -312,20 +312,8 @@ export default async function MeuRepertorioDetalhePage({
   );
   const readyRow = allProgressRows.find((row) => !row.repertoire_item_id && row.ready);
   const isReady = Boolean(readyRow?.ready);
-  const playableItems = repertoireItems.filter((item) => item.kits);
-  const requestedSong = Array.isArray(resolvedSearchParams.musica) ? resolvedSearchParams.musica[0] : resolvedSearchParams.musica;
-  const requestedPosition = Number(requestedSong ?? "");
-  const requestedIndex = Number.isFinite(requestedPosition)
-    ? playableItems.findIndex((item) => item.position === requestedPosition)
-    : -1;
-  const currentIndex = playableItems.length ? Math.max(0, requestedIndex) : -1;
-  const currentItem = currentIndex >= 0 ? playableItems[currentIndex] : null;
-  const previousItem = currentIndex > 0 ? playableItems[currentIndex - 1] : null;
-  const nextItem = currentIndex >= 0 && currentIndex < playableItems.length - 1 ? playableItems[currentIndex + 1] : null;
-  const studiedCount = repertoireItems.filter((item) => statusIsStudied(normalizeStudyStatus(progressMap.get(item.id)))).length;
-  const progressPercent = repertoireItems.length > 0 ? Math.round((studiedCount / repertoireItems.length) * 100) : 0;
+  const studiedCount = repertoireItems.filter((item) => progressMap.get(item.id)?.studied).length;
   const canConfirmReady = repertoireItems.length > 0 && studiedCount >= repertoireItems.length;
-  const playlistHref = playableItems[0] ? `/meus-repertorios/${repertoire.id}?musica=${playableItems[0].position}` : `/meus-repertorios/${repertoire.id}`;
 
   return (
     <PublicAppShell>
@@ -339,6 +327,9 @@ export default async function MeuRepertorioDetalhePage({
             <div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/25 bg-cyan-400/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100">
               <ListMusic className="h-4 w-4" /> Playlist Ministerial
             </div>
+            <h1 className="mt-5 text-3xl font-black tracking-tight md:text-5xl">{repertoire.name}</h1>
+            {repertoire.description ? <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-300 md:text-base">{repertoire.description}</p> : null}
+            <p className="mt-3 text-sm text-cyan-100/80">Compartilhado por {ministry?.name ?? "seu ministério"}</p>
 
             <div className="mt-6 flex flex-wrap gap-3 text-sm text-zinc-300">
               <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2">
