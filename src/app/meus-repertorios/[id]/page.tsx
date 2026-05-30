@@ -39,7 +39,6 @@ type ProgressRow = {
   repertoire_item_id: string | null;
   studied: boolean;
   studied_at: string | null;
-  study_status?: StudyStatus | null;
   ready?: boolean | null;
   ready_at?: string | null;
 };
@@ -47,7 +46,6 @@ type ProgressRow = {
 const STUDY_STATUSES: StudyStatus[] = ["not_studied", "studied", "doubt", "review"];
 
 function normalizeStudyStatus(row?: ProgressRow | null): StudyStatus {
-  if (row?.study_status && STUDY_STATUSES.includes(row.study_status)) return row.study_status;
   return row?.studied ? "studied" : "not_studied";
 }
 
@@ -125,7 +123,6 @@ async function updateStudyStatus(formData: FormData) {
     const { error } = await admin
       .from("ministry_repertoire_progress")
       .update({
-        study_status: studyStatus,
         studied: nextStudied,
         studied_at: studiedAt,
         updated_at: now,
@@ -139,7 +136,6 @@ async function updateStudyStatus(formData: FormData) {
       repertoire_item_id: itemId,
       kit_id: kitId,
       user_id: context.profile.id,
-      study_status: studyStatus,
       studied: nextStudied,
       studied_at: studiedAt,
       ready: false,
@@ -287,7 +283,7 @@ export default async function MeuRepertorioDetalhePage({
       .order("position", { ascending: true }),
     admin
       .from("ministry_repertoire_progress")
-      .select("repertoire_item_id,studied,studied_at,study_status,ready,ready_at")
+      .select("repertoire_item_id,studied,studied_at,ready,ready_at")
       .eq("repertoire_id", repertoire.id)
       .eq("user_id", context.profile.id),
   ]);
