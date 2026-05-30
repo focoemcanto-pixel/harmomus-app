@@ -1,8 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import Link from "next/link";
-import { CheckCircle2, ChevronLeft, ChevronRight, Circle, CircleHelp, Clock3, ExternalLink, Music2, Play, RotateCcw } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { CheckCircle2, ChevronLeft, ChevronRight, Circle, CircleHelp, Clock3, Loader2, Music2, Play, RotateCcw } from "lucide-react";
 
 type StudyStatus = "not_studied" | "studied" | "doubt" | "review";
 
@@ -15,6 +14,26 @@ type MinistryPlaylistTrack = {
   href: string;
   kitId?: string | null;
   studyStatus?: StudyStatus;
+};
+
+type ResolvedAudio = {
+  streamUrl: string | null;
+  tone: string | null;
+  voice: string | null;
+  label: string | null;
+};
+
+type AudioFilesApiFile = {
+  streamUrl?: string | null;
+  url?: string | null;
+  voice?: string | null;
+  name?: string | null;
+  tone?: string | null;
+};
+
+type AudioFilesApiTone = {
+  tone?: string | null;
+  files?: AudioFilesApiFile[] | null;
 };
 
 const STUDY_STATUS_OPTIONS: Array<{ status: StudyStatus; label: string; icon: typeof Circle; className: string; activeClassName: string }> = [
@@ -59,6 +78,41 @@ function statusBadgeClass(status: StudyStatus) {
   return "border-white/10 bg-white/[0.04] text-zinc-300";
 }
 
+function voiceLabel(value?: string | null) {
+  const normalized = String(value ?? "").toLowerCase().trim();
+  const map: Record<string, string> = {
+    todos: "Todos",
+    lead: "Lead",
+    tenor: "Tenor",
+    contralto: "Contralto",
+    soprano: "Soprano",
+    baritono: "Barítono",
+    baixo: "Baixo",
+  };
+  return map[normalized] ?? value ?? "Áudio";
+}
+
+function toneLabel(value?: string | null) {
+  if (!value) return null;
+  return value.replace("#", "♯");
+}
+
+function pickBestAudio(tones: AudioFilesApiTone[] | null | undefined): ResolvedAudio {
+  const allFiles = (tones ?? []).flatMap((tone) => (tone.files ?? []).map((file) => ({ tone: tone.tone ?? file.tone ?? null, file })));
+  const preferred =
+    allFiles.find(({ file }) => String(file.voice ?? file.name ?? "").toLowerCase().includes("todos")) ??
+    allFiles.find(({ file }) => Boolean(file.streamUrl || file.url));
+
+  if (!preferred) return { streamUrl: null, tone: null, voice: null, label: null };
+
+  return {
+    streamUrl: preferred.file.streamUrl ?? preferred.file.url ?? null,
+    tone: preferred.tone,
+    voice: preferred.file.voice ?? preferred.file.name ?? null,
+    label: preferred.file.name ?? preferred.file.voice ?? null,
+  };
+}
+
 type MinistryPlaylistPlayerProps = {
   tracks: MinistryPlaylistTrack[];
   repertoireId?: string;
@@ -66,19 +120,63 @@ type MinistryPlaylistPlayerProps = {
 };
 
 export function MinistryPlaylistPlayer({ tracks, repertoireId, updateStudyStatusAction }: MinistryPlaylistPlayerProps) {
-  const [currentIndex, setCurrentIndex] = useState<number | null>(null);
+  const [currentIndex, setCurrentIndex] = useState<number | null>(tracks.length ? 0 : null);
   const [lastPlayedIndex, setLastPlayedIndex] = useState<number | null>(null);
+  const [audioCache, setAudioCache] = useState<Record<string, ResolvedAudio>>({});
+  const [audioLoading, setAudioLoading] = useState(false);
+  const [audioError, setAudioError] = useState<string | null>(null);
 
   const currentTrack = currentIndex === null ? null : tracks[currentIndex] ?? null;
   const nextTrack = currentIndex === null ? tracks[0] ?? null : tracks[currentIndex + 1] ?? null;
   const lastPlayedTrack = lastPlayedIndex === null ? null : tracks[lastPlayedIndex] ?? null;
+  const studiedCount = tracks.filter((track) => track.studyStatus === "studied").length;
+  const progressPercent = tracks.length ? Math.round((studiedCount / tracks.length) * 100) : 0;
+
+  const currentAudio = currentTrack?.kitId ? audioCache[currentTrack.kitId] : null;
 
   const playbackLabel = useMemo(() => {
-    if (!currentTrack) return "Pronto para iniciar";
-    return `Tocando ${currentIndex! + 1} de ${tracks.length}`;
+    if (!currentTrack || currentIndex === null) return "Pronto para iniciar";
+    return `Música ${currentIndex + 1} de ${tracks.length}`;
   }, [currentIndex, currentTrack, tracks.length]);
 
+  useEffect(() => {
+    const kitId = currentTrack?.kitId;
+    if (!kitId || audioCache[kitId]) return;
+
+    let cancelled = false;
+
+    async function loadAudio() {
+      setAudioLoading(true);
+      setAudioError(null);
+
+      try {
+        const response = await fetch(`/api/kits/${kitId}/audio-files`, { cache: "no-store" });
+        const data = await response.json().catch(() => null);
+
+        if (!response.ok) throw new Error(data?.error || "Não foi possível carregar os áudios desta música.");
+
+        const resolved = pickBestAudio(data?.tones as AudioFilesApiTone[]);
+        if (!resolved.streamUrl) throw new Error("Nenhum áudio disponível para esta música.");
+
+        if (!cancelled) {
+          setAudioCache((current) => ({ ...current, [kitId]: resolved }));
+        }
+      } catch (error) {
+        if (!cancelled) setAudioError(error instanceof Error ? error.message : "Erro ao carregar áudio.");
+      } finally {
+        if (!cancelled) setAudioLoading(false);
+      }
+    }
+
+    void loadAudio();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [audioCache, currentTrack?.kitId]);
+
   function playTrack(index: number) {
+    if (index < 0 || index >= tracks.length) return;
     setLastPlayedIndex(currentIndex);
     setCurrentIndex(index);
   }
@@ -100,25 +198,56 @@ export function MinistryPlaylistPlayer({ tracks, repertoireId, updateStudyStatus
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="rounded-[2rem] border border-cyan-300/20 bg-gradient-to-br from-cyan-400/10 via-white/[0.04] to-fuchsia-500/10 p-5">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div className="flex items-center gap-4">
-              <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-3xl border border-white/10 bg-black/30 text-cyan-100 shadow-2xl shadow-cyan-950/30">
-                {currentTrack?.coverUrl ? (
-                  <img src={currentTrack.coverUrl} alt={currentTrack.name} className="h-full w-full object-cover" />
-                ) : (
-                  <Music2 className="h-9 w-9" />
-                )}
-              </div>
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-200">{playbackLabel}</p>
-                <h3 className="mt-2 text-2xl font-semibold text-white">{currentTrack?.name ?? "Playlist ministerial"}</h3>
-                <p className="mt-1 text-sm text-zinc-400">{currentTrack?.artist ?? "Selecione Reproduzir Playlist para começar pela primeira música."}</p>
-              </div>
+      <div className="rounded-[2rem] border border-cyan-300/20 bg-gradient-to-br from-cyan-400/10 via-white/[0.04] to-fuchsia-500/10 p-5 shadow-[0_24px_90px_rgba(34,211,238,0.12)] md:p-7">
+        <div className="grid gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
+          <div className="mx-auto flex w-full max-w-[260px] flex-col gap-4">
+            <div className="aspect-square overflow-hidden rounded-[2rem] border border-white/10 bg-black/30 shadow-2xl shadow-cyan-950/30">
+              {currentTrack?.coverUrl ? (
+                <img src={currentTrack.coverUrl} alt={currentTrack.name} className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-cyan-100">
+                  <Music2 className="h-16 w-16" />
+                </div>
+              )}
+            </div>
+            <div className="h-3 overflow-hidden rounded-full bg-white/10">
+              <div className="h-full rounded-full bg-cyan-300 transition-all" style={{ width: `${progressPercent}%` }} />
+            </div>
+            <p className="text-center text-xs font-semibold uppercase tracking-[0.18em] text-zinc-400">
+              {studiedCount}/{tracks.length} estudadas
+            </p>
+          </div>
+
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200">{playbackLabel}</p>
+            <h3 className="mt-3 text-3xl font-black tracking-tight text-white md:text-5xl">{currentTrack?.name ?? "Playlist ministerial"}</h3>
+            <p className="mt-2 text-base text-zinc-300">{currentTrack?.artist ?? "Clique em Reproduzir Escala para iniciar o estudo."}</p>
+
+            <div className="mt-5 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.16em]">
+              <span className={`rounded-full border px-3 py-1.5 ${statusBadgeClass(currentTrack?.studyStatus ?? "not_studied")}`}>
+                {statusLabel(currentTrack?.studyStatus ?? "not_studied")}
+              </span>
+              {currentAudio?.tone ? <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-zinc-200">Tom disponível: {toneLabel(currentAudio.tone)}</span> : null}
+              {currentAudio?.voice ? <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-zinc-200">Áudio: {voiceLabel(currentAudio.voice)}</span> : null}
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="mt-6 rounded-3xl border border-white/10 bg-black/25 p-4">
+              {audioLoading ? (
+                <div className="flex items-center gap-2 text-sm text-zinc-300">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Carregando áudio da música...
+                </div>
+              ) : audioError ? (
+                <p className="text-sm text-amber-100">{audioError}</p>
+              ) : currentAudio?.streamUrl ? (
+                <audio key={`${currentTrack?.id}-${currentAudio.streamUrl}`} controls preload="metadata" className="w-full">
+                  <source src={currentAudio.streamUrl} />
+                </audio>
+              ) : (
+                <p className="text-sm text-zinc-400">Selecione uma música da escala para carregar o áudio aqui.</p>
+              )}
+            </div>
+
+            <div className="mt-5 flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={goToPrevious}
@@ -133,7 +262,7 @@ export function MinistryPlaylistPlayer({ tracks, repertoireId, updateStudyStatus
                 disabled={!tracks.length}
                 className="inline-flex items-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <Play className="h-4 w-4 fill-current" /> Reproduzir Playlist
+                <Play className="h-4 w-4 fill-current" /> Reproduzir Escala
               </button>
               <button
                 type="button"
@@ -144,14 +273,38 @@ export function MinistryPlaylistPlayer({ tracks, repertoireId, updateStudyStatus
                 Próxima <ChevronRight className="h-4 w-4" />
               </button>
             </div>
+
+            {currentTrack && updateStudyStatusAction && repertoireId ? (
+              <div className="mt-5 flex flex-wrap gap-2">
+                {STUDY_STATUS_OPTIONS.map((option) => {
+                  const Icon = option.icon;
+                  const isActive = (currentTrack.studyStatus ?? "not_studied") === option.status;
+
+                  return (
+                    <form key={option.status} action={updateStudyStatusAction}>
+                      <input type="hidden" name="repertoire_id" value={repertoireId} />
+                      <input type="hidden" name="item_id" value={currentTrack.id} />
+                      <input type="hidden" name="kit_id" value={currentTrack.kitId ?? ""} />
+                      <input type="hidden" name="study_status" value={option.status} />
+                      <button
+                        disabled={isActive}
+                        className={`inline-flex w-fit items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition disabled:cursor-default ${isActive ? option.activeClassName : option.className}`}
+                      >
+                        <Icon className="h-4 w-4" /> {option.label}
+                      </button>
+                    </form>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
         </div>
+      </div>
 
-        <div className="grid gap-3 rounded-[2rem] border border-white/10 bg-black/20 p-4">
-          <StatusPill label="Música atual" track={currentTrack} tone="current" />
-          <StatusPill label="Próxima música" track={nextTrack} tone="next" />
-          <StatusPill label="Última reproduzida" track={lastPlayedTrack} tone="last" />
-        </div>
+      <div className="grid gap-3 rounded-[2rem] border border-white/10 bg-black/20 p-4 md:grid-cols-3">
+        <StatusPill label="Música atual" track={currentTrack} tone="current" />
+        <StatusPill label="Próxima música" track={nextTrack} tone="next" />
+        <StatusPill label="Última estudada" track={lastPlayedTrack} tone="last" />
       </div>
 
       <div className="overflow-hidden rounded-3xl border border-white/10 bg-black/20">
@@ -162,66 +315,42 @@ export function MinistryPlaylistPlayer({ tracks, repertoireId, updateStudyStatus
           const studyStatus = track.studyStatus ?? "not_studied";
 
           return (
-            <div
+            <button
               key={track.id}
-              className={`grid gap-4 border-b border-white/10 p-4 last:border-b-0 md:grid-cols-[1fr_auto] md:items-center ${
+              type="button"
+              onClick={() => playTrack(index)}
+              className={`grid w-full gap-4 border-b border-white/10 p-4 text-left transition last:border-b-0 md:grid-cols-[1fr_auto] md:items-center ${
                 isCurrent
                   ? "bg-cyan-300/12 ring-1 ring-inset ring-cyan-300/35"
                   : isNext
                     ? "bg-emerald-400/10"
                     : isLastPlayed
                       ? "bg-fuchsia-400/10"
-                      : "bg-transparent"
+                      : "bg-transparent hover:bg-white/[0.035]"
               }`}
             >
-              <button type="button" onClick={() => playTrack(index)} className="group flex w-full items-center gap-4 text-left">
+              <div className="flex w-full items-center gap-4">
                 <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-white/5 text-sm font-bold text-zinc-300">
                   {track.coverUrl ? <img src={track.coverUrl} alt={track.name} className="h-full w-full object-cover" /> : track.position}
                 </div>
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-semibold text-zinc-400">{track.position}.</span>
-                    <h3 className="truncate text-lg font-semibold text-white group-hover:text-cyan-100">{track.name}</h3>
+                    <h3 className="truncate text-lg font-semibold text-white">{track.name}</h3>
                   </div>
                   <p className="text-sm text-zinc-400">{track.artist || "Música da escala"}</p>
                   <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-semibold uppercase tracking-[0.16em]">
                     {isCurrent ? <span className="rounded-full bg-cyan-300 px-2 py-1 text-slate-950">Atual</span> : null}
                     {isNext ? <span className="rounded-full border border-emerald-300/30 bg-emerald-300/10 px-2 py-1 text-emerald-100">Próxima</span> : null}
-                    {isLastPlayed ? <span className="rounded-full border border-fuchsia-300/30 bg-fuchsia-300/10 px-2 py-1 text-fuchsia-100">Última reproduzida</span> : null}
+                    {isLastPlayed ? <span className="rounded-full border border-fuchsia-300/30 bg-fuchsia-300/10 px-2 py-1 text-fuchsia-100">Última</span> : null}
                     <span className={`rounded-full border px-2 py-1 ${statusBadgeClass(studyStatus)}`}>{statusLabel(studyStatus)}</span>
                   </div>
                 </div>
-              </button>
-
-              <div className="flex flex-wrap gap-2 md:justify-end">
-                {updateStudyStatusAction && repertoireId ? (
-                  <div className="flex flex-wrap gap-2 md:justify-end">
-                    {STUDY_STATUS_OPTIONS.map((option) => {
-                      const Icon = option.icon;
-                      const isActive = studyStatus === option.status;
-
-                      return (
-                        <form key={option.status} action={updateStudyStatusAction}>
-                          <input type="hidden" name="repertoire_id" value={repertoireId} />
-                          <input type="hidden" name="item_id" value={track.id} />
-                          <input type="hidden" name="kit_id" value={track.kitId ?? ""} />
-                          <input type="hidden" name="study_status" value={option.status} />
-                          <button
-                            disabled={isActive}
-                            className={`inline-flex w-fit items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition disabled:cursor-default ${isActive ? option.activeClassName : option.className}`}
-                          >
-                            <Icon className="h-4 w-4" /> {option.label}
-                          </button>
-                        </form>
-                      );
-                    })}
-                  </div>
-                ) : null}
-                <Link href={track.href} className="inline-flex w-fit items-center gap-2 rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-zinc-200 transition hover:bg-white/10">
-                  Abrir música <ExternalLink className="h-4 w-4" />
-                </Link>
               </div>
-            </div>
+              <span className="inline-flex w-fit items-center gap-2 rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-zinc-200 md:justify-self-end">
+                {isCurrent ? "Tocando agora" : "Estudar aqui"}
+              </span>
+            </button>
           );
         })}
       </div>
