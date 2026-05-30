@@ -9,6 +9,8 @@ export type MinistryMemberRow = {
   invited_name?: string | null;
   role?: MinistryRole | string | null;
   status?: MinistryMemberStatus | string | null;
+  vocal_primary?: string | null;
+  vocal_secondary?: string | null;
   invite_token?: string | null;
   invited_at?: string | null;
   accepted_at?: string | null;

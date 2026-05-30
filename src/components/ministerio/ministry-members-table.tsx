@@ -17,6 +17,65 @@ function statusClass(status?: string | null) {
   return "border-white/10 bg-white/5 text-zinc-200";
 }
 
+
+const VOCAL_PROFILE_OPTIONS = [
+  { value: "lead", label: "Lead" },
+  { value: "tenor", label: "Tenor" },
+  { value: "contralto", label: "Contralto" },
+  { value: "soprano", label: "Soprano" },
+  { value: "baritono", label: "Barítono" },
+  { value: "baixo", label: "Baixo" },
+  { value: "instrumento", label: "Instrumento" },
+  { value: "outro", label: "Outro" },
+];
+
+function vocalProfileLabel(value?: string | null) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return VOCAL_PROFILE_OPTIONS.find((option) => option.value === normalized)?.label ?? "—";
+}
+
+function VocalProfileForm({ member, canManage }: { member: MinistryMemberRow; canManage: boolean }) {
+  const normalizedStatus = String(member.status ?? "").toLowerCase();
+
+  if (!canManage || normalizedStatus === "removed") {
+    return (
+      <div className="text-xs text-zinc-300">
+        <p>Principal: <span className="text-zinc-100">{vocalProfileLabel(member.vocal_primary)}</span></p>
+        <p className="mt-1">Secundária: <span className="text-zinc-100">{vocalProfileLabel(member.vocal_secondary)}</span></p>
+      </div>
+    );
+  }
+
+  return (
+    <form action="/api/ministerio/vocal-profile" method="post" className="space-y-2">
+      <input type="hidden" name="member_id" value={member.id} />
+      <div className="grid gap-2 lg:grid-cols-2">
+        <label className="text-xs font-medium text-zinc-400">
+          Principal
+          <select name="vocal_primary" defaultValue={member.vocal_primary ?? ""} className="mt-1 h-9 w-full rounded-xl border border-white/10 bg-slate-950/80 px-2 text-xs text-zinc-100 outline-none transition focus:border-cyan-300/60">
+            <option value="">Sem definição</option>
+            {VOCAL_PROFILE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs font-medium text-zinc-400">
+          Secundária
+          <select name="vocal_secondary" defaultValue={member.vocal_secondary ?? ""} className="mt-1 h-9 w-full rounded-xl border border-white/10 bg-slate-950/80 px-2 text-xs text-zinc-100 outline-none transition focus:border-cyan-300/60">
+            <option value="">Sem definição</option>
+            {VOCAL_PROFILE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <button className="inline-flex h-9 items-center justify-center rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-3 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-500/20">
+        Salvar voz
+      </button>
+    </form>
+  );
+}
+
 function OpenInviteLink({ href }: { href: string }) {
   return (
     <Link href={href} className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-3 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-500/20">
@@ -80,7 +139,8 @@ export function MinistryMembersTable({ members, canRemove, canManage, canChangeR
               <thead className="border-y border-white/10 bg-white/[0.04] text-xs uppercase tracking-[0.12em] text-zinc-400">
                 <tr>
                   <th className="px-4 py-3">Integrante</th>
-                  <th className="px-4 py-3">Função</th>
+                  <th className="px-4 py-3">Permissão</th>
+                  <th className="px-4 py-3">Perfil vocal</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Convite</th>
                   <th className="px-4 py-3">Aceite</th>
@@ -101,6 +161,7 @@ export function MinistryMembersTable({ members, canRemove, canManage, canChangeR
                         <p className="mt-1 max-w-[260px] break-all text-xs text-zinc-400">{email}</p>
                       </td>
                       <td className="px-4 py-4 text-zinc-300">{roleLabel(member.role)}</td>
+                      <td className="px-4 py-4 text-zinc-300"><VocalProfileForm member={member} canManage={canManage} /></td>
                       <td className="px-4 py-4"><span className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusClass(member.status)}`}>{statusLabel(member.status)}</span></td>
                       <td className="px-4 py-4 text-zinc-400">
                         <p>{formatDate(member.invited_at || member.created_at)}</p>
@@ -136,8 +197,16 @@ export function MinistryMembersTable({ members, canRemove, canManage, canChangeR
 
                   <div className="mt-4 grid grid-cols-2 gap-3 rounded-2xl border border-white/10 bg-black/20 p-3 text-xs text-zinc-400">
                     <div>
-                      <p className="uppercase tracking-[0.12em] text-zinc-500">Função</p>
+                      <p className="uppercase tracking-[0.12em] text-zinc-500">Permissão</p>
                       <p className="mt-1 text-zinc-200">{roleLabel(member.role)}</p>
+                    </div>
+                    <div>
+                      <p className="uppercase tracking-[0.12em] text-zinc-500">Voz principal</p>
+                      <p className="mt-1 text-zinc-200">{vocalProfileLabel(member.vocal_primary)}</p>
+                    </div>
+                    <div>
+                      <p className="uppercase tracking-[0.12em] text-zinc-500">Voz secundária</p>
+                      <p className="mt-1 text-zinc-200">{vocalProfileLabel(member.vocal_secondary)}</p>
                     </div>
                     <div>
                       <p className="uppercase tracking-[0.12em] text-zinc-500">Convite</p>
@@ -148,6 +217,13 @@ export function MinistryMembersTable({ members, canRemove, canManage, canChangeR
                       <p className="mt-1 text-zinc-200">{member.accepted_at ? formatDate(member.accepted_at) : pending ? "Aguardando" : "—"}</p>
                     </div>
                   </div>
+
+                  {canManage ? (
+                    <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-3">
+                      <p className="mb-3 text-xs uppercase tracking-[0.12em] text-zinc-500">Editar perfil vocal</p>
+                      <VocalProfileForm member={member} canManage={canManage} />
+                    </div>
+                  ) : null}
 
                   <div className="mt-4">
                     <MemberActions member={member} pending={pending} invitePath={invitePath} canManage={canManage} canRemove={canRemove} canChangeRoles={canChangeRoles} ministryName={ministryName} name={name} />
