@@ -13,6 +13,15 @@ interface PlaylistPlayerClientProps {
 }
 
 type KitTrack = PlaylistKitSummary["tracks"][number];
+type PlaybackMetric = {
+  id: string;
+  src: string;
+  clickAt: number;
+  fetchStartAt?: number;
+  fetchEndAt?: number;
+  canplayAt?: number;
+  playingAt?: number;
+};
 
 function formatTime(value: number): string {
   if (!Number.isFinite(value) || value < 0) return "0:00";
@@ -51,6 +60,40 @@ function toneStatusLabel(source: "original" | "generated" | null | undefined) {
   return source === "original" ? "Original" : "Harmomus IA";
 }
 
+function nowPerf() {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
+function readResourceResponseEnd(src: string, fallback: number) {
+  if (typeof performance === "undefined" || typeof performance.getEntriesByName !== "function") return fallback;
+  const entries = performance.getEntriesByName(src, "resource") as PerformanceResourceTiming[];
+  const latest = entries.at(-1);
+  return latest?.responseEnd && latest.responseEnd > 0 ? latest.responseEnd : fallback;
+}
+
+function logPlaybackMetric(metric: PlaybackMetric, event: "PLAY_CLICK" | "FETCH_AUDIO_START" | "FETCH_AUDIO_END" | "AUDIO_CANPLAY" | "AUDIO_PLAYING") {
+  const fetchStartAt = metric.fetchStartAt ?? metric.clickAt;
+  const fetchEndAt = metric.fetchEndAt ?? metric.canplayAt ?? metric.playingAt;
+  const canplayAt = metric.canplayAt ?? metric.playingAt;
+  const playingAt = metric.playingAt;
+  console.info(`[PlaylistPlayer:perf] ${event}`, {
+    id: metric.id,
+    src: metric.src,
+    clickToFetchMs: Math.round(fetchStartAt - metric.clickAt),
+    fetchToResponseMs: fetchEndAt ? Math.round(fetchEndAt - fetchStartAt) : null,
+    responseToCanplayMs: fetchEndAt && canplayAt ? Math.round(canplayAt - fetchEndAt) : null,
+    canplayToPlayingMs: canplayAt && playingAt ? Math.round(playingAt - canplayAt) : null,
+    totalMs: playingAt ? Math.round(playingAt - metric.clickAt) : null,
+  });
+}
+
+function createAudioElement(preload: "metadata" | "auto") {
+  const audio = new Audio();
+  audio.preload = preload;
+  audio.setAttribute("playsinline", "true");
+  return audio;
+}
+
 function friendlyPlaybackError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error ?? "");
   if (/not supported|no supported source|media|decode|failed/i.test(message)) {
@@ -64,6 +107,9 @@ function friendlyPlaybackError(error: unknown) {
 
 export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const preloadAudioRef = useRef<HTMLAudioElement | null>(null);
+  const audioCacheRef = useRef<Map<string, HTMLAudioElement>>(new Map());
+  const playbackMetricRef = useRef<PlaybackMetric | null>(null);
   const pitchControllerRef = useRef<PitchPlaybackController | null>(null);
   const pitchSessionRef = useRef(0);
 
@@ -107,6 +153,20 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
   const isSelectedToneReal = selectedSource === "original";
   const canPlaySelectedTone = Boolean(playableTrack?.streamUrl);
 
+  const nextPlayableTrack = useMemo(() => {
+    if (!selectedTone || kits.length <= 1) return null;
+    const nextKit = kits[currentKitIndex + 1] ?? (replayAtEnd ? kits[0] : null);
+    if (!nextKit) return null;
+    const resolution = resolveToneTrack({
+      tracks: nextKit.tracks,
+      requestedTone: selectedTone,
+      allowPitchShift: nextKit.allow_pitch_shift,
+      maxPitchShiftSemitones: nextKit.max_pitch_shift_semitones,
+      pickTrack: (tracks) => tracks.find((track) => track.voice === selectedVoice) ?? tracks.find((track) => track.voice === "todos") ?? tracks[0] ?? null,
+    });
+    return resolution?.isAvailable ? resolution.sourceTrack : null;
+  }, [currentKitIndex, kits, replayAtEnd, selectedTone, selectedVoice]);
+
   const activeTrackKey = useMemo(() => {
     return [
       playlist.id,
@@ -141,6 +201,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
         const currentSrc = audio.getAttribute("src") || audio.src || "";
         if (currentSrc !== nextSrc) {
           audio.src = nextSrc;
+          audio.load();
         }
       } else {
         audio.removeAttribute("src");
@@ -179,6 +240,35 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
   useEffect(() => {
     resetPlayback(playableTrack?.streamUrl ?? null);
   }, [activeTrackKey]);
+
+  useEffect(() => {
+    const src = playableTrack?.streamUrl;
+    if (!src || semitoneShift !== 0) return;
+    let audio = audioCacheRef.current.get(activeTrackKey);
+    if (!audio) {
+      audio = createAudioElement("auto");
+      audio.src = src;
+      audioCacheRef.current.set(activeTrackKey, audio);
+    }
+    audio.preload = "auto";
+    audio.load();
+    audioRef.current = audio;
+  }, [activeTrackKey, playableTrack?.streamUrl, semitoneShift]);
+
+  useEffect(() => {
+    const src = nextPlayableTrack?.streamUrl;
+    if (!src) return;
+    const preloadKey = `next::${nextPlayableTrack.id}::${src}`;
+    let audio = audioCacheRef.current.get(preloadKey);
+    if (!audio) {
+      audio = createAudioElement("metadata");
+      audio.src = src;
+      audioCacheRef.current.set(preloadKey, audio);
+    }
+    audio.preload = "metadata";
+    preloadAudioRef.current = audio;
+    audio.load();
+  }, [nextPlayableTrack?.id, nextPlayableTrack?.streamUrl]);
 
   useEffect(() => {
     return () => {
@@ -220,9 +310,20 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
   }
 
   async function togglePlay() {
-    const audio = audioRef.current;
+    let audio = audioRef.current;
     const src = playableTrack?.streamUrl ?? null;
-    if (!audio || !src || isLoadingPlayback) return;
+    if (!src || isLoadingPlayback) return;
+
+    const cachedAudio = semitoneShift === 0 ? audioCacheRef.current.get(activeTrackKey) : null;
+    if (cachedAudio) {
+      audio = cachedAudio;
+      audioRef.current = cachedAudio;
+    }
+    if (!audio) {
+      audio = createAudioElement("auto");
+      audioRef.current = audio;
+      if (semitoneShift === 0) audioCacheRef.current.set(activeTrackKey, audio);
+    }
 
     const currentSrc = audio.getAttribute("src") || audio.currentSrc || audio.src || "";
     if (currentSrc !== src) {
@@ -237,7 +338,33 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
       return;
     }
 
+    const metric: PlaybackMetric = { id: activeTrackKey, src, clickAt: nowPerf() };
+    playbackMetricRef.current = metric;
+    logPlaybackMetric(metric, "PLAY_CLICK");
+
     const session = ++pitchSessionRef.current;
+    metric.fetchStartAt = nowPerf();
+    logPlaybackMetric(metric, "FETCH_AUDIO_START");
+    const onCanPlay = () => {
+      if (playbackMetricRef.current !== metric) return;
+      metric.fetchEndAt = readResourceResponseEnd(src, nowPerf());
+      metric.canplayAt = nowPerf();
+      logPlaybackMetric(metric, "FETCH_AUDIO_END");
+      logPlaybackMetric(metric, "AUDIO_CANPLAY");
+    };
+    const onPlaying = () => {
+      if (playbackMetricRef.current !== metric) return;
+      if (!metric.canplayAt) {
+        metric.fetchEndAt = readResourceResponseEnd(src, nowPerf());
+        metric.canplayAt = nowPerf();
+      }
+      metric.playingAt = nowPerf();
+      logPlaybackMetric(metric, "AUDIO_PLAYING");
+    };
+    audio.addEventListener("canplay", onCanPlay, { once: true });
+    audio.addEventListener("playing", onPlaying, { once: true });
+    audio.preload = "auto";
+    audio.load();
 
     try {
       setPlaybackError(null);
@@ -302,7 +429,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,#1f2840_0%,#06070c_40%)] p-4 md:p-8">
       <audio
         ref={audioRef}
-        preload="none"
+        preload="auto"
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
         onEnded={() => {

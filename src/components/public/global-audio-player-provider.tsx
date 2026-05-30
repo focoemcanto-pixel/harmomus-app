@@ -75,6 +75,50 @@ function isSameTrack(a: GlobalTrack | null, b: GlobalTrack) {
 
 const isDev = process.env.NODE_ENV === "development";
 
+type PlaybackMetric = {
+  id: string;
+  src: string;
+  clickAt: number;
+  fetchStartAt?: number;
+  fetchEndAt?: number;
+  canplayAt?: number;
+  playingAt?: number;
+};
+
+function nowPerf() {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
+function logPlaybackMetric(metric: PlaybackMetric, event: "PLAY_CLICK" | "FETCH_AUDIO_START" | "FETCH_AUDIO_END" | "AUDIO_CANPLAY" | "AUDIO_PLAYING") {
+  const fetchStartAt = metric.fetchStartAt ?? metric.clickAt;
+  const fetchEndAt = metric.fetchEndAt ?? metric.canplayAt ?? metric.playingAt;
+  const canplayAt = metric.canplayAt ?? metric.playingAt;
+  const playingAt = metric.playingAt;
+  console.info(`[GlobalAudioPlayer:perf] ${event}`, {
+    id: metric.id,
+    src: metric.src,
+    clickToFetchMs: Math.round(fetchStartAt - metric.clickAt),
+    fetchToResponseMs: fetchEndAt ? Math.round(fetchEndAt - fetchStartAt) : null,
+    responseToCanplayMs: fetchEndAt && canplayAt ? Math.round(canplayAt - fetchEndAt) : null,
+    canplayToPlayingMs: canplayAt && playingAt ? Math.round(playingAt - canplayAt) : null,
+    totalMs: playingAt ? Math.round(playingAt - metric.clickAt) : null,
+  });
+}
+
+function readResourceResponseEnd(src: string, fallback: number) {
+  if (typeof performance === "undefined" || typeof performance.getEntriesByName !== "function") return fallback;
+  const entries = performance.getEntriesByName(src, "resource") as PerformanceResourceTiming[];
+  const latest = entries.at(-1);
+  return latest?.responseEnd && latest.responseEnd > 0 ? latest.responseEnd : fallback;
+}
+
+function createAudioElement(preload: "metadata" | "auto") {
+  const audio = new Audio();
+  audio.preload = preload;
+  audio.setAttribute("playsinline", "true");
+  return audio;
+}
+
 export function GlobalAudioPlayerProvider({ children }: { children: ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const preloadAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -84,6 +128,8 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
   const activePlaybackKeyRef = useRef<string | null>(null);
   const operationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const latestPlayRequestIdRef = useRef(0);
+  const audioCacheRef = useRef<Map<string, HTMLAudioElement>>(new Map());
+  const playbackMetricRef = useRef<PlaybackMetric | null>(null);
 
   const [track, setTrack] = useState<GlobalTrack | null>(null);
   const trackRef = useRef<GlobalTrack | null>(null);
@@ -142,10 +188,8 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
       try {
         audio.currentTime = 0;
       } catch {}
-      audio.removeAttribute("src");
-      audio.src = "";
       try {
-        audio.load();
+        audio.currentTime = 0;
       } catch {}
     }
 
@@ -172,10 +216,8 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
       try {
         audio.pause();
       } catch {}
-      audio.removeAttribute("src");
-      audio.src = "";
       try {
-        audio.load();
+        audio.currentTime = 0;
       } catch {}
     }
 
@@ -183,15 +225,9 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
       try {
         preloadAudio.pause();
       } catch {}
-      preloadAudio.removeAttribute("src");
-      preloadAudio.src = "";
-      try {
-        preloadAudio.load();
-      } catch {}
     }
 
     activePlaybackKeyRef.current = null;
-    setPreloadedSrc(null);
     setIsPlaying(false);
     logDev("engine cleanup complete");
   }
@@ -224,16 +260,20 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
     };
   }, []);
 
-  function preloadTrack(nextTrack: GlobalTrack) {
+  function preloadTrack(nextTrack: GlobalTrack, mode: "metadata" | "auto" = "auto") {
     const preloadKey = getTrackIdentity(nextTrack);
     if (!nextTrack.src || isSameTrack(trackRef.current, nextTrack) || preloadedSrc === preloadKey) return;
     if ((nextTrack.semitoneShift ?? 0) !== 0) return;
 
-    const preloadAudio = preloadAudioRef.current;
-    if (!preloadAudio) return;
-
     try {
-      preloadAudio.src = nextTrack.src;
+      let preloadAudio = audioCacheRef.current.get(preloadKey);
+      if (!preloadAudio) {
+        preloadAudio = createAudioElement(mode);
+        preloadAudio.src = nextTrack.src;
+        audioCacheRef.current.set(preloadKey, preloadAudio);
+      }
+      preloadAudio.preload = mode;
+      preloadAudioRef.current = preloadAudio;
       preloadAudio.load();
       setPreloadedSrc(preloadKey);
     } catch {
@@ -244,9 +284,12 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
   async function playTrack(nextTrack: GlobalTrack) {
     const requestId = ++latestPlayRequestIdRef.current;
     const targetIdentity = getTrackIdentity(nextTrack);
+    const metric: PlaybackMetric = { id: targetIdentity, src: nextTrack.src, clickAt: nowPerf() };
+    playbackMetricRef.current = metric;
+    logPlaybackMetric(metric, "PLAY_CLICK");
 
     return enqueueOperation(async () => {
-      const audio = audioRef.current;
+      let audio = audioRef.current;
       if (!audio) return;
       if (requestId !== latestPlayRequestIdRef.current) return;
 
@@ -269,9 +312,39 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
         setCurrentTime(0);
         setDuration(0);
 
-        audio.src = nextTrack.src;
+        const cachedAudio = semitoneShift === 0 ? audioCacheRef.current.get(targetIdentity) : null;
+        if (cachedAudio) {
+          audio = cachedAudio;
+          audioRef.current = cachedAudio;
+          if (preloadedSrc === targetIdentity) setPreloadedSrc(null);
+        } else if (audio.src !== nextTrack.src) {
+          audio.src = nextTrack.src;
+          if (semitoneShift === 0) audioCacheRef.current.set(targetIdentity, audio);
+        }
+        audio.preload = "auto";
         audio.volume = volumeRef.current;
         audio.loop = loopRef.current;
+
+        metric.fetchStartAt = nowPerf();
+        logPlaybackMetric(metric, "FETCH_AUDIO_START");
+        const onCanPlay = () => {
+          if (playbackMetricRef.current !== metric) return;
+          metric.fetchEndAt = readResourceResponseEnd(nextTrack.src, nowPerf());
+          metric.canplayAt = nowPerf();
+          logPlaybackMetric(metric, "FETCH_AUDIO_END");
+          logPlaybackMetric(metric, "AUDIO_CANPLAY");
+        };
+        const onPlaying = () => {
+          if (playbackMetricRef.current !== metric) return;
+          if (!metric.canplayAt) {
+            metric.fetchEndAt = readResourceResponseEnd(nextTrack.src, nowPerf());
+            metric.canplayAt = nowPerf();
+          }
+          metric.playingAt = nowPerf();
+          logPlaybackMetric(metric, "AUDIO_PLAYING");
+        };
+        audio.addEventListener("canplay", onCanPlay, { once: true });
+        audio.addEventListener("playing", onPlaying, { once: true });
         audio.load();
 
         const abortController = new AbortController();
@@ -410,7 +483,7 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
       {children}
       <audio
         ref={audioRef}
-        preload="metadata"
+        preload="auto"
         onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
         onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
         onPause={() => setIsPlaying(false)}

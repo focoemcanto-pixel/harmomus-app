@@ -1,7 +1,7 @@
 "use client";
 
 import { Pause, Play, RotateCcw, RotateCw, Repeat2, Volume2 } from "lucide-react";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 
 import { type KitTrack, useKitAudioEngine } from "@/components/public/use-kit-audio-engine";
 
@@ -33,6 +33,7 @@ export function HarmomusPlayer({ engine, src, title, canPlay, semitoneShift = 0,
     loop,
     errorMessage,
     playTrack,
+    preloadTrack,
     togglePlay,
     seekTo,
     skipBy,
@@ -48,8 +49,13 @@ export function HarmomusPlayer({ engine, src, title, canPlay, semitoneShift = 0,
   );
 
   const currentSemitoneShift = track?.semitoneShift ?? 0;
-  const candidateTrack: KitTrack = { src: src ?? "", title, semitoneShift, trackId };
+  const candidateTrack: KitTrack = useMemo(() => ({ src: src ?? "", title, semitoneShift, trackId }), [src, title, semitoneShift, trackId]);
   const isCurrentTrack = Boolean(track && src && currentSemitoneShift === semitoneShift && engineIsCurrentTrack(candidateTrack));
+
+  useEffect(() => {
+    if (!canPlay || !src) return;
+    preloadTrack(candidateTrack);
+  }, [canPlay, src, candidateTrack, preloadTrack]);
 
   const formatTime = useMemo(
     () => (value: number) => `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, "0")}`,
