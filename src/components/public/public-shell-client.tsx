@@ -74,6 +74,7 @@ export function PublicShellClient({
       ministryRole === "admin" ||
       ministryRole === "manager"
     : isMinistryPlan;
+  const canOpenMemberRepertoires = Boolean(context.ministry);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(query.toLowerCase().trim()), 180);
@@ -276,6 +277,14 @@ export function PublicShellClient({
                 >
                   Perfil
                 </Link>
+                {canOpenMemberRepertoires ? (
+                  <Link
+                    href="/meus-repertorios"
+                    className="block rounded-lg px-3 py-2 text-sm font-semibold text-cyan-100 hover:bg-white/5"
+                  >
+                    Meus Repertórios
+                  </Link>
+                ) : null}
                 {canOpenMinistryCentral ? (
                   <Link
                     href="/ministerio"
