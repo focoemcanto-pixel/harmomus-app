@@ -4,6 +4,7 @@ import { ConfirmSubmitButton } from "@/components/admin/confirm-submit-button";
 import { HomeSectionForm } from "@/components/admin/home-section-form";
 import { PageHeader } from "@/components/admin/page-header";
 import { createHomeSection, deleteHomeSection, getAdminHomeSections, updateHomeSection } from "@/lib/data/home-sections";
+import { setFlashToast } from "@/lib/flash";
 
 function statusBadgeClass(active?: boolean | null) {
   return active
@@ -20,9 +21,10 @@ export default async function AdminHomeSectionsPage() {
   async function saveSection(formData: FormData) {
     "use server";
     const id = String(formData.get("id") ?? "");
+    const title = String(formData.get("title") ?? "").trim();
     const payload = {
       type: String(formData.get("type") ?? "course_highlight").trim(),
-      title: String(formData.get("title") ?? "").trim(),
+      title,
       subtitle: String(formData.get("subtitle") ?? "").trim(),
       image_url: String(formData.get("image_url") ?? "").trim(),
       button_text: String(formData.get("button_text") ?? "").trim(),
@@ -31,8 +33,17 @@ export default async function AdminHomeSectionsPage() {
       order_index: Number(formData.get("order_index") ?? 0),
     };
 
-    if (!id) await createHomeSection(payload);
-    else await updateHomeSection(id, payload);
+    try {
+      if (!id) {
+        await createHomeSection(payload);
+        await setFlashToast("success", `Bloco ${title || "sem título"} criado com sucesso.`);
+      } else {
+        await updateHomeSection(id, payload);
+        await setFlashToast("success", `Bloco ${title || "sem título"} atualizado com sucesso.`);
+      }
+    } catch (error) {
+      await setFlashToast("error", error instanceof Error ? error.message : "Não foi possível salvar o bloco.");
+    }
 
     revalidatePath("/");
     revalidatePath("/admin/home-sections");
@@ -40,7 +51,16 @@ export default async function AdminHomeSectionsPage() {
 
   async function removeSection(formData: FormData) {
     "use server";
-    await deleteHomeSection(String(formData.get("id") ?? ""));
+    const id = String(formData.get("id") ?? "");
+    const title = String(formData.get("title") ?? "").trim();
+
+    try {
+      await deleteHomeSection(id);
+      await setFlashToast("success", `Bloco ${title || "selecionado"} excluído com sucesso.`);
+    } catch (error) {
+      await setFlashToast("error", error instanceof Error ? error.message : "Não foi possível excluir o bloco.");
+    }
+
     revalidatePath("/");
     revalidatePath("/admin/home-sections");
   }
@@ -110,9 +130,10 @@ export default async function AdminHomeSectionsPage() {
 
                 <form action={removeSection} className="rounded-2xl border border-red-500/30 bg-red-500/5 p-4">
                   <input type="hidden" name="id" value={section.id} />
+                  <input type="hidden" name="title" value={section.title || ""} />
                   <p className="text-sm font-semibold text-red-200">Zona de risco</p>
                   <p className="mt-1 text-xs text-red-100/70">Excluir remove este bloco da administração e da home.</p>
-                  <ConfirmSubmitButton message={`Tem certeza que deseja excluir o bloco \"${section.title || "sem título"}\"?`} className="mt-3 rounded-xl border border-red-400/60 px-4 py-2.5 text-sm font-semibold text-red-200 transition hover:bg-red-500/10">
+                  <ConfirmSubmitButton title="Excluir bloco?" confirmLabel="Sim, excluir bloco" message={`Tem certeza que deseja excluir o bloco \"${section.title || "sem título"}\"?`} className="mt-3 rounded-xl border border-red-400/60 px-4 py-2.5 text-sm font-semibold text-red-200 transition hover:bg-red-500/10">
                     Excluir bloco
                   </ConfirmSubmitButton>
                 </form>
