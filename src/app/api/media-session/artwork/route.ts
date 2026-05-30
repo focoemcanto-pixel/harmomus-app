@@ -1,5 +1,12 @@
 import { NextResponse } from "next/server";
 
+type CloudflareRequestInit = RequestInit & {
+  cf?: {
+    cacheTtl?: number;
+    cacheEverything?: boolean;
+  };
+};
+
 function isAllowedImageUrl(value: string) {
   try {
     const url = new URL(value);
@@ -28,8 +35,8 @@ export async function GET(request: Request) {
       headers: {
         accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
       },
-      cf: { cacheTtl: 60 * 60 * 24 * 7, cacheEverything: true } as RequestInit["cf"],
-    } as RequestInit);
+      cf: { cacheTtl: 60 * 60 * 24 * 7, cacheEverything: true },
+    } satisfies CloudflareRequestInit);
 
     if (!response.ok) {
       return NextResponse.json({ error: "Não foi possível carregar a capa." }, { status: response.status });
