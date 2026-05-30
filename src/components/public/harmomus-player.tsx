@@ -39,12 +39,21 @@ function inferKitArtwork() {
   return cover?.currentSrc || cover?.src || null;
 }
 
-function normalizeArtworkUrl(url: string | null | undefined) {
+function toAbsoluteArtworkUrl(url: string | null | undefined) {
   const value = String(url ?? "").trim();
   if (!value) return null;
   if (/^https?:\/\//i.test(value)) return value;
   if (typeof window !== "undefined" && value.startsWith("/")) return `${window.location.origin}${value}`;
   return value;
+}
+
+function normalizeArtworkUrl(url: string | null | undefined) {
+  const absoluteUrl = toAbsoluteArtworkUrl(url);
+  if (!absoluteUrl) return null;
+  if (typeof window === "undefined") return absoluteUrl;
+  const alreadyProxied = absoluteUrl.includes("/api/media-session/artwork");
+  if (alreadyProxied) return absoluteUrl;
+  return `${window.location.origin}/api/media-session/artwork?src=${encodeURIComponent(absoluteUrl)}`;
 }
 
 export function HarmomusPlayer({
@@ -86,11 +95,12 @@ export function HarmomusPlayer({
   const mediaMetadata = useMemo(() => {
     const kitTitle = mediaTitle?.trim() || inferKitTitle();
     const details = title.replace(/^Tom\s+/i, "Tom ");
+    const rawArtwork = artworkUrl || inferKitArtwork();
     return {
       mediaTitle: kitTitle,
       mediaArtist: mediaArtist?.trim() || details || "Harmomus",
       mediaAlbum: mediaAlbum?.trim() || "Harmomus",
-      artworkUrl: normalizeArtworkUrl(artworkUrl) || normalizeArtworkUrl(inferKitArtwork()),
+      artworkUrl: normalizeArtworkUrl(rawArtwork),
     };
   }, [mediaTitle, mediaArtist, mediaAlbum, artworkUrl, title]);
 
