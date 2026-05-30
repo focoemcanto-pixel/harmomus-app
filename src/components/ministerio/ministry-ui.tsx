@@ -15,7 +15,7 @@ const navItems = [
   { href: "/ministerio", label: "Visão Geral", icon: LayoutDashboard },
   { href: "/ministerio#integrantes", label: "Integrantes", icon: Users },
   { href: "/ministerio#convites", label: "Convites", icon: UserPlus },
-  { href: "/ministerio/repertorios", label: "Repertórios", icon: ListMusic },
+  { href: "/ministerio/repertorios", label: "Minha Escala", icon: ListMusic },
   { href: "/ministerio#permissoes", label: "Permissões", icon: ShieldCheck },
   { href: "/ministerio/solicitacoes", label: "Solicitações", icon: Bell },
   { href: "/ministerio/historico", label: "Histórico", icon: History },

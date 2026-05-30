@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, CalendarDays, ListMusic, Music2, Plus } from "lucide-react";
 
+import { MinistryPlaylistPlayer } from "@/components/ministerio/ministry-playlist-player";
 import { MinistryShell, PremiumPanel, formatDate } from "@/components/ministerio/ministry-ui";
 import { getCurrentUserAccessContext, isMinistryManager } from "@/lib/auth/current-user";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -61,18 +62,18 @@ export default async function RepertoireDetailPage({ params }: { params: Promise
     <MinistryShell>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Link href="/ministerio/repertorios" className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10">
-          <ArrowLeft className="h-4 w-4" /> Voltar para repertórios
+          <ArrowLeft className="h-4 w-4" /> Voltar para Minha Escala
         </Link>
         {canManage ? (
           <Link href={`/ministerio/repertorios/${repertoire.id}/adicionar-kits`} className="inline-flex items-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200">
-            <Plus className="h-4 w-4" /> Adicionar kits
+            <Plus className="h-4 w-4" /> Adicionar músicas
           </Link>
         ) : null}
       </div>
 
       <div className="overflow-hidden rounded-[2rem] border border-cyan-300/20 bg-gradient-to-br from-[#0b1120]/95 via-[#140d27]/95 to-[#06111f]/95 p-6 shadow-[0_30px_100px_rgba(34,211,238,0.16)] md:p-10">
         <div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/25 bg-cyan-400/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100">
-          <ListMusic className="h-4 w-4" /> Repertório do Ministério
+          <ListMusic className="h-4 w-4" /> Playlist Ministerial
         </div>
         <h1 className="mt-5 text-3xl font-semibold tracking-tight md:text-5xl">{repertoire.name}</h1>
         {repertoire.description ? <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-300 md:text-base">{repertoire.description}</p> : null}
@@ -81,7 +82,7 @@ export default async function RepertoireDetailPage({ params }: { params: Promise
             <CalendarDays className="h-4 w-4 text-cyan-200" /> {repertoire.event_date ? formatDate(repertoire.event_date) : `Criado em ${formatDate(repertoire.created_at)}`}
           </span>
           <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2">
-            <Music2 className="h-4 w-4 text-cyan-200" /> {repertoireItems.length} kit{repertoireItems.length === 1 ? "" : "s"}
+            <Music2 className="h-4 w-4 text-cyan-200" /> {repertoireItems.length} música{repertoireItems.length === 1 ? "" : "s"}
           </span>
         </div>
       </div>
@@ -89,59 +90,53 @@ export default async function RepertoireDetailPage({ params }: { params: Promise
       <PremiumPanel>
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
-            <p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Kits do repertório</p>
-            <h2 className="mt-2 text-2xl font-semibold">Músicas para estudar</h2>
+            <p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Playlist</p>
+            <h2 className="mt-2 text-2xl font-semibold">Músicas da escala</h2>
             <p className="mt-1 text-sm text-zinc-400">
               {canManage
-                ? "Estes kits formarão o repertório compartilhado com os integrantes do ministério."
-                : "Estes são os kits definidos pelo responsável do seu ministério para estudo."}
+                ? "Estas músicas formarão a playlist ministerial compartilhada com os integrantes do ministério."
+                : "Estas são as músicas definidas pelo responsável do seu ministério para estudo."}
             </p>
           </div>
           {canManage ? (
             <Link href={`/ministerio/repertorios/${repertoire.id}/adicionar-kits`} className="inline-flex w-fit items-center gap-2 rounded-2xl border border-cyan-300/25 bg-cyan-400/10 px-4 py-3 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-400/20">
-              <Plus className="h-4 w-4" /> Adicionar kits
+              <Plus className="h-4 w-4" /> Adicionar músicas
             </Link>
           ) : null}
         </div>
 
         {repertoireItems.length ? (
-          <div className="mt-6 divide-y divide-white/10 overflow-hidden rounded-3xl border border-white/10 bg-black/20">
-            {repertoireItems.map((item) => {
+          <MinistryPlaylistPlayer
+            tracks={repertoireItems.flatMap((item) => {
               const kit = item.kits;
-              if (!kit) return null;
-              return (
-                <div key={item.id} className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-white/5 text-sm font-bold text-zinc-300">
-                      {kit.cover_url ? <img src={kit.cover_url} alt={kit.name} className="h-full w-full object-cover" /> : item.position}
-                    </div>
-                    <div>
-                      <p className="text-sm text-zinc-500">#{item.position}</p>
-                      <h3 className="text-lg font-semibold text-white">{kit.name}</h3>
-                      <p className="text-sm text-zinc-400">{kit.artist || "Kit vocal"}</p>
-                    </div>
-                  </div>
-                  <Link href={`/biblioteca/${kit.slug}`} className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-zinc-200 transition hover:bg-white/10">
-                    Abrir kit
-                  </Link>
-                </div>
-              );
+              if (!kit) return [];
+
+              return [
+                {
+                  id: item.id,
+                  position: item.position,
+                  name: kit.name,
+                  artist: kit.artist,
+                  coverUrl: kit.cover_url,
+                  href: `/biblioteca/${kit.slug}`,
+                },
+              ];
             })}
-          </div>
+          />
         ) : (
           <div className="mt-6 rounded-3xl border border-dashed border-white/10 bg-black/20 p-10 text-center">
             <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-400/10 text-cyan-100">
               <Music2 className="h-7 w-7" />
             </div>
-            <h3 className="mt-5 text-2xl font-semibold text-white">Nenhum kit adicionado ainda</h3>
+            <h3 className="mt-5 text-2xl font-semibold text-white">Nenhuma música adicionada ainda</h3>
             <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-zinc-400">
               {canManage
-                ? "Adicione os kits que sua equipe precisa estudar neste repertório."
-                : "Quando o responsável adicionar kits, eles aparecerão aqui."}
+                ? "Adicione as músicas que sua equipe precisa estudar nesta escala."
+                : "Quando o responsável adicionar músicas, elas aparecerão aqui."}
             </p>
             {canManage ? (
               <Link href={`/ministerio/repertorios/${repertoire.id}/adicionar-kits`} className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200">
-                <Plus className="h-4 w-4" /> Adicionar primeiro kit
+                <Plus className="h-4 w-4" /> Adicionar primeira música
               </Link>
             ) : null}
           </div>
