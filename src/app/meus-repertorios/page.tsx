@@ -16,6 +16,7 @@ type RepertoireRow = {
   event_date: string | null;
   created_at: string;
   kitCount: number;
+  studiedCount: number;
 };
 
 function formatDate(value?: string | null, fallback = "—") {
@@ -30,6 +31,17 @@ function countItemsByRepertoire(items: any[] | null | undefined) {
   for (const item of items ?? []) {
     const repertoireId = String(item.repertoire_id ?? "");
     if (!repertoireId) continue;
+    counts.set(repertoireId, (counts.get(repertoireId) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function countStudiedByRepertoire(progressRows: any[] | null | undefined) {
+  const counts = new Map<string, number>();
+  for (const row of progressRows ?? []) {
+    const repertoireId = String(row.repertoire_id ?? "");
+    const isStudied = row.study_status ? row.study_status === "studied" : Boolean(row.studied);
+    if (!repertoireId || !row.repertoire_item_id || !isStudied) continue;
     counts.set(repertoireId, (counts.get(repertoireId) ?? 0) + 1);
   }
   return counts;
@@ -73,6 +85,7 @@ export default async function MeusRepertoriosPage() {
   const context = await getCurrentUserAccessContext();
 
   if (context.isGuest) redirect("/login");
+  if (!context.profile?.id) redirect("/login");
   if (!context.ministry?.ministryId) {
     return (
       <ErrorState
@@ -102,12 +115,19 @@ export default async function MeusRepertoriosPage() {
   const ministry = ministryResult.data;
   const repertoires = repertoireResult.data ?? [];
   const repertoireIds = repertoires.map((repertoire: any) => repertoire.id).filter(Boolean);
-  const itemResult = repertoireIds.length
-    ? await admin
-        .from("ministry_repertoire_items")
-        .select("id,repertoire_id")
-        .in("repertoire_id", repertoireIds)
-    : { data: [], error: null };
+  const [itemResult, progressResult] = repertoireIds.length
+    ? await Promise.all([
+        admin
+          .from("ministry_repertoire_items")
+          .select("id,repertoire_id")
+          .in("repertoire_id", repertoireIds),
+        admin
+          .from("ministry_repertoire_progress")
+          .select("repertoire_id,repertoire_item_id,studied,study_status")
+          .eq("user_id", context.profile.id)
+          .in("repertoire_id", repertoireIds),
+      ])
+    : [{ data: [], error: null }, { data: [], error: null }];
 
   if (itemResult.error) {
     const message = getErrorMessage(itemResult.error);
@@ -115,10 +135,18 @@ export default async function MeusRepertoriosPage() {
     return <ErrorState title="Não foi possível carregar as músicas da escala" message={message} />;
   }
 
+  if (progressResult.error) {
+    const message = getErrorMessage(progressResult.error);
+    console.error("[MeusRepertoriosPage] failed to load repertoire progress", progressResult.error);
+    return <ErrorState title="Não foi possível carregar seu progresso da escala" message={message} />;
+  }
+
   const itemCounts = countItemsByRepertoire(itemResult.data);
+  const studiedCounts = countStudiedByRepertoire(progressResult.data);
   const rows = (repertoires as any[]).map((repertoire) => ({
     ...repertoire,
     kitCount: itemCounts.get(String(repertoire.id)) ?? 0,
+    studiedCount: studiedCounts.get(String(repertoire.id)) ?? 0,
   })) as RepertoireRow[];
 
   return (
@@ -162,6 +190,12 @@ export default async function MeusRepertoriosPage() {
                       <div className="flex items-center gap-2">
                         <Music2 className="h-4 w-4" />
                         <span>Quantidade de músicas: {kitCount}</span>
+                      </div>
+                      <div className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-3 text-cyan-100">
+                        <p className="text-sm font-black">{repertoire.studiedCount} de {kitCount} músicas estudadas</p>
+                        <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
+                          <div className="h-full rounded-full bg-cyan-300" style={{ width: `${kitCount > 0 ? Math.round((repertoire.studiedCount / kitCount) * 100) : 0}%` }} />
+                        </div>
                       </div>
                     </div>
                     <Link
