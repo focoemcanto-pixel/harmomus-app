@@ -9,6 +9,15 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+type NovoRepertorioSearchParams = {
+  error?: string | string[];
+};
+
+function getSearchParamValue(value: string | string[] | undefined) {
+  if (Array.isArray(value)) return value[0] ?? "";
+  return value ?? "";
+}
+
 async function createRepertoire(formData: FormData) {
   "use server";
 
@@ -52,11 +61,12 @@ async function createRepertoire(formData: FormData) {
   redirect(`/ministerio/repertorios/${data.id}`);
 }
 
-export default async function NovoRepertorioPage({ searchParams }: { searchParams?: Promise<{ error?: string }> }) {
-  const [context, params] = await Promise.all([
+export default async function NovoRepertorioPage({ searchParams }: { searchParams?: Promise<NovoRepertorioSearchParams> | NovoRepertorioSearchParams }) {
+  const [context, rawParams] = await Promise.all([
     getCurrentUserAccessContext(),
-    searchParams ?? Promise.resolve({}),
+    Promise.resolve(searchParams ?? {}),
   ]);
+  const errorMessage = getSearchParamValue(rawParams.error);
 
   if (context.isGuest) redirect("/login");
   if (!context.ministry) redirect("/assinatura");
@@ -83,9 +93,9 @@ export default async function NovoRepertorioPage({ searchParams }: { searchParam
           </div>
 
           <form action={createRepertoire} className="rounded-[2rem] border border-white/10 bg-black/20 p-5 md:p-6">
-            {params?.error ? (
+            {errorMessage ? (
               <div className="mb-5 rounded-2xl border border-amber-300/25 bg-amber-500/10 p-4 text-sm text-amber-100">
-                {params.error}
+                {errorMessage}
               </div>
             ) : null}
 
