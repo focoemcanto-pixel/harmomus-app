@@ -253,7 +253,7 @@ async function createPaidCheckoutAccount(input: {
   const { data: created, error: createError } = await admin.auth.admin.createUser({
     email: input.email,
     password: input.password,
-    email_confirm: true,
+    email_confirm: false,
     user_metadata: {
       full_name: input.fullName,
       username: input.username,
@@ -279,7 +279,7 @@ async function createPaidCheckoutAccount(input: {
   const { error: profileError } = await admin
     .from("profiles")
     .update({
-      onboarding_status: "checkout_started",
+      onboarding_status: "pending_email_confirmation",
       onboarding_step: "waiting_payment",
       updated_at: now,
     })
