@@ -67,8 +67,27 @@ export async function POST(request: Request) {
 
   const base = process.env.NEXT_PUBLIC_APP_URL?.trim()?.replace(/\/$/, "") || new URL(request.url).origin;
   const emailRedirectTo = `${base}/auth/confirm?next=${encodeURIComponent("/login?confirmed=1")}`;
-  const { error: resendError } = await supabase.auth.resend({ type: "signup", email: newEmail, options: { emailRedirectTo } });
-  if (resendError) return NextResponse.json({ error: resendError.message || "Falha ao reenviar confirmação." }, { status: 400 });
+
+  const { error: emailChangeError } = await supabase.auth.resend({
+    type: "email_change" as any,
+    email: newEmail,
+    options: { emailRedirectTo },
+  });
+
+  if (emailChangeError) {
+    const { error: signupFallbackError } = await supabase.auth.resend({
+      type: "signup",
+      email: newEmail,
+      options: { emailRedirectTo },
+    });
+
+    if (signupFallbackError) {
+      return NextResponse.json(
+        { error: signupFallbackError.message || emailChangeError.message || "Falha ao reenviar confirmação." },
+        { status: 400 },
+      );
+    }
+  }
 
   return NextResponse.json({ ok: true, email: newEmail });
 }
