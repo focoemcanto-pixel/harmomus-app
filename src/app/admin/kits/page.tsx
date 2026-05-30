@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { ConfirmSubmitButton } from "@/components/admin/confirm-submit-button";
 import { PageHeader } from "@/components/admin/page-header";
 import { deleteKit, getKits } from "@/lib/data/kits";
+import { setFlashToast } from "@/lib/flash";
 
 function formatDate(value?: string | null) {
   if (!value) return "-";
@@ -30,8 +31,16 @@ export default async function KitsPage() {
   async function handleDelete(formData: FormData) {
     "use server";
     const id = String(formData.get("id") ?? "");
+    const name = String(formData.get("name") ?? "").trim();
     if (!id) return;
-    await deleteKit(id);
+
+    try {
+      await deleteKit(id);
+      await setFlashToast("success", `Kit ${name || "selecionado"} excluído com sucesso.`);
+    } catch (error) {
+      await setFlashToast("error", error instanceof Error ? error.message : "Não foi possível excluir o kit.");
+    }
+
     revalidatePath("/admin/kits");
     revalidatePath("/biblioteca");
     revalidatePath("/todos-os-kits");
@@ -133,6 +142,7 @@ export default async function KitsPage() {
                     </Link>
                     <form action={handleDelete}>
                       <input type="hidden" name="id" value={kit.id} />
+                      <input type="hidden" name="name" value={kit.name} />
                       <ConfirmSubmitButton message={`Tem certeza que deseja excluir o kit \"${kit.name}\"? Esta ação não poderá ser desfeita.`} className="inline-flex w-full items-center justify-center rounded-xl border border-red-500/50 px-4 py-2.5 text-sm font-semibold text-red-300 transition hover:bg-red-500/10 sm:w-auto">
                         Excluir
                       </ConfirmSubmitButton>
