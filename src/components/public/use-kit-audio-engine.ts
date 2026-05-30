@@ -22,6 +22,43 @@ function createAudioElement(preload: "metadata" | "auto") {
   return audio;
 }
 
+type PlaybackMetric = {
+  id: string;
+  src: string;
+  clickAt: number;
+  fetchStartAt?: number;
+  fetchEndAt?: number;
+  canplayAt?: number;
+  playingAt?: number;
+};
+
+function nowPerf() {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
+function logPlaybackMetric(metric: PlaybackMetric, event: "PLAY_CLICK" | "FETCH_AUDIO_START" | "FETCH_AUDIO_END" | "AUDIO_CANPLAY" | "AUDIO_PLAYING") {
+  const fetchStartAt = metric.fetchStartAt ?? metric.clickAt;
+  const fetchEndAt = metric.fetchEndAt ?? metric.canplayAt ?? metric.playingAt;
+  const canplayAt = metric.canplayAt ?? metric.playingAt;
+  const playingAt = metric.playingAt;
+  console.info(`[HarmomusPlayer:perf] ${event}`, {
+    id: metric.id,
+    src: metric.src,
+    clickToFetchMs: Math.round(fetchStartAt - metric.clickAt),
+    fetchToResponseMs: fetchEndAt ? Math.round(fetchEndAt - fetchStartAt) : null,
+    responseToCanplayMs: fetchEndAt && canplayAt ? Math.round(canplayAt - fetchEndAt) : null,
+    canplayToPlayingMs: canplayAt && playingAt ? Math.round(playingAt - canplayAt) : null,
+    totalMs: playingAt ? Math.round(playingAt - metric.clickAt) : null,
+  });
+}
+
+function readResourceResponseEnd(src: string, fallback: number) {
+  if (typeof performance === "undefined" || typeof performance.getEntriesByName !== "function") return fallback;
+  const entries = performance.getEntriesByName(src, "resource") as PerformanceResourceTiming[];
+  const latest = entries.at(-1);
+  return latest?.responseEnd && latest.responseEnd > 0 ? latest.responseEnd : fallback;
+}
+
 function normalizePlaybackError(error: unknown) {
   const message = error instanceof Error ? error.message : "";
   if (/operation is not supported|not supported source|no supported source|media resource/i.test(message)) {
@@ -55,6 +92,8 @@ export function useKitAudioEngine() {
   const volumeRef = useRef(1);
   const loopRef = useRef(false);
   const requestSerialRef = useRef(0);
+  const audioCacheRef = useRef<Map<string, HTMLAudioElement>>(new Map());
+  const playbackMetricRef = useRef<PlaybackMetric | null>(null);
 
   const ensureAudio = useCallback(() => {
     if (!audioRef.current) audioRef.current = createAudioElement("auto");
@@ -62,6 +101,19 @@ export function useKitAudioEngine() {
     audioRef.current.volume = volumeRef.current;
     audioRef.current.loop = loopRef.current;
     return audioRef.current;
+  }, []);
+
+  const getCachedAudio = useCallback((identity: string, src: string, preload: "metadata" | "auto") => {
+    const cached = audioCacheRef.current.get(identity);
+    if (cached) {
+      cached.preload = preload;
+      return cached;
+    }
+
+    const audio = createAudioElement(preload);
+    audio.src = src;
+    audioCacheRef.current.set(identity, audio);
+    return audio;
   }, []);
 
   const cancelRaf = useCallback(() => {
@@ -88,8 +140,6 @@ export function useKitAudioEngine() {
     if (audio) {
       try { audio.pause(); } catch {}
       try { audio.currentTime = 0; } catch {}
-      audio.removeAttribute("src");
-      try { audio.load(); } catch {}
     }
 
     setIsPlaying(false);
@@ -130,22 +180,29 @@ export function useKitAudioEngine() {
     rafIdRef.current = requestAnimationFrame(update);
   }, [cancelRaf]);
 
-  const preloadTrack = useCallback((nextTrack: KitTrack) => {
+  const preloadTrack = useCallback((nextTrack: KitTrack, mode: "metadata" | "auto" = "auto") => {
     if ((nextTrack.semitoneShift ?? 0) !== 0 || !nextTrack.src) return;
-    if (!preloaderRef.current) preloaderRef.current = createAudioElement("auto");
+    const identity = getTrackIdentity(nextTrack);
+    const cachedAudio = getCachedAudio(identity, nextTrack.src, mode);
 
-    if (preloadedSrcRef.current === nextTrack.src && preloaderRef.current.src) return;
+    if (audioRef.current !== cachedAudio && preloadedSrcRef.current !== nextTrack.src) {
+      preloaderRef.current = cachedAudio;
+      preloadedSrcRef.current = nextTrack.src;
+    }
 
-    preloadedSrcRef.current = nextTrack.src;
-    preloaderRef.current.preload = "auto";
-    preloaderRef.current.src = nextTrack.src;
-    preloaderRef.current.load();
-  }, []);
+    cachedAudio.preload = mode;
+    if (!cachedAudio.src) cachedAudio.src = nextTrack.src;
+    cachedAudio.load();
+  }, [getCachedAudio]);
 
   const playTrack = useCallback(async (nextTrack: KitTrack) => {
     if (!nextTrack.src) return;
 
     const identity = getTrackIdentity(nextTrack);
+    const clickAt = nowPerf();
+    const metric: PlaybackMetric = { id: identity, src: nextTrack.src, clickAt };
+    playbackMetricRef.current = metric;
+    logPlaybackMetric(metric, "PLAY_CLICK");
     const canReusePreloader = (nextTrack.semitoneShift ?? 0) === 0 && preloadedSrcRef.current === nextTrack.src && preloaderRef.current?.src;
 
     hardInvalidatePlayback();
@@ -166,7 +223,12 @@ export function useKitAudioEngine() {
       abortRef.current = abortController;
 
       let reusedPreloader = false;
-      if (canReusePreloader && preloaderRef.current) {
+      if ((nextTrack.semitoneShift ?? 0) === 0) {
+        audio = getCachedAudio(identity, nextTrack.src, "auto");
+        audioRef.current = audio;
+        reusedPreloader = Boolean(canReusePreloader);
+        if (preloaderRef.current === audio) preloadedSrcRef.current = null;
+      } else if (canReusePreloader && preloaderRef.current) {
         audioRef.current = preloaderRef.current;
         audio = audioRef.current;
         preloaderRef.current = createAudioElement("auto");
@@ -174,11 +236,33 @@ export function useKitAudioEngine() {
         reusedPreloader = true;
       } else {
         audio.src = nextTrack.src;
-        audio.load();
       }
+
+      metric.fetchStartAt = nowPerf();
+      logPlaybackMetric(metric, "FETCH_AUDIO_START");
 
       audio.volume = volumeRef.current;
       audio.loop = loopRef.current;
+
+      const onCanPlay = () => {
+        if (playbackMetricRef.current !== metric) return;
+        metric.fetchEndAt = readResourceResponseEnd(nextTrack.src, nowPerf());
+        metric.canplayAt = nowPerf();
+        logPlaybackMetric(metric, "FETCH_AUDIO_END");
+        logPlaybackMetric(metric, "AUDIO_CANPLAY");
+      };
+      const onPlaying = () => {
+        if (playbackMetricRef.current !== metric) return;
+        if (!metric.canplayAt) {
+          metric.fetchEndAt = readResourceResponseEnd(nextTrack.src, nowPerf());
+          metric.canplayAt = nowPerf();
+        }
+        metric.playingAt = nowPerf();
+        logPlaybackMetric(metric, "AUDIO_PLAYING");
+      };
+      audio.addEventListener("canplay", onCanPlay, { once: true });
+      audio.addEventListener("playing", onPlaying, { once: true });
+      audio.load();
 
       const isStillCurrent = () => (
         !abortController.signal.aborted &&
@@ -197,12 +281,12 @@ export function useKitAudioEngine() {
           } catch (firstPlayError) {
             if (!reusedPreloader || !isStillCurrent()) throw firstPlayError;
 
-            const fallbackAudio = createAudioElement("auto");
-            fallbackAudio.src = nextTrack.src;
+            const fallbackAudio = getCachedAudio(`${identity}::fallback`, nextTrack.src, "auto");
             fallbackAudio.volume = volumeRef.current;
             fallbackAudio.loop = loopRef.current;
             audioRef.current = fallbackAudio;
             audio = fallbackAudio;
+            fallbackAudio.load();
             await fallbackAudio.play();
           }
         } else {
@@ -225,7 +309,7 @@ export function useKitAudioEngine() {
         setErrorMessage(normalizePlaybackError(error));
       }
     });
-  }, [ensureAudio, hardInvalidatePlayback, runTransition, startRafLoop]);
+  }, [ensureAudio, getCachedAudio, hardInvalidatePlayback, runTransition, startRafLoop]);
 
   const togglePlay = useCallback(async () => {
     const audio = audioRef.current;

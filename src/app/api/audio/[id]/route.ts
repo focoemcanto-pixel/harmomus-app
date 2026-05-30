@@ -11,14 +11,20 @@ import { normalizeTone, sortTonesByChromaticOrder } from "@/lib/music/tones";
 
 export const runtime = "nodejs";
 
-type ByteRange = { start: number; end?: number };
+type ByteRange = { start: number; end?: number; suffix?: number };
 
 function parseRangeHeader(rangeHeader: string | null): ByteRange | null {
   if (!rangeHeader?.startsWith("bytes=")) return null;
   const value = rangeHeader.replace("bytes=", "").split(",")[0]?.trim();
-  if (!value || value.startsWith("-")) return null;
+  if (!value) return null;
 
   const [startRaw, endRaw] = value.split("-");
+  if (startRaw === "") {
+    const suffix = Number.parseInt(endRaw ?? "", 10);
+    if (Number.isNaN(suffix) || suffix <= 0) return null;
+    return { start: 0, suffix };
+  }
+
   const start = Number.parseInt(startRaw, 10);
   const end = endRaw ? Number.parseInt(endRaw, 10) : undefined;
 
@@ -108,20 +114,59 @@ function runAfterResponse(task: () => Promise<void>) {
   }, 0);
 }
 
+const AUDIO_ROUTE_PERF_LOGS = process.env.AUDIO_ROUTE_PERF_LOGS !== "false";
+const PLANS_CACHE_TTL_MS = 5 * 60 * 1000;
+let plansCache: { expiresAt: number; plans: any[] } | null = null;
+
+function nowMs() {
+  return Date.now();
+}
+
+function logAudioRoutePerf(id: string, message: string, extra: Record<string, unknown>) {
+  if (!AUDIO_ROUTE_PERF_LOGS) return;
+  console.info(`[audio:perf] ${message}`, { audioFileId: id, ...extra });
+}
+
+async function getCachedPlans(supabase: any) {
+  const now = nowMs();
+  if (plansCache && plansCache.expiresAt > now) return { plans: plansCache.plans, cacheHit: true };
+
+  const startedAt = nowMs();
+  const { data } = await supabase.from("plans").select("id,name,slug");
+  const plans = data ?? [];
+  plansCache = { plans, expiresAt: nowMs() + PLANS_CACHE_TTL_MS };
+  return { plans, cacheHit: false, durationMs: nowMs() - startedAt };
+}
+
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const startedAt = Date.now();
+  const startedAt = nowMs();
   const { id } = await params;
+  const range = parseRangeHeader(request.headers.get("range"));
+  const rangeLabel = request.headers.get("range") ?? "full";
   const supabase = await createClient();
+
+  const audioFileStartedAt = nowMs();
   const { data: audioFile } = await (supabase as any).from("kit_audio_files").select("id,kit_id,tone,name,r2_key,file_type,source_type").eq("id", id).maybeSingle();
-  if (!audioFile) return new Response("Áudio não encontrado.", { status: 404 });
+  const audioFileMs = nowMs() - audioFileStartedAt;
+  if (!audioFile) {
+    logAudioRoutePerf(id, "not_found", { totalMs: nowMs() - startedAt, audioFileMs, range: rangeLabel });
+    return new Response("Áudio não encontrado.", { status: 404 });
+  }
   if (!audioFile.r2_key) return new Response("Áudio indisponível.", { status: 502 });
 
-  const [{ data: kit }, { data: plans }, context] = await Promise.all([
+  const parallelStartedAt = nowMs();
+  const [kitResult, plansResult, context] = await Promise.all([
     (supabase as any).from("kits").select("id,slug,name,artist,cover_url,description,lyrics,required_plan,allowed_plan_slugs,original_tone,default_tone,allow_pitch_shift,max_pitch_shift_semitones").eq("id", audioFile.kit_id).maybeSingle(),
-    (supabase as any).from("plans").select("id,name,slug"),
+    getCachedPlans(supabase as any),
     getCurrentUserAccessContext(),
   ]);
-  if (!kit) return new Response("Kit não encontrado.", { status: 404 });
+  const parallelMs = nowMs() - parallelStartedAt;
+  const kit = kitResult.data;
+  const plans = plansResult.plans;
+  if (!kit) {
+    logAudioRoutePerf(id, "kit_not_found", { totalMs: nowMs() - startedAt, audioFileMs, parallelMs, range: rangeLabel });
+    return new Response("Kit não encontrado.", { status: 404 });
+  }
 
   const requiredPlan = resolveRequiredPlan(plans, kit.required_plan);
   const accessKit: PublicKit = {
@@ -142,7 +187,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     tones: [],
   };
 
+  const accessStartedAt = nowMs();
   const access = await resolveKitAccess(context, accessKit);
+  const accessMs = nowMs() - accessStartedAt;
   const analyticsContext = { session_id: resolveSessionId(request), device_type: resolveDeviceType(request.headers.get("user-agent")), plan_slug: context.effectiveSlug, page_path: resolvePagePath(request) };
 
   if (!access.play.allowed) {
@@ -151,7 +198,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   if (!access.tone.allowed) {
+    const openingToneStartedAt = nowMs();
     const openingTone = await resolveOpeningTone(supabase as any, kit);
+    logAudioRoutePerf(id, "opening_tone_resolved", { openingToneMs: nowMs() - openingToneStartedAt, openingTone });
     const requestedTone = normalizeTone(audioFile.tone);
     if (openingTone && requestedTone !== openingTone) {
       await logAudioAccess({ user_id: context.profile?.id ?? null, kit_id: kit.id, audio_file_id: audioFile.id, status: "denied", reason: "tone_restricted", ...analyticsContext });
@@ -159,10 +208,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
   }
 
-  const range = parseRangeHeader(request.headers.get("range"));
   const shouldTrackPlayback = shouldCountPlayback(range);
 
   let streamResponse: Awaited<ReturnType<typeof getAudioStream>>;
+  const r2StartedAt = nowMs();
   try {
     streamResponse = await getAudioStream(audioFile.r2_key, range ?? undefined);
   } catch (error) {
@@ -180,6 +229,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return new Response("Áudio indisponível.", { status: 502 });
   }
 
+  const r2Ms = nowMs() - r2StartedAt;
   const streamBody = streamResponse.Body;
   if (!streamBody) return new Response("Áudio indisponível.", { status: 502 });
 
@@ -191,11 +241,31 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   headers.set("Content-Disposition", `inline; filename=\"${safeFilename(audioFile.name, audioFile.file_type)}\"`);
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("Vary", "Range, Cookie");
-  headers.set("X-Audio-Route-TTFB", String(Date.now() - startedAt));
+  headers.set("X-Audio-Route-TTFB", String(nowMs() - startedAt));
+  headers.set("X-Audio-Supabase-Time", String(audioFileMs + parallelMs));
+  headers.set("X-Audio-Access-Time", String(accessMs));
+  headers.set("X-Audio-R2-Time", String(r2Ms));
   if (streamResponse.ETag) headers.set("ETag", streamResponse.ETag);
   if (streamResponse.LastModified) headers.set("Last-Modified", streamResponse.LastModified.toUTCString());
   if (streamResponse.ContentRange) headers.set("Content-Range", streamResponse.ContentRange);
   if (typeof streamResponse.ContentLength === "number") headers.set("Content-Length", String(streamResponse.ContentLength));
+
+  const responseReadyMs = nowMs() - startedAt;
+  logAudioRoutePerf(id, "response_ready", {
+    totalMs: responseReadyMs,
+    supabaseMs: audioFileMs + parallelMs,
+    audioFileMs,
+    parallelMs,
+    plansCacheHit: plansResult.cacheHit,
+    plansMs: plansResult.durationMs ?? 0,
+    resolveKitAccessMs: accessMs,
+    r2Ms,
+    range: rangeLabel,
+    responseStatus: status,
+    contentLength: streamResponse.ContentLength ?? null,
+    contentRange: streamResponse.ContentRange ?? null,
+    streamingMode: "api-to-r2-direct-stream",
+  });
 
   if (shouldTrackPlayback) {
     runAfterResponse(async () => {
