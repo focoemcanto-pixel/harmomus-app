@@ -1,26 +1,52 @@
 import { ReactNode } from "react";
 import Link from "next/link";
+import { BarChart3, Bot, FileText, Mail, MessageCircle, Megaphone, ScrollText, Users } from "lucide-react";
 
 const tabs = [
-  ["Dashboard", "/admin/comunicacao/dashboard"],
-  ["Campanhas", "/admin/comunicacao/campaigns"],
-  ["Audiência", "/admin/comunicacao/audience"],
-  ["Templates", "/admin/comunicacao/templates"],
-  ["Automações", "/admin/comunicacao/automations"],
-  ["WhatsApp", "/admin/comunicacao/whatsapp"],
-  ["E-mails", "/admin/comunicacao/emails"],
-  ["Logs", "/admin/comunicacao/logs"],
+  { label: "Dashboard", href: "/admin/comunicacao/dashboard", icon: BarChart3, description: "Visão geral" },
+  { label: "Campanhas", href: "/admin/comunicacao/campaigns", icon: Megaphone, description: "Fluxos de disparo" },
+  { label: "Audiência", href: "/admin/comunicacao/audience", icon: Users, description: "CRM e contatos" },
+  { label: "Templates", href: "/admin/comunicacao/templates", icon: FileText, description: "Modelos de mensagem" },
+  { label: "Automações", href: "/admin/comunicacao/automations", icon: Bot, description: "Regras e gatilhos" },
+  { label: "WhatsApp", href: "/admin/comunicacao/whatsapp", icon: MessageCircle, description: "Canal WhatsApp" },
+  { label: "E-mails", href: "/admin/comunicacao/emails", icon: Mail, description: "Canal e-mail" },
+  { label: "Logs", href: "/admin/comunicacao/logs", icon: ScrollText, description: "Histórico" },
 ] as const;
 
 export function CommunicationShell({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) {
   return (
     <div className="space-y-6">
-      <div className="rounded-3xl border border-cyan-400/20 bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 p-6">
-        <p className="text-xs uppercase tracking-[0.3em] text-cyan-300">Central de Comunicação</p>
-        <h2 className="mt-2 text-3xl font-semibold text-white">{title}</h2>
-        <p className="mt-2 text-sm text-slate-300">{subtitle}</p>
+      <div className="overflow-hidden rounded-3xl border border-cyan-400/20 bg-gradient-to-br from-slate-950 via-slate-900 to-background shadow-premium">
+        <div className="p-5 sm:p-7">
+          <p className="text-xs uppercase tracking-[0.3em] text-cyan-300">Central de Comunicação</p>
+          <h2 className="mt-2 text-3xl font-semibold tracking-tight text-white sm:text-4xl">{title}</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">{subtitle}</p>
+        </div>
       </div>
-      <div className="flex flex-wrap gap-2">{tabs.map(([l,h])=> <Link key={h} href={h} className="rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-xs text-slate-200 hover:border-cyan-400/40">{l}</Link>)}</div>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {tabs.map((tab) => {
+          const Icon = tab.icon;
+          return (
+            <Link
+              key={tab.href}
+              href={tab.href}
+              className="group rounded-2xl border border-white/10 bg-slate-900/70 p-4 transition hover:border-cyan-400/40 hover:bg-cyan-500/10"
+            >
+              <div className="flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-400/20 bg-cyan-500/10 text-cyan-200 transition group-hover:border-cyan-300/50">
+                  <Icon size={18} />
+                </span>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-white">{tab.label}</p>
+                  <p className="truncate text-xs text-slate-400">{tab.description}</p>
+                </div>
+              </div>
+            </Link>
+          );
+        })}
+      </div>
+
       {children}
     </div>
   );
