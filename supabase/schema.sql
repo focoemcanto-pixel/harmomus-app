@@ -289,7 +289,7 @@ create table if not exists public.ministry_members (
   id uuid primary key default gen_random_uuid(),
   ministry_id uuid not null references public.ministries(id) on delete cascade,
   user_id uuid not null references public.profiles(id) on delete cascade,
-  role text not null check (role in ('owner','manager','member')),
+  role text not null check (role in ('owner','admin','manager','member')),
   invited_by uuid references public.profiles(id) on delete set null,
   joined_at timestamptz,
   status text not null default 'active' check (status in ('invited','active','removed')),
@@ -300,7 +300,7 @@ create table if not exists public.ministry_invites (
   id uuid primary key default gen_random_uuid(),
   ministry_id uuid not null references public.ministries(id) on delete cascade,
   email text not null,
-  role text not null check (role in ('manager','member')),
+  role text not null check (role in ('admin','manager','member')),
   token text not null unique,
   invited_by uuid references public.profiles(id) on delete set null,
   expires_at timestamptz not null,
@@ -312,10 +312,14 @@ create table if not exists public.ministry_invites (
 create table if not exists public.ministry_activity_logs (
   id uuid primary key default gen_random_uuid(),
   ministry_id uuid not null references public.ministries(id) on delete cascade,
-  action text not null,
   actor_user_id uuid references public.profiles(id) on delete set null,
-  metadata jsonb not null default '{}'::jsonb,
-  created_at timestamptz not null default now()
+  actor_name text,
+  action text not null,
+  entity_type text,
+  entity_id uuid,
+  description text not null,
+  metadata jsonb default '{}'::jsonb,
+  created_at timestamptz default now()
 );
 
 alter table public.ministries enable row level security;
@@ -338,7 +342,7 @@ create policy "Read ministry members" on public.ministry_members for select usin
 
 drop policy if exists "Owners and managers manage members" on public.ministry_members;
 create policy "Owners and managers manage members" on public.ministry_members for all using (
-  exists (select 1 from public.ministry_members mm where mm.ministry_id = ministry_members.ministry_id and mm.user_id = auth.uid() and mm.role in ('owner','manager') and mm.status='active')
+  exists (select 1 from public.ministry_members mm where mm.ministry_id = ministry_members.ministry_id and mm.user_id = auth.uid() and mm.role in ('owner','admin','manager') and mm.status='active')
 ) with check (
-  exists (select 1 from public.ministry_members mm where mm.ministry_id = ministry_members.ministry_id and mm.user_id = auth.uid() and mm.role in ('owner','manager') and mm.status='active')
+  exists (select 1 from public.ministry_members mm where mm.ministry_id = ministry_members.ministry_id and mm.user_id = auth.uid() and mm.role in ('owner','admin','manager') and mm.status='active')
 );

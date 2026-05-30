@@ -9,9 +9,7 @@ export async function getEffectiveUserPlan() {
 }
 
 export function isMinistryOwner(context: CurrentUserAccessContext) {
-  return (
-    context.ministry?.role === "owner" || context.ministry?.role === "admin"
-  );
+  return context.ministry?.role === "owner";
 }
 
 export function isMinistryManager(context: CurrentUserAccessContext) {

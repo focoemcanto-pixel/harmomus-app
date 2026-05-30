@@ -2,6 +2,7 @@ import Link from "next/link";
 import {
   BarChart3,
   Bell,
+  History,
   ExternalLink,
   LayoutDashboard,
   ListMusic,
@@ -17,6 +18,7 @@ const navItems = [
   { href: "/ministerio/repertorios", label: "Repertórios", icon: ListMusic },
   { href: "/ministerio#permissoes", label: "Permissões", icon: ShieldCheck },
   { href: "/ministerio/solicitacoes", label: "Solicitações", icon: Bell },
+  { href: "/ministerio/historico", label: "Histórico", icon: History },
   { href: "/ministerio/relatorios", label: "Relatórios", icon: BarChart3 },
 ] as const;
 
@@ -100,7 +102,7 @@ export function statusLabel(status?: string | null) {
 
 export function roleLabel(role?: string | null) {
   if (role === "owner") return "Responsável";
-  if (role === "admin" || role === "manager") return "Administrador";
+  if (role === "admin" || role === "manager") return "Admin";
   return "Integrante";
 }
 

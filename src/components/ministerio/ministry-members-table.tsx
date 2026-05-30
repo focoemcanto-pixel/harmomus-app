@@ -4,6 +4,7 @@ import { ExternalLink, RotateCcw } from "lucide-react";
 import { CopyInviteLink } from "@/components/ministerio/copy-invite-link";
 import { RemoveMemberButton } from "@/components/ministerio/remove-member-button";
 import { WhatsAppInviteLink } from "@/components/ministerio/whatsapp-invite-link";
+import { UpdateMemberRoleButton } from "@/components/ministerio/update-member-role-button";
 import { formatDate, PremiumPanel, roleLabel, statusLabel } from "@/components/ministerio/ministry-ui";
 import type { MinistryMemberRow } from "@/components/ministerio/types";
 
@@ -35,10 +36,14 @@ function ResendInviteButton({ memberId }: { memberId: string }) {
   );
 }
 
-function MemberActions({ member, pending, invitePath, canManage, canRemove, ministryName, name }: { member: MinistryMemberRow; pending: boolean; invitePath: string | null; canManage: boolean; canRemove: boolean; ministryName: string; name: string }) {
-  const removable = canRemove && member.role !== "owner" && String(member.status) !== "removed";
+function MemberActions({ member, pending, invitePath, canManage, canRemove, canChangeRoles, ministryName, name }: { member: MinistryMemberRow; pending: boolean; invitePath: string | null; canManage: boolean; canRemove: boolean; canChangeRoles: boolean; ministryName: string; name: string }) {
+  const normalizedRole = String(member.role ?? "").toLowerCase();
+  const normalizedStatus = String(member.status ?? "").toLowerCase();
+  const removable = canRemove && normalizedRole !== "owner" && normalizedStatus !== "removed";
+  const canPromote = canChangeRoles && normalizedStatus !== "removed" && !["owner", "admin", "manager"].includes(normalizedRole);
+  const canDemote = canChangeRoles && normalizedStatus !== "removed" && ["admin", "manager"].includes(normalizedRole);
 
-  if (!pending && !removable) return <span className="text-xs text-zinc-500">—</span>;
+  if (!pending && !removable && !canPromote && !canDemote) return <span className="text-xs text-zinc-500">—</span>;
 
   return (
     <div className="flex flex-wrap items-center justify-start gap-2 lg:justify-end">
@@ -50,12 +55,14 @@ function MemberActions({ member, pending, invitePath, canManage, canRemove, mini
         </>
       ) : null}
       {canManage && pending ? <ResendInviteButton memberId={member.id} /> : null}
+      {canPromote ? <UpdateMemberRoleButton memberId={member.id} role="admin" memberName={name} /> : null}
+      {canDemote ? <UpdateMemberRoleButton memberId={member.id} role="member" memberName={name} /> : null}
       {removable ? <RemoveMemberButton memberId={member.id} memberName={name} /> : null}
     </div>
   );
 }
 
-export function MinistryMembersTable({ members, canRemove, canManage, ministryName }: { members: MinistryMemberRow[]; canRemove: boolean; canManage: boolean; ministryName: string }) {
+export function MinistryMembersTable({ members, canRemove, canManage, canChangeRoles = false, ministryName }: { members: MinistryMemberRow[]; canRemove: boolean; canManage: boolean; canChangeRoles?: boolean; ministryName: string }) {
   return (
     <PremiumPanel id="integrantes" className="overflow-hidden p-0">
       <div className="flex flex-col gap-3 p-5 md:flex-row md:items-center md:justify-between md:p-6">
@@ -101,7 +108,7 @@ export function MinistryMembersTable({ members, canRemove, canManage, ministryNa
                       </td>
                       <td className="px-4 py-4 text-zinc-400">{member.accepted_at ? formatDate(member.accepted_at) : pending ? "—" : "—"}</td>
                       <td className="px-4 py-4">
-                        <MemberActions member={member} pending={pending} invitePath={invitePath} canManage={canManage} canRemove={canRemove} ministryName={ministryName} name={name} />
+                        <MemberActions member={member} pending={pending} invitePath={invitePath} canManage={canManage} canRemove={canRemove} canChangeRoles={canChangeRoles} ministryName={ministryName} name={name} />
                       </td>
                     </tr>
                   );
@@ -143,7 +150,7 @@ export function MinistryMembersTable({ members, canRemove, canManage, ministryNa
                   </div>
 
                   <div className="mt-4">
-                    <MemberActions member={member} pending={pending} invitePath={invitePath} canManage={canManage} canRemove={canRemove} ministryName={ministryName} name={name} />
+                    <MemberActions member={member} pending={pending} invitePath={invitePath} canManage={canManage} canRemove={canRemove} canChangeRoles={canChangeRoles} ministryName={ministryName} name={name} />
                   </div>
                 </div>
               );

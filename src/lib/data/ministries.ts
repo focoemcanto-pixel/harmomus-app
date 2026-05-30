@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 
-export type MinistryRole = "owner" | "manager" | "member";
+export type MinistryRole = "owner" | "admin" | "manager" | "member";
 
 export async function getUserMinistry(userId: string) {
   const supabase = (await createClient()) as any;

@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, Check, Music2, Plus, Search } from "lucide-react";
 
 import { MinistryShell, PremiumPanel } from "@/components/ministerio/ministry-ui";
+import { getActivityActorName, logMinistryActivity } from "@/lib/data/ministry-activity";
 import { getCurrentUserAccessContext, isMinistryManager } from "@/lib/auth/current-user";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -56,7 +57,7 @@ async function addKitToRepertoire(formData: FormData) {
 
   const { data: repertoire, error: repertoireError } = await admin
     .from("ministry_repertoires")
-    .select("id,ministry_id,archived")
+    .select("id,ministry_id,name,archived")
     .eq("id", repertoireId)
     .eq("ministry_id", context.ministry.ministryId)
     .maybeSingle();
@@ -66,7 +67,7 @@ async function addKitToRepertoire(formData: FormData) {
 
   const { data: kit, error: kitError } = await admin
     .from("kits")
-    .select("id,published")
+    .select("id,name,artist,published")
     .eq("id", kitId)
     .eq("published", true)
     .maybeSingle();
@@ -92,13 +93,33 @@ async function addKitToRepertoire(formData: FormData) {
 
   const position = (count ?? 0) + 1;
 
-  const { error } = await admin.from("ministry_repertoire_items").insert({
+  const { data: insertedItem, error } = await admin.from("ministry_repertoire_items").insert({
     repertoire_id: repertoireId,
     kit_id: kitId,
     position,
-  });
+  }).select("id").single();
 
   if (error) throw new Error(error.message);
+
+  const actorName = getActivityActorName(context.profile);
+  await logMinistryActivity({
+    ministryId: context.ministry.ministryId,
+    actorUserId: context.profile?.id ?? null,
+    actorName,
+    action: "repertoire.kit_added",
+    entityType: "ministry_repertoire_item",
+    entityId: insertedItem?.id ?? null,
+    description: `${actorName} adicionou ${kit.name || "um kit"} ao repertório ${repertoire.name || "ministerial"}`,
+    metadata: {
+      repertoire_id: repertoireId,
+      repertoire_name: repertoire.name,
+      repertoire_item_id: insertedItem?.id ?? null,
+      kit_id: kitId,
+      kit_name: kit.name,
+      kit_artist: kit.artist,
+      position,
+    },
+  });
 
   redirect(`/ministerio/repertorios/${repertoireId}/adicionar-kits?message=Kit%20adicionado%20com%20sucesso`);
 }

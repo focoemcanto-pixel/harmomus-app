@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentUserAccessContext, isMinistryOwner } from "@/lib/auth/current-user";
+import { getActivityActorName, logMinistryActivity } from "@/lib/data/ministry-activity";
 import { buildAbsoluteUrl, sendMinistryAccessRemovedEmail } from "@/lib/email/ministry-invite-email";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -56,25 +57,24 @@ export async function POST(request: Request) {
     return redirectToMinisterio(request, error.message || "Não foi possível remover o integrante.");
   }
 
-  try {
-    const { error: logError } = await admin.from("ministry_activity_logs").insert({
-      ministry_id: member.ministry_id,
-      actor_id: context.profile.id,
-      action: "member.removed",
-      metadata: {
-        member_id: member.id,
-        user_id: member.user_id,
-        email: member.invited_email,
-        removed_at: now,
-      },
-    });
-
-    if (logError && logError.code !== "42P01") {
-      console.error("[ministerio.remove] Falha ao registrar log de remoção", logError);
-    }
-  } catch (logError) {
-    console.error("[ministerio.remove] Log de remoção ignorado", logError);
-  }
+  const actorName = getActivityActorName(context.profile);
+  const memberName = member.invited_name || member.invited_email || "integrante";
+  await logMinistryActivity({
+    ministryId: member.ministry_id,
+    actorUserId: context.profile.id,
+    actorName,
+    action: "member.removed",
+    entityType: "ministry_member",
+    entityId: member.id,
+    description: `${actorName} removeu ${memberName} do ministério`,
+    metadata: {
+      member_id: member.id,
+      user_id: member.user_id,
+      member_email: member.invited_email,
+      member_name: member.invited_name,
+      removed_at: now,
+    },
+  });
 
   if (member.invited_email) {
     try {

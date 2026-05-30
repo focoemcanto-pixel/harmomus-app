@@ -160,7 +160,7 @@ export default async function MinisterioPage({ searchParams }: { searchParams?: 
           </PremiumPanel>
         </div>
 
-        <MinistryMembersTable members={members} canRemove={canRemove} canManage={canManage} ministryName={ministry?.name ?? "Ministério"} />
+        <MinistryMembersTable members={members} canRemove={canRemove} canManage={canManage} canChangeRoles={canRemove} ministryName={ministry?.name ?? "Ministério"} />
         <ArchivedMembersPanel members={archivedMembers} canRestore={canRemove} />
       </MinistryShell>
     </>
