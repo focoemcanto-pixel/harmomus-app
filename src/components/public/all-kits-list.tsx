@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { canAccessKit, normalizePlan } from "@/lib/access/access-engine";
 
 interface AllKitsListItem {
   id: string;
@@ -16,10 +17,18 @@ interface AllKitsListItem {
 const INITIAL_VISIBLE_COUNT = 36;
 const LOAD_MORE_COUNT = 24;
 
-export function AllKitsList({ kits, planSlug: _planSlug }: { kits: AllKitsListItem[]; planSlug?: string }) {
+function lockedPlanLabel(kit: AllKitsListItem) {
+  const allowed = Array.isArray(kit.allowedPlanSlugs) ? kit.allowedPlanSlugs : [];
+  if (kit.requiredPlanSlug === "plus" || allowed.includes("plus")) return "PLUS";
+  if (kit.requiredPlanSlug === "premium" || allowed.includes("premium")) return "PREMIUM";
+  return "PREMIUM";
+}
+
+export function AllKitsList({ kits, planSlug }: { kits: AllKitsListItem[]; planSlug?: string }) {
   const [query, setQuery] = useState("");
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_COUNT);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const viewerPlan = normalizePlan(planSlug);
 
   const filteredKits = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -80,18 +89,28 @@ export function AllKitsList({ kits, planSlug: _planSlug }: { kits: AllKitsListIt
       </div>
 
       <ul className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4">
-        {visibleKits.map((kit) => (
-          <li key={kit.id}>
-            <Link
-              href={`/biblioteca/${kit.slug}`}
-              prefetch
-              className="group block rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3 transition hover:border-cyan-300/40 hover:bg-white/[0.04]"
-            >
-              <p className="text-base font-semibold text-white transition group-hover:text-cyan-200">{kit.name}</p>
-              <p className="mt-1 text-sm text-zinc-400">{kit.artist}{kit.categoryName ? ` • ${kit.categoryName}` : ""}</p>
-            </Link>
-          </li>
-        ))}
+        {visibleKits.map((kit) => {
+          const locked = !canAccessKit(viewerPlan, kit.allowedPlanSlugs);
+          const plan = lockedPlanLabel(kit);
+          return (
+            <li key={kit.id}>
+              <Link
+                href={`/biblioteca/${kit.slug}`}
+                prefetch
+                className={locked ? "group block rounded-xl border border-gold-300/30 bg-gold-500/5 px-4 py-3 transition hover:border-gold-300/50" : "group block rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3 transition hover:border-cyan-300/40 hover:bg-white/[0.04]"}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-base font-semibold text-white transition group-hover:text-cyan-200">{kit.name}</p>
+                    <p className="mt-1 text-sm text-zinc-400">{kit.artist}{kit.categoryName ? ` • ${kit.categoryName}` : ""}</p>
+                  </div>
+                  {locked ? <span className="shrink-0 rounded-full border border-gold-300/45 bg-black/60 px-2.5 py-1 text-[10px] font-bold tracking-[0.12em] text-gold-100">🔒 {plan}</span> : null}
+                </div>
+                {locked ? <p className="mt-2 text-xs font-medium text-gold-100/85">Exclusivo {plan === "PLUS" ? "Plus/Premium" : "Premium"} • Faça upgrade para desbloquear</p> : null}
+              </Link>
+            </li>
+          );
+        })}
       </ul>
 
       {filteredKits.length === 0 ? <p className="mt-6 text-sm text-zinc-400">Nenhum kit encontrado para sua busca.</p> : null}
