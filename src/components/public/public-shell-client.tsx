@@ -282,7 +282,7 @@ export function PublicShellClient({
                     href="/meus-repertorios"
                     className="block rounded-lg px-3 py-2 text-sm font-semibold text-cyan-100 hover:bg-white/5"
                   >
-                    Meus Repertórios
+                    Minha Escala
                   </Link>
                 ) : null}
                 {canOpenMinistryCentral ? (
