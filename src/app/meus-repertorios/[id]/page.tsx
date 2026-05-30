@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, CalendarDays, CheckCircle2, Circle, ListMusic, Music2, PlayCircle } from "lucide-react";
+import { ArrowLeft, CalendarDays, CheckCircle2, Circle, ListMusic, Music2, PlayCircle, ShieldCheck } from "lucide-react";
 
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
@@ -32,6 +32,8 @@ type ProgressRow = {
   repertoire_item_id: string | null;
   studied: boolean;
   studied_at: string | null;
+  ready?: boolean | null;
+  ready_at?: string | null;
 };
 
 function formatDate(value?: string | null, fallback = "—") {
@@ -109,6 +111,100 @@ async function toggleStudied(formData: FormData) {
     if (error) throw new Error(error.message);
   }
 
+  if (!nextStudied) {
+    await admin
+      .from("ministry_repertoire_progress")
+      .update({ ready: false, ready_at: null, updated_at: now })
+      .eq("repertoire_id", repertoireId)
+      .eq("user_id", context.profile.id)
+      .is("repertoire_item_id", null)
+      .eq("ready", true);
+  }
+
+  redirect(`/meus-repertorios/${repertoireId}`);
+}
+
+async function toggleReady(formData: FormData) {
+  "use server";
+
+  const context = await getCurrentUserAccessContext();
+  if (context.isGuest) redirect("/login");
+  if (!context.ministry?.ministryId || !context.profile?.id) redirect("/");
+
+  const repertoireId = String(formData.get("repertoire_id") ?? "").trim();
+  const nextReady = String(formData.get("next_ready") ?? "") === "true";
+
+  if (!repertoireId) redirect("/meus-repertorios");
+
+  const admin = createSupabaseAdminClient() as any;
+
+  const { data: repertoire, error: repertoireError } = await admin
+    .from("ministry_repertoires")
+    .select("id,ministry_id,archived")
+    .eq("id", repertoireId)
+    .eq("ministry_id", context.ministry.ministryId)
+    .maybeSingle();
+
+  if (repertoireError) throw new Error(repertoireError.message);
+  if (!repertoire?.id || repertoire.archived) notFound();
+
+  const [{ count: totalItems }, { count: studiedItems }] = await Promise.all([
+    admin
+      .from("ministry_repertoire_items")
+      .select("id", { count: "exact", head: true })
+      .eq("repertoire_id", repertoireId),
+    admin
+      .from("ministry_repertoire_progress")
+      .select("id", { count: "exact", head: true })
+      .eq("repertoire_id", repertoireId)
+      .eq("user_id", context.profile.id)
+      .eq("studied", true)
+      .not("repertoire_item_id", "is", null),
+  ]);
+
+  const canConfirmReady = Number(totalItems ?? 0) > 0 && Number(studiedItems ?? 0) >= Number(totalItems ?? 0);
+  if (nextReady && !canConfirmReady) redirect(`/meus-repertorios/${repertoireId}`);
+
+  const now = new Date().toISOString();
+
+  const { data: existing, error: existingError } = await admin
+    .from("ministry_repertoire_progress")
+    .select("id")
+    .eq("repertoire_id", repertoireId)
+    .eq("user_id", context.profile.id)
+    .is("repertoire_item_id", null)
+    .maybeSingle();
+
+  if (existingError) throw new Error(existingError.message);
+
+  if (existing?.id) {
+    const { error } = await admin
+      .from("ministry_repertoire_progress")
+      .update({
+        ready: nextReady,
+        ready_at: nextReady ? now : null,
+        updated_at: now,
+      })
+      .eq("id", existing.id);
+
+    if (error) throw new Error(error.message);
+  } else {
+    const { error } = await admin.from("ministry_repertoire_progress").insert({
+      repertoire_id: repertoireId,
+      repertoire_item_id: null,
+      kit_id: null,
+      user_id: context.profile.id,
+      studied: false,
+      studied_at: null,
+      ready: nextReady,
+      ready_at: nextReady ? now : null,
+      created_at: now,
+      updated_at: now,
+    });
+
+    if (error) throw new Error(error.message);
+  }
+
   redirect(`/meus-repertorios/${repertoireId}`);
 }
 
@@ -144,7 +240,7 @@ export default async function MeuRepertorioDetalhePage({ params }: { params: Pro
       .order("position", { ascending: true }),
     admin
       .from("ministry_repertoire_progress")
-      .select("repertoire_item_id,studied,studied_at")
+      .select("repertoire_item_id,studied,studied_at,ready,ready_at")
       .eq("repertoire_id", repertoire.id)
       .eq("user_id", context.profile.id),
   ]);
@@ -153,10 +249,14 @@ export default async function MeuRepertorioDetalhePage({ params }: { params: Pro
   if (progressError) throw new Error(progressError.message);
 
   const repertoireItems = (items ?? []) as RepertoireItem[];
+  const allProgressRows = (progressRows ?? []) as ProgressRow[];
   const progressMap = new Map(
-    ((progressRows ?? []) as ProgressRow[]).map((row) => [String(row.repertoire_item_id), row]),
+    allProgressRows.filter((row) => row.repertoire_item_id).map((row) => [String(row.repertoire_item_id), row]),
   );
+  const readyRow = allProgressRows.find((row) => !row.repertoire_item_id && row.ready);
+  const isReady = Boolean(readyRow?.ready);
   const studiedCount = repertoireItems.filter((item) => progressMap.get(item.id)?.studied).length;
+  const canConfirmReady = repertoireItems.length > 0 && studiedCount >= repertoireItems.length;
 
   return (
     <PublicAppShell>
@@ -181,6 +281,11 @@ export default async function MeuRepertorioDetalhePage({ params }: { params: Pro
               <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2">
                 <Music2 className="h-4 w-4 text-cyan-200" /> {studiedCount}/{repertoireItems.length} estudadas
               </span>
+              {isReady ? (
+                <span className="inline-flex items-center gap-2 rounded-full border border-emerald-300/25 bg-emerald-400/10 px-4 py-2 text-emerald-100">
+                  <ShieldCheck className="h-4 w-4" /> Pronto para tocar
+                </span>
+              ) : null}
             </div>
           </div>
 
@@ -236,6 +341,32 @@ export default async function MeuRepertorioDetalhePage({ params }: { params: Pro
                   </div>
                 );
               })}
+
+              <div className={`rounded-3xl border p-6 shadow-xl ${isReady ? "border-emerald-300/30 bg-emerald-400/[0.08]" : canConfirmReady ? "border-cyan-300/25 bg-cyan-400/[0.08]" : "border-white/10 bg-white/[0.04]"}`}>
+                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.16em] text-cyan-200">Confirmação final</p>
+                    <h2 className="mt-2 text-2xl font-black text-white">
+                      {isReady ? "Você confirmou que está pronto" : "Estou pronto para tocar este repertório"}
+                    </h2>
+                    <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-300">
+                      {isReady
+                        ? "Sua liderança poderá acompanhar que você concluiu o estudo deste repertório."
+                        : canConfirmReady
+                          ? "Todas as músicas foram marcadas como estudadas. Agora você pode confirmar que está pronto para participar."
+                          : "Marque todas as músicas como estudadas para liberar esta confirmação."}
+                    </p>
+                  </div>
+                  <form action={toggleReady}>
+                    <input type="hidden" name="repertoire_id" value={repertoire.id} />
+                    <input type="hidden" name="next_ready" value={isReady ? "false" : "true"} />
+                    <button disabled={!isReady && !canConfirmReady} className={`inline-flex w-fit items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-50 ${isReady ? "border border-emerald-300/30 bg-emerald-400/10 text-emerald-100 hover:bg-emerald-400/20" : "bg-cyan-300 text-slate-950 hover:bg-cyan-200"}`}>
+                      <ShieldCheck className="h-4 w-4" />
+                      {isReady ? "Desmarcar pronto" : "Confirmar pronto"}
+                    </button>
+                  </form>
+                </div>
+              </div>
             </div>
           ) : (
             <div className="mt-8 rounded-3xl border border-dashed border-white/10 bg-white/[0.04] p-10 text-center">
