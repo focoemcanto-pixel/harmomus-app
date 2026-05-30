@@ -11,20 +11,23 @@ import { normalizeTone, sortTonesByChromaticOrder } from "@/lib/music/tones";
 
 export const runtime = "nodejs";
 
-function parseRangeHeader(rangeHeader: string | null, totalSize?: number): { start: number; end?: number } | null {
+type ByteRange = { start: number; end?: number };
+
+function parseRangeHeader(rangeHeader: string | null): ByteRange | null {
   if (!rangeHeader?.startsWith("bytes=")) return null;
   const value = rangeHeader.replace("bytes=", "").split(",")[0]?.trim();
-  if (!value) return null;
+  if (!value || value.startsWith("-")) return null;
+
   const [startRaw, endRaw] = value.split("-");
   const start = Number.parseInt(startRaw, 10);
   const end = endRaw ? Number.parseInt(endRaw, 10) : undefined;
+
   if (Number.isNaN(start) || start < 0) return null;
   if (end !== undefined && (Number.isNaN(end) || end < start)) return null;
-  if (totalSize !== undefined && start >= totalSize) return null;
   return { start, end };
 }
 
-function shouldCountPlayback(range: { start: number; end?: number } | null) {
+function shouldCountPlayback(range: ByteRange | null) {
   return !range || range.start === 0;
 }
 
@@ -65,6 +68,24 @@ function resolveRequiredPlan(plans: any[] | null | undefined, requiredPlanValue:
   return (plans ?? []).find((plan: any) => plan.id === raw || plan.slug === raw) ?? null;
 }
 
+function safeFilename(name: string | null | undefined, fileType: string | null | undefined) {
+  const base = String(name ?? "audio")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 80) || "audio";
+  const ext = String(fileType ?? "mp3").replace(/[^a-zA-Z0-9]/g, "") || "mp3";
+  return `${base}.${ext}`;
+}
+
+function isRangeNotSatisfiable(error: unknown) {
+  const anyError = error as { name?: string; Code?: string; $metadata?: { httpStatusCode?: number }; message?: string };
+  const value = `${anyError?.name ?? ""} ${anyError?.Code ?? ""} ${anyError?.message ?? ""}`.toLowerCase();
+  return anyError?.$metadata?.httpStatusCode === 416 || value.includes("range not satisfiable") || value.includes("invalidrange");
+}
+
 async function resolveOpeningTone(supabase: any, kit: any) {
   const explicitTone = normalizeTone(kit.default_tone) ?? normalizeTone(kit.original_tone);
   if (explicitTone) return explicitTone;
@@ -93,6 +114,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const supabase = await createClient();
   const { data: audioFile } = await (supabase as any).from("kit_audio_files").select("id,kit_id,tone,name,r2_key,file_type,source_type").eq("id", id).maybeSingle();
   if (!audioFile) return new Response("Áudio não encontrado.", { status: 404 });
+  if (!audioFile.r2_key) return new Response("Áudio indisponível.", { status: 502 });
 
   const [{ data: kit }, { data: plans }, context] = await Promise.all([
     (supabase as any).from("kits").select("id,slug,name,artist,cover_url,description,lyrics,required_plan,allowed_plan_slugs,original_tone,default_tone,allow_pitch_shift,max_pitch_shift_semitones").eq("id", audioFile.kit_id).maybeSingle(),
@@ -139,26 +161,41 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const range = parseRangeHeader(request.headers.get("range"));
   const shouldTrackPlayback = shouldCountPlayback(range);
-  const streamResponse = await getAudioStream(audioFile.r2_key, range ?? undefined);
+
+  let streamResponse: Awaited<ReturnType<typeof getAudioStream>>;
+  try {
+    streamResponse = await getAudioStream(audioFile.r2_key, range ?? undefined);
+  } catch (error) {
+    if (isRangeNotSatisfiable(error)) {
+      return new Response(null, {
+        status: 416,
+        headers: {
+          "Accept-Ranges": "bytes",
+          "Cache-Control": "private, no-store",
+        },
+      });
+    }
+
+    console.error("[audio] R2 stream failed", error);
+    return new Response("Áudio indisponível.", { status: 502 });
+  }
+
   const streamBody = streamResponse.Body;
   if (!streamBody) return new Response("Áudio indisponível.", { status: 502 });
 
-  const totalLength = typeof streamResponse.ContentLength === "number" ? streamResponse.ContentLength : undefined;
   const status = range ? 206 : 200;
   const headers = new Headers();
   headers.set("Content-Type", resolveAudioContentType(audioFile.file_type, streamResponse.ContentType));
   headers.set("Cache-Control", "private, max-age=300, stale-while-revalidate=300");
   headers.set("Accept-Ranges", "bytes");
-  headers.set("Content-Disposition", `inline; filename="${audioFile.name}.${audioFile.file_type}"`);
+  headers.set("Content-Disposition", `inline; filename=\"${safeFilename(audioFile.name, audioFile.file_type)}\"`);
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("Vary", "Range, Cookie");
   headers.set("X-Audio-Route-TTFB", String(Date.now() - startedAt));
   if (streamResponse.ETag) headers.set("ETag", streamResponse.ETag);
   if (streamResponse.LastModified) headers.set("Last-Modified", streamResponse.LastModified.toUTCString());
   if (streamResponse.ContentRange) headers.set("Content-Range", streamResponse.ContentRange);
   if (typeof streamResponse.ContentLength === "number") headers.set("Content-Length", String(streamResponse.ContentLength));
-  if (range && !streamResponse.ContentRange && totalLength !== undefined) {
-    const end = range.end ?? Math.max(range.start, totalLength - 1);
-    headers.set("Content-Range", `bytes ${range.start}-${end}/${totalLength}`);
-  }
 
   if (shouldTrackPlayback) {
     runAfterResponse(async () => {
