@@ -23,8 +23,8 @@ export default async function MinisterioRepertoriosPage() {
 
   if (context.isGuest) redirect("/login");
   if (!context.ministry) redirect("/assinatura");
-  if (!isMinistryManager(context)) redirect("/");
 
+  const canManage = isMinistryManager(context);
   const admin = createSupabaseAdminClient() as any;
 
   const { data: repertoires, error } = await admin
@@ -54,12 +54,14 @@ export default async function MinisterioRepertoriosPage() {
               Organize as músicas que sua equipe precisa estudar para cultos, eventos, conferências e ensaios.
             </p>
           </div>
-          <Link
-            href="/ministerio/repertorios/novo"
-            className="inline-flex w-fit items-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200"
-          >
-            <Plus className="h-4 w-4" /> Novo repertório
-          </Link>
+          {canManage ? (
+            <Link
+              href="/ministerio/repertorios/novo"
+              className="inline-flex w-fit items-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200"
+            >
+              <Plus className="h-4 w-4" /> Novo repertório
+            </Link>
+          ) : null}
         </div>
       </div>
 
@@ -68,7 +70,11 @@ export default async function MinisterioRepertoriosPage() {
           <div>
             <p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Lista</p>
             <h2 className="mt-2 text-2xl font-semibold">Repertórios ativos</h2>
-            <p className="mt-1 text-sm text-zinc-400">Os integrantes verão estes repertórios para estudar os kits definidos pelo responsável.</p>
+            <p className="mt-1 text-sm text-zinc-400">
+              {canManage
+                ? "Os integrantes verão estes repertórios para estudar os kits definidos pelo responsável."
+                : "Estes são os repertórios compartilhados pelo responsável do seu ministério."}
+            </p>
           </div>
           <span className="inline-flex w-fit rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-zinc-300">
             {rows.length} repertório{rows.length === 1 ? "" : "s"}
@@ -110,11 +116,15 @@ export default async function MinisterioRepertoriosPage() {
             </div>
             <h3 className="mt-5 text-2xl font-semibold text-white">Nenhum repertório criado ainda</h3>
             <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-zinc-400">
-              Crie o primeiro repertório para organizar as músicas que sua equipe precisa estudar.
+              {canManage
+                ? "Crie o primeiro repertório para organizar as músicas que sua equipe precisa estudar."
+                : "Quando o responsável do ministério criar repertórios, eles aparecerão aqui."}
             </p>
-            <Link href="/ministerio/repertorios/novo" className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200">
-              <Plus className="h-4 w-4" /> Criar primeiro repertório
-            </Link>
+            {canManage ? (
+              <Link href="/ministerio/repertorios/novo" className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200">
+                <Plus className="h-4 w-4" /> Criar primeiro repertório
+              </Link>
+            ) : null}
           </div>
         )}
       </PremiumPanel>
