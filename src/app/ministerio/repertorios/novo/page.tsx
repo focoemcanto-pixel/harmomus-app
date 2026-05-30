@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { ArrowLeft, CalendarDays, Save } from "lucide-react";
 
 import { MinistryShell, PremiumPanel } from "@/components/ministerio/ministry-ui";
+import { getActivityActorName, logMinistryActivity } from "@/lib/data/ministry-activity";
 import { getCurrentUserAccessContext, isMinistryManager } from "@/lib/auth/current-user";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -57,6 +58,18 @@ async function createRepertoire(formData: FormData) {
     const message = encodeURIComponent(error?.message || "Não foi possível criar o repertório.");
     redirect(`/ministerio/repertorios/novo?error=${message}`);
   }
+
+  const actorName = getActivityActorName(context.profile);
+  await logMinistryActivity({
+    ministryId: context.ministry.ministryId,
+    actorUserId: context.profile?.id ?? null,
+    actorName,
+    action: "repertoire.created",
+    entityType: "ministry_repertoire",
+    entityId: data.id,
+    description: `${actorName} criou o repertório ${name}`,
+    metadata: { repertoire_id: data.id, name, description: description || null, event_date: eventDate || null },
+  });
 
   redirect(`/ministerio/repertorios/${data.id}`);
 }

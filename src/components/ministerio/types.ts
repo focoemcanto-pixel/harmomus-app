@@ -1,4 +1,4 @@
-export type MinistryRole = "owner" | "manager" | "member";
+export type MinistryRole = "owner" | "admin" | "manager" | "member";
 export type MinistryMemberStatus = "invited" | "pending" | "active" | "removed";
 
 export type MinistryMemberRow = {

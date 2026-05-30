@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentUserAccessContext, isMinistryOwner } from "@/lib/auth/current-user";
+import { getActivityActorName, logMinistryActivity } from "@/lib/data/ministry-activity";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 function redirectToMinisterio(request: Request, message?: string) {
@@ -32,7 +33,7 @@ export async function POST(request: Request) {
 
   const { data: member } = await admin
     .from("ministry_members")
-    .select("id,ministry_id,user_id,role,status,invited_email")
+    .select("id,ministry_id,user_id,role,status,invited_email,invited_name")
     .eq("id", memberId)
     .eq("ministry_id", context.ministry.ministryId)
     .maybeSingle();
@@ -104,25 +105,24 @@ export async function POST(request: Request) {
     return redirectToMinisterio(request, error.message || "Não foi possível restaurar o integrante.");
   }
 
-  try {
-    const { error: logError } = await admin.from("ministry_activity_logs").insert({
-      ministry_id: member.ministry_id,
-      actor_id: context.profile.id,
-      action: "member.restored",
-      metadata: {
-        member_id: member.id,
-        user_id: member.user_id,
-        email: member.invited_email,
-        restored_at: now,
-      },
-    });
-
-    if (logError && logError.code !== "42P01") {
-      console.error("[ministerio.restore] Falha ao registrar log de restauração", logError);
-    }
-  } catch (logError) {
-    console.error("[ministerio.restore] Log de restauração ignorado", logError);
-  }
+  const actorName = getActivityActorName(context.profile);
+  const memberName = member.invited_name || member.invited_email || "integrante";
+  await logMinistryActivity({
+    ministryId: member.ministry_id,
+    actorUserId: context.profile.id,
+    actorName,
+    action: "member.restored",
+    entityType: "ministry_member",
+    entityId: member.id,
+    description: `${actorName} restaurou ${memberName} no ministério`,
+    metadata: {
+      member_id: member.id,
+      user_id: member.user_id,
+      member_email: member.invited_email,
+      member_name: member.invited_name,
+      restored_at: now,
+    },
+  });
 
   return redirectToMinisterio(request, "Integrante restaurado com sucesso.");
 }

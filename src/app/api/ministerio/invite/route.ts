@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { getCurrentUserAccessContext, isMinistryManager } from "@/lib/auth/current-user";
 import { getMinistrySeatLimit } from "@/lib/data/ministry";
+import { getActivityActorName, logMinistryActivity } from "@/lib/data/ministry-activity";
 import { buildAbsoluteUrl, sendMinistryInviteEmail } from "@/lib/email/ministry-invite-email";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -96,6 +97,19 @@ export async function POST(request: Request) {
     });
 
     console.log("[MINISTRY INVITE] resend result", emailResult);
+
+    const actorName = getActivityActorName(context.profile);
+    await logMinistryActivity({
+      ministryId: context.ministry.ministryId,
+      actorUserId: context.profile.id,
+      actorName,
+      action: "invite.resent",
+      entityType: "ministry_member",
+      entityId: member.id,
+      description: `${actorName} reenviou o convite para ${member.invited_name || member.invited_email || "integrante"}`,
+      metadata: { member_id: member.id, member_email: member.invited_email, member_name: member.invited_name, invite_token: member.invite_token },
+    });
+
     return redirectToMinisterio(request, emailStatusMessage("resent", emailResult, member.invited_email));
   }
 
@@ -103,7 +117,9 @@ export async function POST(request: Request) {
   const name = String(form.get("name") ?? "").trim();
   const role = String(form.get("role") ?? "member").trim().toLowerCase();
 
-  if (!email || !email.includes("@") || !["member", "manager"].includes(role)) {
+  const normalizedRole = role === "manager" ? "admin" : role;
+
+  if (!email || !email.includes("@") || !["member", "admin"].includes(normalizedRole)) {
     return redirectToMinisterio(request, "Informe dados válidos para o convite.");
   }
 
@@ -144,7 +160,7 @@ export async function POST(request: Request) {
       user_id: profile?.id ?? null,
       invited_email: email,
       invited_name: name || profile?.full_name || "Integrante",
-      role,
+      role: normalizedRole,
       status: profile?.id ? "pending" : "invited",
       invite_token: inviteToken,
       invited_by: context.profile.id,
@@ -175,5 +191,24 @@ export async function POST(request: Request) {
   });
 
   console.log("[MINISTRY INVITE] resend response", emailResult);
+
+  const actorName = getActivityActorName(context.profile);
+  await logMinistryActivity({
+    ministryId: context.ministry.ministryId,
+    actorUserId: context.profile.id,
+    actorName,
+    action: "invite.created",
+    entityType: "ministry_member",
+    entityId: insertedMember.id,
+    description: `${actorName} convidou ${insertedMember.invited_name || insertedMember.invited_email || "integrante"} para o ministério`,
+    metadata: {
+      member_id: insertedMember.id,
+      member_email: insertedMember.invited_email,
+      member_name: insertedMember.invited_name,
+      role: normalizedRole,
+      invite_token: insertedMember.invite_token,
+    },
+  });
+
   return redirectToMinisterio(request, emailStatusMessage("created", emailResult, insertedMember.invited_email));
 }
