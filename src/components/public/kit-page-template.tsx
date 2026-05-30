@@ -219,6 +219,7 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
   const [selectedVoice, setSelectedVoice] = useState<VoiceType>("todos");
   const [loginOpen, setLoginOpen] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [toneMenuOpen, setToneMenuOpen] = useState(false);
   const [upgradeConfig, setUpgradeConfig] = useState({
     title: "Upgrade necessário",
     message: "Faça upgrade para continuar.",
@@ -246,6 +247,8 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
       };
     });
   }, [availableTones, selectedVoice]);
+  const selectedToneOption = toneOptions.find((option) => normalizeTone(option.tone) === normalizeTone(selectedTone)) ?? toneOptions[0] ?? null;
+  const selectedToneIndex = Math.max(0, toneOptions.findIndex((option) => normalizeTone(option.tone) === normalizeTone(selectedTone)));
   const tracksForSelectedVoice = useMemo(
     () => liveKit.tones.flatMap((toneGroup) => {
       const preferred = toneGroup.voices[selectedVoice] ?? toneGroup.voices.todos;
@@ -308,11 +311,19 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
         ctaHref: "/assinar?plan=premium",
       });
       setUpgradeOpen(true);
+      setToneMenuOpen(false);
       return;
     }
 
     stopPlayback();
     setSelectedTone(normalizedTone);
+    setToneMenuOpen(false);
+  }
+
+  function handleToneStep(direction: -1 | 1) {
+    if (!toneOptions.length) return;
+    const nextIndex = (selectedToneIndex + direction + toneOptions.length) % toneOptions.length;
+    handleSelectTone(toneOptions[nextIndex].tone);
   }
 
   function handleSelectVoice(voice: VoiceType) {
@@ -358,36 +369,76 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
             <div className="mt-3"><AccessStatusBadge planSlug={accessContext.effectiveSlug} /></div>
             <div className="mt-5 space-y-3">
               <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <p className="text-xs font-medium uppercase tracking-[0.16em] text-zinc-400">Modular tom</p>
                   <span className="rounded-full border border-violet-400/30 bg-violet-500/10 px-2 py-1 text-[11px] font-semibold text-violet-100">Harmomus IA + arquivos reais</span>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  {toneOptions.map((option) => {
-                    const active = normalizeTone(selectedTone) === normalizeTone(option.tone);
-                    return (
-                      <button
-                        key={option.tone}
-                        type="button"
-                        disabled={!option.isAvailable}
-                        onClick={() => handleSelectTone(option.tone)}
-                        className={`rounded-xl border px-3 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-40 ${
-                          active
-                            ? "border-gold-300 bg-gold-400/15 text-gold-100"
-                            : "border-white/15 bg-white/5 text-zinc-200 hover:bg-white/10"
-                        }`}
-                      >
-                        <span className="block font-medium">{option.label}</span>
-                        <span className={`mt-0.5 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-                          option.sourceType === "original"
-                            ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-200"
-                            : "border-violet-300/30 bg-violet-500/15 text-violet-100"
-                        }`}>
-                          {option.sourceLabel}
-                        </span>
-                      </button>
-                    );
-                  })}
+
+                <div className="relative">
+                  <div className="grid grid-cols-[48px_1fr_48px] items-stretch gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleToneStep(-1)}
+                      className="rounded-2xl border border-white/15 bg-white/5 text-xl font-bold text-zinc-100 transition hover:bg-white/10"
+                      aria-label="Tom anterior"
+                    >
+                      ‹
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setToneMenuOpen((value) => !value)}
+                      className="min-h-[64px] rounded-2xl border border-gold-300 bg-gold-400/15 px-4 text-center text-gold-100 shadow-[0_0_24px_rgba(250,204,21,0.08)] transition hover:bg-gold-400/20"
+                    >
+                      <span className="block text-xl font-bold md:text-2xl">{selectedToneOption?.label ?? formatToneLabel(selectedTone)}</span>
+                      <span className={`mt-1 inline-flex rounded-full border px-3 py-0.5 text-[11px] font-bold ${
+                        selectedToneOption?.sourceType === "original"
+                          ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-200"
+                          : "border-violet-300/30 bg-violet-500/15 text-violet-100"
+                      }`}>
+                        {selectedToneOption?.sourceLabel ?? "Selecionar tom"}
+                      </span>
+                      <span className="ml-2 align-middle text-xs text-gold-100/70">▼</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleToneStep(1)}
+                      className="rounded-2xl border border-white/15 bg-white/5 text-xl font-bold text-zinc-100 transition hover:bg-white/10"
+                      aria-label="Próximo tom"
+                    >
+                      ›
+                    </button>
+                  </div>
+
+                  {toneMenuOpen ? (
+                    <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-30 overflow-hidden rounded-2xl border border-white/15 bg-[#090d18] shadow-[0_24px_70px_rgba(0,0,0,0.55)]">
+                      <div className="max-h-72 overflow-y-auto p-2">
+                        {toneOptions.map((option) => {
+                          const active = normalizeTone(selectedTone) === normalizeTone(option.tone);
+                          return (
+                            <button
+                              key={option.tone}
+                              type="button"
+                              onClick={() => handleSelectTone(option.tone)}
+                              className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-3 text-left transition ${
+                                active ? "bg-gold-400/15 text-gold-100" : "text-zinc-100 hover:bg-white/8"
+                              }`}
+                            >
+                              <span className="text-base font-semibold">{option.label}</span>
+                              <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-bold ${
+                                option.sourceType === "original"
+                                  ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-200"
+                                  : "border-violet-300/30 bg-violet-500/15 text-violet-100"
+                              }`}>
+                                {option.sourceLabel}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
 
@@ -417,7 +468,6 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
                       });
                     } else {
                       const requiredPlan = accessContext.play.requiredPlan ?? "premium";
-                      const planLabel = requiredPlan === "plus" ? "Plus" : "Premium";
                       setUpgradeConfig({
                         title: requiredPlan === "plus" ? "Kit exclusivo para Plus e Premium." : "Kit exclusivo para Premium.",
                         message: requiredPlan === "plus" ? "Faça upgrade para desbloquear este kit e toda a biblioteca Plus." : "Faça upgrade para acessar este kit, modulação inteligente e recursos avançados.",
