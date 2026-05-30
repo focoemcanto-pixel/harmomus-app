@@ -9,22 +9,31 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 async function getRemovedMinistryNotice(userId?: string | null) {
   if (!userId) return null;
 
-  const admin = createSupabaseAdminClient() as any;
-  const { data } = await admin
-    .from("ministry_members")
-    .select("id,removed_at,updated_at,ministry:ministries(name)")
-    .eq("user_id", userId)
-    .eq("status", "removed")
-    .order("removed_at", { ascending: false, nullsFirst: false })
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  try {
+    const admin = createSupabaseAdminClient() as any;
+    const { data } = await admin
+      .from("ministry_members")
+      .select("id,ministry_id,removed_at,updated_at")
+      .eq("user_id", userId)
+      .eq("status", "removed")
+      .order("removed_at", { ascending: false, nullsFirst: false })
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-  if (!data?.id) return null;
+    if (!data?.id) return null;
 
-  return {
-    ministryName: data.ministry?.name || "seu ministério",
-  };
+    const { data: ministry } = data.ministry_id
+      ? await admin.from("ministries").select("id,name").eq("id", data.ministry_id).maybeSingle()
+      : { data: null };
+
+    return {
+      ministryName: ministry?.name || "seu ministério",
+    };
+  } catch (error) {
+    console.error("[PublicAppShell] failed to load removed ministry notice", error);
+    return null;
+  }
 }
 
 function RemovedMinistryUpsellBanner({ ministryName }: { ministryName: string }) {
@@ -53,7 +62,10 @@ function RemovedMinistryUpsellBanner({ ministryName }: { ministryName: string })
 export async function PublicAppShell({ children }: { children: React.ReactNode }) {
   const [context, searchItems, settings] = await Promise.all([
     getCurrentUserAccessContext(),
-    getPublishedKitSearchItems(),
+    getPublishedKitSearchItems().catch((error) => {
+      console.error("[PublicAppShell] failed to load search items", error);
+      return [];
+    }),
     getAdminSettings(),
   ]);
 
