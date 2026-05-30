@@ -52,6 +52,7 @@ type AudioFilesApiTone = {
 };
 
 const CHROMATIC_ORDER = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"] as const;
+const VOICE_PRELOAD_ORDER: VoiceType[] = ["todos", "tenor", "contralto", "soprano"];
 
 function normalizeAudioSource(value: unknown): AudioSource {
   return value === "generated" ? "generated" : "original";
@@ -146,6 +147,10 @@ function getClosestToneStep(currentTone: string, availableTones: string[], direc
   return null;
 }
 
+function buildTrackId(src: string, title: string, voice: VoiceType, tone: string) {
+  return [src, title, voiceLabel(voice).toLowerCase(), formatToneLabel(tone), "0"].join("::");
+}
+
 function mapApiTonesToPublicToneGroups(tones: AudioFilesApiTone[]) {
   const groups = new Map<string, PublicKitToneGroup>();
 
@@ -189,7 +194,7 @@ function mapApiTonesToPublicToneGroups(tones: AudioFilesApiTone[]) {
 
 export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageTemplateProps) {
   const audioEngine = useKitAudioEngine();
-  const { stopPlayback } = audioEngine;
+  const { stopPlayback, preloadTrack } = audioEngine;
   const [liveKit, setLiveKit] = useState<PublicKit>(kit);
 
   useEffect(() => {
@@ -306,6 +311,38 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
   }, [isModulated, selectedFile, midiRange, selectedTone, analysisVoice, toneResolution.sourceTone]);
 
   const arrangementGuidance = getArrangementGuidance(tessituraAnalysis, selectedVoice, isModulated);
+
+  useEffect(() => {
+    if (!accessContext.play.allowed || !selectedTone) return;
+
+    const warmed = new Set<string>();
+    const selected = normalizeTone(selectedTone) ?? selectedTone;
+
+    function warmFile(file: PublicKitAudioFile | null | undefined, tone: string, voice: VoiceType) {
+      if (!file?.streamUrl || warmed.has(file.streamUrl)) return;
+      warmed.add(file.streamUrl);
+      const title = `Tom ${formatToneLabel(tone)} • Voz ${voiceLabel(voice)}`;
+      preloadTrack({
+        src: file.streamUrl,
+        title,
+        semitoneShift: 0,
+        trackId: buildTrackId(file.streamUrl, title, voice, tone),
+      });
+    }
+
+    const selectedGroup = getToneGroup(liveKit, selected);
+    if (selectedGroup) {
+      const voices = Array.from(new Set([selectedVoice, ...VOICE_PRELOAD_ORDER]));
+      for (const voice of voices) warmFile(selectedGroup.voices[voice] ?? selectedGroup.voices.todos, selected, voice);
+    }
+
+    for (const direction of [-1, 1] as const) {
+      const neighborTone = getClosestToneStep(selected, toneOptions.map((option) => option.tone), direction);
+      if (!neighborTone) continue;
+      const neighborGroup = getToneGroup(liveKit, neighborTone);
+      warmFile(neighborGroup?.voices[selectedVoice] ?? neighborGroup?.voices.todos, neighborTone, selectedVoice);
+    }
+  }, [accessContext.play.allowed, liveKit, preloadTrack, selectedTone, selectedVoice, toneOptions]);
 
   function openPremiumToneUpgrade() {
     setUpgradeConfig({
