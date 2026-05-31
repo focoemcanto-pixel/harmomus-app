@@ -148,7 +148,7 @@ export default function WebhookEndpointDetailsPage() {
     setResult(json as TestResult);
     setBanner({
       type: json?.ok ? "success" : "error",
-      message: json?.ok ? "Webhook entregue com sucesso no LabMessage." : "O endpoint respondeu com falha. Veja o retorno abaixo.",
+      message: json?.ok ? "Webhook entregue ao endpoint. Se a mensagem não aparecer, verifique se o número testado não é o mesmo número conectado no LabMessage." : "O endpoint respondeu com falha. Veja o retorno abaixo.",
     });
     await loadEndpoint();
     setTesting(false);
@@ -212,26 +212,10 @@ export default function WebhookEndpointDetailsPage() {
       ) : null}
 
       <div className="grid gap-3 lg:grid-cols-4">
-        <div className="rounded-2xl border border-white/10 bg-zinc-950/60 p-4">
-          <p className="text-xs uppercase tracking-[0.22em] text-zinc-500">Saúde</p>
-          <p className="mt-2 text-2xl font-semibold">{stats.successRate}%</p>
-          <p className="text-xs text-zinc-500">Taxa de sucesso</p>
-        </div>
-        <div className="rounded-2xl border border-white/10 bg-zinc-950/60 p-4">
-          <p className="text-xs uppercase tracking-[0.22em] text-zinc-500">Entregas</p>
-          <p className="mt-2 text-2xl font-semibold">{stats.total}</p>
-          <p className="text-xs text-zinc-500">Últimos registros</p>
-        </div>
-        <div className="rounded-2xl border border-white/10 bg-zinc-950/60 p-4">
-          <p className="text-xs uppercase tracking-[0.22em] text-zinc-500">Velocidade</p>
-          <p className="mt-2 text-2xl font-semibold">{stats.averageMs || 0}ms</p>
-          <p className="text-xs text-zinc-500">Média recente</p>
-        </div>
-        <div className="rounded-2xl border border-white/10 bg-zinc-950/60 p-4">
-          <p className="text-xs uppercase tracking-[0.22em] text-zinc-500">Último disparo</p>
-          <p className="mt-2 text-sm font-medium text-zinc-200">{formatDate(endpoint.last_triggered_at)}</p>
-          <p className="text-xs text-zinc-500">Monitoramento operacional</p>
-        </div>
+        <div className="rounded-2xl border border-white/10 bg-zinc-950/60 p-4"><p className="text-xs uppercase tracking-[0.22em] text-zinc-500">Saúde</p><p className="mt-2 text-2xl font-semibold">{stats.successRate}%</p><p className="text-xs text-zinc-500">Taxa de sucesso</p></div>
+        <div className="rounded-2xl border border-white/10 bg-zinc-950/60 p-4"><p className="text-xs uppercase tracking-[0.22em] text-zinc-500">Entregas</p><p className="mt-2 text-2xl font-semibold">{stats.total}</p><p className="text-xs text-zinc-500">Últimos registros</p></div>
+        <div className="rounded-2xl border border-white/10 bg-zinc-950/60 p-4"><p className="text-xs uppercase tracking-[0.22em] text-zinc-500">Velocidade</p><p className="mt-2 text-2xl font-semibold">{stats.averageMs || 0}ms</p><p className="text-xs text-zinc-500">Média recente</p></div>
+        <div className="rounded-2xl border border-white/10 bg-zinc-950/60 p-4"><p className="text-xs uppercase tracking-[0.22em] text-zinc-500">Último disparo</p><p className="mt-2 text-sm font-medium text-zinc-200">{formatDate(endpoint.last_triggered_at)}</p><p className="text-xs text-zinc-500">Monitoramento operacional</p></div>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
@@ -239,7 +223,7 @@ export default function WebhookEndpointDetailsPage() {
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 className="text-lg font-semibold">Validar gatilho</h2>
-              <p className="mt-1 text-sm text-zinc-400">Use este bloco para testar se o evento selecionado aciona corretamente o fluxo do LabMessage.</p>
+              <p className="mt-1 text-sm text-zinc-400">Este teste simula um evento de checkout e aciona o fluxo configurado no LabMessage.</p>
             </div>
             <ShieldCheck className="text-violet-300" size={22} />
           </div>
@@ -257,92 +241,42 @@ export default function WebhookEndpointDetailsPage() {
             </label>
           </div>
 
+          <div className="mt-3 rounded-2xl border border-amber-400/20 bg-amber-500/10 p-3 text-xs leading-relaxed text-amber-100/90">
+            Para receber a mensagem no celular, use um WhatsApp diferente do número conectado como remetente no LabMessage. Algumas plataformas não registram ou não enviam mensagens para o próprio número conectado.
+          </div>
+
           <div className="mt-4 flex flex-wrap gap-2">
-            <button onClick={previewPayload} disabled={!event || testing} className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm font-medium hover:bg-white/[0.07] disabled:opacity-50">
-              <RefreshCw size={16} /> Conferir dados
-            </button>
-            <button onClick={runTest} disabled={!event || testing} className="inline-flex items-center gap-2 rounded-2xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-violet-950/40 hover:bg-violet-500 disabled:opacity-50">
-              {testing ? <Loader2 className="animate-spin" size={16} /> : <Play size={16} />} Enviar teste real
-            </button>
+            <button onClick={previewPayload} disabled={!event || testing} className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm font-medium hover:bg-white/[0.07] disabled:opacity-50"><RefreshCw size={16} /> Conferir dados</button>
+            <button onClick={runTest} disabled={!event || testing} className="inline-flex items-center gap-2 rounded-2xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-violet-950/40 hover:bg-violet-500 disabled:opacity-50">{testing ? <Loader2 className="animate-spin" size={16} /> : <Play size={16} />} Enviar teste real</button>
           </div>
 
           {result ? (
             <div className={`mt-5 rounded-2xl border p-4 ${getStatusTone(Boolean(result.ok))}`}>
-              <div className="flex items-center gap-2 font-medium">
-                {result.ok ? <CheckCircle2 size={18} /> : <XCircle size={18} />}
-                {result.ok ? "Entrega confirmada" : "Entrega não confirmada"}
-              </div>
+              <div className="flex items-center gap-2 font-medium">{result.ok ? <CheckCircle2 size={18} /> : <XCircle size={18} />}{result.ok ? "Webhook aceito pelo endpoint" : "Entrega não confirmada"}</div>
               <p className="mt-1 text-sm opacity-90">Status {result.status ?? 0} · {result.duration_ms ?? 0}ms</p>
               {result.response_body ? <p className="mt-3 rounded-xl bg-black/25 p-3 text-xs opacity-90">{result.response_body.slice(0, 500)}</p> : null}
             </div>
           ) : null}
 
           {preview ? (
-            <details className="mt-4 rounded-2xl border border-white/10 bg-black/25 p-4">
-              <summary className="cursor-pointer text-sm text-zinc-300">Ver dados que serão enviados</summary>
-              <pre className="mt-3 max-h-80 overflow-auto rounded-xl bg-black/40 p-3 text-xs text-zinc-300">{JSON.stringify(preview, null, 2)}</pre>
-            </details>
+            <details className="mt-4 rounded-2xl border border-white/10 bg-black/25 p-4"><summary className="cursor-pointer text-sm text-zinc-300">Ver dados que serão enviados</summary><pre className="mt-3 max-h-80 overflow-auto rounded-xl bg-black/40 p-3 text-xs text-zinc-300">{JSON.stringify(preview, null, 2)}</pre></details>
           ) : null}
         </div>
 
         <div className="rounded-3xl border border-white/10 bg-zinc-950/60 p-5">
           <h2 className="text-lg font-semibold">Configuração segura</h2>
           <p className="mt-1 text-sm text-zinc-400">Informações sensíveis ficam ocultas por padrão para evitar exposição na operação diária.</p>
-
           <div className="mt-5 space-y-3">
-            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-              <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">URL de entrega</p>
-              <div className="mt-2 flex items-center justify-between gap-3">
-                <p className="truncate text-sm text-zinc-200" title={endpoint.url}>{maskMiddle(endpoint.url, 32, 10)}</p>
-                <button onClick={copyEndpointUrl} className="rounded-xl border border-white/10 p-2 text-zinc-300 hover:bg-white/5" title="Copiar URL"><Copy size={15} /></button>
-              </div>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-              <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Token de assinatura</p>
-              <p className="mt-2 truncate text-sm text-zinc-200">{maskMiddle(endpoint.secret, 14, 8)}</p>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-              <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Gatilhos ativos</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {endpoint.events.map((ev) => <span key={ev} className="rounded-full border border-cyan-400/25 bg-cyan-500/10 px-2.5 py-1 text-xs text-cyan-100">{getWebhookEventLabel(ev)}</span>)}
-              </div>
-            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4"><p className="text-xs uppercase tracking-[0.2em] text-zinc-500">URL de entrega</p><div className="mt-2 flex items-center justify-between gap-3"><p className="truncate text-sm text-zinc-200" title={endpoint.url}>{maskMiddle(endpoint.url, 32, 10)}</p><button onClick={copyEndpointUrl} className="rounded-xl border border-white/10 p-2 text-zinc-300 hover:bg-white/5" title="Copiar URL"><Copy size={15} /></button></div></div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4"><p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Token de assinatura</p><p className="mt-2 truncate text-sm text-zinc-200">{maskMiddle(endpoint.secret, 14, 8)}</p></div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4"><p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Gatilhos ativos</p><div className="mt-3 flex flex-wrap gap-2">{endpoint.events.map((ev) => <span key={ev} className="rounded-full border border-cyan-400/25 bg-cyan-500/10 px-2.5 py-1 text-xs text-cyan-100">{getWebhookEventLabel(ev)}</span>)}</div></div>
           </div>
         </div>
       </div>
 
       <div className="rounded-3xl border border-white/10 bg-zinc-950/60 p-5">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold">Últimas entregas</h2>
-            <p className="text-sm text-zinc-400">Histórico resumido. Payload completo fica recolhido para não poluir a operação.</p>
-          </div>
-          <button onClick={() => void loadEndpoint()} className="inline-flex items-center gap-2 rounded-full border border-white/10 px-3 py-2 text-sm text-zinc-300 hover:bg-white/5">
-            <RefreshCw size={15} /> Atualizar
-          </button>
-        </div>
-
-        {logs.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-white/10 p-8 text-center text-sm text-zinc-400">Nenhuma entrega registrada ainda.</div>
-        ) : (
-          <div className="space-y-2">
-            {logs.map((log) => (
-              <article key={log.id} className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="font-medium text-zinc-100">{getWebhookEventLabel(log.event)}</p>
-                    <p className="mt-1 flex items-center gap-2 text-xs text-zinc-500"><Clock3 size={13} /> {formatDate(log.created_at)} · {log.duration_ms}ms</p>
-                  </div>
-                  <span className={`rounded-full border px-3 py-1 text-xs ${getStatusTone(log.success)}`}>{log.success ? "Sucesso" : "Falha"}</span>
-                </div>
-                <details className="mt-3">
-                  <summary className="cursor-pointer text-xs text-cyan-300">Ver detalhes técnicos</summary>
-                  <pre className="mt-2 max-h-72 overflow-auto rounded-xl bg-black/40 p-3 text-xs text-zinc-300">{JSON.stringify({ payload: log.request_body, response: log.response_body, headers: log.request_headers, error: log.error_message }, null, 2)}</pre>
-                </details>
-              </article>
-            ))}
-          </div>
-        )}
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-semibold">Últimas entregas</h2><p className="text-sm text-zinc-400">Histórico resumido. Payload completo fica recolhido para não poluir a operação.</p></div><button onClick={() => void loadEndpoint()} className="inline-flex items-center gap-2 rounded-full border border-white/10 px-3 py-2 text-sm text-zinc-300 hover:bg-white/5"><RefreshCw size={15} /> Atualizar</button></div>
+        {logs.length === 0 ? <div className="rounded-2xl border border-dashed border-white/10 p-8 text-center text-sm text-zinc-400">Nenhuma entrega registrada ainda.</div> : <div className="space-y-2">{logs.map((log) => <article key={log.id} className="rounded-2xl border border-white/10 bg-white/[0.02] p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-medium text-zinc-100">{getWebhookEventLabel(log.event)}</p><p className="mt-1 flex items-center gap-2 text-xs text-zinc-500"><Clock3 size={13} /> {formatDate(log.created_at)} · {log.duration_ms}ms</p></div><span className={`rounded-full border px-3 py-1 text-xs ${getStatusTone(log.success)}`}>{log.success ? "Sucesso" : "Falha"}</span></div><details className="mt-3"><summary className="cursor-pointer text-xs text-cyan-300">Ver detalhes técnicos</summary><pre className="mt-2 max-h-72 overflow-auto rounded-xl bg-black/40 p-3 text-xs text-zinc-300">{JSON.stringify({ payload: log.request_body, response: log.response_body, headers: log.request_headers, error: log.error_message }, null, 2)}</pre></details></article>)}</div>}
       </div>
     </section>
   );
