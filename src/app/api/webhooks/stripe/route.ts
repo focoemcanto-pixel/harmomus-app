@@ -31,6 +31,8 @@ const ACCEPTED_EVENTS = new Set([
   "customer.subscription.deleted",
   "invoice.paid",
   "invoice.payment_failed",
+  "charge.refunded",
+  "charge.dispute.created",
 ]);
 
 function verifySignature(payload: string, signature: string, secret: string) {
@@ -195,6 +197,8 @@ function mapStripeEventToWebhookEvent(eventType: string, status: string) {
   if (eventType === "customer.subscription.deleted") return "subscription.canceled";
   if (eventType === "invoice.paid") return "payment.approved";
   if (eventType === "invoice.payment_failed") return "subscription.payment_failed";
+  if (eventType === "charge.refunded") return "payment.refunded";
+  if (eventType === "charge.dispute.created") return "payment.chargeback";
   if (eventType === "customer.subscription.updated" && status === "active") return "subscription.renewed";
   return null;
 }
