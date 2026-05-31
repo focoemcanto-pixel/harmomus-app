@@ -18,11 +18,40 @@ export interface FreeAccessStats {
   nextResetAt: string;
 }
 
+type AccessLogRow = {
+  id?: string;
+  kit_id: string | null;
+  accessed_at?: string | null;
+};
+
 function getAccessWindow() {
   const now = new Date();
   const start = new Date(now.getTime() - ACCESS_WINDOW_HOURS * 60 * 60 * 1000);
   const nextReset = new Date(now.getTime() + ACCESS_WINDOW_HOURS * 60 * 60 * 1000);
   return { start: start.toISOString(), nextResetAt: nextReset.toISOString() };
+}
+
+function summarizeAccessRows(rows: AccessLogRow[], limit = FREE_LIMIT) {
+  const orderedUniqueKitIds: string[] = [];
+  const seen = new Set<string>();
+
+  for (const row of rows) {
+    const kitId = String(row.kit_id ?? "").trim();
+    if (!kitId || seen.has(kitId)) continue;
+    seen.add(kitId);
+    orderedUniqueKitIds.push(kitId);
+  }
+
+  const accessedKitIds = orderedUniqueKitIds.slice(0, limit);
+  const uniqueKitCount24h = accessedKitIds.length;
+  const remaining = Math.max(0, limit - uniqueKitCount24h);
+
+  return {
+    accessCountToday: uniqueKitCount24h,
+    uniqueKitCount24h,
+    accessedKitIds,
+    remaining,
+  };
 }
 
 async function getActiveFreeKitId() {
@@ -57,9 +86,10 @@ export async function getFreeAccessStats(userId: string): Promise<FreeAccessStat
 
   const { data, error } = await supabase
     .from("kit_access_logs")
-    .select("kit_id")
+    .select("id,kit_id,accessed_at")
     .eq("user_id", userId)
-    .gte("accessed_at", start);
+    .gte("accessed_at", start)
+    .order("accessed_at", { ascending: true });
 
   if (error) {
     console.error("[access-rules] Could not load kit access logs", {
@@ -68,14 +98,9 @@ export async function getFreeAccessStats(userId: string): Promise<FreeAccessStat
     });
   }
 
-  const rows = ((data ?? []) as { kit_id: string }[]).filter((row) => row.kit_id);
-  const uniqueKitIds = new Set(rows.map((row) => row.kit_id));
-  const accessedKitIds = Array.from(uniqueKitIds);
-  const accessCountToday = uniqueKitIds.size;
-  const uniqueKitCount24h = uniqueKitIds.size;
-  const remaining = Math.max(0, FREE_LIMIT - uniqueKitCount24h);
+  const summary = summarizeAccessRows(((data ?? []) as AccessLogRow[]).filter((row) => row.kit_id), FREE_LIMIT);
 
-  return { accessCountToday, uniqueKitCount24h, accessedKitIds, remaining, limit: FREE_LIMIT, nextResetAt };
+  return { ...summary, limit: FREE_LIMIT, nextResetAt };
 }
 
 export async function registerKitAccess(userId: string, kitId: string): Promise<FreeAccessStats> {
@@ -123,7 +148,7 @@ export async function canPlayAudio(context: CurrentUserAccessContext, kit: Publi
     const kitAlreadyCounted = activeKitId === kit.id || stats.accessedKitIds.includes(kit.id);
 
     if (kitAllowsFree(kit) && stats.uniqueKitCount24h >= dailyLimit && !kitAlreadyCounted) {
-      return { allowed: false, reason: "free_limit" as const, stats };
+      return { allowed: false, reason: "free_limit" as const, stats: { ...stats, limit: dailyLimit } };
     }
 
     if (!canAccessKit(context.effectiveSlug, kit.allowedPlanSlugs)) {
@@ -131,7 +156,7 @@ export async function canPlayAudio(context: CurrentUserAccessContext, kit: Publi
       return { allowed: false, reason: "plan_hierarchy" as const, requiredPlan };
     }
 
-    return { allowed: true, reason: "ok" as const, stats };
+    return { allowed: true, reason: "ok" as const, stats: { ...stats, limit: dailyLimit } };
   }
 
   if (!canAccessKit(context.effectiveSlug, kit.allowedPlanSlugs)) {
