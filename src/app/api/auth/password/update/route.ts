@@ -4,22 +4,36 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
 
+function passwordErrorUrl(request: Request, message: string, migration: boolean) {
+  const url = new URL("/redefinir-senha", request.url);
+  url.searchParams.set("error", message);
+  if (migration) url.searchParams.set("migration", "1");
+  return url;
+}
+
 export async function POST(request: Request) {
   const formData = await request.formData();
   const password = String(formData.get("password") ?? "");
   const confirmPassword = String(formData.get("confirm_password") ?? "");
+  const formMigration = String(formData.get("migration") ?? "");
+  const migration = formMigration === "1";
 
-  if (password.length < 6) return NextResponse.redirect(new URL("/redefinir-senha?error=A+senha+deve+ter+pelo+menos+6+caracteres.", request.url), 303);
-  if (password !== confirmPassword) return NextResponse.redirect(new URL("/redefinir-senha?error=As+senhas+n%C3%A3o+conferem.", request.url), 303);
+  if (password.length < 6) return NextResponse.redirect(passwordErrorUrl(request, "A senha deve ter pelo menos 6 caracteres.", migration), 303);
+  if (password !== confirmPassword) return NextResponse.redirect(passwordErrorUrl(request, "As senhas não conferem.", migration), 303);
 
   const supabase = await createClient();
   const { data, error } = await supabase.auth.updateUser({ password });
 
-  if (error) return NextResponse.redirect(new URL("/redefinir-senha?error=N%C3%A3o+foi+poss%C3%ADvel+redefinir+a+senha.", request.url), 303);
+  if (error) {
+    console.error("[auth.password.update] updateUser failed", error);
+    const lower = String(error.message ?? "").toLowerCase();
+    const message = lower.includes("session") || lower.includes("auth")
+      ? "Sessão expirada. Abra novamente o link enviado por e-mail e tente definir a senha outra vez."
+      : `Não foi possível redefinir a senha. Detalhe: ${error.message}`;
+    return NextResponse.redirect(passwordErrorUrl(request, message, migration), 303);
+  }
 
   const userEmail = data.user?.email?.toLowerCase();
-  const formMigration = String(formData.get("migration") ?? "");
-  const migration = formMigration === "1";
   let completedMigration = migration;
 
   if (userEmail) {
