@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
 import Link from "next/link";
-import { BarChart3, Bot, FileText, Mail, MessageCircle, Megaphone, ScrollText, Users } from "lucide-react";
+import { BarChart3, Bot, FileText, Mail, MessageCircle, Megaphone, ScrollText, Settings, Users } from "lucide-react";
 
 const tabs = [
   { label: "Dashboard", href: "/admin/comunicacao/dashboard", icon: BarChart3, description: "Visão geral" },
@@ -10,6 +10,7 @@ const tabs = [
   { label: "Automações", href: "/admin/comunicacao/automations", icon: Bot, description: "Regras e gatilhos" },
   { label: "WhatsApp", href: "/admin/comunicacao/whatsapp", icon: MessageCircle, description: "Canal WhatsApp" },
   { label: "E-mails", href: "/admin/comunicacao/emails", icon: Mail, description: "Canal e-mail" },
+  { label: "Configurações", href: "/admin/comunicacao/settings", icon: Settings, description: "APIs e limites" },
   { label: "Logs", href: "/admin/comunicacao/logs", icon: ScrollText, description: "Histórico" },
 ] as const;
 
