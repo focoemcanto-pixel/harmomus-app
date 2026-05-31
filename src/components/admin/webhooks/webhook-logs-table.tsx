@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, CheckCircle2, Clock3, Download, ExternalLink, Filter, Loader2, RefreshCw, RotateCcw, Search, ShieldAlert, XCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Clock3, Download, Filter, Loader2, RefreshCw, RotateCcw, Search, ShieldAlert, Trash2, X, XCircle } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -16,12 +16,13 @@ function isTestLog(log: WebhookLog) {
 }
 
 function downloadCsv(logs: WebhookLog[]) {
-  const header = ["data", "evento", "status_http", "sucesso", "duracao_ms", "tentativa", "delivery_id", "erro"];
+  const header = ["data", "evento", "status_http", "sucesso", "tipo", "duracao_ms", "tentativa", "delivery_id", "erro"];
   const rows = logs.map((log) => [
     formatDate(log.created_at),
     getWebhookEventLabel(log.event),
     String(log.status),
     log.success ? "sim" : "nao",
+    isTestLog(log) ? "teste" : "producao",
     String(log.duration_ms),
     String((log.retry_attempt ?? 0) + 1),
     log.delivery_id,
@@ -37,6 +38,13 @@ function downloadCsv(logs: WebhookLog[]) {
   URL.revokeObjectURL(url);
 }
 
+type CleanupTarget = {
+  scope: "tests" | "failed" | "old" | "endpoint";
+  label: string;
+  description: string;
+  olderThanDays?: number;
+};
+
 export function WebhookLogsTable() {
   const searchParams = useSearchParams();
   const [logs, setLogs] = useState<WebhookLog[]>([]);
@@ -47,6 +55,8 @@ export function WebhookLogsTable() {
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(true);
   const [retrying, setRetrying] = useState<string | null>(null);
+  const [cleaning, setCleaning] = useState(false);
+  const [cleanupTarget, setCleanupTarget] = useState<CleanupTarget | null>(null);
   const [banner, setBanner] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   useEffect(() => {
@@ -86,7 +96,8 @@ export function WebhookLogsTable() {
     const failed = total - successful;
     const test = visibleLogs.filter(isTestLog).length;
     const avg = total ? Math.round(visibleLogs.reduce((sum, log) => sum + Number(log.duration_ms ?? 0), 0) / total) : 0;
-    return { total, successful, failed, test, avg, successRate: total ? Math.round((successful / total) * 100) : 0 };
+    const last = visibleLogs[0]?.created_at ?? null;
+    return { total, successful, failed, test, avg, last, successRate: total ? Math.round((successful / total) * 100) : 0 };
   }, [visibleLogs]);
 
   async function retry(logId: string) {
@@ -105,6 +116,30 @@ export function WebhookLogsTable() {
     }
     setBanner({ type: "success", message: "Reenvio solicitado. Atualize os logs para acompanhar o resultado." });
     setRetrying(null);
+    await load();
+  }
+
+  async function cleanupLogs() {
+    if (!cleanupTarget) return;
+    setCleaning(true);
+    setBanner(null);
+
+    const params = new URLSearchParams({ scope: cleanupTarget.scope, confirm: "true" });
+    if (cleanupTarget.scope === "old") params.set("older_than_days", String(cleanupTarget.olderThanDays ?? 90));
+    if (cleanupTarget.scope === "endpoint") params.set("endpoint", endpoint);
+
+    const res = await fetch(`/api/admin/webhooks/logs?${params.toString()}`, { method: "DELETE" });
+    const json = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      setBanner({ type: "error", message: json?.error ?? "Não foi possível limpar os logs." });
+      setCleaning(false);
+      return;
+    }
+
+    setBanner({ type: "success", message: `${json?.deleted ?? 0} log(s) removido(s).` });
+    setCleanupTarget(null);
+    setCleaning(false);
     await load();
   }
 
@@ -131,7 +166,7 @@ export function WebhookLogsTable() {
         <div className="rounded-3xl border border-emerald-400/20 bg-emerald-500/10 p-5"><p className="text-xs uppercase tracking-[0.22em] text-emerald-300/70">Sucesso</p><p className="mt-3 text-3xl font-semibold text-emerald-100">{stats.successful}</p><p className="text-xs text-emerald-200/60">{stats.successRate}% de taxa</p></div>
         <div className="rounded-3xl border border-rose-400/20 bg-rose-500/10 p-5"><p className="text-xs uppercase tracking-[0.22em] text-rose-300/70">Falhas</p><p className="mt-3 text-3xl font-semibold text-rose-100">{stats.failed}</p><p className="text-xs text-rose-200/60">Precisam atenção</p></div>
         <div className="rounded-3xl border border-white/10 bg-zinc-950/60 p-5"><p className="text-xs uppercase tracking-[0.22em] text-zinc-500">Testes</p><p className="mt-3 text-3xl font-semibold">{stats.test}</p><p className="text-xs text-zinc-500">Payloads simulados</p></div>
-        <div className="rounded-3xl border border-white/10 bg-zinc-950/60 p-5"><p className="text-xs uppercase tracking-[0.22em] text-zinc-500">Média</p><p className="mt-3 text-3xl font-semibold">{stats.avg}ms</p><p className="text-xs text-zinc-500">Tempo de resposta</p></div>
+        <div className="rounded-3xl border border-white/10 bg-zinc-950/60 p-5"><p className="text-xs uppercase tracking-[0.22em] text-zinc-500">Último</p><p className="mt-3 text-sm font-semibold text-zinc-200">{formatDate(stats.last)}</p><p className="text-xs text-zinc-500">Média {stats.avg}ms</p></div>
       </div>
 
       <div className="rounded-3xl border border-white/10 bg-zinc-950/55 p-4">
@@ -141,6 +176,18 @@ export function WebhookLogsTable() {
           <select value={kind} onChange={(e) => setKind(e.target.value)} className="rounded-2xl border border-white/10 bg-zinc-900/70 px-3 py-2.5 text-sm outline-none"><option value="all">Teste + produção</option><option value="test">Somente testes</option><option value="live">Somente produção</option></select>
           <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-zinc-900/70 px-3 py-2.5"><Filter size={15} className="text-zinc-500" /><input value={event} onChange={(e) => setEvent(e.target.value)} className="w-48 bg-transparent text-sm outline-none placeholder:text-zinc-600" placeholder="Filtrar evento" /></div>
           <input value={endpoint} onChange={(e) => setEndpoint(e.target.value)} className="rounded-2xl border border-white/10 bg-zinc-900/70 px-3 py-2.5 text-sm outline-none placeholder:text-zinc-600" placeholder="Endpoint ID" />
+        </div>
+      </div>
+
+      <div className="rounded-3xl border border-white/10 bg-white/[0.02] p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div><p className="text-sm font-semibold text-white">Ações rápidas</p><p className="text-xs text-zinc-500">Limpezas exigem confirmação e usam escopos seguros.</p></div>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => setCleanupTarget({ scope: "tests", label: "Limpar testes", description: "Remove somente logs gerados pelo botão de teste." })} className="inline-flex items-center gap-2 rounded-2xl border border-amber-400/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-100 hover:bg-amber-500/15"><Trash2 size={14} /> Limpar testes</button>
+            <button onClick={() => setCleanupTarget({ scope: "failed", label: "Limpar falhas", description: "Remove somente logs que falharam." })} className="inline-flex items-center gap-2 rounded-2xl border border-rose-400/25 bg-rose-500/10 px-3 py-2 text-xs text-rose-100 hover:bg-rose-500/15"><Trash2 size={14} /> Limpar falhas</button>
+            {endpoint ? <button onClick={() => setCleanupTarget({ scope: "endpoint", label: "Limpar esta integração", description: "Remove todos os logs da integração informada no filtro Endpoint ID." })} className="inline-flex items-center gap-2 rounded-2xl border border-white/10 px-3 py-2 text-xs text-zinc-300 hover:bg-white/5"><Trash2 size={14} /> Limpar integração</button> : null}
+            <button onClick={() => setCleanupTarget({ scope: "old", label: "Limpar antigos", description: "Remove somente logs com mais de 90 dias.", olderThanDays: 90 })} className="inline-flex items-center gap-2 rounded-2xl border border-white/10 px-3 py-2 text-xs text-zinc-300 hover:bg-white/5"><Trash2 size={14} /> Limpar antigos</button>
+          </div>
         </div>
       </div>
 
@@ -164,9 +211,7 @@ export function WebhookLogsTable() {
                     <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-500"><Clock3 size={13} /> {formatDate(log.created_at)} · HTTP {log.status} · {log.duration_ms}ms · tentativa {(log.retry_attempt ?? 0) + 1}</p>
                     {log.error_message ? <p className="mt-2 inline-flex items-center gap-2 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-100"><ShieldAlert size={14} /> {log.error_message}</p> : null}
                   </div>
-                  <button disabled={retrying === log.id || log.success} onClick={() => void retry(log.id)} className="inline-flex items-center gap-2 rounded-2xl border border-white/10 px-3 py-2 text-xs text-zinc-300 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40">
-                    {retrying === log.id ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />} Reenviar
-                  </button>
+                  <button disabled={retrying === log.id || log.success} onClick={() => void retry(log.id)} className="inline-flex items-center gap-2 rounded-2xl border border-white/10 px-3 py-2 text-xs text-zinc-300 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40">{retrying === log.id ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />} Reenviar</button>
                 </div>
                 <details className="mt-4 rounded-2xl border border-white/10 bg-black/25 p-4">
                   <summary className="cursor-pointer text-sm text-cyan-300">Ver detalhes técnicos</summary>
@@ -178,9 +223,23 @@ export function WebhookLogsTable() {
         </div>
       )}
 
-      <div className="rounded-3xl border border-white/10 bg-white/[0.02] p-4 text-xs leading-relaxed text-zinc-500">
-        Ações destrutivas como excluir ou arquivar logs serão adicionadas na próxima etapa com confirmação explícita e endpoints próprios. Nesta sprint, o histórico ganhou leitura operacional, filtros, CSV e reenvio seguro de falhas.
-      </div>
+      {cleanupTarget ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl border border-rose-400/25 bg-zinc-950 p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="rounded-2xl border border-rose-400/30 bg-rose-500/10 p-3 text-rose-200"><Trash2 size={20} /></div>
+                <div><h2 className="text-xl font-semibold text-white">{cleanupTarget.label}</h2><p className="mt-2 text-sm leading-relaxed text-zinc-400">{cleanupTarget.description}</p><p className="mt-2 text-xs text-rose-200/80">Essa ação não pode ser desfeita.</p></div>
+              </div>
+              <button onClick={() => setCleanupTarget(null)} className="rounded-xl border border-white/10 p-2 text-zinc-400 hover:bg-white/5"><X size={15} /></button>
+            </div>
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
+              <button onClick={() => setCleanupTarget(null)} className="rounded-2xl border border-white/10 px-4 py-2 text-sm text-zinc-300 hover:bg-white/5">Cancelar</button>
+              <button disabled={cleaning} onClick={() => void cleanupLogs()} className="inline-flex items-center gap-2 rounded-2xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-500 disabled:opacity-70">{cleaning ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} Confirmar limpeza</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
