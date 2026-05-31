@@ -164,6 +164,21 @@ function rowMatchesIdentifiers(row: any, identifiers: string[]) {
   return identifiers.some((identifier) => serialized.includes(identifier.toLowerCase()));
 }
 
+function uniqueRows(rows: any[]) {
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    const key = row?.id ? `id:${row.id}` : JSON.stringify(row ?? {});
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function numericString(value: unknown) {
+  const text = String(value ?? "").trim();
+  return /^\d+$/.test(text) ? text : null;
+}
+
 async function safeTableQuery<T = any>(queryPromise: PromiseLike<{ data: T[] | null; error: any }>): Promise<T[]> {
   try {
     const { data, error } = await queryPromise;
@@ -179,43 +194,78 @@ export async function getSubscriberJourneyData(member: MemberListItem): Promise<
   const profile = member.profile as any;
   const subscription = member.subscription as any;
   const userId = profile?.id;
+  const email = profile?.email;
+  const stripeCustomerId = subscription?.stripe_customer_id ?? subscription?.gateway_customer_id;
+  const stripeSubscriptionId = subscription?.stripe_subscription_id ?? subscription?.gateway_subscription_id;
+  const legacySubscriptionId = numericString(subscription?.legacy_pms_subscription_id);
+  const legacyMemberId = numericString(profile?.legacy_pms_member_id);
+
   const identifiers = Array.from(new Set([
     userId,
-    profile?.email,
-    subscription?.stripe_customer_id,
-    subscription?.gateway_customer_id,
-    subscription?.stripe_subscription_id,
-    subscription?.gateway_subscription_id,
+    email,
+    stripeCustomerId,
+    stripeSubscriptionId,
+    subscription?.stripe_price_id,
     subscription?.legacy_pms_subscription_id,
     profile?.legacy_pms_member_id,
   ].filter(Boolean).map(String)));
 
-  const [communicationLogs, kitAccessLogs, audioAccessLogs, webhookLogsRaw, webhookProcessedEventsRaw, legacyPmsRaw, legacyStripeRaw, legacyStripeImportRaw] = await Promise.all([
+  const [
+    communicationByUser,
+    communicationRecent,
+    kitAccessLogs,
+    audioAccessLogs,
+    webhookLogsRaw,
+    webhookProcessedEventsRaw,
+    legacyPmsBySubscription,
+    legacyPmsByUser,
+    legacyPmsRecent,
+    legacyStripeRaw,
+    legacyStripeImportRaw,
+  ] = await Promise.all([
     userId
-      ? safeTableQuery(supabase.from("communication_logs").select("*").eq("user_id", userId).order("created_at", { ascending: false }).limit(50))
+      ? safeTableQuery(supabase.from("communication_logs").select("*").eq("user_id", userId).order("created_at", { ascending: false }).limit(100))
+      : Promise.resolve([]),
+    safeTableQuery(supabase.from("communication_logs").select("*").order("created_at", { ascending: false }).limit(1000)),
+    userId
+      ? safeTableQuery(supabase.from("kit_access_logs").select("*").eq("user_id", userId).order("accessed_at", { ascending: false }).limit(100))
       : Promise.resolve([]),
     userId
-      ? safeTableQuery(supabase.from("kit_access_logs").select("*").eq("user_id", userId).order("accessed_at", { ascending: false }).limit(50))
+      ? safeTableQuery(supabase.from("audio_access_logs").select("*").eq("user_id", userId).order("accessed_at", { ascending: false }).limit(100))
       : Promise.resolve([]),
-    userId
-      ? safeTableQuery(supabase.from("audio_access_logs").select("*").eq("user_id", userId).order("accessed_at", { ascending: false }).limit(50))
+    safeTableQuery(supabase.from("webhook_logs").select("*").order("created_at", { ascending: false }).limit(1000)),
+    safeTableQuery(supabase.from("webhook_processed_events").select("*").order("processed_at", { ascending: false }).limit(1000)),
+    legacySubscriptionId
+      ? safeTableQuery(supabase.from("legacy_pms_subscriptions").select("*").eq("pms_subscription_id", legacySubscriptionId).limit(25))
       : Promise.resolve([]),
-    safeTableQuery(supabase.from("webhook_logs").select("*").order("created_at", { ascending: false }).limit(200)),
-    safeTableQuery(supabase.from("webhook_processed_events").select("*").order("processed_at", { ascending: false }).limit(200)),
-    safeTableQuery(supabase.from("legacy_pms_subscriptions").select("*").limit(200)),
-    safeTableQuery(supabase.from("legacy_stripe_customers").select("*").limit(200)),
-    safeTableQuery(supabase.from("legacy_stripe_customer_import").select("*").limit(200)),
+    legacyMemberId
+      ? safeTableQuery(supabase.from("legacy_pms_subscriptions").select("*").eq("pms_user_id", legacyMemberId).limit(25))
+      : Promise.resolve([]),
+    safeTableQuery(supabase.from("legacy_pms_subscriptions").select("*").limit(1000)),
+    safeTableQuery(supabase.from("legacy_stripe_customers").select("*").limit(1000)),
+    safeTableQuery(supabase.from("legacy_stripe_customer_import").select("*").limit(1000)),
   ]);
+
+  const communicationLogs = uniqueRows([
+    ...communicationByUser,
+    ...communicationRecent.filter((row) => rowMatchesIdentifiers(row, identifiers)),
+  ]).slice(0, 100);
+
+  const legacyPmsSubscriptions = uniqueRows([
+    ...legacyPmsBySubscription,
+    ...legacyPmsByUser,
+    ...legacyPmsRecent.filter((row) => rowMatchesIdentifiers(row, identifiers)),
+  ]).slice(0, 50);
 
   return {
     communicationLogs,
     kitAccessLogs,
     audioAccessLogs,
-    webhookLogs: webhookLogsRaw.filter((row) => rowMatchesIdentifiers(row, identifiers)).slice(0, 50),
-    webhookProcessedEvents: webhookProcessedEventsRaw.filter((row) => rowMatchesIdentifiers(row, identifiers)).slice(0, 50),
-    legacyPmsSubscriptions: legacyPmsRaw.filter((row) => rowMatchesIdentifiers(row, identifiers)).slice(0, 25),
-    legacyStripeCustomers: legacyStripeRaw.filter((row) => rowMatchesIdentifiers(row, identifiers)).slice(0, 25),
-    legacyStripeCustomerImports: legacyStripeImportRaw.filter((row) => rowMatchesIdentifiers(row, identifiers)).slice(0, 25),
+    webhookLogs: webhookLogsRaw.filter((row) => rowMatchesIdentifiers(row, identifiers)).slice(0, 100),
+    webhookProcessedEvents: webhookProcessedEventsRaw.filter((row) => rowMatchesIdentifiers(row, identifiers)).slice(0, 100),
+    legacyPmsSubscriptions,
+    legacyStripeCustomers: legacyStripeRaw.filter((row) => rowMatchesIdentifiers(row, identifiers)).slice(0, 50),
+    legacyStripeCustomerImports: legacyStripeImportRaw.filter((row) => rowMatchesIdentifiers(row, identifiers)).slice(0, 50),
   };
 }
 
