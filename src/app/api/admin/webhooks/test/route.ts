@@ -4,12 +4,21 @@ import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { buildFakePayload, normalizeTestPhone, saveWebhookLog, signWebhookPayload } from "@/lib/webhooks/core";
 import { WEBHOOK_EVENTS, type WebhookEvent } from "@/types/webhooks";
 
+const DEFAULT_TEST_PHONE = "71993392294";
+const LEGACY_TEST_PHONES = new Set(["5571999999999", "71999999999"]);
+
 function headersToRecord(headers: Headers) {
   const output: Record<string, string> = {};
   headers.forEach((value, key) => {
     output[key] = value;
   });
   return output;
+}
+
+function resolveTestPhone(rawValue: string) {
+  const normalized = normalizeTestPhone(rawValue || DEFAULT_TEST_PHONE);
+  if (!normalized || LEGACY_TEST_PHONES.has(normalized)) return normalizeTestPhone(DEFAULT_TEST_PHONE);
+  return normalized;
 }
 
 function isProbablyLabMessageReceipt(responseBody: string, responseHeaders: Record<string, string>) {
@@ -32,11 +41,11 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   const endpointId = String(body?.endpoint_id ?? body?.endpointId ?? "");
   const selectedEvent = String(body?.event ?? "") as WebhookEvent;
-  const rawTestPhone = String(body?.test_phone ?? "");
+  const rawTestPhone = String(body?.test_phone ?? DEFAULT_TEST_PHONE);
   const previewOnly = Boolean(body?.previewOnly);
 
   if (!WEBHOOK_EVENTS.includes(selectedEvent)) return NextResponse.json({ error: "Evento inválido" }, { status: 400 });
-  const testPhone = normalizeTestPhone(rawTestPhone);
+  const testPhone = resolveTestPhone(rawTestPhone);
   if (!testPhone) return NextResponse.json({ error: "Informe um número de teste para validar este webhook." }, { status: 400 });
   if (testPhone.length < 12 || testPhone.length > 13) return NextResponse.json({ error: "Número de teste inválido. Use DDI + DDD + número, apenas dígitos." }, { status: 400 });
 
@@ -74,7 +83,7 @@ export async function POST(request: Request) {
   };
 
   if (previewOnly) {
-    return NextResponse.json({ payload, delivery_id: deliveryId, signature, headers: requestHeaders, normalized_phone: testPhone });
+    return NextResponse.json({ payload, delivery_id: deliveryId, signature, headers: requestHeaders, normalized_phone: testPhone, default_test_phone: DEFAULT_TEST_PHONE });
   }
 
   const attempts = endpoint.retry_enabled ? Array.from({ length: Math.max(1, Number(endpoint.retry_attempts ?? 1)) }, (_, i) => i) : [0];
@@ -165,6 +174,7 @@ export async function POST(request: Request) {
     duration_ms: lastResult.duration,
     payload,
     normalized_phone: testPhone,
+    default_test_phone: DEFAULT_TEST_PHONE,
     delivery_id: deliveryId,
     signature,
     diagnostic: lastResult.confirmed
