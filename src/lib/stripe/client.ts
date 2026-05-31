@@ -135,6 +135,27 @@ export async function getSubscription(subscriptionId: string) {
   return stripe<any>(`/subscriptions/${encodeURIComponent(subscriptionId)}`, undefined, "GET");
 }
 
+export async function listCustomerSubscriptions(customerId: string) {
+  const query = new URLSearchParams({
+    customer: customerId,
+    status: "all",
+    limit: "10",
+    "expand[]": "data.items.data.price",
+  });
+  return stripe<any>(`/subscriptions?${query.toString()}`, undefined, "GET");
+}
+
+export async function getBestCustomerSubscription(customerId: string) {
+  const subscriptions = await listCustomerSubscriptions(customerId);
+  const data = Array.isArray(subscriptions?.data) ? subscriptions.data : [];
+  const preferredStatuses = ["active", "trialing", "past_due"];
+
+  return data.find((subscription: any) => preferredStatuses.includes(String(subscription?.status ?? "")))
+    ?? data.find((subscription: any) => String(subscription?.status ?? "") !== "canceled")
+    ?? data[0]
+    ?? null;
+}
+
 export async function updateSubscription(subscriptionId: string, priceId: string) {
   const subscription = await getSubscription(subscriptionId);
   const subscriptionItemId = subscription?.items?.data?.[0]?.id;
