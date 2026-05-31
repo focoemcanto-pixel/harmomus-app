@@ -337,8 +337,16 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
   const tessituraSourceFiles = useMemo(() => buildTessituraSourceFiles(liveKit), [liveKit]);
   const selectedGroupVoice = toAnalyzableVoice(selectedVoice) as GroupTessituraVoice | null;
   const currentVoiceTessitura = useMemo(
-    () => selectedGroupVoice ? evaluateIndividualVoiceTessituraForTone(tessituraSourceFiles, selectedTone, selectedGroupVoice) : null,
-    [selectedGroupVoice, selectedTone, tessituraSourceFiles],
+    () =>
+      selectedGroupVoice && selectedSourceType === "generated"
+        ? evaluateIndividualVoiceTessituraForTone(tessituraSourceFiles, selectedTone, selectedGroupVoice)
+        : null,
+    [
+      selectedGroupVoice,
+      selectedSourceType,
+      selectedTone,
+      tessituraSourceFiles,
+    ],
   );
 
   useEffect(() => {
