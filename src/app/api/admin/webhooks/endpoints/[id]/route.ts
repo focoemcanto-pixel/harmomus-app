@@ -45,3 +45,20 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   const { data: logs } = await admin.from("webhook_logs").select("*").eq("endpoint_id", id).order("created_at", { ascending: false }).limit(25);
   return NextResponse.json({ data: endpoint, logs: logs ?? [] });
 }
+
+export async function DELETE(_: Request, { params }: { params: Promise<{ id: string }> }) {
+  const current = await getCurrentUserAccessContext();
+  if (!current.isAdmin) return NextResponse.json({ error: "Acesso negado" }, { status: 403 });
+
+  const { id } = await params;
+  const admin = createSupabaseAdminClient();
+
+  // Primeiro remove logs relacionados para evitar erro de FK em bancos que não usam cascade.
+  const logsDelete = await admin.from("webhook_logs").delete().eq("endpoint_id", id);
+  if (logsDelete.error) return NextResponse.json({ error: logsDelete.error.message }, { status: 500 });
+
+  const endpointDelete = await admin.from("webhook_endpoints").delete().eq("id", id);
+  if (endpointDelete.error) return NextResponse.json({ error: endpointDelete.error.message }, { status: 500 });
+
+  return NextResponse.json({ ok: true });
+}
