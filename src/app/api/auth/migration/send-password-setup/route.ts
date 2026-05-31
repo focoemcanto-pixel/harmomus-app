@@ -32,13 +32,31 @@ function getStripePriceId(subscription: any) {
   return String(subscription?.items?.data?.[0]?.price?.id ?? "").trim();
 }
 
+function normalizeLegacyPlanSlug(value: unknown) {
+  const slug = String(value ?? "free").trim().toLowerCase();
+  return slug || "free";
+}
+
+async function resolvePlanBySlug(admin: any, slug: string) {
+  const { data: plan, error } = await admin
+    .from("plans")
+    .select("id,slug,stripe_price_id")
+    .eq("slug", slug)
+    .maybeSingle();
+
+  if (error || !plan?.id) throw new Error(`Erro ao localizar plano ${slug}:${error?.message ?? "plano ausente"}`);
+  return plan;
+}
+
 async function resolveLegacyPlan(admin: any, legacyMember: any) {
   const stripeCustomerId = String(legacyMember?.stripe_customer_id ?? "").trim();
 
   if (!stripeCustomerId) {
-    const { data: freePlan, error: freePlanError } = await admin.from("plans").select("id,slug").eq("slug", "free").maybeSingle();
-    if (freePlanError || !freePlan?.id) throw new Error(`Erro ao localizar plano free:${freePlanError?.message ?? "plano ausente"}`);
-    return { plan: freePlan, stripeSubscription: null, stripePriceId: null };
+    const legacyPlanSlug = normalizeLegacyPlanSlug(legacyMember?.legacy_plan_slug);
+    const allowedFallbackSlugs = new Set(["free", "plus", "premium", "ministry_10", "ministry_20", "ministry_40"]);
+    const resolvedSlug = allowedFallbackSlugs.has(legacyPlanSlug) ? legacyPlanSlug : "free";
+    const plan = await resolvePlanBySlug(admin, resolvedSlug);
+    return { plan, stripeSubscription: null, stripePriceId: plan.stripe_price_id ?? null };
   }
 
   const stripeSubscription = await getBestCustomerSubscription(stripeCustomerId);
@@ -151,7 +169,7 @@ export async function POST(request: Request) {
 
   const { data: legacyMember, error: legacyLookupError } = await admin
     .from("legacy_members")
-    .select("id,legacy_subscription_id,email,display_name,legacy_plan_slug,legacy_status,legacy_gateway,migrated,password_created,stripe_customer_id")
+    .select("id,legacy_subscription_id,email,display_name,legacy_plan_slug,legacy_status,legacy_gateway,billing_amount,migrated,password_created,stripe_customer_id")
     .ilike("email", email)
     .maybeSingle();
 
