@@ -8,6 +8,7 @@ import {
   CreditCard,
   Crown,
   ExternalLink,
+  ReceiptText,
   RefreshCw,
   ShieldCheck,
   Users,
@@ -38,6 +39,21 @@ type SubscriptionWithProfile = Pick<
   | "canceled_at"
 > & {
   profiles?: { full_name?: string | null; email?: string | null; role?: string | null } | null;
+};
+
+type BillingInvoiceRow = {
+  id: string;
+  amount_paid_cents?: number | null;
+  amount_due_cents?: number | null;
+  amount_remaining_cents?: number | null;
+  paid_at?: string | null;
+  created_at?: string | null;
+  status?: string | null;
+  plan_id?: string | null;
+  customer_email?: string | null;
+  hosted_invoice_url?: string | null;
+  profiles?: { full_name?: string | null; email?: string | null; role?: string | null } | null;
+  plans?: { name?: string | null; slug?: string | null } | null;
 };
 
 type RecentActivityItem = {
@@ -139,10 +155,21 @@ function featureLabel(feature: string) {
 }
 
 function statusBadgeClass(status: string) {
-  if (status === "Ativo") return "bg-emerald-500/20 text-emerald-300";
+  if (status === "Ativo" || status === "Pago") return "bg-emerald-500/20 text-emerald-300";
   if (status === "Teste") return "bg-cyan-500/20 text-cyan-200";
-  if (status === "Atrasado") return "bg-amber-500/20 text-amber-200";
+  if (status === "Atrasado" || status === "Falhou") return "bg-amber-500/20 text-amber-200";
   return "bg-rose-500/20 text-rose-300";
+}
+
+function sumPaidInvoices(invoices: BillingInvoiceRow[], predicate: (invoice: BillingInvoiceRow) => boolean) {
+  return invoices.reduce((total, invoice) => {
+    if (!predicate(invoice)) return total;
+    return total + Number(invoice.amount_paid_cents ?? 0);
+  }, 0);
+}
+
+function startOfYear(date: Date) {
+  return new Date(date.getFullYear(), 0, 1);
 }
 
 export const dynamic = "force-dynamic";
@@ -150,8 +177,20 @@ export const revalidate = 0;
 
 export default async function BillingPage() {
   const supabase = createSupabaseAdminClient() as any;
+  const now = new Date();
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const yearStart = startOfYear(now);
 
-  const [subscriptionsResult, plansResult, failedEventsResult, latestSyncResult, profilesCountResult, ownersCountResult] = await Promise.all([
+  const [
+    subscriptionsResult,
+    plansResult,
+    failedEventsResult,
+    latestSyncResult,
+    profilesCountResult,
+    ownersCountResult,
+    invoicesResult,
+  ] = await Promise.all([
     supabase
       .from("subscriptions")
       .select("id,user_id,plan_id,gateway,status,created_at,updated_at,current_period_end,trial_ends_at,canceled_at,profiles(full_name,email,role)")
@@ -161,6 +200,11 @@ export default async function BillingPage() {
     supabase.from("billing_events").select("created_at").order("created_at", { ascending: false }).limit(1),
     supabase.from("profiles").select("id", { count: "exact", head: true }),
     supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "owner"),
+    supabase
+      .from("billing_invoices")
+      .select("id,amount_paid_cents,amount_due_cents,amount_remaining_cents,paid_at,created_at,status,plan_id,customer_email,hosted_invoice_url,profiles(full_name,email,role),plans(name,slug)")
+      .order("paid_at", { ascending: false, nullsFirst: false })
+      .limit(500),
   ]);
 
   const allSubscriptions = ((subscriptionsResult.data ?? []) as SubscriptionWithProfile[]).filter(
@@ -168,6 +212,11 @@ export default async function BillingPage() {
   );
   const plans = ((plansResult.data ?? []) as PlanSummary[]).filter((plan) => normalize(plan.status) !== "inactive");
   const planById = new Map(plans.map((plan) => [plan.id, plan]));
+  const allInvoices = invoicesResult.error
+    ? []
+    : ((invoicesResult.data ?? []) as BillingInvoiceRow[]).filter((invoice) => !isOwnerProfile(invoice.profiles));
+  const paidInvoices = allInvoices.filter((invoice) => normalize(invoice.status) === "paid" && Number(invoice.amount_paid_cents ?? 0) > 0);
+  const failedInvoices = allInvoices.filter((invoice) => ["open", "uncollectible", "void", "payment_failed"].includes(normalize(invoice.status)) && Number(invoice.amount_due_cents ?? 0) > 0);
 
   const ownerSubscriptionCount = ((subscriptionsResult.data ?? []) as SubscriptionWithProfile[]).filter((subscription) =>
     isOwnerProfile(subscription.profiles),
@@ -180,18 +229,16 @@ export default async function BillingPage() {
   const pendingCount = allSubscriptions.filter((subscription) => normalize(subscription.status) === "pending").length;
 
   const countByPlan = new Map<string, number>();
-  const gatewayCount = new Map<string, number>();
-  let mrrCents = 0;
+  const estimatedRevenueByPlan = new Map<string, number>();
+  let estimatedMrrCents = 0;
 
   for (const subscription of activeSubscriptions) {
     const plan = planById.get(subscription.plan_id);
     const slug = normalize(plan?.slug) || "sem_plano";
+    const planRevenue = isPaidPlan(plan) ? Number(plan?.price_cents ?? 0) : 0;
     countByPlan.set(slug, (countByPlan.get(slug) ?? 0) + 1);
-
-    const gateway = normalize(subscription.gateway) || "sem_gateway";
-    gatewayCount.set(gateway, (gatewayCount.get(gateway) ?? 0) + 1);
-
-    if (isPaidPlan(plan)) mrrCents += Number(plan?.price_cents ?? 0);
+    estimatedRevenueByPlan.set(slug, (estimatedRevenueByPlan.get(slug) ?? 0) + planRevenue);
+    estimatedMrrCents += planRevenue;
   }
 
   const failedEventsCount = failedEventsResult.error ? 0 : (failedEventsResult.count ?? 0);
@@ -203,8 +250,31 @@ export default async function BillingPage() {
     return slug === "premium" || slug.startsWith("ministry_") ? total + count : total;
   }, 0);
   const conversionRate = freeCount + premiumLikeCount > 0 ? (premiumLikeCount / (freeCount + premiumLikeCount)) * 100 : 0;
-  const arpaCents = paidActiveSubscriptions.length ? Math.round(mrrCents / paidActiveSubscriptions.length) : 0;
-  const arrCents = mrrCents * 12;
+  const estimatedArpaCents = paidActiveSubscriptions.length ? Math.round(estimatedMrrCents / paidActiveSubscriptions.length) : 0;
+  const estimatedArrCents = estimatedMrrCents * 12;
+
+  const realRevenue7dCents = sumPaidInvoices(paidInvoices, (invoice) => Boolean(invoice.paid_at && new Date(invoice.paid_at) >= sevenDaysAgo));
+  const realRevenue30dCents = sumPaidInvoices(paidInvoices, (invoice) => Boolean(invoice.paid_at && new Date(invoice.paid_at) >= thirtyDaysAgo));
+  const realRevenueYearCents = sumPaidInvoices(paidInvoices, (invoice) => Boolean(invoice.paid_at && new Date(invoice.paid_at) >= yearStart));
+  const realRevenueTotalCents = sumPaidInvoices(paidInvoices, () => true);
+  const realArpa30dCents = paidInvoices.length ? Math.round(realRevenue30dCents / Math.max(new Set(paidInvoices.map((invoice) => invoice.customer_email ?? invoice.id)).size, 1)) : 0;
+
+  const revenueByPlan = new Map<string, { name: string; real: number; estimated: number; count: number }>();
+  for (const plan of plans) {
+    const slug = normalize(plan.slug);
+    revenueByPlan.set(slug, {
+      name: plan.name,
+      real: 0,
+      estimated: estimatedRevenueByPlan.get(slug) ?? 0,
+      count: countByPlan.get(slug) ?? 0,
+    });
+  }
+  for (const invoice of paidInvoices) {
+    const slug = normalize(invoice.plans?.slug) || "sem_plano";
+    const current = revenueByPlan.get(slug) ?? { name: invoice.plans?.name ?? "Sem plano", real: 0, estimated: 0, count: 0 };
+    current.real += Number(invoice.amount_paid_cents ?? 0);
+    revenueByPlan.set(slug, current);
+  }
 
   const featureKeys = Array.from(new Set([...DEFAULT_FEATURES, ...plans.flatMap(readFeatures)]));
 
@@ -222,6 +292,8 @@ export default async function BillingPage() {
     };
   });
 
+  const latestPayments = paidInvoices.slice(0, 8);
+
   const isStripeConnected = Boolean(process.env.STRIPE_SECRET_KEY);
   const isWebhookActive = Boolean(process.env.STRIPE_WEBHOOK_SECRET);
   const stripeDashboardUrl = process.env.STRIPE_DASHBOARD_URL || "https://dashboard.stripe.com/";
@@ -229,30 +301,30 @@ export default async function BillingPage() {
 
   const stats = [
     {
-      label: "MRR real estimado",
-      value: formatMoney(mrrCents),
-      detail: `${formatCount(paidActiveSubscriptions.length)} pagantes ativos • owners excluídos`,
+      label: "Receita real 30 dias",
+      value: formatMoney(realRevenue30dCents),
+      detail: `${formatCount(paidInvoices.length)} pagamento(s) Stripe salvos • owners excluídos`,
       icon: ChartNoAxesCombined,
       glow: "from-gold-500/20 via-gold-300/5",
     },
     {
-      label: "ARR projetado",
-      value: formatMoney(arrCents),
-      detail: `ticket médio ativo: ${formatMoney(arpaCents)}`,
-      icon: WalletCards,
+      label: "Receita real no ano",
+      value: formatMoney(realRevenueYearCents),
+      detail: `total histórico salvo: ${formatMoney(realRevenueTotalCents)}`,
+      icon: ReceiptText,
       glow: "from-emerald-500/20 via-emerald-300/5",
     },
     {
-      label: "Assinantes ativos",
-      value: formatCount(activeSubscriptions.length),
-      detail: plans.map((plan) => `${plan.name}: ${formatCount(countByPlan.get(normalize(plan.slug)) ?? 0)}`).join(" • "),
-      icon: Users,
+      label: "MRR estimado ativo",
+      value: formatMoney(estimatedMrrCents),
+      detail: `${formatCount(paidActiveSubscriptions.length)} pagantes ativos • ARR ${formatMoney(estimatedArrCents)}`,
+      icon: WalletCards,
       glow: "from-cyan-500/20 via-cyan-300/5",
     },
     {
       label: "Mix Free → Premium",
       value: `${conversionRate.toFixed(1)}%`,
-      detail: `Free ${formatCount(freeCount)} • Premium/Ministério ${formatCount(premiumLikeCount)}`,
+      detail: `Free ${formatCount(freeCount)} • Premium/Ministério ${formatCount(premiumLikeCount)} • ARPA real 30d ${formatMoney(realArpa30dCents || estimatedArpaCents)}`,
       icon: ArrowRightLeft,
       glow: "from-violet-500/20 via-violet-300/5",
     },
@@ -263,18 +335,19 @@ export default async function BillingPage() {
     { label: "Webhook", value: isWebhookActive ? "Ativo" : "Secret ausente" },
     { label: "Último sync", value: lastSyncLabel },
     { label: "Eventos falhos", value: formatCount(failedEventsCount) },
+    { label: "Invoices reais", value: invoicesResult.error ? "Tabela indisponível" : formatCount(allInvoices.length) },
   ];
 
   const statusCards = [
     { label: "Em teste", value: trialingCount, helper: "trialing" },
     { label: "Atrasadas", value: overdueCount, helper: "overdue" },
     { label: "Pendentes", value: pendingCount, helper: "pending" },
-    { label: "Canceladas", value: canceledCount, helper: "canceled" },
+    { label: "Falhas cobrança", value: failedInvoices.length, helper: "Stripe invoices" },
   ];
 
   return (
     <section className="space-y-6">
-      <PageHeader title="Billing" description="Cockpit de receita, planos, permissões, migração e saúde dos gateways." />
+      <PageHeader title="Billing" description="Cockpit de receita real Stripe, planos, permissões, migração e saúde dos gateways." />
 
       <div className="rounded-2xl border border-gold-500/20 bg-gold-500/10 p-4 text-sm text-gold-100 shadow-premium">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -378,23 +451,21 @@ export default async function BillingPage() {
         <div className="rounded-2xl border border-white/10 bg-surface/80 p-5 shadow-premium">
           <h2 className="mb-4 flex items-center gap-2 text-base font-semibold text-white">
             <CreditCard className="h-4 w-4 text-cyan-300" />
-            Receita por plano ativo
+            Receita por plano
           </h2>
           <div className="space-y-3">
-            {plans.map((plan) => {
-              const slug = normalize(plan.slug);
-              const count = countByPlan.get(slug) ?? 0;
-              const revenue = isPaidPlan(plan) ? count * Number(plan.price_cents ?? 0) : 0;
-              const percent = mrrCents > 0 ? Math.max((revenue / mrrCents) * 100, revenue > 0 ? 4 : 0) : 0;
+            {Array.from(revenueByPlan.entries()).map(([slug, data]) => {
+              const percent = realRevenueTotalCents > 0 ? Math.max((data.real / realRevenueTotalCents) * 100, data.real > 0 ? 4 : 0) : 0;
               return (
-                <div key={plan.id} className="rounded-xl border border-white/10 bg-black/20 p-3">
+                <div key={slug} className="rounded-xl border border-white/10 bg-black/20 p-3">
                   <div className="mb-2 flex items-center justify-between gap-3 text-sm">
-                    <span className="font-medium text-white">{plan.name}</span>
-                    <span className="text-muted">{formatCount(count)} ativo(s) • {formatMoney(revenue)}</span>
+                    <span className="font-medium text-white">{data.name}</span>
+                    <span className="text-muted">real {formatMoney(data.real)} • estimado {formatMoney(data.estimated)}</span>
                   </div>
                   <div className="h-2 rounded-full bg-white/10">
                     <div className="h-2 rounded-full bg-gradient-to-r from-gold-400 via-cyan-400 to-emerald-400" style={{ width: `${percent}%` }} />
                   </div>
+                  <p className="mt-2 text-xs text-muted">{formatCount(data.count)} assinatura(s) ativa(s)</p>
                 </div>
               );
             })}
@@ -403,22 +474,26 @@ export default async function BillingPage() {
 
         <div className="rounded-2xl border border-white/10 bg-surface/80 p-5 shadow-premium">
           <h2 className="mb-4 flex items-center gap-2 text-base font-semibold text-white">
-            <AlertTriangle className="h-4 w-4 text-amber-300" />
-            Pontos de atenção
+            <ReceiptText className="h-4 w-4 text-emerald-300" />
+            Últimos pagamentos Stripe
           </h2>
-          <div className="space-y-3 text-sm">
-            <div className="rounded-xl border border-amber-400/20 bg-amber-500/10 p-3 text-amber-100">
-              <p className="font-medium">Permissões agora vêm dos planos</p>
-              <p className="mt-1 text-xs text-amber-100/70">Evita tabela fixa só com Free, Plus e Premium.</p>
-            </div>
-            <div className="rounded-xl border border-rose-400/20 bg-rose-500/10 p-3 text-rose-100">
-              <p className="font-medium">{formatCount(overdueCount + pendingCount)} assinatura(s) exigem revisão</p>
-              <p className="mt-1 text-xs text-rose-100/70">Atrasadas ou pendentes não entram no MRR.</p>
-            </div>
-            <div className="rounded-xl border border-cyan-400/20 bg-cyan-500/10 p-3 text-cyan-100">
-              <p className="font-medium">{formatCount(totalProfiles)} perfis não-owner no sistema</p>
-              <p className="mt-1 text-xs text-cyan-100/70">Base útil para comparar usuários cadastrados x assinaturas.</p>
-            </div>
+          <div className="space-y-3">
+            {latestPayments.map((invoice) => (
+              <div key={invoice.id} className="rounded-xl border border-white/10 bg-black/20 p-3 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="font-medium text-white">{invoice.customer_email ?? invoice.profiles?.email ?? "Cliente sem e-mail"}</p>
+                    <p className="text-xs text-muted">{invoice.plans?.name ?? "Plano não identificado"} • {formatDateTime(invoice.paid_at ?? invoice.created_at)}</p>
+                  </div>
+                  <span className="font-semibold text-emerald-300">{formatMoney(Number(invoice.amount_paid_cents ?? 0))}</span>
+                </div>
+              </div>
+            ))}
+            {latestPayments.length === 0 ? (
+              <div className="rounded-xl border border-amber-400/20 bg-amber-500/10 p-3 text-sm text-amber-100">
+                Nenhum pagamento real salvo ainda. Após a migration e os próximos eventos `invoice.paid`, esta área será preenchida automaticamente.
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
