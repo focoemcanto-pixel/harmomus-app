@@ -1,12 +1,12 @@
 export const WEBHOOK_EVENT_CATEGORIES = {
-  "CADASTRO E ACESSO": [
+  "👤 Usuários": [
     "user.created",
     "user.email_confirmed",
     "user.login",
     "user.password_reset",
     "user.migrated",
   ],
-  "CHECKOUT": [
+  "💳 Checkout": [
     "checkout.started",
     "checkout.plus.started",
     "checkout.premium.started",
@@ -17,26 +17,26 @@ export const WEBHOOK_EVENT_CATEGORIES = {
     "checkout.plus.abandoned",
     "checkout.premium.abandoned",
   ],
-  "ASSINATURA": [
+  "🔄 Assinaturas": [
     "subscription.created",
     "subscription.renewed",
     "subscription.canceled",
     "subscription.payment_failed",
   ],
-  "PLANO ATIVADO": [
+  "✅ Plano ativado": [
     "plan.free_activated",
     "plan.plus_activated",
     "plan.premium_activated",
     "plan.ministry_activated",
   ],
-  "UPGRADES ESPECÍFICOS": [
+  "⬆️ Upgrades específicos": [
     "upgrade.free_to_plus",
     "upgrade.free_to_premium",
     "upgrade.plus_to_premium",
     "upgrade.plus_to_ministry",
     "upgrade.premium_to_ministry",
   ],
-  "DOWNGRADES ESPECÍFICOS": [
+  "⬇️ Downgrades específicos": [
     "downgrade.premium_to_plus",
     "downgrade.premium_to_free",
     "downgrade.plus_to_free",
@@ -44,18 +44,18 @@ export const WEBHOOK_EVENT_CATEGORIES = {
     "downgrade.ministry_to_plus",
     "downgrade.ministry_to_free",
   ],
-  "PAGAMENTOS": [
+  "💰 Pagamentos": [
     "payment.approved",
     "payment.refunded",
     "payment.chargeback",
   ],
-  "MINISTERIAL": [
+  "🏛️ Ministerial": [
     "subscription.ministry_10.created",
     "subscription.ministry_20.created",
     "subscription.ministry_40.created",
     "subscription.ministry.canceled",
   ],
-  "ENGAJAMENTO": [
+  "🎵 Engajamento": [
     "repertoire.submitted",
     "repertoire.updated",
     "kit.downloaded",
