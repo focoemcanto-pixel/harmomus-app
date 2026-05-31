@@ -51,6 +51,13 @@ export interface PlaylistKitSummary {
   allow_pitch_shift: boolean;
   max_pitch_shift_semitones: number;
   category: { name: string; slug: string } | null;
+  ministry?: {
+    repertoireItemId?: string | null;
+    assignedTone?: string | null;
+    assignedVoice?: PlaylistTrackVoice | null;
+    notes?: string | null;
+    locked?: boolean;
+  } | null;
   tracks: {
     id: string;
     tone: string;
@@ -73,6 +80,10 @@ export interface PublicPlaylist {
   id: string;
   name: string;
   slug: string;
+  mode?: "public" | "ministry_scale";
+  label?: string;
+  exitHref?: string;
+  queueDescription?: string;
   kits: PlaylistKitSummary[];
 }
 
@@ -214,7 +225,7 @@ async function getPlaylistItems(supabase: any, playlistId: string) {
   return fallbackData ?? [];
 }
 
-async function getAudioFilesForPlaylist(supabase: any, kitIds: string[]) {
+export async function getAudioFilesForPlaylist(supabase: any, kitIds: string[]) {
   if (!kitIds.length) return [];
 
   const baseSelect = "id, kit_id, tone, name, file_type, source_type";
@@ -226,6 +237,44 @@ async function getAudioFilesForPlaylist(supabase: any, kitIds: string[]) {
   const { data: fallbackData, error: fallbackError } = await supabase.from("kit_audio_files").select(baseSelect).in("kit_id", kitIds);
   if (fallbackError) throw new Error(fallbackError.message);
   return fallbackData ?? [];
+}
+
+export function normalizePlaylistVoice(value: string): PlaylistTrackVoice {
+  const normalized = value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  if (normalized.includes("soprano")) return "soprano";
+  if (normalized.includes("contralto")) return "contralto";
+  if (normalized.includes("tenor")) return "tenor";
+  if (normalized.includes("baritono")) return "baritono";
+  return "todos";
+}
+
+export function mapAudioFilesByKitId(audioFiles: any[]) {
+  const filesByKitId = new Map<string, any[]>();
+  for (const file of audioFiles ?? []) {
+    const list = filesByKitId.get(file.kit_id) ?? [];
+    list.push(file);
+    filesByKitId.set(file.kit_id, list);
+  }
+  return filesByKitId;
+}
+
+export function mapKitTracks(files: any[]) {
+  return (files ?? []).map((file) => ({
+    id: file.id,
+    tone: file.tone,
+    voice: normalizePlaylistVoice(file.name),
+    name: file.name,
+    streamUrl: `/api/audio/${file.id}`,
+    fileType: file.file_type,
+    minMidiNote: file.min_midi_note ?? null,
+    maxMidiNote: file.max_midi_note ?? null,
+    detectedMinMidiNote: file.detected_min_midi_note ?? null,
+    detectedMaxMidiNote: file.detected_max_midi_note ?? null,
+    tessituraConfidence: file.tessitura_confidence ?? null,
+    tessituraSource: file.tessitura_source ?? "manual",
+    sourceType: file.source_type === "generated" ? "generated" : "original",
+    isGenerated: file.source_type === "generated",
+  }));
 }
 
 export async function getPlaylistBySlug(slug: string): Promise<PublicPlaylist | null> {
@@ -247,27 +296,14 @@ export async function getPlaylistBySlug(slug: string): Promise<PublicPlaylist | 
   const publicItems = (items ?? []).filter((i: any) => i.kits.published);
   const kitIds = publicItems.map((i: any) => i.kits.id);
   const audioFiles = await getAudioFilesForPlaylist(supabase, kitIds);
-
-  const normalizeVoice = (value: string): PlaylistTrackVoice => {
-    const normalized = value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-    if (normalized.includes("soprano")) return "soprano";
-    if (normalized.includes("contralto")) return "contralto";
-    if (normalized.includes("tenor")) return "tenor";
-    if (normalized.includes("baritono")) return "baritono";
-    return "todos";
-  };
-
-  const filesByKitId = new Map<string, any[]>();
-  for (const file of audioFiles ?? []) {
-    const list = filesByKitId.get(file.kit_id) ?? [];
-    list.push(file);
-    filesByKitId.set(file.kit_id, list);
-  }
+  const filesByKitId = mapAudioFilesByKitId(audioFiles);
 
   return {
     id: playlist.id,
     name: playlist.name,
     slug: playlist.slug,
+    mode: "public",
+    label: "Playlist pública",
     kits: publicItems.map((i: any) => ({
       ...i.kits,
       original_tone: i.kits.original_tone ?? null,
@@ -275,22 +311,7 @@ export async function getPlaylistBySlug(slug: string): Promise<PublicPlaylist | 
       allow_pitch_shift: i.kits.allow_pitch_shift ?? true,
       max_pitch_shift_semitones: i.kits.max_pitch_shift_semitones ?? 2,
       category: i.kits.category_id ? cmap.get(i.kits.category_id) ?? null : null,
-      tracks: (filesByKitId.get(i.kits.id) ?? []).map((file) => ({
-        id: file.id,
-        tone: file.tone,
-        voice: normalizeVoice(file.name),
-        name: file.name,
-        streamUrl: `/api/audio/${file.id}`,
-        fileType: file.file_type,
-        minMidiNote: file.min_midi_note ?? null,
-        maxMidiNote: file.max_midi_note ?? null,
-        detectedMinMidiNote: file.detected_min_midi_note ?? null,
-        detectedMaxMidiNote: file.detected_max_midi_note ?? null,
-        tessituraConfidence: file.tessitura_confidence ?? null,
-        tessituraSource: file.tessitura_source ?? "manual",
-        sourceType: file.source_type === "generated" ? "generated" : "original",
-        isGenerated: file.source_type === "generated",
-      })),
+      tracks: mapKitTracks(filesByKitId.get(i.kits.id) ?? []),
     })),
   };
 }
