@@ -13,7 +13,12 @@ export function signWebhookPayload(payload: string, secret: string, timestamp: n
 }
 
 export function normalizeTestPhone(value: string) {
-  return value.replace(/[\s()\-*]/g, "").replace(/\D/g, "");
+  const digits = value.replace(/[\s()\-*]/g, "").replace(/\D/g, "");
+
+  // Permite que o admin digite 71999999999 ou 5571999999999.
+  // Para o LabMessage, o teste sempre sai padronizado com DDI 55.
+  if (digits.length === 10 || digits.length === 11) return `55${digits}`;
+  return digits;
 }
 
 export function formatBrazilPhone(value: string) {
@@ -30,10 +35,11 @@ export function formatBrazilPhone(value: string) {
 export function buildFakePayload(event: WebhookEvent, testPhone: string) {
   const phoneDigits = normalizeTestPhone(testPhone);
   const phoneDisplay = formatBrazilPhone(phoneDigits);
+  const phoneWithoutCountry = phoneDigits.startsWith("55") ? phoneDigits.slice(2) : phoneDigits;
   const eventLabel = getWebhookEventLabel(event);
   const customerName = "Cliente Teste";
   const customerEmail = "cliente.teste@harmomus.com";
-  const testMessage = "Teste de webhook enviado pelo Harmomus.";
+  const testMessage = `Teste Harmomus recebido: ${eventLabel}.`;
 
   return {
     event,
@@ -42,13 +48,23 @@ export function buildFakePayload(event: WebhookEvent, testPhone: string) {
     delivery_id: `evt_test_${crypto.randomUUID()}`,
     created_at: new Date().toISOString(),
 
-    // Aliases técnicos comuns.
+    // Campos diretos — usados por automações tipo LabMessage/Make/Zapier.
     phone: phoneDigits,
     number: phoneDigits,
     to: phoneDigits,
     whatsapp: phoneDigits,
+    mobile: phoneDigits,
+    phone_number: phoneDigits,
+    whatsapp_number: phoneDigits,
     recipient_phone: phoneDigits,
     contact_phone: phoneDigits,
+    destination: phoneDigits,
+    numero: phoneDigits,
+    número: phoneDigits,
+    celular_numero: phoneDigits,
+    numero_whatsapp: phoneDigits,
+    telefone_com_ddd: phoneWithoutCountry,
+    celular_com_ddd: phoneWithoutCountry,
 
     // Aliases em PT-BR usados por plataformas como LabMessage.
     Nome: customerName,
@@ -63,6 +79,7 @@ export function buildFakePayload(event: WebhookEvent, testPhone: string) {
 
     message: testMessage,
     text: testMessage,
+    body: testMessage,
     Mensagem: testMessage,
     mensagem: testMessage,
 
@@ -70,7 +87,11 @@ export function buildFakePayload(event: WebhookEvent, testPhone: string) {
       name: customerName,
       email: customerEmail,
       phone: phoneDigits,
+      number: phoneDigits,
       whatsapp: phoneDigits,
+      mobile: phoneDigits,
+      phone_number: phoneDigits,
+      whatsapp_number: phoneDigits,
       telefone: phoneDisplay,
       Telefone: phoneDisplay,
     },
@@ -78,7 +99,11 @@ export function buildFakePayload(event: WebhookEvent, testPhone: string) {
       name: customerName,
       email: customerEmail,
       phone: phoneDigits,
+      number: phoneDigits,
       whatsapp: phoneDigits,
+      mobile: phoneDigits,
+      phone_number: phoneDigits,
+      whatsapp_number: phoneDigits,
       telefone: phoneDisplay,
       Telefone: phoneDisplay,
     },
@@ -88,6 +113,9 @@ export function buildFakePayload(event: WebhookEvent, testPhone: string) {
       phone: phoneDigits,
       number: phoneDigits,
       whatsapp: phoneDigits,
+      mobile: phoneDigits,
+      phone_number: phoneDigits,
+      whatsapp_number: phoneDigits,
       telefone: phoneDisplay,
       Telefone: phoneDisplay,
     },
@@ -97,6 +125,8 @@ export function buildFakePayload(event: WebhookEvent, testPhone: string) {
       telefone: phoneDisplay,
       celular: phoneDisplay,
       whatsapp: phoneDisplay,
+      numero: phoneDigits,
+      celular_numero: phoneDigits,
     },
     data: {
       id: `test_order_${crypto.randomUUID()}`,
@@ -108,6 +138,8 @@ export function buildFakePayload(event: WebhookEvent, testPhone: string) {
         name: customerName,
         email: customerEmail,
         phone: phoneDigits,
+        number: phoneDigits,
+        whatsapp: phoneDigits,
         telefone: phoneDisplay,
       },
     },
