@@ -1,5 +1,3 @@
-import { cookies } from "next/headers";
-
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { canAccessKit, canUsePitchShift, getDailyKitLimit } from "@/lib/access/access-engine";
 import type { PublicKit } from "@/lib/data/public-kits";
@@ -7,7 +5,6 @@ import type { CurrentUserAccessContext } from "@/lib/auth/current-user";
 
 const FREE_LIMIT = 3;
 const ACCESS_WINDOW_HOURS = 24;
-const ACTIVE_FREE_KIT_COOKIE = "harmomus_active_kit_id";
 
 export interface FreeAccessStats {
   accessCountToday: number;
@@ -32,48 +29,17 @@ function getAccessWindow() {
 }
 
 function summarizeAccessRows(rows: AccessLogRow[], limit = FREE_LIMIT) {
-  const orderedUniqueKitIds: string[] = [];
-  const seen = new Set<string>();
-
-  for (const row of rows) {
-    const kitId = String(row.kit_id ?? "").trim();
-    if (!kitId || seen.has(kitId)) continue;
-    seen.add(kitId);
-    orderedUniqueKitIds.push(kitId);
-  }
-
-  const accessedKitIds = orderedUniqueKitIds.slice(0, limit);
-  const uniqueKitCount24h = accessedKitIds.length;
-  const remaining = Math.max(0, limit - uniqueKitCount24h);
+  const validRows = rows.filter((row) => String(row.kit_id ?? "").trim()).slice(0, limit);
+  const accessedKitIds = validRows.map((row) => String(row.kit_id));
+  const accessCountToday = validRows.length;
+  const remaining = Math.max(0, limit - accessCountToday);
 
   return {
-    accessCountToday: uniqueKitCount24h,
-    uniqueKitCount24h,
+    accessCountToday,
+    uniqueKitCount24h: accessCountToday,
     accessedKitIds,
     remaining,
   };
-}
-
-async function getActiveFreeKitId() {
-  try {
-    const cookieStore = await cookies();
-    return cookieStore.get(ACTIVE_FREE_KIT_COOKIE)?.value ?? null;
-  } catch {
-    return null;
-  }
-}
-
-async function setActiveFreeKitId(kitId: string) {
-  try {
-    const cookieStore = await cookies();
-    cookieStore.set(ACTIVE_FREE_KIT_COOKIE, kitId, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      maxAge: ACCESS_WINDOW_HOURS * 60 * 60,
-      path: "/",
-    });
-  } catch {}
 }
 
 export function canViewKit() {
@@ -106,10 +72,8 @@ export async function getFreeAccessStats(userId: string): Promise<FreeAccessStat
 export async function registerKitAccess(userId: string, kitId: string): Promise<FreeAccessStats> {
   const supabase = createSupabaseAdminClient() as any;
   const stats = await getFreeAccessStats(userId);
-  const activeKitId = await getActiveFreeKitId();
 
-  if (activeKitId === kitId || stats.accessedKitIds.includes(kitId)) return stats;
-  if (stats.uniqueKitCount24h >= FREE_LIMIT) return stats;
+  if (stats.accessCountToday >= FREE_LIMIT) return stats;
 
   const { error: insertError } = await supabase.from("kit_access_logs").insert({ user_id: userId, kit_id: kitId });
 
@@ -122,7 +86,6 @@ export async function registerKitAccess(userId: string, kitId: string): Promise<
     return stats;
   }
 
-  await setActiveFreeKitId(kitId);
   return getFreeAccessStats(userId);
 }
 
@@ -144,10 +107,8 @@ export async function canPlayAudio(context: CurrentUserAccessContext, kit: Publi
   if (context.effectiveSlug === "free" && context.profile) {
     const stats = await getFreeAccessStats(context.profile.id);
     const dailyLimit = getDailyKitLimit(context.effectiveSlug) ?? FREE_LIMIT;
-    const activeKitId = await getActiveFreeKitId();
-    const kitAlreadyCounted = activeKitId === kit.id || stats.accessedKitIds.includes(kit.id);
 
-    if (kitAllowsFree(kit) && stats.uniqueKitCount24h >= dailyLimit && !kitAlreadyCounted) {
+    if (kitAllowsFree(kit) && stats.accessCountToday >= dailyLimit) {
       return { allowed: false, reason: "free_limit" as const, stats: { ...stats, limit: dailyLimit } };
     }
 
