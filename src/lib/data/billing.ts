@@ -32,6 +32,54 @@ function getCheckoutStartedEvents(planSlug: string) {
   return events;
 }
 
+function normalizePlanFamily(slug?: string | null) {
+  if (!slug) return "free";
+  if (slug.startsWith("ministry")) return "ministry";
+  if (slug === "premium") return "premium";
+  if (slug === "plus") return "plus";
+  return "free";
+}
+
+function planRank(planFamily: string) {
+  if (planFamily === "free") return 0;
+  if (planFamily === "plus") return 1;
+  if (planFamily === "premium") return 2;
+  if (planFamily === "ministry") return 3;
+  return 0;
+}
+
+function getPlanActivatedEvent(planFamily: string) {
+  if (planFamily === "plus") return "plan.plus_activated";
+  if (planFamily === "premium") return "plan.premium_activated";
+  if (planFamily === "ministry") return "plan.ministry_activated";
+  return "plan.free_activated";
+}
+
+function getSpecificPlanTransitionEvent(fromSlug?: string | null, toSlug?: string | null) {
+  const from = normalizePlanFamily(fromSlug);
+  const to = normalizePlanFamily(toSlug);
+  if (from === to) return null;
+
+  const direction = planRank(to) > planRank(from) ? "upgrade" : "downgrade";
+  const key = `${from}_to_${to}`;
+  const allowed = new Set([
+    "free_to_plus",
+    "free_to_premium",
+    "plus_to_premium",
+    "plus_to_ministry",
+    "premium_to_ministry",
+    "premium_to_plus",
+    "premium_to_free",
+    "plus_to_free",
+    "ministry_to_premium",
+    "ministry_to_plus",
+    "ministry_to_free",
+  ]);
+
+  if (!allowed.has(key)) return null;
+  return `${direction}.${key}`;
+}
+
 async function dispatchCheckoutStarted(input: {
   userId: string;
   email: string;
@@ -60,6 +108,43 @@ async function dispatchCheckoutStarted(input: {
           trial_days: input.trialDays,
           source: input.source ?? null,
           started_at: new Date().toISOString(),
+        },
+      }),
+    ),
+  );
+}
+
+async function dispatchPlanTransition(input: {
+  userId: string;
+  email?: string | null;
+  fromPlanSlug?: string | null;
+  toPlanSlug: string;
+  subscriptionId?: string | null;
+}) {
+  const fromFamily = normalizePlanFamily(input.fromPlanSlug);
+  const toFamily = normalizePlanFamily(input.toPlanSlug);
+  if (fromFamily === toFamily) return;
+
+  const specificEvent = getSpecificPlanTransitionEvent(input.fromPlanSlug, input.toPlanSlug);
+  const activatedEvent = getPlanActivatedEvent(toFamily);
+  const events = [specificEvent, activatedEvent].filter(Boolean) as string[];
+
+  await Promise.allSettled(
+    events.map((event) =>
+      dispatchWebhookEvent({
+        event: event as any,
+        source: "billing.plan_change",
+        recipient: {
+          email: input.email ?? undefined,
+        },
+        data: {
+          user_id: input.userId,
+          from_plan: input.fromPlanSlug ?? null,
+          from_plan_family: fromFamily,
+          to_plan: input.toPlanSlug,
+          to_plan_family: toFamily,
+          subscription_id: input.subscriptionId ?? null,
+          changed_at: new Date().toISOString(),
         },
       }),
     ),
@@ -259,7 +344,13 @@ export async function changeSubscriptionPlan(userId: string, planId: string) {
 
   const supabase = createSupabaseAdminClient() as any;
   const [{ data: sub, error: subError }, plan] = await Promise.all([
-    supabase.from("subscriptions").select("*").eq("user_id", userId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    supabase
+      .from("subscriptions")
+      .select("*, plans:plan_id(slug)")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
     getPlanById(supabase, planId),
   ]);
 
@@ -268,7 +359,20 @@ export async function changeSubscriptionPlan(userId: string, planId: string) {
   if (!sub?.stripe_subscription_id) throw new Error("Assinatura inválida para upgrade/troca de plano.");
   if (sub.plan_id === planId) return;
 
+  const previousPlanSlug = sub?.plans?.slug ?? null;
+
   await updateSubscription(sub.stripe_subscription_id, plan.stripePriceId);
-  const { error } = await supabase.from("subscriptions").update({ plan_id: planId, stripe_price_id: plan.stripePriceId, updated_at: new Date().toISOString() }).eq("id", sub.id);
+  const { error } = await supabase
+    .from("subscriptions")
+    .update({ plan_id: planId, stripe_price_id: plan.stripePriceId, updated_at: new Date().toISOString() })
+    .eq("id", sub.id);
   if (error) throw new Error(`Falha ao atualizar plano local: ${error.message}`);
+
+  void dispatchPlanTransition({
+    userId,
+    email: sub?.email ?? null,
+    fromPlanSlug: previousPlanSlug,
+    toPlanSlug: plan.slug,
+    subscriptionId: sub.id,
+  }).catch((transitionError) => console.error("[billing] Falha ao disparar webhook de troca de plano", transitionError));
 }
