@@ -10,6 +10,11 @@ function normalizeRedirect(raw: string) {
   return raw;
 }
 
+function isSupportedLegacyPlan(value: unknown) {
+  const slug = String(value ?? "").trim().toLowerCase();
+  return ["free", "plus", "premium", "ministry_10", "ministry_20", "ministry_40"].includes(slug);
+}
+
 export async function POST(request: Request) {
   const formData = await request.formData();
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
@@ -31,13 +36,13 @@ export async function POST(request: Request) {
     } else {
       const { data: legacyMember } = await admin
         .from("legacy_members")
-        .select("email,legacy_plan_slug,legacy_status,migrated,password_created")
+        .select("email,legacy_plan_slug,legacy_status,migrated,password_created,stripe_customer_id")
         .ilike("email", email)
         .maybeSingle();
 
       if (
         legacyMember &&
-        String(legacyMember.legacy_plan_slug ?? "").toLowerCase() === "free" &&
+        isSupportedLegacyPlan(legacyMember.legacy_plan_slug) &&
         String(legacyMember.legacy_status ?? "").toLowerCase() === "active" &&
         (!legacyMember.migrated || !legacyMember.password_created)
       ) {
@@ -50,6 +55,7 @@ export async function POST(request: Request) {
           data: {
             legacy_plan_slug: legacyMember.legacy_plan_slug,
             legacy_status: legacyMember.legacy_status,
+            has_stripe_customer: Boolean(legacyMember.stripe_customer_id),
           },
         });
 
