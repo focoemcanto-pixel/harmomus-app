@@ -10,7 +10,6 @@ import {
   ExternalLink,
   RefreshCw,
   ShieldCheck,
-  Sparkles,
   Users,
   WalletCards,
 } from "lucide-react";
@@ -50,8 +49,6 @@ type RecentActivityItem = {
   createdAt: string | null;
   currentPeriodEnd: string | null;
 };
-
-const OWNER_EMAILS = ["amrkuezemarquinhos@hotmail.com"];
 
 const FEATURE_LABELS: Record<string, string> = {
   biblioteca_basica: "Biblioteca básica",
@@ -100,8 +97,8 @@ function normalize(value: unknown) {
   return String(value ?? "").trim().toLowerCase();
 }
 
-function isOwnerEmail(email?: string | null) {
-  return OWNER_EMAILS.includes(normalize(email));
+function isOwnerProfile(profile?: { role?: string | null } | null) {
+  return normalize(profile?.role) === "owner";
 }
 
 function isActiveStatus(status?: string | null) {
@@ -154,7 +151,7 @@ export const revalidate = 0;
 export default async function BillingPage() {
   const supabase = createSupabaseAdminClient() as any;
 
-  const [subscriptionsResult, plansResult, failedEventsResult, latestSyncResult, profilesCountResult] = await Promise.all([
+  const [subscriptionsResult, plansResult, failedEventsResult, latestSyncResult, profilesCountResult, ownersCountResult] = await Promise.all([
     supabase
       .from("subscriptions")
       .select("id,user_id,plan_id,gateway,status,created_at,updated_at,current_period_end,trial_ends_at,canceled_at,profiles(full_name,email,role)")
@@ -162,17 +159,18 @@ export default async function BillingPage() {
     supabase.from("plans").select("id,slug,name,price_cents,features,status,hierarchy_level").order("hierarchy_level", { ascending: true }),
     supabase.from("billing_events").select("id", { count: "exact", head: true }).eq("processed", false),
     supabase.from("billing_events").select("created_at").order("created_at", { ascending: false }).limit(1),
-    supabase.from("profiles").select("id,email,role", { count: "exact", head: true }),
+    supabase.from("profiles").select("id", { count: "exact", head: true }),
+    supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "owner"),
   ]);
 
   const allSubscriptions = ((subscriptionsResult.data ?? []) as SubscriptionWithProfile[]).filter(
-    (subscription) => !isOwnerEmail(subscription.profiles?.email),
+    (subscription) => !isOwnerProfile(subscription.profiles),
   );
   const plans = ((plansResult.data ?? []) as PlanSummary[]).filter((plan) => normalize(plan.status) !== "inactive");
   const planById = new Map(plans.map((plan) => [plan.id, plan]));
 
   const ownerSubscriptionCount = ((subscriptionsResult.data ?? []) as SubscriptionWithProfile[]).filter((subscription) =>
-    isOwnerEmail(subscription.profiles?.email),
+    isOwnerProfile(subscription.profiles),
   ).length;
   const activeSubscriptions = allSubscriptions.filter((subscription) => isActiveStatus(subscription.status));
   const paidActiveSubscriptions = activeSubscriptions.filter((subscription) => isPaidPlan(planById.get(subscription.plan_id)));
@@ -198,7 +196,8 @@ export default async function BillingPage() {
 
   const failedEventsCount = failedEventsResult.error ? 0 : (failedEventsResult.count ?? 0);
   const latestEventCreatedAt = latestSyncResult.error ? null : latestSyncResult.data?.[0]?.created_at ?? null;
-  const totalProfiles = profilesCountResult.error ? 0 : Math.max((profilesCountResult.count ?? 0) - OWNER_EMAILS.length, 0);
+  const ownerProfilesCount = ownersCountResult.error ? 0 : (ownersCountResult.count ?? 0);
+  const totalProfiles = profilesCountResult.error ? 0 : Math.max((profilesCountResult.count ?? 0) - ownerProfilesCount, 0);
   const freeCount = countByPlan.get("free") ?? 0;
   const premiumLikeCount = Array.from(countByPlan.entries()).reduce((total, [slug, count]) => {
     return slug === "premium" || slug.startsWith("ministry_") ? total + count : total;
@@ -232,7 +231,7 @@ export default async function BillingPage() {
     {
       label: "MRR real estimado",
       value: formatMoney(mrrCents),
-      detail: `${formatCount(paidActiveSubscriptions.length)} pagantes ativos • owner excluído`,
+      detail: `${formatCount(paidActiveSubscriptions.length)} pagantes ativos • owners excluídos`,
       icon: ChartNoAxesCombined,
       glow: "from-gold-500/20 via-gold-300/5",
     },
@@ -281,7 +280,7 @@ export default async function BillingPage() {
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <p className="flex items-center gap-2 font-medium">
             <Crown className="h-4 w-4" />
-            Owner protegido: {OWNER_EMAILS.join(", ")}
+            Owners protegidos por role
           </p>
           <p className="text-xs text-gold-100/70">
             {formatCount(ownerSubscriptionCount)} assinatura(s) de owner removida(s) das métricas financeiras, planos e atividade recente.
@@ -430,7 +429,7 @@ export default async function BillingPage() {
             <Activity className="h-4 w-4 text-violet-300" />
             Migração e atividade recente
           </h2>
-          <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-muted">Owner removido da listagem</span>
+          <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-muted">Owners removidos da listagem</span>
         </div>
 
         <div className="overflow-x-auto">
