@@ -1,5 +1,10 @@
 import { CommunicationShell } from "@/components/admin/communications/communication-shell";
+import { LogsViewer } from "@/components/admin/communications/logs-viewer";
 
 export default function Page() {
-  return <CommunicationShell title="Logs" subtitle="Módulo enterprise com loading, empty state e tratamento de erro."><div className="rounded-2xl border border-white/10 bg-slate-900/70 p-5 text-slate-300">Tela logs pronta para integração com serviços e hooks modulares.</div></CommunicationShell>;
+  return (
+    <CommunicationShell title="Logs" subtitle="Histórico real dos testes, campanhas e eventos da Central de Comunicação.">
+      <LogsViewer />
+    </CommunicationShell>
+  );
 }

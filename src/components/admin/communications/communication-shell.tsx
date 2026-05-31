@@ -1,12 +1,13 @@
 import { ReactNode } from "react";
 import Link from "next/link";
-import { BarChart3, Bot, FileText, Mail, MessageCircle, Megaphone, ScrollText, Settings, Users } from "lucide-react";
+import { BarChart3, Bot, FileImage, FileText, Mail, MessageCircle, Megaphone, ScrollText, Settings, Users } from "lucide-react";
 
 const tabs = [
   { label: "Dashboard", href: "/admin/comunicacao/dashboard", icon: BarChart3, description: "Visão geral" },
   { label: "Campanhas", href: "/admin/comunicacao/campaigns", icon: Megaphone, description: "Fluxos de disparo" },
   { label: "Audiência", href: "/admin/comunicacao/audience", icon: Users, description: "CRM e contatos" },
   { label: "Templates", href: "/admin/comunicacao/templates", icon: FileText, description: "Modelos de mensagem" },
+  { label: "Biblioteca", href: "/admin/comunicacao/media", icon: FileImage, description: "Mídias de campanha" },
   { label: "Automações", href: "/admin/comunicacao/automations", icon: Bot, description: "Regras e gatilhos" },
   { label: "WhatsApp", href: "/admin/comunicacao/whatsapp", icon: MessageCircle, description: "Canal WhatsApp" },
   { label: "E-mails", href: "/admin/comunicacao/emails", icon: Mail, description: "Canal e-mail" },

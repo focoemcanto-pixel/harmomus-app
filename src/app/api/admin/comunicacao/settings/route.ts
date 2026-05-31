@@ -33,7 +33,7 @@ export async function GET() {
 
   if (error) {
     if (error.code === "42P01") {
-      return NextResponse.json({ error: "Banco de marketing ainda não configurado. Aplique a migration." }, { status: 500 });
+      return NextResponse.json({ error: "Aplique a migration de marketing" }, { status: 500 });
     }
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
@@ -71,7 +71,16 @@ export async function POST(request: Request) {
   const createdBy = getCreatedBy(current.profile?.id);
   const admin = createSupabaseAdminClient();
 
-  const records = [
+  const records: Array<{
+    name: string;
+    type: string;
+    provider: string;
+    active: boolean;
+    config: Record<string, string>;
+    limits: Record<string, number>;
+    created_by: string | null;
+    updated_at: string;
+  }> = [
     {
       name: "WhatsApp principal",
       type: "whatsapp",
@@ -117,7 +126,7 @@ export async function POST(request: Request) {
 
     if (existingError && existingError.code !== "PGRST116") {
       if (existingError.code === "42P01") {
-        return NextResponse.json({ error: "Banco de marketing ainda não configurado. Aplique a migration." }, { status: 500 });
+        return NextResponse.json({ error: "Aplique a migration de marketing" }, { status: 500 });
       }
       return NextResponse.json({ error: existingError.message }, { status: 500 });
     }
