@@ -65,6 +65,10 @@ function toIsoFromStripeSeconds(value: unknown) {
   return typeof value === "number" ? new Date(value * 1000).toISOString() : null;
 }
 
+function cents(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? Math.round(value) : 0;
+}
+
 function getPlanSlugFromEnvPrice(stripePriceId: string | null) {
   if (!stripePriceId) return null;
   if (stripePriceId === process.env.STRIPE_PLUS_PRICE_ID) return "plus";
@@ -364,6 +368,62 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
   return { userId, planSlug: plan.slug ?? null, status, customerId, subscriptionId: syncedSubscriptionId, localSubscriptionId, stripePriceId, customerEmail, currentPeriodEnd, trialEndsAt };
 }
 
+async function saveBillingInvoiceFromStripeEvent(supabase: any, event: StripeEvent, context: SyncedSubscriptionContext) {
+  if (!["invoice.paid", "invoice.payment_failed"].includes(event.type)) return;
+
+  const invoice = event.data?.object ?? {};
+  const providerInvoiceId = normalize(invoice.id);
+  if (!providerInvoiceId) return;
+
+  const stripeCustomerId = getStripeId(invoice.customer) ?? context?.customerId ?? null;
+  const stripeSubscriptionId = getStripeId(invoice.subscription) ?? context?.subscriptionId ?? null;
+  const stripePriceId = invoice.lines?.data?.[0]?.price?.id ?? context?.stripePriceId ?? null;
+  const customerEmail =
+    normalize(invoice.customer_email) ??
+    normalize(invoice.customer_details?.email) ??
+    context?.customerEmail ??
+    null;
+
+  const userId = context?.userId ?? (await ensureUserIdByCustomerOrEmail(supabase, stripeCustomerId, customerEmail));
+  const plan = await getPlanByStripePriceId(supabase, stripePriceId, null);
+  const period = invoice.lines?.data?.[0]?.period ?? {};
+  const status = normalizeLower(invoice.status) ?? (event.type === "invoice.paid" ? "paid" : "payment_failed");
+  const paidAt =
+    toIsoFromStripeSeconds(invoice.status_transitions?.paid_at) ??
+    (event.type === "invoice.paid" ? toIsoFromStripeSeconds(invoice.created) : null);
+
+  const payload = {
+    provider: "stripe",
+    provider_invoice_id: providerInvoiceId,
+    provider_event_id: event.id,
+    user_id: userId,
+    subscription_id: context?.localSubscriptionId ?? null,
+    plan_id: plan?.id ?? null,
+    stripe_customer_id: stripeCustomerId,
+    stripe_subscription_id: stripeSubscriptionId,
+    stripe_price_id: stripePriceId,
+    customer_email: customerEmail,
+    status,
+    currency: normalizeLower(invoice.currency) ?? "brl",
+    amount_due_cents: cents(invoice.amount_due),
+    amount_paid_cents: event.type === "invoice.paid" ? cents(invoice.amount_paid) : 0,
+    amount_remaining_cents: cents(invoice.amount_remaining),
+    invoice_url: normalize(invoice.invoice_pdf),
+    hosted_invoice_url: normalize(invoice.hosted_invoice_url),
+    paid_at: paidAt,
+    period_start: toIsoFromStripeSeconds(period.start),
+    period_end: toIsoFromStripeSeconds(period.end),
+    raw_payload: invoice,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { error } = await supabase
+    .from("billing_invoices")
+    .upsert(payload, { onConflict: "provider,provider_invoice_id" });
+
+  if (error) console.error("[stripe.webhook] Falha ao salvar billing_invoice", error);
+}
+
 async function dispatchStripeWebhookEvent(supabase: any, event: StripeEvent, context: SyncedSubscriptionContext) {
   if (!context) return;
 
@@ -457,6 +517,7 @@ export async function POST(req: Request) {
 
   if (ACCEPTED_EVENTS.has(event.type)) {
     const context = await syncSubscriptionFromStripeEvent(supabase, event);
+    await saveBillingInvoiceFromStripeEvent(supabase, event, context);
     await dispatchStripeWebhookEvent(supabase, event, context);
   }
 
