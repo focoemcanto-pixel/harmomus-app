@@ -3,17 +3,14 @@ import { revalidatePath } from "next/cache";
 
 import { ConfirmSubmitButton } from "@/components/admin/confirm-submit-button";
 import { PageHeader } from "@/components/admin/page-header";
+import { formatDateTimeBR } from "@/lib/format-date-time-br";
 import { deleteKit, getKits } from "@/lib/data/kits";
 import { setFlashToast } from "@/lib/flash";
 
 function formatDate(value?: string | null) {
-  if (!value) return "-";
-  try {
-    return new Date(value).toLocaleDateString("pt-BR");
-  } catch {
-    return "-";
-  }
+  return formatDateTimeBR(value);
 }
+
 
 function statusBadgeClass(published?: boolean | null) {
   return published

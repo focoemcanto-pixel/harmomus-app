@@ -2,6 +2,7 @@ import { revalidatePath } from "next/cache";
 import { BarChart3, ExternalLink, MessageSquareText, Music2, Trash2, Wand2 } from "lucide-react";
 
 import { ConfirmSubmitButton } from "@/components/admin/confirm-submit-button";
+import { formatDateTimeBR } from "@/lib/format-date-time-br";
 import { deletePremiumRequest, getPremiumRequests, getPremiumRequestStats, updatePremiumRequestStatus, type PremiumRequestStatus } from "@/lib/data/premium-analytics";
 
 export const dynamic = "force-dynamic";
@@ -28,12 +29,7 @@ const urgencyLabels: Record<string, string> = {
 };
 
 function formatDate(value?: string | null) {
-  if (!value) return "-";
-  try {
-    return new Date(value).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
-  } catch {
-    return "-";
-  }
+  return formatDateTimeBR(value);
 }
 
 function summarizeRequest(row: any) {

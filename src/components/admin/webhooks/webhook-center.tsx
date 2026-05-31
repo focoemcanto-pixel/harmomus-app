@@ -30,6 +30,7 @@ import {
   getWebhookEventLabel,
   type WebhookEndpoint,
 } from "@/types/webhooks";
+import { formatDateTimeBR } from "@/lib/format-date-time-br";
 
 type FormState = {
   name: string;
@@ -86,8 +87,7 @@ function summarizeUrl(url: string) {
 }
 
 function formatDate(value?: string | null) {
-  if (!value) return "Nunca";
-  return new Date(value).toLocaleString("pt-BR");
+  return value ? formatDateTimeBR(value) : "Nunca";
 }
 
 function normalizePhone(value: string) {

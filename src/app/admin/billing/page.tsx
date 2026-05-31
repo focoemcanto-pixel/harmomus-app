@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 
 import { PageHeader } from "@/components/admin/page-header";
+import { formatDateTimeBR } from "@/lib/format-date-time-br";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { Database } from "@/types/database";
 
@@ -92,8 +93,7 @@ function formatCount(value: number) {
 }
 
 function formatDateTime(value?: string | null) {
-  if (!value) return "—";
-  return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
+  return formatDateTimeBR(value).replace("-", "—");
 }
 
 function normalize(value: unknown) {

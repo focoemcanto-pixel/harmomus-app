@@ -4,11 +4,11 @@ import { ArrowLeft, CheckCircle2, Clock3, Download, Filter, Loader2, RefreshCw, 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { formatDateTimeBR } from "@/lib/format-date-time-br";
 import { getWebhookEventLabel, type WebhookLog } from "@/types/webhooks";
 
 function formatDate(value?: string | null) {
-  if (!value) return "Nunca";
-  return new Date(value).toLocaleString("pt-BR");
+  return value ? formatDateTimeBR(value) : "Nunca";
 }
 
 function isTestLog(log: WebhookLog) {

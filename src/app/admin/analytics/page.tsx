@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { formatDateTimeBR } from "@/lib/format-date-time-br";
 import { PageHeader } from "@/components/admin/page-header";
 import {
   getAdminAnalyticsSummary,
@@ -30,11 +31,8 @@ function BlockList({ title, data }: { title: string; data: { label: string; valu
 
 function formatDay(value?: string) {
   if (!value) return "não informado";
-  try {
-    return new Date(`${value}T00:00:00`).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
-  } catch {
-    return value;
-  }
+  const formatted = formatDateTimeBR(`${value}T00:00:00`);
+  return formatted === "-" ? value : formatted.slice(0, 5);
 }
 
 export default async function AdminAnalyticsPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
@@ -90,12 +88,12 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
 
     <div className="rounded-xl border border-white/10 bg-black/30 p-4 overflow-x-auto">
       <h3 className="mb-3 text-sm font-semibold text-cyan-200">Últimos 50 plays</h3>
-      {recent.length===0?<EmptyState/>:<table className="min-w-[1100px] w-full text-xs"><thead className="text-left text-zinc-400"><tr><th>Quando</th><th>Kit</th><th>Música/Faixa</th><th>Usuário</th><th>Plano</th><th>Dispositivo</th><th>Tom/Voz</th><th>Página/Abrir kit</th></tr></thead><tbody>{recent.map((r, i)=> <tr key={`${r.when}-${i}`} className="border-t border-white/10"><td>{r.when ? new Date(r.when).toLocaleString("pt-BR") : "-"}</td><td>{r.kit}</td><td>{r.track}</td><td>{r.user}</td><td>{r.plan}</td><td>{r.device}</td><td>{r.toneVoice}</td><td>{r.kitSlug ? <Link className="text-cyan-300" href={`/biblioteca/${r.kitSlug}`}>{r.page}</Link> : r.page}</td></tr>)}</tbody></table>}
+      {recent.length===0?<EmptyState/>:<table className="min-w-[1100px] w-full text-xs"><thead className="text-left text-zinc-400"><tr><th>Quando</th><th>Kit</th><th>Música/Faixa</th><th>Usuário</th><th>Plano</th><th>Dispositivo</th><th>Tom/Voz</th><th>Página/Abrir kit</th></tr></thead><tbody>{recent.map((r, i)=> <tr key={`${r.when}-${i}`} className="border-t border-white/10"><td>{r.when ? formatDateTimeBR(r.when) : "-"}</td><td>{r.kit}</td><td>{r.track}</td><td>{r.user}</td><td>{r.plan}</td><td>{r.device}</td><td>{r.toneVoice}</td><td>{r.kitSlug ? <Link className="text-cyan-300" href={`/biblioteca/${r.kitSlug}`}>{r.page}</Link> : r.page}</td></tr>)}</tbody></table>}
     </div>
 
     <div className="rounded-xl border border-rose-400/20 bg-rose-950/20 p-4 overflow-x-auto">
       <h3 className="mb-3 text-sm font-semibold text-rose-200">Últimos bloqueios / oportunidades de conversão</h3>
-      {recentDenied.length===0?<EmptyState/>:<table className="min-w-[1100px] w-full text-xs"><thead className="text-left text-zinc-400"><tr><th>Quando</th><th>Kit</th><th>Música/Faixa</th><th>Usuário</th><th>Plano</th><th>Dispositivo</th><th>Motivo</th><th>Página/Abrir kit</th></tr></thead><tbody>{recentDenied.map((r, i)=> <tr key={`${r.when}-${i}`} className="border-t border-white/10"><td>{r.when ? new Date(r.when).toLocaleString("pt-BR") : "-"}</td><td>{r.kit}</td><td>{r.track}</td><td>{r.user}</td><td>{r.plan}</td><td>{r.device}</td><td>{r.reason}</td><td>{r.kitSlug ? <Link className="text-cyan-300" href={`/biblioteca/${r.kitSlug}`}>{r.page}</Link> : r.page}</td></tr>)}</tbody></table>}
+      {recentDenied.length===0?<EmptyState/>:<table className="min-w-[1100px] w-full text-xs"><thead className="text-left text-zinc-400"><tr><th>Quando</th><th>Kit</th><th>Música/Faixa</th><th>Usuário</th><th>Plano</th><th>Dispositivo</th><th>Motivo</th><th>Página/Abrir kit</th></tr></thead><tbody>{recentDenied.map((r, i)=> <tr key={`${r.when}-${i}`} className="border-t border-white/10"><td>{r.when ? formatDateTimeBR(r.when) : "-"}</td><td>{r.kit}</td><td>{r.track}</td><td>{r.user}</td><td>{r.plan}</td><td>{r.device}</td><td>{r.reason}</td><td>{r.kitSlug ? <Link className="text-cyan-300" href={`/biblioteca/${r.kitSlug}`}>{r.page}</Link> : r.page}</td></tr>)}</tbody></table>}
     </div>
   </section>;
 }
