@@ -38,7 +38,6 @@ async function dispatchCheckoutStarted(input: {
   planSlug: string;
   planId: string;
   customerId: string;
-  sessionId?: string | null;
   sessionUrl?: string | null;
   trialDays: number;
   source?: string | null;
@@ -57,7 +56,6 @@ async function dispatchCheckoutStarted(input: {
           plan: input.planSlug,
           plan_id: input.planId,
           stripe_customer_id: input.customerId,
-          checkout_session_id: input.sessionId ?? null,
           checkout_url: input.sessionUrl ?? null,
           trial_days: input.trialDays,
           source: input.source ?? null,
@@ -208,7 +206,6 @@ async function createStripeCheckoutWithSupabase(
     planSlug: plan.slug,
     planId: plan.id,
     customerId,
-    sessionId: session?.id ?? null,
     sessionUrl: session?.url ?? null,
     trialDays,
     source: metadata?.source ?? null,
