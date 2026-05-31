@@ -7,6 +7,17 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 const WHATSAPP_PROVIDERS = new Set(["labmessage", "evolution", "zapi", "meta", "custom"]);
 const EMAIL_PROVIDERS = new Set(["smtp", "resend", "sendgrid", "ses"]);
 
+type MarketingChannelRecord = {
+  name: string;
+  type: "whatsapp" | "email";
+  provider: string;
+  active: boolean;
+  config: Record<string, string>;
+  limits: Record<string, number>;
+  created_by: string | null;
+  updated_at: string;
+};
+
 function sanitizeNumber(value: unknown, fallback: number) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
@@ -70,8 +81,9 @@ export async function POST(request: Request) {
 
   const createdBy = getCreatedBy(current.profile?.id);
   const admin = createSupabaseAdminClient();
+  const now = new Date().toISOString();
 
-  const records = [
+  const records: MarketingChannelRecord[] = [
     {
       name: "WhatsApp principal",
       type: "whatsapp",
@@ -85,7 +97,7 @@ export async function POST(request: Request) {
       },
       limits: safeLimits,
       created_by: createdBy,
-      updated_at: new Date().toISOString(),
+      updated_at: now,
     },
     {
       name: "E-mail principal",
@@ -103,7 +115,7 @@ export async function POST(request: Request) {
       },
       limits: safeLimits,
       created_by: createdBy,
-      updated_at: new Date().toISOString(),
+      updated_at: now,
     },
   ];
 
@@ -122,9 +134,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: existingError.message }, { status: 500 });
     }
 
+    const payload = record as any;
     const query = existing?.id
-      ? admin.from("marketing_channels").update(record).eq("id", existing.id).select("id,name,type,provider,active,config,limits").single()
-      : admin.from("marketing_channels").insert(record).select("id,name,type,provider,active,config,limits").single();
+      ? admin.from("marketing_channels").update(payload).eq("id", existing.id).select("id,name,type,provider,active,config,limits").single()
+      : admin.from("marketing_channels").insert(payload).select("id,name,type,provider,active,config,limits").single();
 
     const { data, error } = await query;
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
