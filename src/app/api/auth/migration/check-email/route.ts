@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
+function isSupportedLegacyPlan(value: unknown) {
+  const slug = String(value ?? "").trim().toLowerCase();
+  return ["free", "plus", "premium", "ministry_10", "ministry_20", "ministry_40"].includes(slug);
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
@@ -24,7 +29,7 @@ export async function POST(request: Request) {
 
     const shouldMigrate =
       !!legacyMember &&
-      String(legacyMember.legacy_plan_slug ?? "").toLowerCase() === "free" &&
+      isSupportedLegacyPlan(legacyMember.legacy_plan_slug) &&
       String(legacyMember.legacy_status ?? "").toLowerCase() === "active" &&
       (!legacyMember.migrated || !legacyMember.password_created);
 
