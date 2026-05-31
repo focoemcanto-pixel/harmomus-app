@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CalendarClock, Check, ImagePlus, Mail, MessageCircle, Rocket, Send, ShieldCheck, Sparkles, Users } from "lucide-react";
+import { CalendarClock, Check, ImagePlus, Loader2, Mail, MessageCircle, Rocket, Send, ShieldCheck, Sparkles, Users } from "lucide-react";
 
 type Channel = "whatsapp" | "email";
 type Plan = "free" | "plus" | "premium" | "ministry";
@@ -50,6 +50,7 @@ export function CampaignBuilder() {
   const [scheduledAt, setScheduledAt] = useState("");
   const [mediaPreview, setMediaPreview] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
 
   const audienceSize = useMemo(
     () => plans.reduce((sum, plan) => sum + audienceBase[plan], 0),
@@ -97,14 +98,37 @@ export function CampaignBuilder() {
     setStatus(`Teste preparado para ${channels.includes("whatsapp") ? testPhone : ""}${channels.length === 2 ? " e " : ""}${channels.includes("email") ? testEmail : ""}. A integração real será conectada ao canal configurado.`);
   }
 
-  function saveDraft() {
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(
-        "harmomus:marketing-campaign-draft",
-        JSON.stringify({ name, channels, plans, title, message, link, minDelay, maxDelay, dailyLimit, hourlyLimit, pauseEvery, pauseMinutes, scheduleMode, scheduledAt }),
-      );
+  async function saveDraft() {
+    if (!name.trim()) return setStatus("Informe o nome da campanha.");
+    if (!channels.length) return setStatus("Selecione pelo menos um canal.");
+    if (!message.trim()) return setStatus("Informe a mensagem da campanha.");
+
+    setIsSavingDraft(true);
+    setStatus(null);
+    try {
+      const response = await fetch("/api/admin/comunicacao/campaigns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          channels,
+          audience_filters: { plans, estimatedAudience: audienceSize },
+          title,
+          message,
+          link_url: link,
+          schedule_mode: scheduleMode,
+          scheduled_at: scheduledAt,
+          rate_limits: { minDelay, maxDelay, dailyLimit, hourlyLimit, pauseEvery, pauseMinutes },
+        }),
+      });
+      const json = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(json?.error ?? "Falha ao salvar rascunho.");
+      setStatus(`Rascunho salvo no Supabase: ${json?.data?.name ?? name}.`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Falha ao salvar rascunho.");
+    } finally {
+      setIsSavingDraft(false);
     }
-    setStatus("Rascunho salvo localmente. Próxima etapa: persistir no banco e conectar a fila de disparos.");
   }
 
   return (
@@ -227,7 +251,7 @@ export function CampaignBuilder() {
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
             <button onClick={sendTest} className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-500">Enviar teste</button>
-            <button onClick={saveDraft} className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10">Salvar rascunho</button>
+            <button onClick={saveDraft} disabled={isSavingDraft} className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60">{isSavingDraft ? <Loader2 size={15} className="animate-spin" /> : null}{isSavingDraft ? "Salvando..." : "Salvar rascunho"}</button>
           </div>
 
           <div className="mt-5 rounded-2xl border border-white/10 bg-slate-900/70 p-4">

@@ -58,6 +58,8 @@ export function CommunicationSettings() {
   const [status, setStatus] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [testingWhatsApp, setTestingWhatsApp] = useState(false);
+  const [testingEmail, setTestingEmail] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -135,16 +137,51 @@ export function CommunicationSettings() {
     }
   }
 
-  function testWhatsApp() {
+  async function testWhatsApp() {
     const digits = testPhone.replace(/\D/g, "");
     if (digits.length < 12) return setStatus("Informe um WhatsApp de teste com DDI + DDD + número.");
-    if (!apiUrl.trim()) return setStatus("Informe a URL/API do provedor WhatsApp antes do teste real.");
-    setStatus(`Teste WhatsApp preparado para ${digits}. Próxima etapa: conectar /api/admin/comunicacao/test-whatsapp ao provedor ${whatsProviders.find((p) => p.value === whatsProvider)?.label}.`);
+
+    setTestingWhatsApp(true);
+    setStatus(null);
+    try {
+      const response = await fetch("/api/admin/comunicacao/test-whatsapp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: digits, message: "Teste real do WhatsApp pela Central de Comunicação Harmomus." }),
+      });
+      const json = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(json?.error ?? "Falha ao testar WhatsApp.");
+      setStatus(`WhatsApp enviado com sucesso para ${digits}. Status do provedor: ${json?.data?.status ?? "ok"}.`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Falha ao testar WhatsApp.");
+    } finally {
+      setTestingWhatsApp(false);
+    }
   }
 
-  function testEmailConnection() {
+  async function testEmailConnection() {
     if (!testEmail.includes("@")) return setStatus("Informe um e-mail de teste válido.");
-    setStatus(`Teste de e-mail preparado para ${testEmail}. Próxima etapa: conectar /api/admin/comunicacao/test-email ao provedor ${emailProviders.find((p) => p.value === emailProvider)?.label}.`);
+
+    setTestingEmail(true);
+    setStatus(null);
+    try {
+      const response = await fetch("/api/admin/comunicacao/test-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: testEmail,
+          subject: "Teste real de e-mail Harmomus",
+          message: "Teste real de e-mail pela Central de Comunicação Harmomus.",
+        }),
+      });
+      const json = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(json?.error ?? "Falha ao testar e-mail.");
+      setStatus(`E-mail enviado com sucesso para ${testEmail}. Status do provedor: ${json?.data?.status ?? "ok"}.`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Falha ao testar e-mail.");
+    } finally {
+      setTestingEmail(false);
+    }
   }
 
   return (
@@ -215,8 +252,8 @@ export function CommunicationSettings() {
             <div><h3 className="text-lg font-semibold text-white">Testes rápidos</h3><p className="text-sm text-slate-400">Valide antes de publicar campanhas.</p></div>
           </div>
           <div className="mt-5 grid gap-2">
-            <button onClick={testWhatsApp} disabled={isLoading} className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"><Send size={15} /> Testar WhatsApp</button>
-            <button onClick={testEmailConnection} disabled={isLoading} className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60"><Mail size={15} /> Testar e-mail</button>
+            <button onClick={testWhatsApp} disabled={isLoading || testingWhatsApp} className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60">{testingWhatsApp ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />} {testingWhatsApp ? "Testando..." : "Testar WhatsApp"}</button>
+            <button onClick={testEmailConnection} disabled={isLoading || testingEmail} className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60">{testingEmail ? <Loader2 size={15} className="animate-spin" /> : <Mail size={15} />} {testingEmail ? "Testando..." : "Testar e-mail"}</button>
             <button onClick={saveSettings} disabled={isLoading || isSaving} className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60">{isSaving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} {isSaving ? "Salvando..." : "Salvar configurações"}</button>
           </div>
           {status ? <p className="mt-4 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-sm text-cyan-100">{status}</p> : null}
@@ -224,7 +261,7 @@ export function CommunicationSettings() {
 
         <section className="rounded-3xl border border-emerald-400/20 bg-emerald-500/10 p-5 text-sm text-emerald-100">
           <div className="mb-2 flex items-center gap-2 font-semibold text-white"><CheckCircle2 size={17} /> Configuração persistente</div>
-          <p className="leading-6 text-emerald-100/90">As configurações agora são carregadas e salvas em marketing_channels. Próxima etapa: conectar os testes às rotas reais de envio.</p>
+          <p className="leading-6 text-emerald-100/90">As configurações agora são carregadas e salvas em marketing_channels. Os testes rápidos usam as rotas reais e registram resultado em marketing_logs.</p>
         </section>
       </aside>
     </div>
