@@ -8,6 +8,7 @@ export const WEBHOOK_EVENT_CATEGORIES = {
     "subscription.payment_failed",
   ],
   "ASSINATURAS POR PLANO": [
+    "subscription.free.created",
     "subscription.plus.created",
     "subscription.premium.created",
     "subscription.ministry_10.created",
@@ -46,6 +47,7 @@ export const WEBHOOK_EVENT_LABELS: Record<string, string> = {
   "subscription.upgraded": "Upgrade de assinatura",
   "subscription.downgraded": "Downgrade de assinatura",
   "subscription.payment_failed": "Falha de pagamento da assinatura",
+  "subscription.free.created": "Free cadastrado",
   "subscription.plus.created": "Plus iniciado",
   "subscription.premium.created": "Premium iniciado",
   "subscription.ministry_10.created": "Ministerial 10 iniciado",
