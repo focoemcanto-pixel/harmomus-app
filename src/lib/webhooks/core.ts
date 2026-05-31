@@ -15,8 +15,6 @@ export function signWebhookPayload(payload: string, secret: string, timestamp: n
 export function normalizeTestPhone(value: string) {
   let digits = value.replace(/[\s()\-*]/g, "").replace(/\D/g, "");
 
-  // Trata entradas comuns no Brasil:
-  // 71999999999, 071999999999, 5571999999999 e 55071999999999.
   while (digits.startsWith("00")) digits = digits.slice(2);
   if (digits.startsWith("550")) digits = `55${digits.slice(3)}`;
   if (digits.startsWith("0") && (digits.length === 11 || digits.length === 12)) digits = digits.slice(1);
@@ -39,6 +37,16 @@ export function formatBrazilPhone(value: string) {
   return `+55 (${ddd}) ${first}-${last}`;
 }
 
+function mapToKiwifyEvent(event: WebhookEvent) {
+  if (event.includes("abandoned")) return "cart_abandoned";
+  if (event.includes("canceled") || event.includes("cancelled")) return "subscription_canceled";
+  if (event.includes("failed")) return "payment_refused";
+  if (event.includes("refunded")) return "refund";
+  if (event.includes("chargeback")) return "chargeback";
+  if (event.includes("checkout") || event.includes("payment") || event.includes("subscription") || event.includes("plan")) return "order_approved";
+  return "order_approved";
+}
+
 export function buildFakePayload(event: WebhookEvent, testPhone: string) {
   const phoneDigits = normalizeTestPhone(testPhone);
   const phoneDisplay = formatBrazilPhone(phoneDigits);
@@ -47,15 +55,80 @@ export function buildFakePayload(event: WebhookEvent, testPhone: string) {
   const customerName = "Cliente Teste";
   const customerEmail = "cliente.teste@harmomus.com";
   const testMessage = `Teste Harmomus recebido: ${eventLabel}.`;
+  const now = new Date().toISOString();
+  const orderId = `hm_test_${crypto.randomUUID()}`;
+  const kiwifyEvent = mapToKiwifyEvent(event);
 
   return {
-    event,
-    event_label: eventLabel,
+    // Formato principal inspirado em webhooks de checkout como Kiwify.
+    event: kiwifyEvent,
+    webhook_event_type: kiwifyEvent,
+    event_type: kiwifyEvent,
+    status: kiwifyEvent === "order_approved" ? "approved" : kiwifyEvent,
+    order_status: kiwifyEvent === "order_approved" ? "approved" : kiwifyEvent,
+    approved: kiwifyEvent === "order_approved",
     test: true,
+    source: "harmomus",
     delivery_id: `evt_test_${crypto.randomUUID()}`,
-    created_at: new Date().toISOString(),
+    created_at: now,
+
+    // Evento interno do Harmomus para segmentação avançada.
+    harmomus_event: event,
+    harmomus_event_label: eventLabel,
+    event_label: eventLabel,
+
+    order_id: orderId,
+    transaction_id: orderId,
+    subscription_id: `sub_test_${crypto.randomUUID()}`,
+    payment_method: "credit_card",
+    currency: "BRL",
+    total_price: 39.9,
+    amount: 3990,
+    product: {
+      id: "harmomus-premium-test",
+      name: "Harmomus Premium",
+      type: "subscription",
+    },
+    product_name: "Harmomus Premium",
+    plan: "Premium",
+    plan_name: "Premium",
+
+    Customer: {
+      full_name: customerName,
+      first_name: "Cliente",
+      email: customerEmail,
+      mobile: phoneDigits,
+      phone_number: phoneDigits,
+      phone: phoneDigits,
+      whatsapp: phoneDigits,
+    },
+    customer: {
+      name: customerName,
+      full_name: customerName,
+      first_name: "Cliente",
+      email: customerEmail,
+      phone: phoneDigits,
+      phone_number: phoneDigits,
+      mobile: phoneDigits,
+      whatsapp: phoneDigits,
+      telefone: phoneDisplay,
+      Telefone: phoneDisplay,
+    },
+    buyer: {
+      name: customerName,
+      full_name: customerName,
+      email: customerEmail,
+      phone: phoneDigits,
+      phone_number: phoneDigits,
+      mobile: phoneDigits,
+      whatsapp: phoneDigits,
+    },
 
     // Campos diretos — usados por automações tipo LabMessage/Make/Zapier.
+    name: customerName,
+    full_name: customerName,
+    first_name: "Cliente",
+    email: customerEmail,
     phone: phoneDigits,
     number: phoneDigits,
     to: phoneDigits,
@@ -77,7 +150,6 @@ export function buildFakePayload(event: WebhookEvent, testPhone: string) {
     Nome: customerName,
     nome: customerName,
     Email: customerEmail,
-    email: customerEmail,
     Telefone: phoneDisplay,
     telefone: phoneDisplay,
     Celular: phoneDisplay,
@@ -100,27 +172,20 @@ export function buildFakePayload(event: WebhookEvent, testPhone: string) {
     },
     variables: {
       nome: customerName,
+      name: customerName,
       email: customerEmail,
       telefone: phoneDigits,
+      phone: phoneDigits,
       whatsapp: phoneDigits,
       mensagem: testMessage,
-      evento: event,
+      evento: kiwifyEvent,
+      evento_harmomus: event,
       evento_nome: eventLabel,
+      produto: "Harmomus Premium",
+      plano: "Premium",
     },
 
     recipient: {
-      name: customerName,
-      email: customerEmail,
-      phone: phoneDigits,
-      number: phoneDigits,
-      whatsapp: phoneDigits,
-      mobile: phoneDigits,
-      phone_number: phoneDigits,
-      whatsapp_number: phoneDigits,
-      telefone: phoneDisplay,
-      Telefone: phoneDisplay,
-    },
-    customer: {
       name: customerName,
       email: customerEmail,
       phone: phoneDigits,
@@ -154,13 +219,20 @@ export function buildFakePayload(event: WebhookEvent, testPhone: string) {
       celular_numero: phoneDigits,
     },
     data: {
-      id: `test_order_${crypto.randomUUID()}`,
+      id: orderId,
+      order_id: orderId,
+      transaction_id: orderId,
+      event: kiwifyEvent,
+      harmomus_event: event,
+      product_name: "Harmomus Premium",
       plan: "Premium",
       amount: 3990,
+      total_price: 39.9,
       currency: "BRL",
-      status: event.includes("failed") ? "failed" : "approved",
+      status: kiwifyEvent === "order_approved" ? "approved" : kiwifyEvent,
       customer: {
         name: customerName,
+        full_name: customerName,
         email: customerEmail,
         phone: phoneDigits,
         number: phoneDigits,
