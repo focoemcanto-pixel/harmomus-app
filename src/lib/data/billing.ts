@@ -1,5 +1,6 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createCheckoutSession, createCustomerPortalSession, getOrCreateCustomer, updateSubscription } from "@/lib/stripe/client";
+import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
 
 function resolveAppUrl(fallbackOrigin?: string | null) {
   const envBase = process.env.NEXT_PUBLIC_APP_URL?.trim();
@@ -22,6 +23,49 @@ function resolvePlanPriceId(planSlug: string, dbPriceId?: string | null) {
   if (planSlug === "ministry_20") return process.env.STRIPE_MINISTRY_20_PRICE_ID?.trim() || null;
   if (planSlug === "ministry_40") return process.env.STRIPE_MINISTRY_40_PRICE_ID?.trim() || null;
   return null;
+}
+
+function getCheckoutStartedEvents(planSlug: string) {
+  const events = ["checkout.started"];
+  if (planSlug === "plus") events.push("checkout.plus.started");
+  if (planSlug === "premium") events.push("checkout.premium.started");
+  return events;
+}
+
+async function dispatchCheckoutStarted(input: {
+  userId: string;
+  email: string;
+  planSlug: string;
+  planId: string;
+  customerId: string;
+  sessionId?: string | null;
+  sessionUrl?: string | null;
+  trialDays: number;
+  source?: string | null;
+}) {
+  const events = getCheckoutStartedEvents(input.planSlug);
+  await Promise.allSettled(
+    events.map((event) =>
+      dispatchWebhookEvent({
+        event: event as any,
+        source: "stripe.checkout",
+        recipient: {
+          email: input.email,
+        },
+        data: {
+          user_id: input.userId,
+          plan: input.planSlug,
+          plan_id: input.planId,
+          stripe_customer_id: input.customerId,
+          checkout_session_id: input.sessionId ?? null,
+          checkout_url: input.sessionUrl ?? null,
+          trial_days: input.trialDays,
+          source: input.source ?? null,
+          started_at: new Date().toISOString(),
+        },
+      }),
+    ),
+  );
 }
 
 async function getPlanBySlug(admin: any, planSlug: string) {
@@ -143,7 +187,7 @@ async function createStripeCheckoutWithSupabase(
   const base = resolveAppUrl(fallbackOrigin);
   const trialDays = trialAlreadyUsed ? 0 : Number(plan.trial_days ?? 0);
 
-  return createCheckoutSession({
+  const session = await createCheckoutSession({
     customerId,
     priceId: plan.stripePriceId,
     successUrl: `${base}/checkout/sucesso?session_id={CHECKOUT_SESSION_ID}`,
@@ -157,6 +201,20 @@ async function createStripeCheckoutWithSupabase(
       ...metadata,
     },
   });
+
+  void dispatchCheckoutStarted({
+    userId,
+    email,
+    planSlug: plan.slug,
+    planId: plan.id,
+    customerId,
+    sessionId: session?.id ?? null,
+    sessionUrl: session?.url ?? null,
+    trialDays,
+    source: metadata?.source ?? null,
+  }).catch((error) => console.error("[billing] Falha ao disparar webhook checkout.started", error));
+
+  return session;
 }
 
 export async function startStripeCheckout(userId: string, email: string, planId: string, fallbackOrigin?: string | null) {
