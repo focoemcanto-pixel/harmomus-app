@@ -199,8 +199,32 @@ function mapStripeEventToWebhookEvent(eventType: string, status: string) {
   return null;
 }
 
-function shouldDispatchPremiumActivated(eventType: string, context: NonNullable<SyncedSubscriptionContext>) {
-  if (context.planSlug !== "premium") return false;
+function normalizePlanFamily(slug?: string | null) {
+  if (!slug) return null;
+  if (slug.startsWith("ministry")) return "ministry";
+  if (slug === "premium") return "premium";
+  if (slug === "plus") return "plus";
+  if (slug === "free") return "free";
+  return null;
+}
+
+function getPlanActivatedEvent(planSlug?: string | null) {
+  const family = normalizePlanFamily(planSlug);
+  if (family === "plus") return "plan.plus_activated";
+  if (family === "premium") return "plan.premium_activated";
+  if (family === "ministry") return "plan.ministry_activated";
+  if (family === "free") return "plan.free_activated";
+  return null;
+}
+
+function getCheckoutCompletedEvent(planSlug?: string | null) {
+  const family = normalizePlanFamily(planSlug);
+  if (family === "plus") return "checkout.plus.completed";
+  if (family === "premium") return "checkout.premium.completed";
+  return null;
+}
+
+function shouldDispatchPlanActivated(eventType: string, context: NonNullable<SyncedSubscriptionContext>) {
   if (!["active", "trialing"].includes(context.status)) return false;
   return eventType === "checkout.session.completed" || eventType === "customer.subscription.created";
 }
@@ -343,51 +367,41 @@ async function dispatchStripeWebhookEvent(supabase: any, event: StripeEvent, con
   if (!webhookEvent) return;
 
   const profile = await getProfileForWebhook(supabase, context.userId);
+  const recipient = {
+    name: profile?.full_name ?? null,
+    email: profile?.email ?? context.customerEmail,
+    phone: profile?.phone ?? null,
+  };
+  const data = {
+    stripe_event_id: event.id,
+    stripe_event_type: event.type,
+    user_id: context.userId,
+    plan: context.planSlug,
+    status: context.status,
+    stripe_customer_id: context.customerId,
+    stripe_subscription_id: context.subscriptionId,
+    stripe_price_id: context.stripePriceId,
+    current_period_end: context.currentPeriodEnd,
+    trial_ends_at: context.trialEndsAt,
+  };
 
-  await dispatchWebhookEvent({
-    event: webhookEvent as any,
-    source: "stripe",
-    recipient: {
-      name: profile?.full_name ?? null,
-      email: profile?.email ?? context.customerEmail,
-      phone: profile?.phone ?? null,
-    },
-    data: {
-      stripe_event_id: event.id,
-      stripe_event_type: event.type,
-      user_id: context.userId,
-      plan: context.planSlug,
-      status: context.status,
-      stripe_customer_id: context.customerId,
-      stripe_subscription_id: context.subscriptionId,
-      stripe_price_id: context.stripePriceId,
-      current_period_end: context.currentPeriodEnd,
-      trial_ends_at: context.trialEndsAt,
-    },
-  });
+  const extraEvents = [
+    event.type === "checkout.session.completed" ? getCheckoutCompletedEvent(context.planSlug) : null,
+    shouldDispatchPlanActivated(event.type, context) ? getPlanActivatedEvent(context.planSlug) : null,
+  ].filter(Boolean) as string[];
 
-  if (shouldDispatchPremiumActivated(event.type, context)) {
-    try {
-      await dispatchWebhookEvent({
-        event: "plan.premium_activated",
-        source: "stripe.subscription",
-        recipient: {
-          name: profile?.full_name ?? null,
-          email: profile?.email ?? context.customerEmail,
-          phone: profile?.phone ?? null,
-        },
-        data: {
-          user_id: context.userId,
-          plan: context.planSlug,
-          status: context.status,
-          activated_at: new Date().toISOString(),
-          stripe_event_type: event.type,
-        },
-      });
-    } catch (webhookError) {
-      console.error("[stripe.webhook] Falha ao disparar plan.premium_activated", webhookError);
-    }
-  }
+  const events = Array.from(new Set([webhookEvent, ...extraEvents]));
+
+  await Promise.allSettled(
+    events.map((eventName) =>
+      dispatchWebhookEvent({
+        event: eventName as any,
+        source: "stripe",
+        recipient,
+        data,
+      }),
+    ),
+  );
 }
 
 async function getExistingBillingEvent(supabase: any, eventId: string) {
