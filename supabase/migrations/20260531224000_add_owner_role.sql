@@ -10,4 +10,4 @@ alter table public.profiles
 
 update public.profiles
 set role = 'owner', updated_at = now()
-where lower(email) = 'markuezemarquinhos@hotmail.com';
+where lower(email) = 'amrkuezemarquinhos@hotmail.com';
