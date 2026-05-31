@@ -19,16 +19,20 @@ function HarmomusLogo({ logoUrl, appName }: { logoUrl?: string; appName: string 
   );
 }
 
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string; redirect?: string; confirmed?: string; message?: string }> }) {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string; redirect?: string; confirmed?: string; migration?: string; reset?: string; message?: string }> }) {
   const params = await searchParams;
   const settings = await getAdminSettings();
   const redirectTo = normalizeRedirect(String(params.redirect ?? ""));
   const error = params.error ? decodeURIComponent(String(params.error)) : "";
-  const successMessage = params.confirmed === "1"
-    ? "E-mail validado com sucesso. Faça seu primeiro login para acessar o Harmomus."
-    : params.message
-      ? decodeURIComponent(String(params.message))
-      : "";
+  const successMessage = params.migration === "success"
+    ? "Seu e-mail foi confirmado e sua senha foi criada com sucesso. Faça login para acessar sua conta."
+    : params.confirmed === "1"
+      ? "E-mail validado com sucesso. Faça seu primeiro login para acessar o Harmomus."
+      : params.reset === "success"
+        ? "Senha redefinida com sucesso. Faça login para acessar sua conta."
+        : params.message
+          ? decodeURIComponent(String(params.message))
+          : "";
 
   const appName = settings.branding.appName || "Harmomus";
   const logoUrl = settings.branding.logoUrl || "";
