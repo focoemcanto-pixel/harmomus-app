@@ -36,6 +36,11 @@ function normalizeRole(role: unknown) {
     .toLowerCase();
 }
 
+function isPlatformAdminRole(role: unknown) {
+  const normalized = normalizeRole(role);
+  return normalized === "owner" || normalized === "admin";
+}
+
 async function findProfileForUser(
   supabase: Awaited<ReturnType<typeof createClient>>,
   user: { id: string; email?: string | null },
@@ -275,7 +280,7 @@ export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessCo
     hierarchyLevel:
       effectiveSlug === "premium" ? 3 : effectiveSlug === "plus" ? 2 : 1,
     isGuest: false,
-    isAdmin: normalizeRole(profile?.role) === "admin",
+    isAdmin: isPlatformAdminRole(profile?.role),
     ministry: ministryContext,
   };
 }
