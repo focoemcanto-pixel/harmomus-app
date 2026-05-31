@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type React from "react";
 import { formatDateTimeBR } from "@/lib/format-date-time-br";
 import { PageHeader } from "@/components/admin/page-header";
 import {
@@ -24,6 +25,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type ListItem = { label: string; value: number };
+type FunnelStep = { label: string; value: number; caption: string };
 
 function EmptyState({ label = "Ainda não há dados suficientes." }: { label?: string }) {
   return <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 text-sm text-zinc-400">{label}</div>;
@@ -38,6 +40,11 @@ function formatDay(value?: string) {
 function formatNumber(value: number | string) {
   if (typeof value === "string") return value;
   return new Intl.NumberFormat("pt-BR").format(value);
+}
+
+function percent(value: number, base: number) {
+  if (!base) return 0;
+  return Math.round((value / base) * 100);
 }
 
 function MetricCard({ title, value, caption, tone = "default" }: { title: string; value: number | string; caption: string; tone?: "default" | "good" | "warn" | "danger" }) {
@@ -117,6 +124,44 @@ function TrendChart({ data }: { data: { date: string; plays: number }[] }) {
   );
 }
 
+function FunnelCard({ steps }: { steps: FunnelStep[] }) {
+  const base = Math.max(steps[0]?.value ?? 0, 1);
+  return (
+    <div className="rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.12),transparent_35%),rgba(9,9,11,0.72)] p-5 shadow-2xl shadow-black/20 xl:col-span-3">
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200/70">Crescimento</p>
+          <h3 className="mt-1 text-lg font-semibold text-white">Funil Harmomus</h3>
+          <p className="mt-1 text-sm text-zinc-500">Leitura executiva com as métricas disponíveis hoje. Conversões financeiras reais entram quando adicionarmos eventos de checkout/assinatura ao analytics.</p>
+        </div>
+      </div>
+      <div className="grid gap-3 lg:grid-cols-5">
+        {steps.map((step, index) => {
+          const width = Math.max(percent(step.value, base), step.value > 0 ? 8 : 2);
+          const prev = index > 0 ? steps[index - 1]?.value ?? 0 : step.value;
+          const localRate = index === 0 ? 100 : percent(step.value, prev);
+          return (
+            <div key={step.label} className="rounded-3xl border border-white/10 bg-black/25 p-4">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-xs text-zinc-500">Etapa {index + 1}</p>
+                  <h4 className="mt-1 text-sm font-semibold text-white">{step.label}</h4>
+                </div>
+                <span className="rounded-full border border-cyan-400/20 bg-cyan-500/10 px-2 py-1 text-[10px] text-cyan-100">{localRate}%</span>
+              </div>
+              <p className="mt-4 text-3xl font-semibold text-white">{formatNumber(step.value)}</p>
+              <p className="mt-1 min-h-8 text-xs text-zinc-500">{step.caption}</p>
+              <div className="mt-4 h-2 rounded-full bg-white/10">
+                <div className="h-2 rounded-full bg-gradient-to-r from-emerald-400 via-cyan-400 to-violet-400" style={{ width: `${width}%` }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function InsightCard({ label, value, tone = "cyan" }: { label: string; value: string; tone?: "cyan" | "emerald" | "violet" | "rose" }) {
   const tones = {
     cyan: "border-cyan-300/20 bg-cyan-500/5 text-cyan-100",
@@ -149,6 +194,13 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
   const topKit = topKits[0]?.label ?? "não informado";
   const topUser = topUsers[0]?.label ?? "não informado";
   const conversionOpportunity = summary.gateViews ? `${summary.gateViews} visualizações de bloqueio premium por ${summary.uniqueGateUsers} usuário(s)` : "sem bloqueios premium no período";
+  const funnelSteps: FunnelStep[] = [
+    { label: "Usuários únicos", value: summary.uniqueUsers, caption: "Pessoas que consumiram áudio." },
+    { label: "Sessões", value: summary.uniqueSessions, caption: "Sessões únicas de reprodução." },
+    { label: "Plays", value: summary.plays, caption: "Reproduções autorizadas." },
+    { label: "Bloqueios Premium", value: summary.gateViews || summary.denied, caption: "Desejo travado por plano/acesso." },
+    { label: "Pedidos Premium", value: premiumRequests.open, caption: "Solicitações abertas para conversão." },
+  ];
 
   return <section className="space-y-6 text-zinc-100">
     <PageHeader title="Analytics" description="Inteligência de consumo, retenção e oportunidades comerciais da plataforma Harmomus." />
@@ -170,6 +222,8 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
       <MetricCard title="Assinantes ativos" value={summary.activeSubscribers} caption={`${summary.plusActive} Plus · ${summary.premiumActive} Premium/Minist.`} />
       <MetricCard title="Premium requests" value={premiumRequests.open} caption={`${premiumRequests.total} solicitações totais`} tone={premiumRequests.open > 0 ? "warn" : "default"} />
     </div>
+
+    <FunnelCard steps={funnelSteps} />
 
     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
       <InsightCard label="Kit em alta" value={topKit} tone="emerald" />
