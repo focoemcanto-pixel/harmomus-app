@@ -13,10 +13,17 @@ export function signWebhookPayload(payload: string, secret: string, timestamp: n
 }
 
 export function normalizeTestPhone(value: string) {
-  const digits = value.replace(/[\s()\-*]/g, "").replace(/\D/g, "");
+  let digits = value.replace(/[\s()\-*]/g, "").replace(/\D/g, "");
 
-  // Permite que o admin digite 71999999999 ou 5571999999999.
-  // Para o LabMessage, o teste sempre sai padronizado com DDI 55.
+  // Trata entradas comuns no Brasil:
+  // 71999999999, 071999999999, 5571999999999 e 55071999999999.
+  while (digits.startsWith("00")) digits = digits.slice(2);
+  if (digits.startsWith("550")) digits = `55${digits.slice(3)}`;
+  if (digits.startsWith("0") && (digits.length === 11 || digits.length === 12)) digits = digits.slice(1);
+
+  const alreadyHasBrazilCode = digits.startsWith("55") && (digits.length === 12 || digits.length === 13);
+  if (alreadyHasBrazilCode) return digits;
+
   if (digits.length === 10 || digits.length === 11) return `55${digits}`;
   return digits;
 }
@@ -82,6 +89,24 @@ export function buildFakePayload(event: WebhookEvent, testPhone: string) {
     body: testMessage,
     Mensagem: testMessage,
     mensagem: testMessage,
+
+    labmessage: {
+      phone: phoneDigits,
+      number: phoneDigits,
+      to: phoneDigits,
+      message: testMessage,
+      name: customerName,
+      email: customerEmail,
+    },
+    variables: {
+      nome: customerName,
+      email: customerEmail,
+      telefone: phoneDigits,
+      whatsapp: phoneDigits,
+      mensagem: testMessage,
+      evento: event,
+      evento_nome: eventLabel,
+    },
 
     recipient: {
       name: customerName,
