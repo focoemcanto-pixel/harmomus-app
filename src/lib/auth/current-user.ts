@@ -83,6 +83,18 @@ function hasBillingLink(subscription: Subscription | null | undefined) {
   );
 }
 
+function isLegacyPmsSubscription(subscription: Subscription | null | undefined) {
+  if (!subscription) return false;
+  const gateway = String((subscription as any).gateway ?? "").trim().toLowerCase();
+  const originalGateway = String((subscription as any).original_gateway ?? "").trim().toLowerCase();
+  return Boolean(
+    (subscription as any).migrated_from_pms === true ||
+    gateway === "legacy" ||
+    gateway === "pms" ||
+    originalGateway === "pms",
+  );
+}
+
 function isSubscriptionUsable(
   subscription: Subscription | null | undefined,
   planSlug?: string | null,
@@ -90,11 +102,16 @@ function isSubscriptionUsable(
   if (!subscription) return false;
   const status = String(subscription.status ?? "").toLowerCase();
   if (!["active", "trialing"].includes(status)) return false;
+
+  const isLegacyPms = isLegacyPmsSubscription(subscription);
   if (
     (planSlug === "premium" || isMinistryPlanSlug(planSlug)) &&
-    !hasBillingLink(subscription)
-  )
+    !hasBillingLink(subscription) &&
+    !isLegacyPms
+  ) {
     return false;
+  }
+
   const periodEnd = (subscription as any).current_period_end
     ? new Date((subscription as any).current_period_end).getTime()
     : Number.POSITIVE_INFINITY;
