@@ -2,6 +2,7 @@ import Link from "next/link";
 import { MessageSquare, Music2, Wand2 } from "lucide-react";
 
 import { PageHeader } from "@/components/admin/page-header";
+import { formatDateTimeBR } from "@/lib/format-date-time-br";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
@@ -34,11 +35,9 @@ function typeLabel(type?: string | null) {
 }
 
 function formatDate(value?: string | null) {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+  return formatDateTimeBR(value).replace("-", "—");
 }
+
 
 function safeParam(value?: string | string[]) {
   return typeof value === "string" ? value : "";

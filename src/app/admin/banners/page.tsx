@@ -2,17 +2,14 @@ import { revalidatePath } from "next/cache";
 
 import { ConfirmSubmitButton } from "@/components/admin/confirm-submit-button";
 import { PageHeader } from "@/components/admin/page-header";
+import { formatDateTimeBR } from "@/lib/format-date-time-br";
 import { deleteHomeBanner, getAdminHomeBanners, updateHomeBanner } from "@/lib/data/home-banners";
 import { setFlashToast } from "@/lib/flash";
 
 function formatDateTime(value?: string | null) {
-  if (!value) return "Sem agenda";
-  try {
-    return new Date(value).toLocaleString("pt-BR");
-  } catch {
-    return "Sem agenda";
-  }
+  return value ? formatDateTimeBR(value) : "Sem agenda";
 }
+
 
 function statusBadgeClass(active?: boolean | null) {
   return active

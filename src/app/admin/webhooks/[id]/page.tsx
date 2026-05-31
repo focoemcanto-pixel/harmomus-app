@@ -15,6 +15,7 @@ import {
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { formatDateTimeBR } from "@/lib/format-date-time-br";
 import { getWebhookEventLabel, type WebhookEndpoint, type WebhookLog } from "@/types/webhooks";
 
 const DEFAULT_TEST_PHONE = "71993392294";
@@ -39,8 +40,7 @@ function getStatusTone(success?: boolean) {
 }
 
 function formatDate(value?: string | null) {
-  if (!value) return "Nunca";
-  return new Date(value).toLocaleString("pt-BR");
+  return value ? formatDateTimeBR(value) : "Nunca";
 }
 
 function normalizePhone(value: string) {

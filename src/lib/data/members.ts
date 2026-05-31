@@ -11,6 +11,17 @@ export interface MemberListItem {
   plan: Plan | null;
 }
 
+export interface SubscriberJourneyData {
+  communicationLogs: any[];
+  webhookLogs: any[];
+  webhookProcessedEvents: any[];
+  kitAccessLogs: any[];
+  audioAccessLogs: any[];
+  legacyPmsSubscriptions: any[];
+  legacyStripeCustomers: any[];
+  legacyStripeCustomerImports: any[];
+}
+
 function makeProfileFromAuthUser(user: any, profile?: any): Profile {
   const metadata = user.user_metadata ?? {};
   return {
@@ -145,6 +156,67 @@ export async function getMemberById(id: string): Promise<MemberListItem | null> 
   const plan: Plan | null = typedSubscription?.plan_id ? typedPlans.find((item) => item.id === typedSubscription.plan_id) ?? null : null;
 
   return { profile: mergedProfile, subscription: typedSubscription, plan };
+}
+
+function rowMatchesIdentifiers(row: any, identifiers: string[]) {
+  if (!identifiers.length) return false;
+  const serialized = JSON.stringify(row ?? {}).toLowerCase();
+  return identifiers.some((identifier) => serialized.includes(identifier.toLowerCase()));
+}
+
+async function safeTableQuery<T = any>(queryPromise: PromiseLike<{ data: T[] | null; error: any }>): Promise<T[]> {
+  try {
+    const { data, error } = await queryPromise;
+    if (error) return [];
+    return data ?? [];
+  } catch {
+    return [];
+  }
+}
+
+export async function getSubscriberJourneyData(member: MemberListItem): Promise<SubscriberJourneyData> {
+  const supabase = createSupabaseAdminClient() as any;
+  const profile = member.profile as any;
+  const subscription = member.subscription as any;
+  const userId = profile?.id;
+  const identifiers = Array.from(new Set([
+    userId,
+    profile?.email,
+    subscription?.stripe_customer_id,
+    subscription?.gateway_customer_id,
+    subscription?.stripe_subscription_id,
+    subscription?.gateway_subscription_id,
+    subscription?.legacy_pms_subscription_id,
+    profile?.legacy_pms_member_id,
+  ].filter(Boolean).map(String)));
+
+  const [communicationLogs, kitAccessLogs, audioAccessLogs, webhookLogsRaw, webhookProcessedEventsRaw, legacyPmsRaw, legacyStripeRaw, legacyStripeImportRaw] = await Promise.all([
+    userId
+      ? safeTableQuery(supabase.from("communication_logs").select("*").eq("user_id", userId).order("created_at", { ascending: false }).limit(50))
+      : Promise.resolve([]),
+    userId
+      ? safeTableQuery(supabase.from("kit_access_logs").select("*").eq("user_id", userId).order("accessed_at", { ascending: false }).limit(50))
+      : Promise.resolve([]),
+    userId
+      ? safeTableQuery(supabase.from("audio_access_logs").select("*").eq("user_id", userId).order("accessed_at", { ascending: false }).limit(50))
+      : Promise.resolve([]),
+    safeTableQuery(supabase.from("webhook_logs").select("*").order("created_at", { ascending: false }).limit(200)),
+    safeTableQuery(supabase.from("webhook_processed_events").select("*").order("processed_at", { ascending: false }).limit(200)),
+    safeTableQuery(supabase.from("legacy_pms_subscriptions").select("*").limit(200)),
+    safeTableQuery(supabase.from("legacy_stripe_customers").select("*").limit(200)),
+    safeTableQuery(supabase.from("legacy_stripe_customer_import").select("*").limit(200)),
+  ]);
+
+  return {
+    communicationLogs,
+    kitAccessLogs,
+    audioAccessLogs,
+    webhookLogs: webhookLogsRaw.filter((row) => rowMatchesIdentifiers(row, identifiers)).slice(0, 50),
+    webhookProcessedEvents: webhookProcessedEventsRaw.filter((row) => rowMatchesIdentifiers(row, identifiers)).slice(0, 50),
+    legacyPmsSubscriptions: legacyPmsRaw.filter((row) => rowMatchesIdentifiers(row, identifiers)).slice(0, 25),
+    legacyStripeCustomers: legacyStripeRaw.filter((row) => rowMatchesIdentifiers(row, identifiers)).slice(0, 25),
+    legacyStripeCustomerImports: legacyStripeImportRaw.filter((row) => rowMatchesIdentifiers(row, identifiers)).slice(0, 25),
+  };
 }
 
 export async function updateMemberSubscription(userId: string, payload: Database["public"]["Tables"]["subscriptions"]["Update"]): Promise<void> {
