@@ -29,14 +29,19 @@ function getAccessWindow() {
 }
 
 function summarizeAccessRows(rows: AccessLogRow[], limit = FREE_LIMIT) {
-  const validRows = rows.filter((row) => String(row.kit_id ?? "").trim()).slice(0, limit);
-  const accessedKitIds = validRows.map((row) => String(row.kit_id));
-  const accessCountToday = validRows.length;
-  const remaining = Math.max(0, limit - accessCountToday);
+  const accessedKitIds = Array.from(
+    new Set(
+      rows
+        .map((row) => String(row.kit_id ?? "").trim())
+        .filter(Boolean),
+    ),
+  );
+  const uniqueKitCount24h = accessedKitIds.length;
+  const remaining = Math.max(0, limit - uniqueKitCount24h);
 
   return {
-    accessCountToday,
-    uniqueKitCount24h: accessCountToday,
+    accessCountToday: uniqueKitCount24h,
+    uniqueKitCount24h,
     accessedKitIds,
     remaining,
   };
@@ -71,16 +76,23 @@ export async function getFreeAccessStats(userId: string): Promise<FreeAccessStat
 
 export async function registerKitAccess(userId: string, kitId: string): Promise<FreeAccessStats> {
   const supabase = createSupabaseAdminClient() as any;
+  const normalizedKitId = String(kitId ?? "").trim();
   const stats = await getFreeAccessStats(userId);
 
-  if (stats.accessCountToday >= FREE_LIMIT) return stats;
+  if (!normalizedKitId) return stats;
 
-  const { error: insertError } = await supabase.from("kit_access_logs").insert({ user_id: userId, kit_id: kitId });
+  if (stats.accessedKitIds.includes(normalizedKitId)) {
+    return stats;
+  }
+
+  if (stats.uniqueKitCount24h >= FREE_LIMIT) return stats;
+
+  const { error: insertError } = await supabase.from("kit_access_logs").insert({ user_id: userId, kit_id: normalizedKitId });
 
   if (insertError) {
     console.error("[access-rules] Could not register kit access", {
       userId,
-      kitId,
+      kitId: normalizedKitId,
       error: insertError,
     });
     return stats;
@@ -107,8 +119,9 @@ export async function canPlayAudio(context: CurrentUserAccessContext, kit: Publi
   if (context.effectiveSlug === "free" && context.profile) {
     const stats = await getFreeAccessStats(context.profile.id);
     const dailyLimit = getDailyKitLimit(context.effectiveSlug) ?? FREE_LIMIT;
+    const hasAlreadyAccessedThisKit = stats.accessedKitIds.includes(kit.id);
 
-    if (kitAllowsFree(kit) && stats.accessCountToday >= dailyLimit) {
+    if (kitAllowsFree(kit) && stats.uniqueKitCount24h >= dailyLimit && !hasAlreadyAccessedThisKit) {
       return { allowed: false, reason: "free_limit" as const, stats: { ...stats, limit: dailyLimit } };
     }
 
