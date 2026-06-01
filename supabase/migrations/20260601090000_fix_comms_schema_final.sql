@@ -1,3 +1,5 @@
+-- Keep pgcrypto enabled for environments that still depend on gen_random_uuid()
+-- from the extension instead of the built-in PostgreSQL implementation.
 create extension if not exists pgcrypto;
 
 create table if not exists public.communication_logs (
@@ -143,19 +145,31 @@ alter table if exists public.marketing_events
   alter column metadata set default '{}'::jsonb,
   alter column created_at set default now();
 
-update public.marketing_events
+with marketing_events_backfill as (
+  select
+    id,
+    coalesce(event_type, event_key, action) as resolved_event_type,
+    coalesce(action, event_key, event_type) as resolved_action,
+    coalesce(nullif(source, ''), 'harmomus') as resolved_source,
+    coalesce(metadata, '{}'::jsonb) as resolved_metadata,
+    coalesce(created_at, now()) as resolved_created_at
+  from public.marketing_events
+  where event_type is null
+     or action is null
+     or source is null
+     or source = ''
+     or metadata is null
+     or created_at is null
+)
+update public.marketing_events as target
 set
-  event_type = coalesce(event_type, event_key, action),
-  action = coalesce(action, event_key, event_type),
-  source = coalesce(nullif(source, ''), 'harmomus'),
-  metadata = coalesce(metadata, '{}'::jsonb),
-  created_at = coalesce(created_at, now())
-where event_type is null
-   or action is null
-   or source is null
-   or source = ''
-   or metadata is null
-   or created_at is null;
+  event_type = source.resolved_event_type,
+  action = source.resolved_action,
+  source = source.resolved_source,
+  metadata = source.resolved_metadata,
+  created_at = source.resolved_created_at
+from marketing_events_backfill as source
+where target.id = source.id;
 
 create index if not exists marketing_events_event_type_created_at_idx
   on public.marketing_events (event_type, created_at desc);
@@ -221,6 +235,7 @@ create index if not exists subscription_history_subscription_id_created_at_idx
 create index if not exists subscription_history_change_type_created_at_idx
   on public.subscription_history (change_type, created_at desc);
 
+-- Deduplicate provider webhook/history events while still allowing NULLs.
 create unique index if not exists subscription_history_provider_event_unique_idx
   on public.subscription_history (provider_event_id)
   where provider_event_id is not null;
