@@ -9,7 +9,6 @@ import {
   Sparkles,
   Target,
   TrendingUp,
-  UserCheck,
   Users,
 } from "lucide-react";
 
