@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
+import { KitBulkUpload } from "@/components/admin/kit-bulk-upload";
 import { KitForm } from "@/components/admin/kit-form";
 import { createKit, ensureArtistCategory, getArtistCategories, getKitFormOptions } from "@/lib/data/kits";
 
@@ -73,5 +74,19 @@ export default async function NovoKitPage() {
     redirect("/admin/kits");
   }
 
-  return <KitForm mode="create" categories={categories} artistCategories={artistCategories} plans={plans} action={createKitAction} />;
+  return (
+    <div className="space-y-8">
+      <KitBulkUpload />
+
+      <div className="flex items-center gap-4">
+        <div className="h-px flex-1 bg-border" />
+        <span className="rounded-full border border-border bg-surface px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted">
+          Cadastro manual
+        </span>
+        <div className="h-px flex-1 bg-border" />
+      </div>
+
+      <KitForm mode="create" categories={categories} artistCategories={artistCategories} plans={plans} action={createKitAction} />
+    </div>
+  );
 }
