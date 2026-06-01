@@ -230,7 +230,7 @@ export async function getPremiumRequests() {
   const supabase = createSupabaseAdminClient() as any;
   const { data, error } = await supabase
     .from("premium_requests")
-    .select("*, profile:profiles(full_name, email, avatar_url), kit:kits(name, slug, artist)")
+    .select("id,user_id,ministry_id,request_type,song_name,artist_name,reference_link,kit_slug,desired_tone,voice_part,notes,status,created_at,updated_at,delivered_kit_slug,delivered_at,profile:profiles(full_name,email,avatar_url)")
     .order("created_at", { ascending: false })
     .limit(200);
 
@@ -240,9 +240,9 @@ export async function getPremiumRequests() {
     ...row,
     type: toAdminRequestType(row.request_type),
     status: toAdminRequestStatus(row.status),
-    title: row.song_name ?? row.kit_name ?? "Solicitação premium",
-    artist: row.artist_name ?? row.kit?.artist ?? null,
-    requested_tone: row.desired_tone ?? row.requested_tone ?? null,
+    title: row.song_name ?? "Solicitação premium",
+    artist: row.artist_name ?? null,
+    requested_tone: row.desired_tone ?? null,
     reference_url: row.reference_link ?? null,
     message: row.notes ?? null,
     profiles: row.profile ?? row.profiles ?? null,
@@ -271,7 +271,6 @@ export async function createPremiumRequest(input: {
     reference_link: input.reference_url ?? null,
     desired_tone: input.requested_tone ?? null,
     notes: input.message ?? null,
-    kit_id: input.kit_id ?? null,
     status: "pending",
   });
 
