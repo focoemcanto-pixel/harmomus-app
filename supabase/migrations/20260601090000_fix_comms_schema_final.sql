@@ -27,10 +27,10 @@ alter table if exists public.communication_logs
   add column if not exists status text,
   add column if not exists event text,
   add column if not exists event_type text,
-  add column if not exists level text not null default 'info',
+  add column if not exists level text default 'info',
   add column if not exists message text,
   add column if not exists response jsonb,
-  add column if not exists updated_at timestamptz not null default now();
+  add column if not exists updated_at timestamptz default now();
 
 do $$
 declare
@@ -57,6 +57,15 @@ end $$;
 alter table if exists public.communication_logs
   alter column status set default 'queued',
   alter column updated_at set default now();
+
+update public.communication_logs
+set
+  status = coalesce(status, 'queued'),
+  level = coalesce(level, 'info'),
+  updated_at = coalesce(updated_at, created_at, now())
+where status is null
+   or level is null
+   or updated_at is null;
 
 create index if not exists communication_logs_status_created_at_idx
   on public.communication_logs (status, created_at desc);
@@ -100,9 +109,9 @@ alter table if exists public.marketing_events
   add column if not exists event_label text,
   add column if not exists action text,
   add column if not exists channel text,
-  add column if not exists source text not null default 'harmomus',
-  add column if not exists metadata jsonb not null default '{}'::jsonb,
-  add column if not exists created_at timestamptz not null default now();
+  add column if not exists source text default 'harmomus',
+  add column if not exists metadata jsonb default '{}'::jsonb,
+  add column if not exists created_at timestamptz default now();
 
 do $$
 declare
@@ -128,17 +137,23 @@ end $$;
 
 alter table if exists public.marketing_events
   alter column event_type drop not null,
-  alter column source set default 'harmomus';
+  alter column source set default 'harmomus',
+  alter column metadata set default '{}'::jsonb,
+  alter column created_at set default now();
 
 update public.marketing_events
 set
   event_type = coalesce(event_type, event_key, action),
   action = coalesce(action, event_type, event_key),
-  source = coalesce(nullif(source, ''), 'harmomus')
+  source = coalesce(nullif(source, ''), 'harmomus'),
+  metadata = coalesce(metadata, '{}'::jsonb),
+  created_at = coalesce(created_at, now())
 where event_type is null
    or action is null
    or source is null
-   or source = '';
+   or source = ''
+   or metadata is null
+   or created_at is null;
 
 create index if not exists marketing_events_event_type_created_at_idx
   on public.marketing_events (event_type, created_at desc);
@@ -175,10 +190,25 @@ alter table if exists public.subscription_history
   add column if not exists from_plan_slug text,
   add column if not exists to_plan_slug text,
   add column if not exists change_type text,
-  add column if not exists source text not null default 'system',
+  add column if not exists source text default 'system',
   add column if not exists provider_event_id text,
-  add column if not exists metadata jsonb not null default '{}'::jsonb,
-  add column if not exists created_at timestamptz not null default now();
+  add column if not exists metadata jsonb default '{}'::jsonb,
+  add column if not exists created_at timestamptz default now();
+
+alter table if exists public.subscription_history
+  alter column source set default 'system',
+  alter column metadata set default '{}'::jsonb,
+  alter column created_at set default now();
+
+update public.subscription_history
+set
+  source = coalesce(nullif(source, ''), 'system'),
+  metadata = coalesce(metadata, '{}'::jsonb),
+  created_at = coalesce(created_at, now())
+where source is null
+   or source = ''
+   or metadata is null
+   or created_at is null;
 
 create index if not exists subscription_history_user_id_created_at_idx
   on public.subscription_history (user_id, created_at desc);
