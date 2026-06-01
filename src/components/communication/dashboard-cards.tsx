@@ -1,168 +1,143 @@
 import Link from "next/link";
-import { ArrowRight, Bot, Flame, Mail, MessageCircle, MousePointerClick, Send, ShieldAlert, Sparkles, Target, TrendingUp, Users } from "lucide-react";
+import { AlertTriangle, ArrowRight, BarChart3, CheckCircle2, Clock3, HeartPulse, Mail, MessageCircle, MousePointerClick, Send, ShieldCheck, Sparkles, Target, TrendingUp, Users, Workflow } from "lucide-react";
 
-import { getCommunicationDashboard, getPendingQueue } from "@/lib/communication/service";
+import { getCommunicationDashboard } from "@/lib/communication/service";
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("pt-BR").format(value);
 }
 
-function formatPercent(value: number) {
-  return `${value.toFixed(1).replace(".", ",")}%`;
+function formatPercent(value: number | null) {
+  return value === null ? "dados insuficientes" : `${value.toFixed(1).replace(".", ",")}%`;
 }
 
-function MetricCard({ title, value, caption, icon: Icon, tone = "cyan" }: { title: string; value: string | number; caption: string; icon: any; tone?: "cyan" | "emerald" | "amber" | "rose" | "violet" }) {
+function MetricCard({ title, value, caption, icon: Icon, tone = "cyan" }: { title: string; value: string | number; caption: string; icon: React.ComponentType<{ className?: string }>; tone?: "cyan" | "emerald" | "amber" | "rose" | "violet" }) {
   const tones = {
-    cyan: "from-cyan-500/15 via-slate-950/80 to-slate-950 border-cyan-400/20",
-    emerald: "from-emerald-500/15 via-slate-950/80 to-slate-950 border-emerald-400/20",
-    amber: "from-amber-500/15 via-slate-950/80 to-slate-950 border-amber-400/20",
-    rose: "from-rose-500/15 via-slate-950/80 to-slate-950 border-rose-400/20",
-    violet: "from-violet-500/15 via-slate-950/80 to-slate-950 border-violet-400/20",
+    cyan: "from-cyan-500/15 border-cyan-400/20",
+    emerald: "from-emerald-500/15 border-emerald-400/20",
+    amber: "from-amber-500/15 border-amber-400/20",
+    rose: "from-rose-500/15 border-rose-400/20",
+    violet: "from-violet-500/15 border-violet-400/20",
   };
 
   return (
-    <article className={`rounded-3xl border bg-gradient-to-br ${tones[tone]} p-5 shadow-2xl shadow-black/20`}>
+    <article className={`rounded-3xl border bg-gradient-to-br ${tones[tone]} via-slate-950/85 to-slate-950 p-5 shadow-2xl shadow-black/20`}>
       <div className="mb-3 flex items-center justify-between gap-3">
         <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{title}</p>
         <Icon className="h-4 w-4 text-white/70" />
       </div>
       <p className="text-3xl font-semibold tracking-tight text-white">{typeof value === "number" ? formatNumber(value) : value}</p>
-      <p className="mt-1 text-xs text-slate-500">{caption}</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">{caption}</p>
     </article>
   );
 }
 
-function RecommendedCampaign({ title, audience, message, href, tone = "cyan" }: { title: string; audience: string; message: string; href: string; tone?: "cyan" | "amber" | "rose" | "violet" }) {
-  const tones = {
-    cyan: "border-cyan-400/20 bg-cyan-500/10 text-cyan-100",
-    amber: "border-amber-400/20 bg-amber-500/10 text-amber-100",
-    rose: "border-rose-400/20 bg-rose-500/10 text-rose-100",
-    violet: "border-violet-400/20 bg-violet-500/10 text-violet-100",
-  };
-
+function RecommendedCampaignCard({ title, audience, reason, channel, count, href }: { title: string; audience: string; reason: string; channel: string; count: number; href: string }) {
   return (
     <article className="rounded-3xl border border-white/10 bg-slate-950/60 p-5 shadow-2xl shadow-black/20">
-      <span className={`inline-flex rounded-full border px-3 py-1 text-xs ${tones[tone]}`}>{audience}</span>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="rounded-full border border-cyan-400/20 bg-cyan-500/10 px-3 py-1 text-xs text-cyan-100">{audience}</span>
+        <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs text-slate-300">{formatNumber(count)} contatos</span>
+      </div>
       <h3 className="mt-4 text-lg font-semibold text-white">{title}</h3>
-      <p className="mt-2 min-h-12 text-sm leading-6 text-slate-400">{message}</p>
+      <p className="mt-2 text-sm leading-6 text-slate-400">{reason}</p>
+      <p className="mt-3 text-xs uppercase tracking-[0.2em] text-slate-500">Canal sugerido: <span className="text-slate-200">{channel}</span></p>
       <Link href={href} className="mt-4 inline-flex items-center gap-2 rounded-2xl border border-white/10 px-4 py-2 text-sm text-slate-200 transition hover:border-cyan-400/40 hover:bg-cyan-500/10 hover:text-cyan-100">
-        Preparar campanha <ArrowRight className="h-4 w-4" />
+        Criar campanha <ArrowRight className="h-4 w-4" />
       </Link>
     </article>
   );
 }
 
 export async function DashboardCards() {
-  const [data, queue] = await Promise.all([getCommunicationDashboard(), getPendingQueue(8)]);
-
-  const failed = data.deliveries.filter((item) => String(item.status ?? "").toLowerCase().includes("fail") || String(item.status ?? "").toLowerCase().includes("erro")).length;
+  const data = await getCommunicationDashboard();
   const whatsappSent = data.deliveries.filter((item) => item.channel === "whatsapp").length;
   const emailSent = data.deliveries.filter((item) => item.channel === "email").length;
-  const healthTone = failed > 0 ? "rose" : queue.length > 0 ? "amber" : "emerald";
-
-  const campaigns = [
-    {
-      title: "Converter leads quentes do Upgrade Center",
-      audience: "Free/Plus com bloqueio premium",
-      message: "Use os usuários que tentaram consumir conteúdo travado para apresentar Plus ou Premium no momento certo.",
-      href: "/admin/assinaturas",
-      tone: "amber" as const,
-    },
-    {
-      title: "Recuperar assinantes em risco",
-      audience: "Atrasados, pendentes e cancelados",
-      message: "Crie uma mensagem direta para recuperar pagamento, renovar interesse ou oferecer retorno ao plano.",
-      href: "/admin/assinaturas",
-      tone: "rose" as const,
-    },
-    {
-      title: "Campanha por kit com alto desejo",
-      audience: "Bloqueios Premium no Analytics",
-      message: "Transforme kits que mais batem no bloqueio em campanhas de upgrade com prova de valor.",
-      href: "/admin/analytics",
-      tone: "violet" as const,
-    },
-  ];
+  const healthIcon = data.operationalHealth.tone === "emerald" ? CheckCircle2 : data.operationalHealth.tone === "amber" ? Clock3 : AlertTriangle;
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-        <MetricCard title="Contatos" value={data.contacts} caption="Base total no CRM" icon={Users} />
-        <MetricCard title="Campanhas" value={data.activeCampaigns} caption="Ativas ou em processamento" icon={Send} tone="violet" />
-        <MetricCard title="Entregas" value={data.sent} caption={`${whatsappSent} WhatsApp · ${emailSent} e-mail`} icon={MessageCircle} tone="emerald" />
-        <MetricCard title="Open rate" value={formatPercent(data.openRate)} caption="Eventos de abertura" icon={Mail} />
-        <MetricCard title="CTR" value={formatPercent(data.ctr)} caption="Cliques rastreados" icon={MousePointerClick} tone="amber" />
-        <MetricCard title="Conversão" value={formatPercent(data.conversion)} caption="Eventos de assinatura/conversão" icon={TrendingUp} tone="emerald" />
+      {data.warnings.length ? (
+        <div className="rounded-3xl border border-amber-400/20 bg-amber-500/10 p-4 text-sm text-amber-100">
+          <div className="flex items-center gap-2 font-semibold"><AlertTriangle size={16} /> Dados parciais disponíveis</div>
+          <p className="mt-1 text-amber-100/80">Algumas tabelas opcionais não responderam. A página continua operacional com fallback visual.</p>
+          <details className="mt-2">
+            <summary className="cursor-pointer text-xs uppercase tracking-[0.2em]">Ver fontes indisponíveis</summary>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-amber-100/80">
+              {data.warnings.slice(0, 6).map((warning) => <li key={`${warning.source}-${warning.message}`}>{warning.source}: {warning.message}</li>)}
+            </ul>
+          </details>
+        </div>
+      ) : null}
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <MetricCard title="Contatos totais" value={data.contacts} caption="Base real em profiles" icon={Users} />
+        <MetricCard title="Campanhas ativas" value={data.activeCampaigns} caption="Agendadas, em fila ou enviando" icon={Send} tone="violet" />
+        <MetricCard title="Mensagens enviadas" value={data.sent} caption={`${whatsappSent} WhatsApp · ${emailSent} e-mail/logs`} icon={MessageCircle} tone="emerald" />
+        <MetricCard title="Fila pendente" value={data.pending} caption="Jobs/logs aguardando processamento" icon={Clock3} tone={data.pending ? "amber" : "emerald"} />
+        <MetricCard title="Falhas" value={data.failed} caption="Eventos/logs com erro" icon={AlertTriangle} tone={data.failed ? "rose" : "emerald"} />
+        <MetricCard title="Open rate" value={formatPercent(data.openRate)} caption="Somente quando há eventos de abertura" icon={Mail} />
+        <MetricCard title="CTR" value={formatPercent(data.ctr)} caption="Cliques rastreados em logs/eventos" icon={MousePointerClick} tone="amber" />
+        <MetricCard title="Conversão" value={formatPercent(data.conversion)} caption="Eventos reais de conversão/assinatura" icon={TrendingUp} tone="emerald" />
+        <MetricCard title="Saúde operacional" value={`${data.operationalHealth.score}/100`} caption={data.operationalHealth.label} icon={healthIcon} tone={data.operationalHealth.tone} />
+        <MetricCard title="Segmentos úteis" value={data.segments.filter((segment) => segment.count > 0).length} caption="Públicos calculados com dados reais" icon={Target} tone="violet" />
       </div>
 
-      <div className="rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.14),transparent_34%),rgba(2,6,23,0.78)] p-6 shadow-2xl shadow-black/30">
+      <section className="rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.16),transparent_32%),rgba(2,6,23,0.82)] p-6 shadow-2xl shadow-black/30">
         <div className="flex flex-wrap items-start justify-between gap-5">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-200/70">Marketing Intelligence</p>
-            <h2 className="mt-2 text-2xl font-semibold text-white">Painel de crescimento</h2>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">A Central de Comunicação agora conecta campanhas com Analytics, Assinaturas, Webhooks e LabMessage. A decisão principal é: para quem mandar, com qual objetivo e por qual canal.</p>
+            <h2 className="mt-2 text-2xl font-semibold text-white">Painel executivo de comunicação</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">A operação usa dados reais de perfis, assinaturas, acessos, invoices, histórico e logs. Métricas sem eventos suficientes aparecem explicitamente como dados insuficientes.</p>
           </div>
-          <Link href="/admin/comunicacao/campaigns" className="inline-flex items-center gap-2 rounded-2xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-cyan-950/30 transition hover:bg-cyan-500">
-            Nova campanha <Sparkles className="h-4 w-4" />
-          </Link>
-        </div>
-
-        <div className="mt-6 grid gap-3 md:grid-cols-3">
-          <div className="rounded-3xl border border-white/10 bg-black/25 p-5">
-            <div className="flex items-center gap-2 text-sm font-semibold text-white"><Flame className="h-4 w-4 text-amber-300" /> Leads quentes</div>
-            <p className="mt-2 text-sm text-slate-400">Puxe da Central de Assinaturas usuários com plays, bloqueios e sinal de upgrade.</p>
-          </div>
-          <div className="rounded-3xl border border-white/10 bg-black/25 p-5">
-            <div className="flex items-center gap-2 text-sm font-semibold text-white"><Target className="h-4 w-4 text-violet-300" /> Segmentos claros</div>
-            <p className="mt-2 text-sm text-slate-400">Free ativo, Plus engajado, Premium em risco, cancelados e bloqueios por kit.</p>
-          </div>
-          <div className="rounded-3xl border border-white/10 bg-black/25 p-5">
-            <div className="flex items-center gap-2 text-sm font-semibold text-white"><Bot className="h-4 w-4 text-cyan-300" /> Automação pronta</div>
-            <p className="mt-2 text-sm text-slate-400">Use os webhooks e a fila para campanhas por evento sem expor detalhes técnicos.</p>
-          </div>
-        </div>
-      </div>
-
-      <div>
-        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h2 className="text-xl font-semibold text-white">Campanhas recomendadas</h2>
-            <p className="mt-1 text-sm text-slate-500">Atalhos estratégicos baseados nos módulos que já estruturamos.</p>
-          </div>
-          <Link href="/admin/comunicacao/templates" className="inline-flex items-center gap-2 text-sm text-cyan-300 hover:text-cyan-200">Ver templates <ArrowRight className="h-4 w-4" /></Link>
-        </div>
-        <div className="grid gap-3 xl:grid-cols-3">
-          {campaigns.map((campaign) => <RecommendedCampaign key={campaign.title} {...campaign} />)}
-        </div>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-[1fr_0.85fr]">
-        <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-5 shadow-2xl shadow-black/20">
-          <h2 className="flex items-center gap-2 text-lg font-semibold text-white"><ShieldAlert className="h-4 w-4 text-amber-300" /> Saúde operacional</h2>
-          <p className="mt-1 text-sm text-slate-500">Fila e falhas recentes da comunicação.</p>
-          <div className="mt-5 grid gap-3 sm:grid-cols-3">
-            <div className="rounded-2xl border border-white/10 bg-black/25 p-4"><p className="text-xs text-slate-500">Na fila</p><p className="mt-2 text-2xl font-semibold text-white">{queue.length}</p></div>
-            <div className="rounded-2xl border border-white/10 bg-black/25 p-4"><p className="text-xs text-slate-500">Falhas</p><p className="mt-2 text-2xl font-semibold text-white">{failed}</p></div>
-            <div className={`rounded-2xl border p-4 ${healthTone === "rose" ? "border-rose-400/25 bg-rose-500/10" : healthTone === "amber" ? "border-amber-400/25 bg-amber-500/10" : "border-emerald-400/25 bg-emerald-500/10"}`}><p className="text-xs text-slate-300/70">Status</p><p className="mt-2 text-2xl font-semibold text-white">{failed > 0 ? "Atenção" : queue.length > 0 ? "Fila ativa" : "Saudável"}</p></div>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/admin/analytics" className="rounded-2xl border border-white/10 px-4 py-2 text-sm text-slate-200 hover:border-cyan-400/40 hover:bg-cyan-500/10">Analytics</Link>
+            <Link href="/admin/assinaturas" className="rounded-2xl border border-white/10 px-4 py-2 text-sm text-slate-200 hover:border-cyan-400/40 hover:bg-cyan-500/10">Assinaturas</Link>
+            <Link href="/admin/webhooks" className="rounded-2xl border border-white/10 px-4 py-2 text-sm text-slate-200 hover:border-cyan-400/40 hover:bg-cyan-500/10">Webhooks</Link>
           </div>
         </div>
 
-        <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-5 shadow-2xl shadow-black/20">
-          <h2 className="text-lg font-semibold text-white">Próximas entregas</h2>
-          <p className="mt-1 text-sm text-slate-500">Itens aguardando processamento.</p>
-          <div className="mt-5 space-y-2">
-            {queue.length === 0 ? <div className="rounded-2xl border border-dashed border-white/10 p-6 text-center text-sm text-slate-500">Nenhum item pendente.</div> : null}
-            {queue.map((item) => (
-              <div key={item.id} className="rounded-2xl border border-white/10 bg-black/25 p-3 text-sm">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="font-medium text-white">{item.channel}</span>
-                  <span className="rounded-full border border-amber-400/25 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-100">{item.status}</span>
-                </div>
-                <p className="mt-1 truncate text-xs text-slate-500">{String((item.payload as any)?.campaign_name ?? (item.payload as any)?.recipient ?? item.delivery_id)}</p>
+        <div className="mt-6 grid gap-4 lg:grid-cols-3">
+          {data.segments.slice(0, 6).map((segment) => (
+            <Link key={segment.slug} href={segment.href} className="rounded-3xl border border-white/10 bg-slate-950/55 p-5 transition hover:border-cyan-400/30 hover:bg-cyan-500/10">
+              <div className="flex items-center justify-between gap-3">
+                <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300">{segment.category}</span>
+                <span className="text-xl font-bold text-white">{formatNumber(segment.count)}</span>
+              </div>
+              <h3 className="mt-3 font-semibold text-white">{segment.title}</h3>
+              <p className="mt-2 text-sm leading-6 text-slate-400">{segment.description}</p>
+            </Link>
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <div className="mb-4 flex items-center gap-2 text-white"><Sparkles className="h-5 w-5 text-cyan-300" /><h2 className="text-xl font-semibold">Campanhas recomendadas</h2></div>
+        <div className="grid gap-4 xl:grid-cols-3">
+          {data.recommendedCampaigns.map((campaign) => <RecommendedCampaignCard key={campaign.slug} title={campaign.title} audience={campaign.audience} reason={campaign.reason} channel={campaign.channel} count={campaign.count} href={campaign.ctaHref} />)}
+        </div>
+      </section>
+
+      <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+        <section className="rounded-3xl border border-white/10 bg-slate-950/70 p-5 shadow-2xl shadow-black/20">
+          <div className="flex items-center gap-2 text-white"><Workflow size={18} className="text-violet-300" /><h2 className="font-semibold">Funil comercial · últimos 30 dias</h2></div>
+          <p className="mt-1 text-sm text-slate-500">Baseado em subscription_history quando a tabela existe. Valores zerados indicam ausência de evento registrado.</p>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {data.funnel.map((item) => (
+              <div key={item.label} className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <p className="text-xs text-slate-500">{item.hint}</p>
+                <p className="mt-1 text-sm font-semibold text-slate-200">{item.label}</p>
+                <p className="mt-2 text-2xl font-bold text-white">{formatNumber(item.count)}</p>
               </div>
             ))}
           </div>
-        </div>
+        </section>
+
+        <section className="rounded-3xl border border-emerald-400/20 bg-emerald-500/10 p-5 shadow-2xl shadow-black/20">
+          <div className="flex items-center gap-2 text-emerald-100"><ShieldCheck size={18} /><h2 className="font-semibold">Envio seguro</h2></div>
+          <p className="mt-3 text-sm leading-6 text-emerald-100/80">Campanhas não disparam mensagens no carregamento da página. O fluxo prepara payload padronizado, coloca mensagens em fila e registra logs. O envio real depende de canal/webhook configurado.</p>
+          <Link href="/admin/comunicacao/settings" className="mt-4 inline-flex items-center gap-2 rounded-2xl border border-emerald-300/25 px-4 py-2 text-sm font-semibold text-emerald-50 hover:bg-emerald-400/10">Configurar canais <ArrowRight className="h-4 w-4" /></Link>
+        </section>
       </div>
     </div>
   );

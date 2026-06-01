@@ -14,10 +14,10 @@ const planLabels: Record<Plan, string> = {
 };
 
 const audienceBase: Record<Plan, number> = {
-  free: 320,
-  plus: 42,
-  premium: 186,
-  ministry: 8,
+  free: 0,
+  plus: 0,
+  premium: 0,
+  ministry: 0,
 };
 
 const defaultMessage = `Olá {{nome}}!\n\nTem novidade no Harmomus 🎵\n\nAcabamos de liberar um novo conteúdo para ajudar você a estudar com mais organização e segurança vocal.\n\nAcesse agora: {{link}}`;
@@ -38,8 +38,8 @@ export function CampaignBuilder() {
   const [title, setTitle] = useState("Novo kit disponível no Harmomus");
   const [message, setMessage] = useState(defaultMessage);
   const [link, setLink] = useState("https://harmomus.com/todos-os-kits");
-  const [testPhone, setTestPhone] = useState("5571993392294");
-  const [testEmail, setTestEmail] = useState("focoemcanto@gmail.com");
+  const [testPhone, setTestPhone] = useState("");
+  const [testEmail, setTestEmail] = useState("");
   const [minDelay, setMinDelay] = useState(8);
   const [maxDelay, setMaxDelay] = useState(25);
   const [dailyLimit, setDailyLimit] = useState(600);
@@ -51,6 +51,8 @@ export function CampaignBuilder() {
   const [mediaPreview, setMediaPreview] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [savedCampaignId, setSavedCampaignId] = useState<string | null>(null);
+  const [isQueueing, setIsQueueing] = useState(false);
 
   const audienceSize = useMemo(
     () => plans.reduce((sum, plan) => sum + audienceBase[plan], 0),
@@ -86,7 +88,7 @@ export function CampaignBuilder() {
     reader.readAsDataURL(file);
   }
 
-  function sendTest() {
+  async function sendTest() {
     const missingTarget = channels.includes("whatsapp") && testPhone.replace(/\D/g, "").length < 12;
     const missingEmail = channels.includes("email") && !testEmail.includes("@");
 
@@ -95,7 +97,27 @@ export function CampaignBuilder() {
     if (missingTarget) return setStatus("Informe um WhatsApp de teste com DDI + DDD + número.");
     if (missingEmail) return setStatus("Informe um e-mail de teste válido.");
 
-    setStatus(`Teste preparado para ${channels.includes("whatsapp") ? testPhone : ""}${channels.length === 2 ? " e " : ""}${channels.includes("email") ? testEmail : ""}. A integração real será conectada ao canal configurado.`);
+    setStatus("Enviando teste pelo endpoint interno seguro...");
+    try {
+      const calls = [];
+      if (channels.includes("whatsapp")) {
+        calls.push(fetch("/api/admin/comunicacao/test-whatsapp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone: testPhone, message: previewMessage }) }));
+      }
+      if (channels.includes("email")) {
+        calls.push(fetch("/api/admin/comunicacao/test-email", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: testEmail, subject: title, text: previewMessage }) }));
+      }
+      const results = await Promise.all(calls);
+      const failures = [];
+      for (const result of results) {
+        if (!result.ok) {
+          const json = await result.json().catch(() => null);
+          failures.push(json?.error ?? `HTTP ${result.status}`);
+        }
+      }
+      setStatus(failures.length ? `Teste registrado com falha: ${failures.join(" · ")}` : "Teste enviado pelo endpoint interno e registrado em logs.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Falha ao executar teste.");
+    }
   }
 
   async function saveDraft() {
@@ -112,7 +134,7 @@ export function CampaignBuilder() {
         body: JSON.stringify({
           name,
           channels,
-          audience_filters: { plans, estimatedAudience: audienceSize },
+          audience_filters: { plans, segment: plans.join(","), note: "Audiência real calculada no servidor ao enfileirar." },
           title,
           message,
           link_url: link,
@@ -123,11 +145,38 @@ export function CampaignBuilder() {
       });
       const json = await response.json().catch(() => null);
       if (!response.ok) throw new Error(json?.error ?? "Falha ao salvar rascunho.");
-      setStatus(`Rascunho salvo no Supabase: ${json?.data?.name ?? name}.`);
+      setSavedCampaignId(json?.data?.id ?? null);
+      setStatus(`Rascunho salvo no Supabase: ${json?.data?.name ?? name}. Revise e coloque em fila quando estiver pronto.`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Falha ao salvar rascunho.");
     } finally {
       setIsSavingDraft(false);
+    }
+  }
+
+
+
+  async function queueCampaign() {
+    if (!savedCampaignId) return setStatus("Salve a campanha antes de colocar mensagens em fila.");
+    if (!channels.length) return setStatus("Selecione pelo menos um canal.");
+    setIsQueueing(true);
+    setStatus(null);
+    try {
+      const results = await Promise.all(channels.map(async (channel) => {
+        const response = await fetch(`/api/admin/comunicacao/campaigns/${savedCampaignId}/queue`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ channel }),
+        });
+        const json = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(json?.error ?? `Falha ao enfileirar ${channel}.`);
+        return `${channel}: ${json?.data?.queued ?? 0}`;
+      }));
+      setStatus(`Campanha colocada em fila com status queued. ${results.join(" · ")}. O envio depende do webhook/canal configurado.`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Falha ao enfileirar campanha.");
+    } finally {
+      setIsQueueing(false);
     }
   }
 
@@ -214,9 +263,9 @@ export function CampaignBuilder() {
           <div className="rounded-3xl border border-white/10 bg-slate-950/70 p-5">
             <div className="flex items-center gap-2 text-white"><Users size={18} className="text-cyan-300" /><h3 className="font-semibold">Simulador de alcance</h3></div>
             <div className="mt-4 grid gap-3 text-sm">
-              <div className="rounded-2xl bg-slate-900/70 p-4"><p className="text-slate-400">Público selecionado</p><p className="text-2xl font-bold text-white">{audienceSize}</p></div>
-              <div className="rounded-2xl bg-slate-900/70 p-4"><p className="text-slate-400">Tempo estimado</p><p className="text-2xl font-bold text-white">{formatTime(estimatedSeconds)}</p></div>
-              <div className="rounded-2xl bg-slate-900/70 p-4"><p className="text-slate-400">Lotes diários</p><p className="text-2xl font-bold text-white">{dailyBatches}</p></div>
+              <div className="rounded-2xl bg-slate-900/70 p-4"><p className="text-slate-400">Público selecionado</p><p className="text-2xl font-bold text-white">calculado na fila</p></div>
+              <div className="rounded-2xl bg-slate-900/70 p-4"><p className="text-slate-400">Tempo estimado</p><p className="text-2xl font-bold text-white">após enfileirar</p></div>
+              <div className="rounded-2xl bg-slate-900/70 p-4"><p className="text-slate-400">Lotes diários</p><p className="text-2xl font-bold text-white">limite seguro</p></div>
             </div>
           </div>
 
@@ -250,8 +299,9 @@ export function CampaignBuilder() {
             <label className="text-sm text-slate-300">E-mail teste<input value={testEmail} onChange={(e) => setTestEmail(e.target.value)} className="mt-1 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-white" /></label>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
-            <button onClick={sendTest} className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-500">Enviar teste</button>
+            <button onClick={sendTest} className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-500">Enviar teste seguro</button>
             <button onClick={saveDraft} disabled={isSavingDraft} className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60">{isSavingDraft ? <Loader2 size={15} className="animate-spin" /> : null}{isSavingDraft ? "Salvando..." : "Salvar rascunho"}</button>
+            <button onClick={queueCampaign} disabled={!savedCampaignId || isQueueing} className="inline-flex items-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-2 text-sm font-semibold text-emerald-50 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60">{isQueueing ? <Loader2 size={15} className="animate-spin" /> : <ShieldCheck size={15} />}{isQueueing ? "Enfileirando..." : "Colocar em fila"}</button>
           </div>
 
           <div className="mt-5 rounded-2xl border border-white/10 bg-slate-900/70 p-4">
