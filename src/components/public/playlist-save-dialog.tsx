@@ -30,7 +30,8 @@ export function PlaylistSaveDialog({ open, kitId, kitSlug, kitName, onClose }: P
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [status, setStatus] = useState<Status>(null);
-  const [createdSlug, setCreatedSlug] = useState<string | null>(null);
+  const [savedPlaylistSlug, setSavedPlaylistSlug] = useState<string | null>(null);
+  const [savedPlaylistLabel, setSavedPlaylistLabel] = useState("Abrir playlist");
 
   useEffect(() => {
     if (!open) return;
@@ -40,7 +41,8 @@ export function PlaylistSaveDialog({ open, kitId, kitSlug, kitName, onClose }: P
     async function loadPlaylists() {
       setLoading(true);
       setStatus(null);
-      setCreatedSlug(null);
+      setSavedPlaylistSlug(null);
+      setSavedPlaylistLabel("Abrir playlist");
 
       try {
         const response = await fetch("/api/playlists", { cache: "no-store" });
@@ -85,6 +87,7 @@ export function PlaylistSaveDialog({ open, kitId, kitSlug, kitName, onClose }: P
 
     setSubmitting(true);
     setStatus(null);
+    setSavedPlaylistSlug(null);
 
     try {
       const response = await fetch("/api/playlists", {
@@ -98,7 +101,11 @@ export function PlaylistSaveDialog({ open, kitId, kitSlug, kitName, onClose }: P
         throw new Error(data.error ?? "Não foi possível adicionar o kit à playlist.");
       }
 
-      setStatus({ type: "success", message: selectedPlaylist ? `Kit adicionado à playlist ${selectedPlaylist.name}.` : "Kit adicionado à playlist." });
+      const playlistSlug = data.slug ?? selectedPlaylist?.slug ?? null;
+      const playlistName = selectedPlaylist?.name ?? "playlist";
+      setSavedPlaylistSlug(playlistSlug);
+      setSavedPlaylistLabel(`Abrir ${playlistName}`);
+      setStatus({ type: "success", message: `Kit adicionado à playlist ${playlistName}.` });
     } catch (error) {
       setStatus({ type: "error", message: error instanceof Error ? error.message : "Não foi possível adicionar o kit à playlist." });
     } finally {
@@ -115,7 +122,8 @@ export function PlaylistSaveDialog({ open, kitId, kitSlug, kitName, onClose }: P
 
     setSubmitting(true);
     setStatus(null);
-    setCreatedSlug(null);
+    setSavedPlaylistSlug(null);
+    setSavedPlaylistLabel("Abrir playlist");
 
     try {
       const response = await fetch("/api/playlists", {
@@ -129,7 +137,8 @@ export function PlaylistSaveDialog({ open, kitId, kitSlug, kitName, onClose }: P
         throw new Error(data.error ?? "Não foi possível criar a playlist.");
       }
 
-      setCreatedSlug(data.slug ?? null);
+      setSavedPlaylistSlug(data.slug ?? null);
+      setSavedPlaylistLabel("Abrir playlist criada");
       setNewPlaylistName("");
       setStatus({ type: "success", message: "Playlist criada com este kit." });
 
@@ -169,6 +178,7 @@ export function PlaylistSaveDialog({ open, kitId, kitSlug, kitName, onClose }: P
               onClick={() => {
                 setMode("existing");
                 setStatus(null);
+                setSavedPlaylistSlug(null);
               }}
               disabled={!playlists.length}
               className={`rounded-xl px-3 py-2 text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-45 ${mode === "existing" ? "bg-cyan-300 text-black" : "text-zinc-200 hover:bg-white/5"}`}
@@ -180,6 +190,7 @@ export function PlaylistSaveDialog({ open, kitId, kitSlug, kitName, onClose }: P
               onClick={() => {
                 setMode("new");
                 setStatus(null);
+                setSavedPlaylistSlug(null);
               }}
               className={`rounded-xl px-3 py-2 text-sm font-bold transition ${mode === "new" ? "bg-cyan-300 text-black" : "text-zinc-200 hover:bg-white/5"}`}
             >
@@ -206,6 +217,7 @@ export function PlaylistSaveDialog({ open, kitId, kitSlug, kitName, onClose }: P
                         onClick={() => {
                           setSelectedPlaylistId(playlist.id);
                           setStatus(null);
+                          setSavedPlaylistSlug(null);
                         }}
                         className={`flex w-full items-center justify-between gap-4 rounded-2xl border px-4 py-3 text-left transition ${active ? "border-cyan-300 bg-cyan-300/10" : "border-white/10 bg-white/[0.03] hover:bg-white/[0.06]"}`}
                       >
@@ -243,6 +255,7 @@ export function PlaylistSaveDialog({ open, kitId, kitSlug, kitName, onClose }: P
                   onChange={(event) => {
                     setNewPlaylistName(event.target.value);
                     setStatus(null);
+                    setSavedPlaylistSlug(null);
                   }}
                   maxLength={80}
                   placeholder="Ex.: Culto de domingo"
@@ -265,9 +278,9 @@ export function PlaylistSaveDialog({ open, kitId, kitSlug, kitName, onClose }: P
           {status ? (
             <div className={`rounded-2xl border px-4 py-3 text-sm ${status.type === "success" ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-100" : "border-rose-400/25 bg-rose-500/10 text-rose-100"}`}>
               {status.message}
-              {createdSlug ? (
-                <Link href={`/playlist/${createdSlug}`} className="mt-2 block font-bold text-cyan-200 hover:text-cyan-100">
-                  Abrir playlist criada
+              {savedPlaylistSlug ? (
+                <Link href={`/playlist/${savedPlaylistSlug}`} className="mt-3 inline-flex w-full items-center justify-center rounded-xl border border-cyan-300/30 bg-cyan-300/10 px-4 py-3 text-sm font-black uppercase tracking-[0.14em] text-cyan-100 transition hover:bg-cyan-300/20 hover:text-white">
+                  {savedPlaylistLabel}
                 </Link>
               ) : null}
             </div>
