@@ -12,8 +12,6 @@ type WhatsAppProvider = "labmessage" | "evolution" | "zapi" | "meta" | "custom";
 type EmailProvider = "smtp" | "resend" | "sendgrid" | "ses";
 type ChannelType = "whatsapp" | "email";
 
-type SecretStatus = { configured: true };
-
 type WhatsAppConfig = {
   apiUrl?: string;
   apiToken?: string;
@@ -60,11 +58,11 @@ type MarketingChannelRow = MarketingChannelRecord & {
 };
 
 type SafeWhatsAppConfig = Omit<WhatsAppConfig, "apiToken"> & {
-  apiToken?: SecretStatus;
+  tokenConfigured?: true;
 };
 
 type SafeEmailConfig = Omit<EmailConfig, "smtpPass"> & {
-  smtpPass?: SecretStatus;
+  passwordConfigured?: true;
 };
 
 type SafeMarketingChannelRow = Omit<MarketingChannelRow, "config"> & {
@@ -160,10 +158,10 @@ function buildWhatsAppConfig(input: Record<string, unknown>, existing?: WhatsApp
   addStringIfFilled(config, "instance", input.instance);
   addStringIfFilled(config, "testPhone", input.testPhone);
 
-  const hasApiTokenInput = Object.hasOwn(input, "apiToken");
   const apiToken = sanitizeString(input.apiToken);
+  const existingApiToken = existing?.apiToken;
   if (apiToken && apiToken !== MASKED_SECRET) config.apiToken = apiToken;
-  else if ((!hasApiTokenInput || apiToken === MASKED_SECRET) && hasSecret(existing?.apiToken)) config.apiToken = existing?.apiToken;
+  else if (hasSecret(existingApiToken)) config.apiToken = existingApiToken;
 
   return config;
 }
@@ -179,10 +177,10 @@ function buildEmailConfig(input: Record<string, unknown>, existing?: EmailConfig
   const smtpPort = sanitizeString(input.smtpPort);
   if (smtpPort) config.smtpPort = sanitizeNumber(smtpPort, 587);
 
-  const hasSmtpPassInput = Object.hasOwn(input, "smtpPass");
   const smtpPass = sanitizeString(input.smtpPass);
+  const existingSmtpPass = existing?.smtpPass;
   if (smtpPass && smtpPass !== MASKED_SECRET) config.smtpPass = smtpPass;
-  else if ((!hasSmtpPassInput || smtpPass === MASKED_SECRET) && hasSecret(existing?.smtpPass)) config.smtpPass = existing?.smtpPass;
+  else if (hasSecret(existingSmtpPass)) config.smtpPass = existingSmtpPass;
 
   return config;
 }
@@ -212,7 +210,7 @@ function sanitizeConfigForResponse(type: ChannelType, config: StoredConfig): Saf
     if (whatsappConfig.apiUrl) safeConfig.apiUrl = whatsappConfig.apiUrl;
     if (whatsappConfig.instance) safeConfig.instance = whatsappConfig.instance;
     if (whatsappConfig.testPhone) safeConfig.testPhone = whatsappConfig.testPhone;
-    if (hasSecret(whatsappConfig.apiToken)) safeConfig.apiToken = { configured: true };
+    if (hasSecret(whatsappConfig.apiToken)) safeConfig.tokenConfigured = true;
     return safeConfig;
   }
 
@@ -224,7 +222,7 @@ function sanitizeConfigForResponse(type: ChannelType, config: StoredConfig): Saf
   if (emailConfig.smtpPort) safeConfig.smtpPort = emailConfig.smtpPort;
   if (emailConfig.smtpUser) safeConfig.smtpUser = emailConfig.smtpUser;
   if (emailConfig.testEmail) safeConfig.testEmail = emailConfig.testEmail;
-  if (hasSecret(emailConfig.smtpPass)) safeConfig.smtpPass = { configured: true };
+  if (hasSecret(emailConfig.smtpPass)) safeConfig.passwordConfigured = true;
   return safeConfig;
 }
 
