@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const BASE_SELECT = "id,kit_id,tone,name,file_type,source_type";
@@ -7,6 +8,7 @@ const TESSITURA_SELECT = `${BASE_SELECT},min_midi_note,max_midi_note,detected_mi
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const current = await getCurrentUserAccessContext();
     const { id } = await params;
     const supabase = createSupabaseAdminClient() as any;
 
@@ -17,7 +19,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       .maybeSingle();
 
     if (kitError) throw new Error(kitError.message);
-    if (!kit?.id || kit.published !== true) {
+    if (!kit?.id || (!current.isAdmin && kit.published !== true)) {
       return NextResponse.json({ error: "Kit não encontrado." }, { status: 404 });
     }
 
@@ -59,7 +61,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       })),
     }, {
       headers: {
-        "Cache-Control": "public, max-age=60, stale-while-revalidate=300",
+        "Cache-Control": "no-store",
       },
     });
   } catch (error) {
