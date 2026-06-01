@@ -17,7 +17,7 @@ export type RecentActivity = {
 };
 
 export type PremiumRequestType = "song" | "tone" | "feedback";
-export type PremiumRequestStatus = "pending" | "reviewing" | "approved" | "done" | "rejected";
+export type PremiumRequestStatus = "pending" | "reviewing" | "approved" | "done" | "rejected" | "new" | "in_review" | "archived";
 
 type AudioLog = { id: string; kit_id: string | null; accessed_at?: string | null; kits?: { category_id?: string | null } | null };
 
@@ -39,6 +39,27 @@ function countByKit(logs: AudioLog[]) {
     counts.set(row.kit_id, (counts.get(row.kit_id) ?? 0) + 1);
   }
   return counts;
+}
+
+function toAdminRequestType(requestType?: string | null) {
+  if (requestType === "tone") return "tone_request";
+  if (requestType === "feedback") return "feedback";
+  return "music_request";
+}
+
+function toDbRequestStatus(status: PremiumRequestStatus) {
+  if (status === "new") return "pending";
+  if (status === "in_review") return "reviewing";
+  if (status === "archived") return "rejected";
+  return status;
+}
+
+function toAdminRequestStatus(status?: string | null) {
+  if (status === "pending") return "new";
+  if (status === "reviewing" || status === "approved") return "in_review";
+  if (status === "done") return "done";
+  if (status === "rejected") return "archived";
+  return status ?? "new";
 }
 
 async function fetchAllowedAudioLogs(input?: { userId?: string; days?: number; limit?: number; withCategory?: boolean }) {
@@ -214,7 +235,18 @@ export async function getPremiumRequests() {
     .limit(200);
 
   if (error) throw new Error(error.message);
-  return data ?? [];
+
+  return (data ?? []).map((row: any) => ({
+    ...row,
+    type: toAdminRequestType(row.request_type),
+    status: toAdminRequestStatus(row.status),
+    title: row.song_name ?? row.kit_name ?? "Solicitação premium",
+    artist: row.artist_name ?? row.kit?.artist ?? null,
+    requested_tone: row.desired_tone ?? row.requested_tone ?? null,
+    reference_url: row.reference_link ?? null,
+    message: row.notes ?? null,
+    profiles: row.profile ?? row.profiles ?? null,
+  }));
 }
 
 export async function createPremiumRequest(input: {
@@ -248,7 +280,10 @@ export async function createPremiumRequest(input: {
 
 export async function updatePremiumRequestStatus(id: string, status: PremiumRequestStatus) {
   const supabase = createSupabaseAdminClient() as any;
-  const { error } = await supabase.from("premium_requests").update({ status, updated_at: new Date().toISOString() }).eq("id", id);
+  const { error } = await supabase
+    .from("premium_requests")
+    .update({ status: toDbRequestStatus(status), updated_at: new Date().toISOString() })
+    .eq("id", id);
   if (error) throw new Error(error.message);
 }
 
