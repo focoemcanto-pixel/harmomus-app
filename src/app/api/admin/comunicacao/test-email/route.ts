@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import {
   getActiveChannel,
   isMissingCommunicationTable,
-  communicationTableErrorResponse,
+  marketingTableErrorResponse,
   maskSecret,
   requireAdmin,
   sanitizeText,
@@ -30,7 +30,7 @@ export async function POST(request: Request) {
 
   const { data: channel, error: channelError } = await getActiveChannel(admin, "email");
   if (channelError) {
-    if (isMissingCommunicationTable(channelError)) return communicationTableErrorResponse();
+    if (isMissingCommunicationTable(channelError)) return marketingTableErrorResponse();
     return NextResponse.json({ error: channelError.message }, { status: 500 });
   }
   if (!channel) return NextResponse.json({ error: "Canal de e-mail ativo não configurado." }, { status: 400 });
