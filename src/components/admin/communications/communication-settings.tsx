@@ -34,11 +34,16 @@ function readNumber(value: unknown, fallback: number) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function hasConfiguredSecret(value: unknown) {
+  return Boolean(value && typeof value === "object" && "configured" in value);
+}
+
 export function CommunicationSettings() {
   const [whatsProvider, setWhatsProvider] = useState<WhatsProvider>("labmessage");
   const [emailProvider, setEmailProvider] = useState<EmailProvider>("smtp");
   const [apiUrl, setApiUrl] = useState("");
   const [apiToken, setApiToken] = useState("");
+  const [apiTokenConfigured, setApiTokenConfigured] = useState(false);
   const [instance, setInstance] = useState("");
   const [senderName, setSenderName] = useState("Harmomus");
   const [senderEmail, setSenderEmail] = useState("contato@harmomus.com");
@@ -46,6 +51,7 @@ export function CommunicationSettings() {
   const [smtpPort, setSmtpPort] = useState("587");
   const [smtpUser, setSmtpUser] = useState("");
   const [smtpPass, setSmtpPass] = useState("");
+  const [smtpPassConfigured, setSmtpPassConfigured] = useState(false);
   const [perMinute, setPerMinute] = useState(12);
   const [perHour, setPerHour] = useState(120);
   const [perDay, setPerDay] = useState(600);
@@ -82,7 +88,8 @@ export function CommunicationSettings() {
         if (isEmailProvider(email?.provider)) setEmailProvider(email.provider);
 
         setApiUrl(String(whatsappConfig.apiUrl ?? ""));
-        setApiToken(String(whatsappConfig.apiToken ?? ""));
+        setApiToken("");
+        setApiTokenConfigured(hasConfiguredSecret(whatsappConfig.apiToken));
         setInstance(String(whatsappConfig.instance ?? ""));
         setTestPhone(String(whatsappConfig.testPhone ?? "5571993392294"));
 
@@ -91,7 +98,8 @@ export function CommunicationSettings() {
         setSmtpHost(String(emailConfig.smtpHost ?? ""));
         setSmtpPort(String(emailConfig.smtpPort ?? "587"));
         setSmtpUser(String(emailConfig.smtpUser ?? ""));
-        setSmtpPass(String(emailConfig.smtpPass ?? ""));
+        setSmtpPass("");
+        setSmtpPassConfigured(hasConfiguredSecret(emailConfig.smtpPass));
         setTestEmail(String(emailConfig.testEmail ?? "focoemcanto@gmail.com"));
 
         setPerMinute(readNumber(limits.perMinute, 12));
@@ -122,13 +130,21 @@ export function CommunicationSettings() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          whatsapp: { provider: whatsProvider, apiUrl, apiToken, instance, testPhone },
-          email: { provider: emailProvider, senderName, senderEmail, smtpHost, smtpPort, smtpUser, smtpPass, testEmail },
+          whatsapp: { provider: whatsProvider, apiUrl, ...(apiToken.trim() ? { apiToken } : {}), instance, testPhone },
+          email: { provider: emailProvider, senderName, senderEmail, smtpHost, smtpPort, smtpUser, ...(smtpPass.trim() ? { smtpPass } : {}), testEmail },
           limits: { perMinute, perHour, perDay, delayMin, delayMax, pauseEvery, pauseMinutes },
         }),
       });
       const json = await response.json().catch(() => null);
       if (!response.ok) throw new Error(json?.error ?? "Falha ao salvar configurações.");
+      if (apiToken.trim()) {
+        setApiToken("");
+        setApiTokenConfigured(true);
+      }
+      if (smtpPass.trim()) {
+        setSmtpPass("");
+        setSmtpPassConfigured(true);
+      }
       setStatus("Configurações salvas no Supabase com sucesso.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Falha ao salvar configurações.");
@@ -201,7 +217,7 @@ export function CommunicationSettings() {
           </div>
           <div className="mt-5 grid gap-4 lg:grid-cols-2">
             <label className="text-sm text-slate-300">URL/API ou Webhook<input value={apiUrl} onChange={(e) => setApiUrl(e.target.value)} placeholder="https://..." className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none focus:border-emerald-300/60" /></label>
-            <label className="text-sm text-slate-300">Token/Chave secreta<input value={apiToken} onChange={(e) => setApiToken(e.target.value)} type="password" placeholder="••••••••" className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none focus:border-emerald-300/60" /></label>
+            <label className="text-sm text-slate-300">Token/Chave secreta<input value={apiToken} onChange={(e) => setApiToken(e.target.value)} type="password" placeholder={apiTokenConfigured ? "Token já configurado" : "••••••••"} className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none focus:border-emerald-300/60" /></label>
             <label className="text-sm text-slate-300">Instância / número remetente<input value={instance} onChange={(e) => setInstance(e.target.value)} placeholder="main / 5571..." className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none focus:border-emerald-300/60" /></label>
             <label className="text-sm text-slate-300">WhatsApp de teste<input value={testPhone} onChange={(e) => setTestPhone(e.target.value)} className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none focus:border-emerald-300/60" /></label>
           </div>
@@ -223,7 +239,7 @@ export function CommunicationSettings() {
             <label className="text-sm text-slate-300">SMTP host / API host<input value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)} className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none focus:border-cyan-300/60" /></label>
             <label className="text-sm text-slate-300">Porta<input value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)} className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none focus:border-cyan-300/60" /></label>
             <label className="text-sm text-slate-300">Usuário/API key<input value={smtpUser} onChange={(e) => setSmtpUser(e.target.value)} className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none focus:border-cyan-300/60" /></label>
-            <label className="text-sm text-slate-300">Senha/Secret<input value={smtpPass} onChange={(e) => setSmtpPass(e.target.value)} type="password" className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none focus:border-cyan-300/60" /></label>
+            <label className="text-sm text-slate-300">Senha/Secret<input value={smtpPass} onChange={(e) => setSmtpPass(e.target.value)} type="password" placeholder={smtpPassConfigured ? "Senha já configurada" : "••••••••"} className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none focus:border-cyan-300/60" /></label>
             <label className="text-sm text-slate-300 lg:col-span-2">E-mail de teste<input value={testEmail} onChange={(e) => setTestEmail(e.target.value)} className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none focus:border-cyan-300/60" /></label>
           </div>
         </section>

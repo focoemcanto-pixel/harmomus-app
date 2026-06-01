@@ -32,7 +32,8 @@ const PLAN_PRICE_ESTIMATE = {
 
 type ListItem = { label: string; value: number };
 type FunnelStep = { label: string; value: number; caption: string };
-type Opportunity = { label: string; value: number; usersHint?: string; kind: "high" | "medium" | "low" };
+type OpportunityKind = "high" | "medium" | "low";
+type Opportunity = { label: string; value: number; usersHint?: string; kind: OpportunityKind; priorityRate: number };
 type Insight = { title: string; body: string; tone: "emerald" | "cyan" | "violet" | "rose" | "amber" };
 type CeoMetric = { title: string; value: string | number; caption: string; tone?: "default" | "good" | "warn" | "danger" };
 
@@ -68,10 +69,22 @@ function funnelRateLabel(value: number, previous: number, index: number) {
   return `${rate}%`;
 }
 
-function potentialLabel(kind: Opportunity["kind"]) {
-  if (kind === "high") return "🔥 Alto";
-  if (kind === "medium") return "🟡 Médio";
-  return "Baixo";
+function potentialLabel(kind: OpportunityKind) {
+  if (kind === "high") return "Alta";
+  if (kind === "medium") return "Média";
+  return "Baixa";
+}
+
+function opportunityKind(value: number): OpportunityKind {
+  if (value >= 20) return "high";
+  if (value >= 8) return "medium";
+  return "low";
+}
+
+function opportunityPriority(kind: OpportunityKind) {
+  if (kind === "high") return 3;
+  if (kind === "medium") return 2;
+  return 1;
 }
 
 function MetricCard({ title, value, caption, tone = "default" }: { title: string; value: number | string; caption: string; tone?: "default" | "good" | "warn" | "danger" }) {
@@ -250,10 +263,10 @@ function OpportunityCenter({ opportunities }: { opportunities: Opportunity[] }) 
                   <h4 className="truncate text-sm font-semibold text-white">{item.label}</h4>
                   <p className="mt-1 text-xs text-zinc-500">{item.usersHint ?? "Usuários únicos ainda não disponíveis para este recorte."}</p>
                 </div>
-                <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] ${item.kind === "high" ? "border border-rose-400/30 bg-rose-500/10 text-rose-100" : item.kind === "medium" ? "border border-amber-400/30 bg-amber-500/10 text-amber-100" : "border border-white/10 bg-white/[0.03] text-zinc-300"}`}>{potentialLabel(item.kind)}</span>
+                <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] ${item.kind === "high" ? "border border-rose-400/30 bg-rose-500/10 text-rose-100" : item.kind === "medium" ? "border border-amber-400/30 bg-amber-500/10 text-amber-100" : "border border-emerald-400/20 bg-emerald-500/10 text-emerald-100"}`}>Prioridade {potentialLabel(item.kind)}</span>
               </div>
               <p className="mt-5 text-3xl font-semibold text-white">{formatNumber(item.value)}</p>
-              <p className="mt-1 text-xs text-zinc-500">bloqueios no período</p>
+              <p className="mt-1 text-xs text-zinc-500">bloqueios no período · taxa de prioridade {item.priorityRate}/3</p>
               <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.02] p-3 text-xs text-zinc-400">Ação sugerida: campanha de upgrade ou liberar prévia estratégica deste kit.</div>
             </article>
           ))}
@@ -273,12 +286,12 @@ function FutureMetricsRoadmap() {
     "Kits que mais convertem assinatura",
   ];
   return (
-    <div className="rounded-3xl border border-dashed border-white/15 bg-white/[0.02] p-5">
+    <div className="min-w-0 overflow-hidden rounded-3xl border border-dashed border-white/15 bg-white/[0.02] p-5">
       <p className="text-xs font-semibold uppercase tracking-[0.24em] text-zinc-500">Próximas métricas</p>
       <h3 className="mt-1 text-lg font-semibold text-white">Dados que dependem de novos eventos</h3>
       <p className="mt-1 text-sm text-zinc-500">Esses indicadores foram planejados, mas não devem ser estimados sem rastreamento próprio para evitar decisões em cima de número falso.</p>
       <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-        {items.map((item) => <div key={item} className="rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-xs text-zinc-300">{item}</div>)}
+        {items.map((item) => <div key={item} className="min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-xs text-zinc-300">{item}</div>)}
       </div>
     </div>
   );
@@ -296,11 +309,11 @@ function InsightCard({ label, value, tone = "cyan" }: { label: string; value: st
 
 function DataTable({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-zinc-950/55 shadow-2xl shadow-black/20">
+    <div className="min-w-0 max-w-full overflow-hidden rounded-3xl border border-white/10 bg-zinc-950/55 shadow-2xl shadow-black/20">
       <div className="p-5 pb-0">
         <h3 className="mb-4 truncate text-sm font-semibold text-cyan-100">{title}</h3>
       </div>
-      <div className="overflow-x-auto px-5 pb-5">
+      <div className="max-w-full overflow-x-auto px-5 pb-5">
         {children}
       </div>
     </div>
@@ -309,7 +322,10 @@ function DataTable({ title, children }: { title: string; children: React.ReactNo
 
 export default async function AdminAnalyticsPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const params = await searchParams;
-  const filters: AnalyticsFilters = { period: (params.period as any) ?? "30", plan: (params.plan as any) ?? "all", device: (params.device as any) ?? "all", query: params.q ?? "" };
+  const period = params.period === "7" || params.period === "30" || params.period === "90" ? params.period : "30";
+  const plan = params.plan === "free" || params.plan === "plus" || params.plan === "premium" || params.plan === "all" ? params.plan : "all";
+  const device = params.device === "mobile" || params.device === "desktop" || params.device === "all" ? params.device : "all";
+  const filters: AnalyticsFilters = { period, plan, device, query: params.q ?? "" };
 
   const [summary, byDay, devices, plans, topSongs, topKits, topUsers, topTones, topVoices, recent, premiumRequests, deniedReasons, deniedKits, gatePages, recentDenied] = await Promise.all([
     getAdminAnalyticsSummary(filters), getPlaysByDay(filters), getDeviceBreakdown(filters), getPlanBreakdown(filters), getTopSongs(filters), getTopKits(filters), getTopUsers(filters), getTopTones(filters), getTopVoices(filters), getRecentPlays(filters), getPremiumRequestsSummary(filters), getTopDeniedReasons(filters), getTopDeniedKits(filters), getTopGatePages(filters), getRecentDenied(filters),
@@ -330,11 +346,13 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
     { label: "Bloqueios Premium", value: summary.gateViews || summary.denied, caption: "Desejo travado por plano/acesso." },
     { label: "Pedidos Premium", value: premiumRequests.open, caption: "Solicitações abertas para conversão." },
   ];
-  const opportunities: Opportunity[] = deniedKits.slice(0, 6).map((item) => ({
-    label: item.label,
-    value: item.value,
-    kind: item.value >= 20 ? "high" : item.value >= 8 ? "medium" : "low",
-  }));
+  const opportunities: Opportunity[] = deniedKits
+    .map((item) => {
+      const kind = opportunityKind(item.value);
+      return { label: item.label, value: item.value, kind, priorityRate: opportunityPriority(kind) };
+    })
+    .sort((a, b) => b.priorityRate - a.priorityRate || b.value - a.value || a.label.localeCompare(b.label))
+    .slice(0, 6);
   const ceoMetrics: CeoMetric[] = [
     { title: "Simulação de MRR", value: formatCurrency(estimatedMrr), caption: "Simulação com preço fixo no código", tone: "good" },
     { title: "Simulação de potencial", value: formatCurrency(potentialRevenue), caption: "Estimativa baseada em pedidos abertos", tone: premiumRequests.open > 0 ? "warn" : "default" },
@@ -343,16 +361,29 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
     { title: "Mix Premium", value: `${percent(summary.premiumActive, summary.activeSubscribers)}%`, caption: "Participação Premium/Ministerial na base" },
     { title: "Bloqueio", value: `${summary.denyRate}%`, caption: "Tentativas travadas no período", tone: summary.denyRate > 20 ? "danger" : summary.denyRate > 0 ? "warn" : "default" },
   ];
+  const dayChanges = byDay.slice(1).map((item, index) => {
+    const previous = byDay[index];
+    const delta = item.plays - (previous?.plays ?? 0);
+    return { date: item.date, previousDate: previous?.date, plays: item.plays, delta };
+  });
+  const biggestGrowth = [...dayChanges].sort((a, b) => b.delta - a.delta)[0];
+  const biggestDrop = [...dayChanges].sort((a, b) => a.delta - b.delta)[0];
+  const topOpportunity = opportunities[0];
   const automaticInsights: Insight[] = [
     {
-      title: summary.denyRate > 15 ? "Bloqueio alto" : "Bloqueio controlado",
-      body: summary.denyRate > 15 ? `${summary.denyRate}% das tentativas foram bloqueadas. Isso pode indicar desejo de upgrade, mas também fricção excessiva.` : `Taxa de bloqueio em ${summary.denyRate}%. Acompanhe se isso gera pedidos Premium ou abandono.`,
-      tone: summary.denyRate > 15 ? "rose" : "cyan",
+      title: "Maior crescimento",
+      body: biggestGrowth && biggestGrowth.delta > 0 ? `${formatDay(biggestGrowth.date)} cresceu ${formatNumber(biggestGrowth.delta)} play(s) em relação a ${formatDay(biggestGrowth.previousDate)}.` : "Não houve crescimento diário positivo suficiente no período selecionado.",
+      tone: "emerald",
     },
     {
-      title: "Conteúdo com maior tração",
+      title: "Maior queda",
+      body: biggestDrop && biggestDrop.delta < 0 ? `${formatDay(biggestDrop.date)} caiu ${formatNumber(Math.abs(biggestDrop.delta))} play(s) em relação a ${formatDay(biggestDrop.previousDate)}.` : "Não houve queda diária relevante nos dados atuais.",
+      tone: biggestDrop && biggestDrop.delta < 0 ? "rose" : "cyan",
+    },
+    {
+      title: "Kit mais consumido",
       body: topKit !== "não informado" ? `${topKit} lidera o consumo no período. Considere expandir tons, vozes ou criar campanha em cima dele.` : "Ainda não há kit líder suficiente para uma decisão de conteúdo.",
-      tone: "emerald",
+      tone: "cyan",
     },
     {
       title: "Plano dominante",
@@ -360,22 +391,22 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
       tone: "violet",
     },
     {
-      title: premiumRequests.open > 0 ? "Fila comercial aberta" : "Sem fila Premium aberta",
-      body: premiumRequests.open > 0 ? `${premiumRequests.open} solicitação(ões) Premium precisam de atenção. Priorize contato rápido para aumentar conversão.` : "Nenhuma solicitação Premium aberta agora. Foque em criar novos pontos de desejo no produto.",
-      tone: premiumRequests.open > 0 ? "amber" : "cyan",
+      title: "Maior oportunidade comercial",
+      body: topOpportunity ? `${topOpportunity.label} tem prioridade ${potentialLabel(topOpportunity.kind).toLowerCase()} com ${formatNumber(topOpportunity.value)} bloqueio(s) no período.` : "Nenhuma oportunidade comercial por bloqueio foi encontrada no período.",
+      tone: topOpportunity?.kind === "high" ? "rose" : topOpportunity?.kind === "medium" ? "amber" : "cyan",
     },
   ];
 
   return <section className="min-w-0 space-y-6 overflow-hidden text-zinc-100">
     <PageHeader title="Analytics" description="Inteligência de consumo, retenção e oportunidades comerciais da plataforma Harmomus." />
 
-    <form className="rounded-3xl border border-white/10 bg-zinc-950/55 p-4 shadow-2xl shadow-black/20">
+    <form className="min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-zinc-950/55 p-4 shadow-2xl shadow-black/20">
       <div className="grid gap-3 md:grid-cols-5">
-        <select name="period" defaultValue={filters.period} className="rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm outline-none"><option value="7">7 dias</option><option value="30">30 dias</option><option value="90">90 dias</option></select>
-        <select name="plan" defaultValue={filters.plan} className="rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm outline-none"><option value="all">Todos planos</option><option value="free">Free</option><option value="plus">Plus</option><option value="premium">Premium</option></select>
-        <select name="device" defaultValue={filters.device} className="rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm outline-none"><option value="all">Todos dispositivos</option><option value="mobile">Mobile</option><option value="desktop">Desktop</option></select>
-        <input name="q" defaultValue={filters.query} placeholder="Buscar kit/música" className="rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm outline-none placeholder:text-zinc-600" />
-        <button className="rounded-2xl border border-cyan-400/30 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/15">Aplicar filtros</button>
+        <select name="period" defaultValue={filters.period} className="min-w-0 rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm outline-none"><option value="7">7 dias</option><option value="30">30 dias</option><option value="90">90 dias</option></select>
+        <select name="plan" defaultValue={filters.plan} className="min-w-0 rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm outline-none"><option value="all">Todos planos</option><option value="free">Free</option><option value="plus">Plus</option><option value="premium">Premium</option></select>
+        <select name="device" defaultValue={filters.device} className="min-w-0 rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm outline-none"><option value="all">Todos dispositivos</option><option value="mobile">Mobile</option><option value="desktop">Desktop</option></select>
+        <input name="q" defaultValue={filters.query} placeholder="Buscar kit/música" className="min-w-0 rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm outline-none placeholder:text-zinc-600" />
+        <button className="min-w-0 rounded-2xl border border-cyan-400/30 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/15">Aplicar filtros</button>
       </div>
     </form>
 
