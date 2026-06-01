@@ -3,10 +3,12 @@
 import Link from "next/link";
 import { useState } from "react";
 
+import { PlaylistSaveDialog } from "@/components/public/playlist-save-dialog";
 import { ShareButton } from "@/components/public/share-button";
 import { canSavePlaylist } from "@/lib/access/access-engine";
 
 export function KitActionsMenu({
+  kitId,
   kitName,
   kitSlug,
   categorySlug,
@@ -14,6 +16,7 @@ export function KitActionsMenu({
   canRequestSongsAndTones = planSlug === "premium",
   onPremiumRequired,
 }: {
+  kitId: string;
   kitName: string;
   kitSlug: string;
   categorySlug?: string | null;
@@ -22,6 +25,7 @@ export function KitActionsMenu({
   onPremiumRequired?: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [playlistOpen, setPlaylistOpen] = useState(false);
   const isPremium = planSlug === "premium";
   const canRequestTone = isPremium && canRequestSongsAndTones;
   const isPremiumWithoutRequestPermission = isPremium && !canRequestSongsAndTones;
@@ -34,6 +38,11 @@ export function KitActionsMenu({
     onPremiumRequired?.();
   }
 
+  function openPlaylistDialog() {
+    setOpen(false);
+    setPlaylistOpen(true);
+  }
+
   return (
     <div className="relative">
       <button type="button" onClick={() => setOpen((v) => !v)} className="rounded-full border border-white/15 bg-black/30 px-3 py-1 text-sm text-white">Ações</button>
@@ -42,9 +51,13 @@ export function KitActionsMenu({
           <ShareButton title={kitName} />
 
           {canUsePlaylists ? (
-            <Link href={`/criar-playlist?kit=${kitSlug}`} className="mt-1 block rounded-lg border border-white/10 px-3 py-2 text-sm text-zinc-200 hover:bg-white/5">
+            <button
+              type="button"
+              onClick={openPlaylistDialog}
+              className="mt-1 block w-full rounded-lg border border-white/10 px-3 py-2 text-left text-sm text-zinc-200 hover:bg-white/5"
+            >
               Salvar na playlist
-            </Link>
+            </button>
           ) : (
             <button
               type="button"
@@ -87,6 +100,16 @@ export function KitActionsMenu({
             </Link>
           ) : null}
         </div>
+      ) : null}
+
+      {canUsePlaylists ? (
+        <PlaylistSaveDialog
+          open={playlistOpen}
+          kitId={kitId}
+          kitSlug={kitSlug}
+          kitName={kitName}
+          onClose={() => setPlaylistOpen(false)}
+        />
       ) : null}
     </div>
   );
