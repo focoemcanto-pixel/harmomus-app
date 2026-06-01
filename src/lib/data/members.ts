@@ -189,26 +189,31 @@ async function safeTableQuery<T = any>(queryPromise: PromiseLike<{ data: T[] | n
   }
 }
 
+function getMemberIdentifiers(member: MemberListItem) {
+  const profile = member.profile as any;
+  const subscription = member.subscription as any;
+
+  return Array.from(new Set([
+    profile?.id,
+    profile?.email,
+    subscription?.stripe_customer_id,
+    subscription?.gateway_customer_id,
+    subscription?.stripe_subscription_id,
+    subscription?.gateway_subscription_id,
+    subscription?.stripe_price_id,
+    subscription?.legacy_pms_subscription_id,
+    profile?.legacy_pms_member_id,
+  ].filter(Boolean).map(String)));
+}
+
 export async function getSubscriberJourneyData(member: MemberListItem): Promise<SubscriberJourneyData> {
   const supabase = createSupabaseAdminClient() as any;
   const profile = member.profile as any;
   const subscription = member.subscription as any;
   const userId = profile?.id;
-  const email = profile?.email;
-  const stripeCustomerId = subscription?.stripe_customer_id ?? subscription?.gateway_customer_id;
-  const stripeSubscriptionId = subscription?.stripe_subscription_id ?? subscription?.gateway_subscription_id;
   const legacySubscriptionId = numericString(subscription?.legacy_pms_subscription_id);
   const legacyMemberId = numericString(profile?.legacy_pms_member_id);
-
-  const identifiers = Array.from(new Set([
-    userId,
-    email,
-    stripeCustomerId,
-    stripeSubscriptionId,
-    subscription?.stripe_price_id,
-    subscription?.legacy_pms_subscription_id,
-    profile?.legacy_pms_member_id,
-  ].filter(Boolean).map(String)));
+  const identifiers = getMemberIdentifiers(member);
 
   const [
     communicationByUser,
@@ -269,7 +274,6 @@ export async function getSubscriberJourneyData(member: MemberListItem): Promise<
   };
 }
 
-
 export async function getMemberOperationalSummaries(
   members: MemberListItem[],
   options: { limit?: number } = {},
@@ -279,8 +283,11 @@ export async function getMemberOperationalSummaries(
   const targetMembers = members.slice(0, limit);
   const userIds = targetMembers.map((member) => member.profile.id).filter(Boolean);
   const empty = new Map<string, Partial<SubscriberJourneyData>>();
+  const identifiersByUser = new Map<string, string[]>();
 
-  for (const userId of userIds) {
+  for (const member of targetMembers) {
+    const userId = member.profile.id;
+    if (!userId) continue;
     empty.set(userId, {
       communicationLogs: [],
       kitAccessLogs: [],
@@ -291,14 +298,20 @@ export async function getMemberOperationalSummaries(
       legacyStripeCustomers: [],
       legacyStripeCustomerImports: [],
     });
+    identifiersByUser.set(userId, getMemberIdentifiers(member));
   }
 
   if (!userIds.length) return empty;
 
-  const [communicationLogs, kitAccessLogs, audioAccessLogs] = await Promise.all([
-    safeTableQuery(supabase.from("communication_logs").select("*").in("user_id", userIds).order("created_at", { ascending: false }).limit(Math.max(userIds.length * 5, 100))),
-    safeTableQuery(supabase.from("kit_access_logs").select("*").in("user_id", userIds).order("accessed_at", { ascending: false }).limit(Math.max(userIds.length * 5, 100))),
-    safeTableQuery(supabase.from("audio_access_logs").select("*").in("user_id", userIds).order("accessed_at", { ascending: false }).limit(Math.max(userIds.length * 5, 100))),
+  const lightweightLimit = Math.max(userIds.length * 5, 100);
+  const webhookLimit = Math.max(userIds.length * 20, 500);
+
+  const [communicationLogs, kitAccessLogs, audioAccessLogs, webhookLogsRaw, webhookProcessedEventsRaw] = await Promise.all([
+    safeTableQuery(supabase.from("communication_logs").select("*").in("user_id", userIds).order("created_at", { ascending: false }).limit(lightweightLimit)),
+    safeTableQuery(supabase.from("kit_access_logs").select("*").in("user_id", userIds).order("accessed_at", { ascending: false }).limit(lightweightLimit)),
+    safeTableQuery(supabase.from("audio_access_logs").select("*").in("user_id", userIds).order("accessed_at", { ascending: false }).limit(lightweightLimit)),
+    safeTableQuery(supabase.from("webhook_logs").select("*").order("created_at", { ascending: false }).limit(webhookLimit)),
+    safeTableQuery(supabase.from("webhook_processed_events").select("*").order("processed_at", { ascending: false }).limit(webhookLimit)),
   ]);
 
   for (const log of communicationLogs) {
@@ -317,6 +330,13 @@ export async function getMemberOperationalSummaries(
     const userId = String((log as any)?.user_id ?? "");
     const summary = empty.get(userId);
     if (summary) summary.audioAccessLogs = [...(summary.audioAccessLogs ?? []), log];
+  }
+
+  for (const [userId, identifiers] of identifiersByUser.entries()) {
+    const summary = empty.get(userId);
+    if (!summary) continue;
+    summary.webhookLogs = webhookLogsRaw.filter((row) => rowMatchesIdentifiers(row, identifiers)).slice(0, 20);
+    summary.webhookProcessedEvents = webhookProcessedEventsRaw.filter((row) => rowMatchesIdentifiers(row, identifiers)).slice(0, 20);
   }
 
   return empty;
