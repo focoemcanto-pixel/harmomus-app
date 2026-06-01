@@ -34,9 +34,10 @@ export default async function BibliotecaKitPage({ params }: { params: Promise<{ 
   const initialFavorited = current.isGuest ? false : await isFavoriteKit(kit.id).catch(() => false);
 
   // IMPORTANTE:
-  // Não registrar consumo de kit durante renderização da página.
+  // Não registrar consumo de kit durante renderização server da página.
   // Next.js pode pré-carregar/renderizar múltiplas páginas e consumir acessos indevidamente.
-  // O consumo deve ocorrer apenas após interação explícita do usuário (play).
+  // O consumo Free é disparado no cliente, dentro do KitPageTemplate, apenas quando a página
+  // permitida é realmente montada para o usuário.
 
   if (!accessContext.play.allowed) {
     try {

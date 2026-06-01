@@ -20,6 +20,13 @@ interface KitPageTemplateProps {
   favoriteButton?: React.ReactNode;
 }
 
+type FreeAccessStats = {
+  accessCountToday?: number;
+  remaining?: number;
+  limit?: number;
+  nextResetAt?: string;
+};
+
 type AudioSource = "original" | "generated";
 
 type AudioFilesApiFile = {
@@ -219,10 +226,34 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
   const { stopPlayback, preloadTrack } = audioEngine;
   const canPlay = Boolean(accessContext?.play?.allowed);
   const [liveKit, setLiveKit] = useState<PublicKit>(kit);
+  const [freeAccessStats, setFreeAccessStats] = useState<FreeAccessStats | null>(accessContext?.play?.stats ?? null);
 
   useEffect(() => {
     setLiveKit(kit);
-  }, [kit]);
+    setFreeAccessStats(accessContext?.play?.stats ?? null);
+  }, [accessContext?.play?.stats, kit]);
+
+  useEffect(() => {
+    if (accessContext?.effectiveSlug !== "free" || !accessContext?.play?.allowed || !accessContext?.profile?.id) return;
+
+    let cancelled = false;
+
+    async function registerVisit() {
+      try {
+        const response = await fetch(`/api/kits/${kit.id}/access`, { method: "POST", cache: "no-store" });
+        const data = await response.json().catch(() => null);
+        if (!cancelled && response.ok && data?.stats) setFreeAccessStats(data.stats);
+      } catch (error) {
+        console.warn("[KitPageTemplate] Could not register free kit access", error);
+      }
+    }
+
+    void registerVisit();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessContext?.effectiveSlug, accessContext?.play?.allowed, accessContext?.profile?.id, kit.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -546,7 +577,7 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
                     } else if (accessContext.play.reason === "free_limit") {
                       setUpgradeConfig({
                         title: "Você atingiu seu limite gratuito de hoje.",
-                        message: "Seu plano Free permite acessar até 3 kits diferentes a cada 24 horas. Faça upgrade para continuar estudando sem interrupções.",
+                        message: "Seu plano Free permite até 3 visitas válidas a kits a cada 24 horas. Faça upgrade para continuar estudando sem interrupções.",
                         ctaLabel: "Fazer upgrade",
                         ctaHref: "/assinar?plan=plus",
                       });
@@ -601,7 +632,7 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
               )}
 
               {accessContext.effectiveSlug === "free" ? (
-                <AccessCounter value={accessContext.play.stats?.uniqueKitCount24h ?? 0} limit={accessContext.play.stats?.limit ?? 3} />
+                <AccessCounter value={freeAccessStats?.accessCountToday ?? accessContext.play.stats?.accessCountToday ?? 0} limit={freeAccessStats?.limit ?? accessContext.play.stats?.limit ?? 3} />
               ) : null}
             </div>
           </div>

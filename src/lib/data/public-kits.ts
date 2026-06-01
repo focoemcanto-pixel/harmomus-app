@@ -226,6 +226,42 @@ export async function getPublishedKitSearchItems(limit = 250): Promise<PublicKit
   });
 }
 
+
+export async function getPublishedKitById(id: string): Promise<PublicKit | null> {
+  const supabase = await getPublicClient();
+  const { data: kit, error: kitError } = await supabase
+    .from("kits")
+    .select("*")
+    .eq("id", id)
+    .eq("published", true)
+    .maybeSingle();
+
+  if (kitError) throw new Error(`Falha ao buscar kit: ${kitError.message}`);
+  if (!kit) return null;
+
+  const [{ data: category, error: categoryError }, { data: plans, error: plansError }, { data: files, error: filesError }] = await Promise.all([
+    kit.category_id ? supabase.from("categories").select("*").eq("id", kit.category_id).maybeSingle() : Promise.resolve({ data: null, error: null }),
+    supabase.from("plans").select("*"),
+    supabase.from("kit_audio_files").select("*").eq("kit_id", kit.id).order("tone", { ascending: true }),
+  ]);
+
+  if (categoryError) throw new Error(`Falha ao buscar categoria: ${categoryError.message}`);
+  if (plansError) throw new Error(`Falha ao buscar planos: ${plansError.message}`);
+  if (filesError) throw new Error(`Falha ao buscar áudios do kit: ${filesError.message}`);
+
+  const categoriesMap = new Map<string, Database["public"]["Tables"]["categories"]["Row"]>();
+  if (category) categoriesMap.set(category.id, category as Database["public"]["Tables"]["categories"]["Row"]);
+  const plansRows = (plans ?? []) as Database["public"]["Tables"]["plans"]["Row"][];
+  const plansMap = new Map(plansRows.map((row) => [row.id, row]));
+
+  return mapKit(
+    kit as Database["public"]["Tables"]["kits"]["Row"] & any,
+    categoriesMap,
+    plansMap,
+    (files ?? []) as Database["public"]["Tables"]["kit_audio_files"]["Row"][],
+  );
+}
+
 export async function getPublishedKitBySlug(slug: string): Promise<PublicKit | null> {
   const supabase = await getPublicClient();
   const { data: kit, error: kitError } = await supabase
