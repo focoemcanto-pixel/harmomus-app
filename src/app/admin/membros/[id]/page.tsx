@@ -1,5 +1,22 @@
+import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import {
+  Activity,
+  AlertTriangle,
+  ArrowLeft,
+  BadgeCheck,
+  CalendarClock,
+  CreditCard,
+  MailPlus,
+  MessageCircle,
+  PlayCircle,
+  ShieldCheck,
+  Target,
+  TrendingUp,
+  UserRound,
+  Zap,
+} from "lucide-react";
 
 import { ConfirmSubmitButton } from "@/components/admin/confirm-submit-button";
 import { PageHeader } from "@/components/admin/page-header";
@@ -40,24 +57,31 @@ type JourneyDiagnosis = {
   evidence: string[];
 };
 
+function normalize(value: unknown) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
 function statusBadgeClass(status?: string | null) {
-  switch (status) {
+  switch (normalize(status)) {
     case "active":
     case "trialing":
     case "concluído":
     case "enviado":
     case "entregue":
     case "allowed":
+    case "success":
       return "border-emerald-400/40 bg-emerald-500/10 text-emerald-200";
     case "pending":
     case "pendente":
     case "informação":
+    case "warning":
       return "border-amber-400/40 bg-amber-500/10 text-amber-200";
     case "canceled":
     case "inactive":
     case "erro":
     case "falhou":
     case "denied":
+    case "critical":
       return "border-red-400/40 bg-red-500/10 text-red-200";
     case "ausente":
       return "border-zinc-500/40 bg-zinc-500/10 text-zinc-300";
@@ -92,7 +116,11 @@ function isPresent(value: unknown) {
 function formatBoolean(value: unknown) {
   if (value === true) return "Sim";
   if (value === false) return "Não";
-  return "-";
+  return "—";
+}
+
+function safeDate(value?: string | null) {
+  return value ? formatDateTimeBR(value) : "—";
 }
 
 function getRowDate(row: any, preferred: string[] = []) {
@@ -109,8 +137,11 @@ function getEarliestDate(rows: any[], preferred: string[] = []) {
     .sort((a, b) => new Date(String(a)).getTime() - new Date(String(b)).getTime())[0] ?? null;
 }
 
-function getCurrentProblem(profile: any, subscription: any, journey: Awaited<ReturnType<typeof getSubscriberJourneyData>>) {
-  return buildDiagnosis(profile, subscription, journey).title;
+function getLatestDate(rows: any[], preferred: string[] = []) {
+  return rows
+    .map((row) => getRowDate(row, preferred))
+    .filter(Boolean)
+    .sort((a, b) => new Date(String(b)).getTime() - new Date(String(a)).getTime())[0] ?? null;
 }
 
 function buildDiagnosis(profile: any, subscription: any, journey: Awaited<ReturnType<typeof getSubscriberJourneyData>>): JourneyDiagnosis {
@@ -127,7 +158,7 @@ function buildDiagnosis(profile: any, subscription: any, journey: Awaited<Return
       cause: migrated
         ? "Cliente migrado do PMS com customer Stripe localizado, mas sem assinatura Stripe vinculada no banco."
         : "Customer Stripe existe, mas a subscription ainda não foi registrada ou sincronizada no Harmomus.",
-      action: "Conferir a assinatura no Stripe e, se existir, sincronizar ou preencher a subscription antes de ativar o plano.",
+      action: "Conferir a assinatura no Stripe e sincronizar a subscription antes de ativar ou considerar o acesso saudável.",
       confidence: "alta",
       evidence: [
         `Status atual: ${subscription?.status ?? "sem assinatura"}`,
@@ -143,7 +174,7 @@ function buildDiagnosis(profile: any, subscription: any, journey: Awaited<Return
       severity: "warning",
       title: "Assinatura pendente de ativação",
       cause: "Existe assinatura registrada, mas ela ainda não está ativa/trialing.",
-      action: "Verificar último webhook, status do checkout e se o pagamento foi aprovado no gateway.",
+      action: "Enviar recuperação de checkout/pagamento e revisar último webhook do gateway.",
       confidence: "alta",
       evidence: [
         `Status atual: ${subscription.status}`,
@@ -157,7 +188,7 @@ function buildDiagnosis(profile: any, subscription: any, journey: Awaited<Return
       severity: "warning",
       title: "Aguardando confirmação de e-mail",
       cause: "O cadastro ainda está marcado como pendente de confirmação de e-mail.",
-      action: "Reenviar acesso/confirmar entrega do e-mail ou orientar o usuário a verificar caixa de entrada e spam.",
+      action: "Reenviar acesso/confirmar entrega do e-mail e orientar o usuário a verificar caixa de entrada e spam.",
       confidence: "alta",
       evidence: [`Onboarding: ${profile.onboarding_status}`, `Etapa: ${profile?.onboarding_step ?? "sem etapa"}`],
     };
@@ -168,7 +199,7 @@ function buildDiagnosis(profile: any, subscription: any, journey: Awaited<Return
       severity: "info",
       title: "Usuário ainda não realizou login",
       cause: "O cadastro existe, mas não há registro de primeiro login.",
-      action: "Reenviar link de acesso ou orientar o usuário a entrar com o e-mail cadastrado.",
+      action: "Enviar campanha de primeiro acesso com link de login e instruções simples.",
       confidence: "alta",
       evidence: [
         profile?.password_setup_completed_at ? `Senha configurada em ${formatDateTimeBR(profile.password_setup_completed_at)}` : "Senha sem configuração registrada",
@@ -182,7 +213,7 @@ function buildDiagnosis(profile: any, subscription: any, journey: Awaited<Return
       severity: "warning",
       title: "Falha recente em comunicação",
       cause: "Há registros de comunicação com erro/falha para este usuário.",
-      action: "Abrir o bloco Comunicações e revisar o provider_message_id/erro retornado.",
+      action: "Abrir bloco Comunicações, revisar erro do provider e reenviar por canal alternativo.",
       confidence: "média",
       evidence: ["communication_logs contém falha ou erro"],
     };
@@ -193,7 +224,7 @@ function buildDiagnosis(profile: any, subscription: any, journey: Awaited<Return
       severity: "success",
       title: "Jornada saudável",
       cause: "Assinatura ativa/trialing e sem problema crítico detectado na leitura administrativa.",
-      action: "Nenhuma ação obrigatória. Use a timeline apenas para auditoria fina.",
+      action: "Acompanhar engajamento, uso de kits e oportunidades de upgrade/retenção.",
       confidence: "média",
       evidence: [`Status atual: ${subscription?.status}`],
     };
@@ -215,18 +246,38 @@ function buildChecklist(profile: any, subscription: any, journey: Awaited<Return
   const activeStatuses = new Set(["active", "trialing"]);
 
   return [
-    { label: "Perfil criado", status: profile?.created_at ? "concluído" : "ausente", detail: formatDateTimeBR(profile?.created_at) },
-    { label: "Senha configurada", status: profile?.password_setup_completed_at ? "concluído" : profile?.requires_password_setup ? "pendente" : "informação", detail: profile?.password_setup_completed_at ? formatDateTimeBR(profile.password_setup_completed_at) : "Sem data registrada" },
+    { label: "Perfil criado", status: profile?.created_at ? "concluído" : "ausente", detail: safeDate(profile?.created_at) },
+    { label: "Senha configurada", status: profile?.password_setup_completed_at ? "concluído" : profile?.requires_password_setup ? "pendente" : "informação", detail: profile?.password_setup_completed_at ? safeDate(profile.password_setup_completed_at) : "Sem data registrada" },
     { label: "E-mail confirmado", status: profile?.onboarding_status === "pending_email_confirmation" ? "pendente" : "informação", detail: profile?.onboarding_status === "pending_email_confirmation" ? "Aguardando confirmação de e-mail" : profile?.onboarding_status ?? "Sem status específico" },
-    { label: "Assinatura criada", status: subscription?.created_at ? "concluído" : "ausente", detail: formatDateTimeBR(subscription?.created_at) },
+    { label: "Assinatura criada", status: subscription?.created_at ? "concluído" : "ausente", detail: safeDate(subscription?.created_at) },
     { label: "Stripe Customer vinculado", status: stripeCustomer ? "concluído" : "ausente", detail: stripeCustomer ?? "Sem customer" },
     { label: "Stripe Subscription vinculada", status: stripeSubscription ? "concluído" : stripeCustomer ? "erro" : "ausente", detail: stripeSubscription ?? "Sem subscription" },
     { label: "Plano ativo", status: activeStatuses.has(subscription?.status) ? "concluído" : subscription?.status === "pending" ? "pendente" : "ausente", detail: subscription?.status ?? "Sem assinatura" },
-    { label: "Primeiro login realizado", status: profile?.last_login_at ? "concluído" : "pendente", detail: formatDateTimeBR(profile?.last_login_at) },
-    { label: "Primeiro acesso a kit", status: journey.kitAccessLogs.length ? "concluído" : "ausente", detail: journey.kitAccessLogs.length ? formatDateTimeBR(getEarliestDate(journey.kitAccessLogs, ["accessed_at"])) : "Sem acesso registrado" },
-    { label: "Primeiro áudio reproduzido", status: journey.audioAccessLogs.some((log: any) => log.status !== "denied") ? "concluído" : journey.audioAccessLogs.length ? "erro" : "ausente", detail: journey.audioAccessLogs.length ? formatDateTimeBR(getEarliestDate(journey.audioAccessLogs, ["accessed_at"])) : "Sem áudio registrado" },
+    { label: "Primeiro login realizado", status: profile?.last_login_at ? "concluído" : "pendente", detail: safeDate(profile?.last_login_at) },
+    { label: "Primeiro acesso a kit", status: journey.kitAccessLogs.length ? "concluído" : "ausente", detail: journey.kitAccessLogs.length ? safeDate(getEarliestDate(journey.kitAccessLogs, ["accessed_at"])) : "Sem acesso registrado" },
+    { label: "Primeiro áudio reproduzido", status: journey.audioAccessLogs.some((log: any) => log.status !== "denied") ? "concluído" : journey.audioAccessLogs.length ? "erro" : "ausente", detail: journey.audioAccessLogs.length ? safeDate(getEarliestDate(journey.audioAccessLogs, ["accessed_at"])) : "Sem áudio registrado" },
     { label: "Comunicação enviada", status: journey.communicationLogs.some((log: any) => ["enviado", "entregue", "abriu", "clicou", "respondeu"].includes(log.status)) ? "concluído" : journey.communicationLogs.some((log: any) => log.status === "falhou") ? "erro" : "ausente", detail: journey.communicationLogs[0]?.status ?? "Sem comunicação" },
   ] as Array<{ label: string; status: JourneyStatus; detail: string }>;
+}
+
+function calculateScores(checklist: Array<{ status: JourneyStatus }>, diagnosis: JourneyDiagnosis | null, journey: Awaited<ReturnType<typeof getSubscriberJourneyData>>, subscription: any) {
+  const done = checklist.filter((item) => item.status === "concluído").length;
+  const errors = checklist.filter((item) => item.status === "erro").length;
+  const pending = checklist.filter((item) => item.status === "pendente").length;
+  const engagementSignals = Math.min(4, Number(Boolean(subscription?.status === "active" || subscription?.status === "trialing")) + Number(Boolean(journey.kitAccessLogs.length)) + Number(Boolean(journey.audioAccessLogs.length)) + Number(Boolean(journey.communicationLogs.length)));
+  const engagement = Math.min(100, Math.round(((done / Math.max(checklist.length, 1)) * 70) + (engagementSignals * 7.5)));
+  const riskBase = diagnosis?.severity === "critical" ? 85 : diagnosis?.severity === "warning" ? 60 : diagnosis?.severity === "info" ? 35 : 15;
+  const risk = Math.min(100, Math.max(0, riskBase + errors * 10 + pending * 4 - engagementSignals * 6));
+  const conversion = Math.min(100, Math.round((done / Math.max(checklist.length, 1)) * 100));
+  return { engagement, risk, conversion };
+}
+
+function scoreColor(score: number, inverted = false) {
+  const good = inverted ? score <= 30 : score >= 70;
+  const mid = inverted ? score <= 60 : score >= 45;
+  if (good) return "text-emerald-200 border-emerald-400/30 bg-emerald-500/10";
+  if (mid) return "text-amber-200 border-amber-400/30 bg-amber-500/10";
+  return "text-red-200 border-red-400/30 bg-red-500/10";
 }
 
 function addTimelineEvent(events: JourneyTimelineEvent[], event: JourneyTimelineEvent) {
@@ -238,6 +289,7 @@ function buildTimeline(profile: any, subscription: any, journey: Awaited<ReturnT
   const events: JourneyTimelineEvent[] = [];
   addTimelineEvent(events, { at: profile?.created_at, type: "Perfil", description: "Perfil criado", source: "profiles.created_at", status: "concluído", details: profile });
   addTimelineEvent(events, { at: profile?.password_setup_completed_at, type: "Onboarding", description: "Senha configurada", source: "profiles.password_setup_completed_at", status: "concluído", details: { password_setup_completed_at: profile?.password_setup_completed_at } });
+  addTimelineEvent(events, { at: profile?.last_login_at, type: "Login", description: "Primeiro/último login registrado", source: "profiles.last_login_at", status: "concluído", details: { last_login_at: profile?.last_login_at } });
   addTimelineEvent(events, { at: subscription?.created_at, type: "Assinatura", description: `Assinatura criada (${subscription?.status ?? "sem status"})`, source: "subscriptions.created_at", status: subscription?.status ?? "informação", details: subscription });
   addTimelineEvent(events, { at: subscription?.updated_at, type: "Assinatura", description: "Assinatura atualizada", source: "subscriptions.updated_at", status: subscription?.status ?? "informação", details: subscription });
 
@@ -250,10 +302,25 @@ function buildTimeline(profile: any, subscription: any, journey: Awaited<ReturnT
   return events.sort((a, b) => new Date(b.at ?? 0).getTime() - new Date(a.at ?? 0).getTime()).slice(0, 80);
 }
 
+function getCampaignSegment(diagnosis: JourneyDiagnosis | null, subscription: any) {
+  if (subscription?.status === "pending") return "pending";
+  if (["canceled", "inactive", "expired"].includes(normalize(subscription?.status))) return "churn";
+  if (diagnosis?.title?.includes("login")) return "first_access";
+  if (diagnosis?.title?.includes("Stripe")) return "stripe_review";
+  return "member_followup";
+}
+
+function whatsappHref(phone: unknown, fallbackText: string) {
+  const digits = String(phone ?? "").replace(/\D/g, "");
+  if (!digits) return null;
+  const withCountry = digits.startsWith("55") ? digits : `55${digits}`;
+  return `https://wa.me/${withCountry}?text=${encodeURIComponent(fallbackText)}`;
+}
+
 function Field({ label, value }: { label: string; value: unknown }) {
   return (
     <p className="break-words text-sm text-muted">
-      <strong className="text-white">{label}:</strong> {String(value ?? "-")}
+      <strong className="text-white">{label}:</strong> {String(value ?? "—")}
     </p>
   );
 }
@@ -264,6 +331,22 @@ function JsonDetails({ value }: { value: unknown }) {
       <summary className="cursor-pointer text-xs font-semibold text-gold-300">Ver detalhes técnicos</summary>
       <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap text-xs leading-5 text-zinc-300">{JSON.stringify(value ?? {}, null, 2)}</pre>
     </details>
+  );
+}
+
+function ScoreCard({ label, value, detail, icon: Icon, inverted = false }: { label: string; value: number; detail: string; icon: any; inverted?: boolean }) {
+  return (
+    <article className={`rounded-3xl border p-5 shadow-premium ${scoreColor(value, inverted)}`}>
+      <div className="mb-3 flex items-center justify-between">
+        <p className="text-xs uppercase tracking-[0.22em] opacity-80">{label}</p>
+        <Icon className="h-4 w-4" />
+      </div>
+      <p className="text-3xl font-semibold text-white">{value}%</p>
+      <div className="mt-3 h-2 rounded-full bg-black/30">
+        <div className="h-2 rounded-full bg-current" style={{ width: `${Math.max(4, value)}%` }} />
+      </div>
+      <p className="mt-2 text-xs opacity-80">{detail}</p>
+    </article>
   );
 }
 
@@ -279,13 +362,17 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
   const subscription: any = member?.subscription ?? null;
   const currentPlanId = subscription?.plan_id ?? "";
   const currentStatus = subscription?.status ?? "inactive";
-  const username = getMetadataValue(profile, "username") ?? "-";
-  const phone = profile?.phone ?? getMetadataValue(profile, "phone") ?? "-";
+  const username = getMetadataValue(profile, "username") ?? "—";
+  const phone = profile?.phone ?? getMetadataValue(profile, "phone") ?? "";
   const checklist = journey && profile ? buildChecklist(profile, subscription, journey) : [];
   const timeline = journey && profile ? buildTimeline(profile, subscription, journey) : [];
   const latestWebhook = journey?.webhookProcessedEvents[0] ?? journey?.webhookLogs[0] ?? null;
   const diagnosis = journey && profile ? buildDiagnosis(profile, subscription, journey) : null;
   const currentProblem = diagnosis?.title ?? "Dados insuficientes";
+  const scores = journey && profile ? calculateScores(checklist, diagnosis, journey, subscription) : { engagement: 0, risk: 100, conversion: 0 };
+  const segment = getCampaignSegment(diagnosis, subscription);
+  const campaignHref = `/admin/comunicacao/campaigns?segment=${encodeURIComponent(segment)}&email=${encodeURIComponent(profile?.email ?? "")}`;
+  const whatsHref = whatsappHref(phone, `Olá! Passando para te ajudar com seu acesso ao Harmomus. Vi aqui que precisamos conferir sua etapa: ${currentProblem}.`);
 
   async function save(formData: FormData) {
     "use server";
@@ -353,52 +440,107 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
     return (
       <section className="space-y-6">
         <PageHeader title="Membro não encontrado" description="Não foi possível carregar este membro." />
-        <a href="/admin/membros" className="inline-flex rounded-xl border border-border px-4 py-2 text-sm text-muted hover:text-white">Voltar para membros</a>
+        <Link href="/admin/membros" className="inline-flex items-center gap-2 rounded-xl border border-border px-4 py-2 text-sm text-muted hover:text-white">
+          <ArrowLeft className="h-4 w-4" /> Voltar para membros
+        </Link>
       </section>
     );
   }
 
   return (
     <section className="space-y-6">
-      <PageHeader title="Detalhe do Membro" description="Gerencie plano, status, assinatura e ações administrativas." />
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <PageHeader title="CRM do Membro" description="Diagnóstico completo da jornada, engajamento, risco e intervenções do usuário." />
+        <Link href="/admin/membros" className="inline-flex w-fit items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-zinc-200 transition hover:bg-white/10">
+          <ArrowLeft className="h-4 w-4" /> Voltar
+        </Link>
+      </div>
 
-      <div className="overflow-hidden rounded-3xl border border-border bg-gradient-to-br from-surface via-surface to-background shadow-premium">
-        <div className="flex flex-col gap-5 p-5 sm:p-6 md:flex-row md:items-center md:justify-between">
+      <div className="overflow-hidden rounded-[2rem] border border-gold-500/20 bg-gradient-to-br from-gold-500/10 via-surface to-background shadow-premium">
+        <div className="flex flex-col gap-6 p-5 sm:p-6 xl:flex-row xl:items-center xl:justify-between">
           <div>
-            <p className="text-xs uppercase tracking-[0.24em] text-gold-300">Membro</p>
-            <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">{profile.full_name ?? "Sem nome"}</h2>
-            <p className="mt-1 text-sm text-muted">{profile.email ?? "Sem e-mail"}</p>
+            <p className="text-xs uppercase tracking-[0.24em] text-gold-300">Jornada individual</p>
+            <h2 className="mt-2 text-3xl font-semibold tracking-tight text-white">{profile.full_name ?? "Sem nome"}</h2>
+            <p className="mt-1 text-sm text-muted">{profile.email ?? "Sem e-mail"} · {phone || "sem telefone"}</p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <span className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] ${statusBadgeClass(currentStatus)}`}>{currentStatus}</span>
+              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-zinc-300">{member.plan?.name ?? "Free"}</span>
+              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-zinc-300">{subscription?.gateway ?? subscription?.original_gateway ?? "sem gateway"}</span>
+            </div>
           </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <a href="#jornada-assinante" className="rounded-xl border border-gold-500/40 bg-gold-500/10 px-4 py-2 text-sm font-semibold text-gold-200 transition hover:bg-gold-500/20">Jornada do Assinante</a>
-            <span className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] ${statusBadgeClass(currentStatus)}`}>{currentStatus}</span>
-            <a href="/admin/membros" className="rounded-xl border border-border px-4 py-2 text-sm text-muted transition hover:border-gold-500/40 hover:text-white">Voltar</a>
+
+          <div className="grid gap-2 sm:grid-cols-2 xl:min-w-[420px]">
+            <Link href={campaignHref} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-gold-400/30 bg-gold-500/10 px-4 py-3 text-sm font-semibold text-gold-200 transition hover:bg-gold-500/20">
+              <MailPlus className="h-4 w-4" /> Enviar campanha
+            </Link>
+            {whatsHref ? (
+              <a href={whatsHref} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-500/20">
+                <MessageCircle className="h-4 w-4" /> Chamar no WhatsApp
+              </a>
+            ) : (
+              <span className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-muted">
+                <MessageCircle className="h-4 w-4" /> Sem telefone
+              </span>
+            )}
           </div>
         </div>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
+      <div className="grid gap-4 md:grid-cols-3">
+        <ScoreCard label="Engajamento" value={scores.engagement} detail="Login, kits, áudios, comunicação e assinatura." icon={TrendingUp} />
+        <ScoreCard label="Risco" value={scores.risk} detail="Quanto maior, mais urgente a intervenção." icon={AlertTriangle} inverted />
+        <ScoreCard label="Jornada" value={scores.conversion} detail="Percentual de etapas essenciais concluídas." icon={Target} />
+      </div>
+
+      {diagnosis ? (
+        <div className={`rounded-3xl border p-5 shadow-premium ${severityClass(diagnosis.severity)}`}>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-[0.22em] opacity-80">Centro de Diagnóstico</p>
+              <h3 className="mt-2 text-2xl font-semibold text-white">{diagnosis.title}</h3>
+              <p className="mt-2 text-sm leading-6 opacity-90"><strong>Causa provável:</strong> {diagnosis.cause}</p>
+              <p className="mt-1 text-sm leading-6 opacity-90"><strong>Ação sugerida:</strong> {diagnosis.action}</p>
+            </div>
+            <div className="grid min-w-[220px] gap-2 text-sm">
+              <span className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2">Severidade: <strong>{diagnosis.severity}</strong></span>
+              <span className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2">Confiança: <strong>{diagnosis.confidence}</strong></span>
+              <Link href={campaignHref} className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-center font-semibold text-white transition hover:bg-white/10">Intervir agora</Link>
+            </div>
+          </div>
+          <div className="mt-4 grid gap-2 md:grid-cols-2">
+            {diagnosis.evidence.map((item) => (
+              <p key={item} className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-xs opacity-90">{item}</p>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
         <div className="rounded-3xl border border-border bg-surface p-5 shadow-premium sm:p-6">
-          <h3 className="text-lg font-semibold text-white">Dados do perfil</h3>
+          <h3 className="flex items-center gap-2 text-lg font-semibold text-white"><UserRound className="h-5 w-5 text-gold-300" /> Perfil e origem</h3>
           <div className="mt-4 grid gap-3 text-sm text-muted md:grid-cols-2">
             <Field label="Nome" value={profile.full_name} />
             <Field label="E-mail" value={profile.email} />
             <Field label="Username" value={username} />
-            <Field label="Telefone" value={phone} />
-            <Field label="Cadastro" value={formatDateTimeBR(profile.created_at)} />
-            <Field label="Atualizado" value={formatDateTimeBR(profile.updated_at)} />
+            <Field label="Telefone" value={phone || "—"} />
+            <Field label="Cadastro" value={safeDate(profile.created_at)} />
+            <Field label="Atualizado" value={safeDate(profile.updated_at)} />
+            <Field label="Último login" value={safeDate(profile.last_login_at)} />
+            <Field label="Origem" value={profile.migrated_from_pms || subscription?.migrated_from_pms ? "Usuário migrado do PMS" : "Novo cadastro"} />
           </div>
         </div>
 
         <div className="rounded-3xl border border-border bg-surface p-5 shadow-premium sm:p-6">
-          <h3 className="text-lg font-semibold text-white">Assinatura</h3>
+          <h3 className="flex items-center gap-2 text-lg font-semibold text-white"><CreditCard className="h-5 w-5 text-cyan-300" /> Assinatura e cobrança</h3>
           <div className="mt-4 grid gap-3 text-sm text-muted md:grid-cols-2">
             <Field label="Plano atual" value={member.plan?.name ?? "Free"} />
             <Field label="Status" value={currentStatus} />
-            <Field label="Gateway" value={subscription?.gateway} />
-            <Field label="Stripe Customer" value={subscription?.stripe_customer_id} />
-            <Field label="Stripe Sub" value={subscription?.stripe_subscription_id} />
-            <Field label="Próx. cobrança" value={formatDateTimeBR(subscription?.next_billing_at ?? subscription?.current_period_end)} />
+            <Field label="Gateway" value={subscription?.gateway ?? subscription?.original_gateway} />
+            <Field label="Stripe Customer" value={subscription?.stripe_customer_id ?? subscription?.gateway_customer_id} />
+            <Field label="Stripe Sub" value={subscription?.stripe_subscription_id ?? subscription?.gateway_subscription_id} />
+            <Field label="Stripe Price" value={subscription?.stripe_price_id} />
+            <Field label="Próx. cobrança" value={safeDate(subscription?.next_billing_at ?? subscription?.current_period_end)} />
+            <Field label="Auto renovação" value={formatBoolean(subscription?.auto_renew)} />
           </div>
         </div>
       </div>
@@ -406,164 +548,118 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
       <section id="jornada-assinante" className="space-y-5 rounded-[2rem] border border-gold-500/30 bg-gradient-to-br from-gold-500/10 via-surface to-background p-5 shadow-premium sm:p-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div>
-            <p className="text-xs uppercase tracking-[0.24em] text-gold-300">Visão premium</p>
-            <h3 className="mt-2 text-2xl font-semibold text-white">Jornada do Assinante</h3>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">Diagnóstico somente leitura do caminho do usuário desde cadastro, migração, ativação de assinatura, comunicações e primeiros acessos.</p>
+            <p className="text-xs uppercase tracking-[0.24em] text-gold-300">Mapa visual</p>
+            <h3 className="mt-2 text-2xl font-semibold text-white">Funil do membro</h3>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">Confirme exatamente onde ele avançou, onde travou e qual evidência existe em cada etapa.</p>
           </div>
-          <span className={`w-fit rounded-full border px-3 py-1 text-xs font-semibold ${statusBadgeClass(currentStatus)}`}>{currentProblem}</span>
+          <span className={`w-fit rounded-full border px-3 py-1 text-xs font-semibold ${statusBadgeClass(diagnosis?.severity)}`}>{currentProblem}</span>
         </div>
 
-        {diagnosis ? (
-          <div className={`rounded-3xl border p-5 ${severityClass(diagnosis.severity)}`}>
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div>
-                <p className="text-xs uppercase tracking-[0.22em] opacity-80">Centro de Diagnóstico</p>
-                <h4 className="mt-2 text-xl font-semibold text-white">{diagnosis.title}</h4>
-                <p className="mt-2 text-sm leading-6 opacity-90"><strong>Causa provável:</strong> {diagnosis.cause}</p>
-                <p className="mt-1 text-sm leading-6 opacity-90"><strong>Ação sugerida:</strong> {diagnosis.action}</p>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {checklist.map((item, index) => (
+            <div key={item.label} className="rounded-2xl border border-white/10 bg-black/20 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-xs text-white">{index + 1}</span>
+                <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${statusBadgeClass(item.status)}`}>{item.status}</span>
               </div>
-              <div className="grid min-w-[220px] gap-2 text-sm">
-                <span className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2">Severidade: <strong>{diagnosis.severity}</strong></span>
-                <span className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2">Confiança: <strong>{diagnosis.confidence}</strong></span>
-              </div>
+              <p className="mt-3 font-medium text-white">{item.label}</p>
+              <p className="mt-1 text-xs leading-relaxed text-muted">{item.detail}</p>
             </div>
-            <div className="mt-4 grid gap-2 md:grid-cols-2">
-              {diagnosis.evidence.map((item) => (
-                <p key={item} className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-xs opacity-90">{item}</p>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        <div className="grid gap-4 xl:grid-cols-4">
-          <div className="rounded-3xl border border-white/10 bg-black/20 p-4">
-            <p className="text-xs uppercase tracking-[0.2em] text-muted">Status atual</p>
-            <p className="mt-2 text-lg font-semibold text-white">{currentStatus}</p>
-          </div>
-          <div className="rounded-3xl border border-white/10 bg-black/20 p-4">
-            <p className="text-xs uppercase tracking-[0.2em] text-muted">Plano / Gateway</p>
-            <p className="mt-2 text-lg font-semibold text-white">{member.plan?.name ?? "Free"}</p>
-            <p className="text-xs text-muted">{subscription?.gateway ?? subscription?.original_gateway ?? "Sem gateway"}</p>
-          </div>
-          <div className="rounded-3xl border border-white/10 bg-black/20 p-4">
-            <p className="text-xs uppercase tracking-[0.2em] text-muted">Origem</p>
-            <p className="mt-2 text-lg font-semibold text-white">{profile.migrated_from_pms || subscription?.migrated_from_pms ? "Usuário migrado do PMS" : "Novo cadastro"}</p>
-          </div>
-          <div className="rounded-3xl border border-white/10 bg-black/20 p-4">
-            <p className="text-xs uppercase tracking-[0.2em] text-muted">Último webhook/evento</p>
-            <p className="mt-2 text-sm font-semibold text-white">{latestWebhook?.event_type ?? latestWebhook?.event ?? subscription?.last_webhook_event ?? "Sem evento conhecido"}</p>
-            <p className="text-xs text-muted">{formatDateTimeBR(latestWebhook?.processed_at ?? latestWebhook?.created_at)}</p>
-          </div>
-        </div>
-
-        <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
-          <h4 className="text-lg font-semibold text-white">Checklist visual</h4>
-          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {checklist.map((item) => (
-              <div key={item.label} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <p className="font-medium text-white">{item.label}</p>
-                  <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${statusBadgeClass(item.status)}`}>{item.status}</span>
-                </div>
-                <p className="mt-2 text-xs text-muted">{item.detail}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="grid gap-4 xl:grid-cols-2">
-          <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
-            <h4 className="text-lg font-semibold text-white">Stripe</h4>
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <Field label="gateway_customer_id" value={subscription?.gateway_customer_id} />
-              <Field label="gateway_subscription_id" value={subscription?.gateway_subscription_id} />
-              <Field label="stripe_customer_id" value={subscription?.stripe_customer_id} />
-              <Field label="stripe_subscription_id" value={subscription?.stripe_subscription_id} />
-              <Field label="stripe_price_id" value={subscription?.stripe_price_id} />
-              <Field label="status" value={subscription?.status} />
-              <Field label="next_billing_at" value={formatDateTimeBR(subscription?.next_billing_at)} />
-              <Field label="current_period_end" value={formatDateTimeBR(subscription?.current_period_end)} />
-              <Field label="cancel_at_period_end" value={formatBoolean(subscription?.cancel_at_period_end ?? (subscription?.auto_renew === false ? true : null))} />
-            </div>
-          </div>
-
-          <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
-            <h4 className="text-lg font-semibold text-white">Legado/PMS</h4>
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <Field label="migrated_from_pms" value={formatBoolean(profile.migrated_from_pms || subscription?.migrated_from_pms)} />
-              <Field label="original_gateway" value={subscription?.original_gateway} />
-              <Field label="legacy_pms_member_id" value={profile.legacy_pms_member_id} />
-              <Field label="legacy_pms_subscription_id" value={subscription?.legacy_pms_subscription_id} />
-            </div>
-            <div className="mt-4 space-y-3">
-              {journey.legacyPmsSubscriptions.length ? journey.legacyPmsSubscriptions.map((row, index) => <JsonDetails key={`legacy-pms-${index}`} value={row} />) : <p className="rounded-2xl border border-dashed border-white/10 p-4 text-sm text-muted">Nenhum dado localizado em legacy_pms_subscriptions pelos fallbacks seguros.</p>}
-              {(journey.legacyStripeCustomers.length || journey.legacyStripeCustomerImports.length) ? <JsonDetails value={{ legacy_stripe_customers: journey.legacyStripeCustomers, legacy_stripe_customer_import: journey.legacyStripeCustomerImports }} /> : null}
-            </div>
-          </div>
-        </div>
-
-        <div className="grid gap-4 xl:grid-cols-2">
-          <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
-            <h4 className="text-lg font-semibold text-white">Comunicações</h4>
-            <div className="mt-4 space-y-3">
-              {journey.communicationLogs.length ? journey.communicationLogs.slice(0, 10).map((log: any) => (
-                <div key={log.id ?? JSON.stringify(log)} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="font-medium text-white">{log.channel === "whatsapp" ? "WhatsApp enviado" : "E-mail enviado"}</p>
-                    <span className={`rounded-full border px-2.5 py-1 text-xs ${statusBadgeClass(log.status)}`}>{log.status ?? "informação"}</span>
-                  </div>
-                  <p className="mt-1 text-xs text-muted">{formatDateTimeBR(log.created_at)} · {log.provider_message_id ?? "sem provider_message_id"}</p>
-                  {(log.error || log.error_message || log.details?.error) ? <p className="mt-2 text-xs text-red-200">Erro: {log.error ?? log.error_message ?? log.details?.error}</p> : null}
-                  <JsonDetails value={log} />
-                </div>
-              )) : <p className="rounded-2xl border border-dashed border-white/10 p-4 text-sm text-muted">Nenhuma comunicação encontrada para este usuário.</p>}
-            </div>
-          </div>
-
-          <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
-            <h4 className="text-lg font-semibold text-white">Atividade</h4>
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <Field label="Último login" value={formatDateTimeBR(profile.last_login_at)} />
-              <Field label="Último seen" value={formatDateTimeBR(profile.last_seen_at)} />
-            </div>
-            <div className="mt-5 grid gap-4 md:grid-cols-2">
-              <div>
-                <p className="text-sm font-semibold text-white">Últimos kits acessados</p>
-                <div className="mt-2 space-y-2">
-                  {journey.kitAccessLogs.slice(0, 5).map((log: any) => <p key={log.id ?? JSON.stringify(log)} className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs text-muted">{log.kit_id ?? "Kit"} · {formatDateTimeBR(log.accessed_at ?? log.created_at)}</p>)}
-                  {!journey.kitAccessLogs.length ? <p className="text-xs text-muted">Sem kits acessados.</p> : null}
-                </div>
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-white">Últimos áudios acessados</p>
-                <div className="mt-2 space-y-2">
-                  {journey.audioAccessLogs.slice(0, 5).map((log: any) => <p key={log.id ?? JSON.stringify(log)} className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs text-muted">{log.audio_file_id ?? "Áudio"} · {log.status ?? "-"} · {formatDateTimeBR(log.accessed_at ?? log.created_at)}</p>)}
-                  {!journey.audioAccessLogs.length ? <p className="text-xs text-muted">Sem áudios acessados.</p> : null}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
-          <h4 className="text-lg font-semibold text-white">Timeline cronológica consolidada</h4>
-          <div className="mt-5 space-y-3">
-            {timeline.length ? timeline.map((event, index) => (
-              <article key={`${event.source}-${event.at}-${index}`} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.18em] text-muted">{formatDateTimeBR(event.at)} · {event.source}</p>
-                    <h5 className="mt-1 font-semibold text-white">{event.type}</h5>
-                    <p className="mt-1 text-sm text-muted">{event.description}</p>
-                  </div>
-                  <span className={`w-fit rounded-full border px-2.5 py-1 text-xs ${statusBadgeClass(event.status)}`}>{event.status}</span>
-                </div>
-                <JsonDetails value={event.details} />
-              </article>
-            )) : <p className="rounded-2xl border border-dashed border-white/10 p-5 text-center text-sm text-muted">Nenhum evento encontrado na jornada pelos fallbacks seguros.</p>}
-          </div>
+          ))}
         </div>
       </section>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <div className="rounded-3xl border border-border bg-surface p-5 shadow-premium sm:p-6">
+          <h3 className="flex items-center gap-2 text-lg font-semibold text-white"><MailPlus className="h-5 w-5 text-gold-300" /> Intervenções recomendadas</h3>
+          <div className="mt-4 grid gap-3">
+            <Link href={campaignHref} className="rounded-2xl border border-gold-400/30 bg-gold-500/10 p-4 text-sm text-gold-100 transition hover:bg-gold-500/20">
+              <strong>Campanha sugerida:</strong> {segment}. Use esta ação para falar com o membro de acordo com a etapa atual.
+            </Link>
+            {whatsHref ? (
+              <a href={whatsHref} target="_blank" rel="noreferrer" className="rounded-2xl border border-emerald-400/30 bg-emerald-500/10 p-4 text-sm text-emerald-100 transition hover:bg-emerald-500/20">
+                <strong>WhatsApp:</strong> chamar agora com uma mensagem contextualizada sobre o bloqueio atual.
+              </a>
+            ) : null}
+            <Link href="/admin/comunicacao/templates" className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-zinc-200 transition hover:bg-white/[0.06]">
+              <strong>Templates:</strong> revisar modelos de recuperação, primeiro acesso, upgrade e reativação.
+            </Link>
+          </div>
+        </div>
+
+        <div className="rounded-3xl border border-border bg-surface p-5 shadow-premium sm:p-6">
+          <h3 className="flex items-center gap-2 text-lg font-semibold text-white"><Activity className="h-5 w-5 text-violet-300" /> Atividade recente</h3>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <Field label="Último kit" value={safeDate(getLatestDate(journey.kitAccessLogs, ["accessed_at"]))} />
+            <Field label="Último áudio" value={safeDate(getLatestDate(journey.audioAccessLogs, ["accessed_at"]))} />
+            <Field label="Última comunicação" value={safeDate(getLatestDate(journey.communicationLogs, ["created_at", "sent_at"]))} />
+            <Field label="Último webhook" value={safeDate(latestWebhook?.processed_at ?? latestWebhook?.created_at)} />
+          </div>
+          <div className="mt-5 grid gap-3 md:grid-cols-2">
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+              <p className="flex items-center gap-2 text-sm font-semibold text-white"><PlayCircle className="h-4 w-4 text-cyan-300" /> Kits acessados</p>
+              <p className="mt-2 text-2xl font-semibold text-white">{journey.kitAccessLogs.length}</p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+              <p className="flex items-center gap-2 text-sm font-semibold text-white"><Zap className="h-4 w-4 text-gold-300" /> Áudios tocados</p>
+              <p className="mt-2 text-2xl font-semibold text-white">{journey.audioAccessLogs.length}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <div className="rounded-3xl border border-border bg-surface p-5 shadow-premium sm:p-6">
+          <h3 className="flex items-center gap-2 text-lg font-semibold text-white"><ShieldCheck className="h-5 w-5 text-emerald-300" /> Stripe e legado</h3>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <Field label="gateway_customer_id" value={subscription?.gateway_customer_id} />
+            <Field label="gateway_subscription_id" value={subscription?.gateway_subscription_id} />
+            <Field label="legacy_pms_member_id" value={profile.legacy_pms_member_id} />
+            <Field label="legacy_pms_subscription_id" value={subscription?.legacy_pms_subscription_id} />
+            <Field label="migrated_from_pms" value={formatBoolean(profile.migrated_from_pms || subscription?.migrated_from_pms)} />
+            <Field label="last_webhook_event" value={subscription?.last_webhook_event} />
+          </div>
+          <div className="mt-4 space-y-3">
+            {journey.legacyPmsSubscriptions.length ? journey.legacyPmsSubscriptions.slice(0, 3).map((row, index) => <JsonDetails key={`legacy-pms-${index}`} value={row} />) : <p className="rounded-2xl border border-dashed border-white/10 p-4 text-sm text-muted">Nenhum dado localizado em legacy_pms_subscriptions pelos fallbacks seguros.</p>}
+            {(journey.legacyStripeCustomers.length || journey.legacyStripeCustomerImports.length) ? <JsonDetails value={{ legacy_stripe_customers: journey.legacyStripeCustomers, legacy_stripe_customer_import: journey.legacyStripeCustomerImports }} /> : null}
+          </div>
+        </div>
+
+        <div className="rounded-3xl border border-border bg-surface p-5 shadow-premium sm:p-6">
+          <h3 className="flex items-center gap-2 text-lg font-semibold text-white"><CalendarClock className="h-5 w-5 text-amber-300" /> Comunicações e acessos</h3>
+          <div className="mt-4 space-y-3">
+            {journey.communicationLogs.length ? journey.communicationLogs.slice(0, 8).map((log: any) => (
+              <div key={log.id ?? JSON.stringify(log)} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-medium text-white">{log.channel === "whatsapp" ? "WhatsApp" : "E-mail"}</p>
+                  <span className={`rounded-full border px-2.5 py-1 text-xs ${statusBadgeClass(log.status)}`}>{log.status ?? "informação"}</span>
+                </div>
+                <p className="mt-1 text-xs text-muted">{safeDate(log.created_at)} · {log.provider_message_id ?? "sem provider_message_id"}</p>
+                {(log.error || log.error_message || log.details?.error) ? <p className="mt-2 text-xs text-red-200">Erro: {log.error ?? log.error_message ?? log.details?.error}</p> : null}
+              </div>
+            )) : <p className="rounded-2xl border border-dashed border-white/10 p-4 text-sm text-muted">Nenhuma comunicação encontrada para este usuário.</p>}
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-3xl border border-border bg-surface p-5 shadow-premium sm:p-6">
+        <h3 className="text-lg font-semibold text-white">Timeline cronológica consolidada</h3>
+        <div className="mt-5 space-y-3">
+          {timeline.length ? timeline.map((event, index) => (
+            <article key={`${event.source}-${event.at}-${index}`} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.18em] text-muted">{safeDate(event.at)} · {event.source}</p>
+                  <h4 className="mt-1 font-semibold text-white">{event.type}</h4>
+                  <p className="mt-1 text-sm text-muted">{event.description}</p>
+                </div>
+                <span className={`w-fit rounded-full border px-2.5 py-1 text-xs ${statusBadgeClass(event.status)}`}>{event.status}</span>
+              </div>
+              <JsonDetails value={event.details} />
+            </article>
+          )) : <p className="rounded-2xl border border-dashed border-white/10 p-5 text-center text-sm text-muted">Nenhum evento encontrado na jornada pelos fallbacks seguros.</p>}
+        </div>
+      </div>
 
       <form action={save} className="rounded-3xl border border-border bg-surface p-5 shadow-premium sm:p-6">
         <input type="hidden" name="user_id" value={profile.id ?? id} />
