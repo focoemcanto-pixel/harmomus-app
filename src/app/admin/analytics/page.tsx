@@ -24,10 +24,17 @@ import {
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+const PLAN_PRICE_ESTIMATE = {
+  plus: 29.9,
+  premium: 49.9,
+  ministry: 149.9,
+} as const;
+
 type ListItem = { label: string; value: number };
 type FunnelStep = { label: string; value: number; caption: string };
 type Opportunity = { label: string; value: number; usersHint?: string; kind: "high" | "medium" | "low" };
 type Insight = { title: string; body: string; tone: "emerald" | "cyan" | "violet" | "rose" | "amber" };
+type CeoMetric = { title: string; value: string | number; caption: string; tone?: "default" | "good" | "warn" | "danger" };
 
 function EmptyState({ label = "Ainda não há dados suficientes." }: { label?: string }) {
   return <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 text-sm text-zinc-400">{label}</div>;
@@ -42,6 +49,10 @@ function formatDay(value?: string) {
 function formatNumber(value: number | string) {
   if (typeof value === "string") return value;
   return new Intl.NumberFormat("pt-BR").format(value);
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
 }
 
 function percent(value: number, base: number) {
@@ -65,7 +76,7 @@ function MetricCard({ title, value, caption, tone = "default" }: { title: string
   return (
     <div className={`rounded-3xl border bg-gradient-to-br ${tones[tone]} p-5 shadow-[0_0_40px_rgba(34,211,238,0.06)]`}>
       <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">{title}</p>
-      <p className="mt-3 text-3xl font-semibold tracking-tight text-white">{formatNumber(value)}</p>
+      <p className="mt-3 text-3xl font-semibold tracking-tight text-white">{typeof value === "number" ? formatNumber(value) : value}</p>
       <p className="mt-1 text-xs text-zinc-500">{caption}</p>
     </div>
   );
@@ -128,6 +139,21 @@ function TrendChart({ data }: { data: { date: string; plays: number }[] }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function CeoDashboard({ metrics }: { metrics: CeoMetric[] }) {
+  return (
+    <div className="rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(16,185,129,0.16),transparent_32%),rgba(9,9,11,0.82)] p-5 shadow-2xl shadow-black/30">
+      <div className="mb-5">
+        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-emerald-200/70">Dashboard CEO</p>
+        <h2 className="mt-1 text-xl font-semibold text-white">Receita, crescimento e potencial</h2>
+        <p className="mt-1 text-sm text-zinc-500">Estimativas baseadas nos planos ativos e sinais comerciais disponíveis hoje.</p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+        {metrics.map((metric) => <MetricCard key={metric.title} title={metric.title} value={metric.value} caption={metric.caption} tone={metric.tone} />)}
+      </div>
     </div>
   );
 }
@@ -229,6 +255,27 @@ function OpportunityCenter({ opportunities }: { opportunities: Opportunity[] }) 
   );
 }
 
+function FutureMetricsRoadmap() {
+  const items = [
+    "Churn real por cancelamento e período",
+    "Conversão Free → Plus → Premium",
+    "LTV e receita por cohort",
+    "Tempo médio de escuta e conclusão de faixa",
+    "Usuários em risco por inatividade",
+    "Kits que mais convertem assinatura",
+  ];
+  return (
+    <div className="rounded-3xl border border-dashed border-white/15 bg-white/[0.02] p-5">
+      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-zinc-500">Próximas métricas</p>
+      <h3 className="mt-1 text-lg font-semibold text-white">Dados que dependem de novos eventos</h3>
+      <p className="mt-1 text-sm text-zinc-500">Esses indicadores foram planejados, mas não devem ser estimados sem rastreamento próprio para evitar decisões em cima de número falso.</p>
+      <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+        {items.map((item) => <div key={item} className="rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-xs text-zinc-300">{item}</div>)}
+      </div>
+    </div>
+  );
+}
+
 function InsightCard({ label, value, tone = "cyan" }: { label: string; value: string; tone?: "cyan" | "emerald" | "violet" | "rose" }) {
   const tones = {
     cyan: "border-cyan-300/20 bg-cyan-500/5 text-cyan-100",
@@ -260,6 +307,9 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
   const topPlan = [...plans].sort((a, b) => b.value - a.value)[0]?.label ?? "não informado";
   const topKit = topKits[0]?.label ?? "não informado";
   const topUser = topUsers[0]?.label ?? "não informado";
+  const estimatedMrr = summary.plusActive * PLAN_PRICE_ESTIMATE.plus + summary.premiumActive * PLAN_PRICE_ESTIMATE.premium;
+  const potentialRevenue = premiumRequests.open * PLAN_PRICE_ESTIMATE.premium;
+  const opportunityRevenue = deniedKits.slice(0, 3).reduce((sum, item) => sum + item.value, 0) * 0.08 * PLAN_PRICE_ESTIMATE.premium;
   const conversionOpportunity = summary.gateViews ? `${summary.gateViews} visualizações de bloqueio premium por ${summary.uniqueGateUsers} usuário(s)` : "sem bloqueios premium no período";
   const funnelSteps: FunnelStep[] = [
     { label: "Usuários únicos", value: summary.uniqueUsers, caption: "Pessoas que consumiram áudio." },
@@ -273,6 +323,14 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
     value: item.value,
     kind: item.value >= 20 ? "high" : item.value >= 8 ? "medium" : "low",
   }));
+  const ceoMetrics: CeoMetric[] = [
+    { title: "MRR estimado", value: formatCurrency(estimatedMrr), caption: "Baseado em Plus/Premium ativos", tone: "good" },
+    { title: "Receita potencial", value: formatCurrency(potentialRevenue), caption: "Pedidos Premium abertos × preço Premium", tone: premiumRequests.open > 0 ? "warn" : "default" },
+    { title: "Potencial bloqueado", value: formatCurrency(opportunityRevenue), caption: "Estimativa conservadora dos principais bloqueios", tone: opportunityRevenue > 0 ? "warn" : "default" },
+    { title: "Assinantes", value: summary.activeSubscribers, caption: `${summary.plusActive} Plus · ${summary.premiumActive} Premium/Minist.` },
+    { title: "Mix Premium", value: `${percent(summary.premiumActive, summary.activeSubscribers)}%`, caption: "Participação Premium/Ministerial na base" },
+    { title: "Bloqueio", value: `${summary.denyRate}%`, caption: "Tentativas travadas no período", tone: summary.denyRate > 20 ? "danger" : summary.denyRate > 0 ? "warn" : "default" },
+  ];
   const automaticInsights: Insight[] = [
     {
       title: summary.denyRate > 15 ? "Bloqueio alto" : "Bloqueio controlado",
@@ -308,6 +366,8 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
         <button className="rounded-2xl border border-cyan-400/30 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/15">Aplicar filtros</button>
       </div>
     </form>
+
+    <CeoDashboard metrics={ceoMetrics} />
 
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
       <MetricCard title="Plays" value={summary.plays} caption={`${summary.avgDailyPlays} por dia`} tone="good" />
@@ -355,5 +415,7 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
     <DataTable title="Últimos bloqueios / oportunidades de conversão">
       {recentDenied.length === 0 ? <EmptyState label="Nenhum bloqueio registrado no período." /> : <table className="min-w-[1100px] w-full text-xs"><thead className="text-left text-zinc-400"><tr><th className="pb-3">Quando</th><th className="pb-3">Kit</th><th className="pb-3">Música/Faixa</th><th className="pb-3">Usuário</th><th className="pb-3">Plano</th><th className="pb-3">Dispositivo</th><th className="pb-3">Motivo</th><th className="pb-3">Página/Abrir kit</th></tr></thead><tbody>{recentDenied.map((r, i) => <tr key={`${r.when}-${i}`} className="border-t border-white/10 text-zinc-300"><td className="py-3">{r.when ? formatDateTimeBR(r.when) : "-"}</td><td className="py-3">{r.kit}</td><td className="py-3">{r.track}</td><td className="py-3">{r.user}</td><td className="py-3"><span className="rounded-full border border-white/10 bg-white/[0.03] px-2 py-1">{r.plan}</span></td><td className="py-3">{r.device}</td><td className="py-3 text-rose-200">{r.reason}</td><td className="py-3">{r.kitSlug ? <Link className="text-cyan-300 hover:text-cyan-200" href={`/biblioteca/${r.kitSlug}`}>{r.page}</Link> : r.page}</td></tr>)}</tbody></table>}
     </DataTable>
+
+    <FutureMetricsRoadmap />
   </section>;
 }
