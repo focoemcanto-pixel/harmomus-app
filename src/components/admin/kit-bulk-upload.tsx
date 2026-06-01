@@ -1,8 +1,8 @@
 "use client";
 
-import { type ChangeEvent, type DragEvent, useMemo, useRef, useState } from "react";
+import { type ChangeEvent, type DragEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, FolderUp, Loader2, Music2, Sparkles, UploadCloud, Wand2, XCircle } from "lucide-react";
+import { Loader2, Music2, Sparkles, UploadCloud, Wand2, XCircle } from "lucide-react";
 
 type ImportStatus = "idle" | "ready" | "uploading" | "success" | "error";
 
@@ -16,11 +16,14 @@ type UploadResult = {
   skippedFiles: number;
   tones: string[];
   voices: string[];
+  originalTone: string | null;
+  defaultTone: string | null;
   editUrl: string;
 };
 
 const AUDIO_EXTENSIONS = new Set(["mp3", "wav", "m4a", "aac", "ogg", "flac"]);
 const TONE_RE = /^(A|A#|Bb|B|C|C#|Db|D|D#|Eb|E|F|F#|Gb|G|G#|Ab)$/i;
+const TONE_ORDER = ["C", "C#", "Db", "D", "D#", "Eb", "E", "F", "F#", "Gb", "G", "G#", "Ab", "A", "A#", "Bb", "B"];
 
 function normalizePath(value: string) {
   return value.replace(/\\+/g, "/").split("/").filter(Boolean).join("/");
@@ -97,19 +100,30 @@ function formatBytes(value: number) {
   return `${(mb / 1024).toFixed(2)} GB`;
 }
 
+function sortTones(tones: string[]) {
+  return [...tones].sort((a, b) => {
+    const ai = TONE_ORDER.indexOf(a);
+    const bi = TONE_ORDER.indexOf(b);
+    if (ai === -1 && bi === -1) return a.localeCompare(b);
+    if (ai === -1) return 1;
+    if (bi === -1) return -1;
+    return ai - bi;
+  });
+}
+
 export function KitBulkUpload() {
   const router = useRouter();
-  const folderInputRef = useRef<HTMLInputElement | null>(null);
   const filesInputRef = useRef<HTMLInputElement | null>(null);
 
   const [files, setFiles] = useState<File[]>([]);
   const [artist, setArtist] = useState("");
   const [kitNameOverride, setKitNameOverride] = useState("");
+  const [originalTone, setOriginalTone] = useState("");
+  const [defaultTone, setDefaultTone] = useState("");
   const [published, setPublished] = useState(false);
   const [status, setStatus] = useState<ImportStatus>("idle");
   const [isDragOver, setIsDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<UploadResult | null>(null);
 
   const audioFiles = useMemo(() => files.filter(isAudioFile), [files]);
   const totalSize = useMemo(() => audioFiles.reduce((sum, file) => sum + file.size, 0), [audioFiles]);
@@ -120,29 +134,29 @@ export function KitBulkUpload() {
 
     for (const file of audioFiles) {
       const parsed = inferToneAndVoice(file);
-      tones.add(parsed.tone);
+      if (parsed.tone !== "Original") tones.add(parsed.tone);
       voices.add(parsed.voice);
     }
 
     return {
-      tones: Array.from(tones).sort((a, b) => a.localeCompare(b)),
+      tones: sortTones(Array.from(tones)),
       voices: Array.from(voices).sort((a, b) => a.localeCompare(b)),
     };
   }, [audioFiles]);
+
+  useEffect(() => {
+    if (!detected.tones.length) return;
+    setOriginalTone((current) => current || detected.tones[0]);
+    setDefaultTone((current) => current || detected.tones[0]);
+  }, [detected.tones]);
 
   const canImport = audioFiles.length > 0 && status !== "uploading";
 
   function receiveFiles(fileList?: FileList | null) {
     const nextFiles = Array.from(fileList ?? []);
     setFiles(nextFiles);
-    setResult(null);
     setError(null);
     setStatus(nextFiles.length ? "ready" : "idle");
-  }
-
-  function onFolderChange(event: ChangeEvent<HTMLInputElement>) {
-    receiveFiles(event.target.files);
-    event.target.value = "";
   }
 
   function onFilesChange(event: ChangeEvent<HTMLInputElement>) {
@@ -161,12 +175,13 @@ export function KitBulkUpload() {
 
     setStatus("uploading");
     setError(null);
-    setResult(null);
 
     try {
       const body = new FormData();
       body.append("name", detectedKitName);
       body.append("artist", artist.trim());
+      body.append("originalTone", originalTone);
+      body.append("defaultTone", defaultTone || originalTone);
       body.append("published", published ? "true" : "false");
 
       for (const file of audioFiles) {
@@ -184,8 +199,8 @@ export function KitBulkUpload() {
         throw new Error(data?.error || "Não foi possível importar o kit.");
       }
 
-      setResult(data as UploadResult);
       setStatus("success");
+      router.replace(`/admin/kits/novo?importedKitId=${encodeURIComponent((data as UploadResult).kitId)}#kit-editor`);
       router.refresh();
     } catch (caught) {
       setStatus("error");
@@ -195,38 +210,30 @@ export function KitBulkUpload() {
 
   function resetImport() {
     setFiles([]);
-    setResult(null);
     setError(null);
     setStatus("idle");
     setKitNameOverride("");
     setArtist("");
+    setOriginalTone("");
+    setDefaultTone("");
     setPublished(false);
   }
 
   return (
-    <section className="overflow-hidden rounded-3xl border border-gold-500/20 bg-gradient-to-br from-gold-500/10 via-surface to-background p-5 shadow-premium sm:p-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <section className="rounded-3xl border border-gold-500/20 bg-gradient-to-br from-gold-500/10 via-surface to-background p-4 shadow-premium sm:p-5">
+      <div className="flex flex-col gap-2">
+        <div className="inline-flex w-fit items-center gap-2 rounded-full border border-gold-500/30 bg-gold-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-gold-200">
+          <Sparkles size={13} /> Importação premium
+        </div>
         <div>
-          <div className="inline-flex items-center gap-2 rounded-full border border-gold-500/30 bg-gold-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-gold-200">
-            <Sparkles size={14} /> Importação premium
-          </div>
-          <h2 className="mt-4 text-2xl font-semibold tracking-tight text-white">Upload inteligente de kit completo</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">
-            Selecione uma pasta organizada por música, tom e voz. O Harmomus sobe os áudios para o R2, cria o kit, registra os arquivos no banco e entrega tudo pronto para revisão.
+          <h2 className="text-xl font-semibold tracking-tight text-white sm:text-2xl">Upload inteligente de kit completo</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-muted">
+            Envie os áudios, o Harmomus cria o kit no banco/R2 e libera o editor preenchido logo abaixo nesta mesma página.
           </p>
         </div>
-
-        {result ? (
-          <a
-            href={result.editUrl}
-            className="inline-flex items-center justify-center rounded-2xl border border-emerald-400/40 bg-emerald-500/10 px-5 py-3 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-500/20"
-          >
-            Abrir kit importado
-          </a>
-        ) : null}
       </div>
 
-      <div className="mt-6 grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
+      <div className="mt-5 grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
         <div
           onDragOver={(event) => {
             event.preventDefault();
@@ -234,53 +241,33 @@ export function KitBulkUpload() {
           }}
           onDragLeave={() => setIsDragOver(false)}
           onDrop={onDrop}
-          className={`rounded-3xl border border-dashed p-6 text-center transition ${
+          className={`flex min-h-[220px] flex-col items-center justify-center rounded-3xl border border-dashed p-5 text-center transition sm:min-h-[260px] ${
             isDragOver ? "border-gold-300 bg-gold-500/10" : "border-border bg-background/50"
           }`}
         >
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl border border-gold-500/30 bg-gold-500/10 text-gold-200">
-            <UploadCloud size={28} />
+          <div className="flex h-14 w-14 items-center justify-center rounded-3xl border border-gold-500/30 bg-gold-500/10 text-gold-200">
+            <UploadCloud size={24} />
           </div>
-          <p className="mt-4 text-base font-semibold text-foreground">Arraste a pasta do kit ou selecione os arquivos</p>
-          <p className="mt-2 text-sm leading-6 text-muted">
-            Melhor formato: <span className="text-gold-200">Nome da música / Tom / voz.mp3</span>. Também aceitamos arquivos soltos com tom e voz no nome.
+          <p className="mt-4 text-base font-semibold text-foreground">Arraste os áudios aqui</p>
+          <p className="mt-2 max-w-md text-sm leading-6 text-muted">
+            Formato recomendado: nome do kit / tom / voz.mp3. Para evitar a confirmação do navegador, use arrastar e soltar ou selecione arquivos.
           </p>
 
-          <div className="mt-5 flex flex-col justify-center gap-3 sm:flex-row">
-            <button
-              type="button"
-              onClick={() => folderInputRef.current?.click()}
-              disabled={status === "uploading"}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-gold-500/40 bg-gold-500/10 px-5 py-3 text-sm font-semibold text-gold-200 transition hover:bg-gold-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <FolderUp size={16} /> Selecionar pasta
-            </button>
-            <button
-              type="button"
-              onClick={() => filesInputRef.current?.click()}
-              disabled={status === "uploading"}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-border bg-surface-muted px-5 py-3 text-sm font-semibold text-foreground transition hover:border-gold-500/40 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <Music2 size={16} /> Selecionar arquivos
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => filesInputRef.current?.click()}
+            disabled={status === "uploading"}
+            className="mt-5 inline-flex items-center justify-center gap-2 rounded-2xl border border-border bg-surface-muted px-5 py-3 text-sm font-semibold text-foreground transition hover:border-gold-500/40 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Music2 size={16} /> Selecionar arquivos
+          </button>
 
-          <input
-            ref={folderInputRef}
-            type="file"
-            multiple
-            // @ts-expect-error webkitdirectory is supported by Chromium browsers and ignored elsewhere.
-            webkitdirectory="true"
-            directory="true"
-            className="hidden"
-            onChange={onFolderChange}
-          />
           <input ref={filesInputRef} type="file" multiple accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac" className="hidden" onChange={onFilesChange} />
         </div>
 
-        <div className="rounded-3xl border border-border bg-background/50 p-5">
+        <div className="rounded-3xl border border-border bg-background/50 p-4 sm:p-5">
           <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <Wand2 size={17} className="text-gold-300" /> Detecção automática
+            <Wand2 size={17} className="text-gold-300" /> Configuração antes de gerar o editor
           </div>
 
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -296,9 +283,9 @@ export function KitBulkUpload() {
             </div>
           </div>
 
-          <div className="mt-4 space-y-3">
-            <label className="block text-sm">
-              <span className="text-muted">Nome detectado/editável</span>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <label className="block text-sm sm:col-span-2">
+              <span className="text-muted">Nome do kit</span>
               <input
                 value={detectedKitName}
                 onChange={(event) => setKitNameOverride(event.target.value)}
@@ -307,7 +294,7 @@ export function KitBulkUpload() {
               />
             </label>
 
-            <label className="block text-sm">
+            <label className="block text-sm sm:col-span-2">
               <span className="text-muted">Artista</span>
               <input
                 value={artist}
@@ -317,21 +304,49 @@ export function KitBulkUpload() {
               />
             </label>
 
-            <label className="flex items-center gap-2 rounded-2xl border border-border bg-surface/70 p-4 text-sm text-muted">
-              <input type="checkbox" checked={published} onChange={(event) => setPublished(event.target.checked)} className="h-4 w-4 rounded border-border bg-surface-muted accent-gold-300" />
-              Publicar kit automaticamente após importar
+            <label className="block text-sm">
+              <span className="text-muted">Tom original</span>
+              <select
+                value={originalTone}
+                onChange={(event) => setOriginalTone(event.target.value)}
+                className="mt-2 w-full rounded-2xl border border-border bg-surface-muted px-4 py-3 text-foreground outline-none ring-gold-400/40 focus:ring"
+              >
+                <option value="">Selecione</option>
+                {(detected.tones.length ? detected.tones : TONE_ORDER).map((tone) => (
+                  <option key={tone} value={tone}>{tone}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block text-sm">
+              <span className="text-muted">Tom inicial</span>
+              <select
+                value={defaultTone}
+                onChange={(event) => setDefaultTone(event.target.value)}
+                className="mt-2 w-full rounded-2xl border border-border bg-surface-muted px-4 py-3 text-foreground outline-none ring-gold-400/40 focus:ring"
+              >
+                <option value="">Selecione</option>
+                {(detected.tones.length ? detected.tones : TONE_ORDER).map((tone) => (
+                  <option key={tone} value={tone}>{tone}</option>
+                ))}
+              </select>
             </label>
           </div>
 
+          <label className="mt-4 flex items-center gap-2 rounded-2xl border border-border bg-surface/70 p-4 text-sm text-muted">
+            <input type="checkbox" checked={published} onChange={(event) => setPublished(event.target.checked)} className="h-4 w-4 rounded border-border bg-surface-muted accent-gold-300" />
+            Publicar kit automaticamente após importar
+          </label>
+
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <div className="rounded-2xl border border-border bg-surface/70 p-4">
-              <p className="text-xs uppercase tracking-[0.18em] text-gold-300">Tons</p>
+              <p className="text-xs uppercase tracking-[0.18em] text-gold-300">Tons detectados</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 {detected.tones.length ? detected.tones.map((tone) => <span key={tone} className="rounded-full border border-gold-500/30 bg-gold-500/10 px-3 py-1 text-xs text-gold-100">{tone}</span>) : <span className="text-xs text-muted">Aguardando arquivos</span>}
               </div>
             </div>
             <div className="rounded-2xl border border-border bg-surface/70 p-4">
-              <p className="text-xs uppercase tracking-[0.18em] text-cyan-300">Vozes</p>
+              <p className="text-xs uppercase tracking-[0.18em] text-cyan-300">Vozes detectadas</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 {detected.voices.length ? detected.voices.map((voice) => <span key={voice} className="rounded-full border border-cyan-400/30 bg-cyan-400/10 px-3 py-1 text-xs text-cyan-100">{voice}</span>) : <span className="text-xs text-muted">Aguardando arquivos</span>}
               </div>
@@ -341,18 +356,11 @@ export function KitBulkUpload() {
           {status === "uploading" ? (
             <div className="mt-5 rounded-2xl border border-gold-500/30 bg-gold-500/10 p-4">
               <div className="flex items-center gap-3 text-sm font-semibold text-gold-100">
-                <Loader2 size={18} className="animate-spin" /> Importando kit. Não feche esta janela.
+                <Loader2 size={18} className="animate-spin" /> Importando e preparando editor nesta página...
               </div>
               <div className="mt-3 h-2 overflow-hidden rounded-full bg-background">
                 <div className="h-full w-2/3 animate-pulse rounded-full bg-gold-400" />
               </div>
-            </div>
-          ) : null}
-
-          {status === "success" && result ? (
-            <div className="mt-5 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">
-              <div className="flex items-center gap-2 font-semibold"><CheckCircle2 size={18} /> Kit importado com sucesso</div>
-              <p className="mt-2 text-xs leading-5 text-emerald-100/80">{result.uploadedFiles} áudio(s) enviados • {result.tones.length} tom(ns) • {result.voices.length} voz(es)</p>
             </div>
           ) : null}
 
@@ -371,7 +379,7 @@ export function KitBulkUpload() {
               className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl border border-gold-500/40 bg-gold-500/15 px-5 py-3 text-sm font-semibold text-gold-100 transition hover:bg-gold-500/25 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {status === "uploading" ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-              {status === "uploading" ? "Importando..." : "Importar kit"}
+              {status === "uploading" ? "Preparando editor..." : "Importar e abrir editor abaixo"}
             </button>
             <button
               type="button"
