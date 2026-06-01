@@ -101,6 +101,9 @@ create index if not exists idx_audio_access_logs_audio_file_accessed_at
   on public.audio_access_logs (audio_file_id, accessed_at desc);
 
 -- Eventos / webhooks / comunicação
+alter table if exists public.marketing_events
+  add column if not exists action text;
+
 create index if not exists idx_marketing_events_user_created_at
   on public.marketing_events (user_id, created_at desc);
 

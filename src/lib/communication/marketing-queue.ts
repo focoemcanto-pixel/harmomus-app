@@ -1,0 +1,294 @@
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import type { Channel } from "@/types/communication";
+
+type MarketingJob = {
+  id: string;
+  campaign_id: string | null;
+  user_id: string | null;
+  recipient_name: string | null;
+  recipient_email: string | null;
+  recipient_phone: string | null;
+  channel: Channel;
+  status: "pending" | "processing" | "sent" | "failed";
+  attempts: number | null;
+  scheduled_at: string | null;
+  payload: Record<string, unknown> | null;
+};
+
+type MarketingChannelRow = {
+  id: string;
+  type: Channel;
+  provider: string;
+  config: Record<string, unknown> | null;
+};
+
+type ProviderResult = {
+  ok: boolean;
+  provider: string;
+  providerMessageId?: string | null;
+  status?: number;
+  response?: unknown;
+  errorMessage?: string | null;
+};
+
+type ProcessMarketingQueueResult = {
+  processed: number;
+  sent: number;
+  failed: number;
+  skipped: number;
+};
+
+function sanitizeText(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function maskSecret(value: unknown) {
+  const text = sanitizeText(value);
+  if (!text) return "";
+  if (text.length <= 6) return "••••";
+  return `${text.slice(0, 3)}••••${text.slice(-2)}`;
+}
+
+function normalizePhone(value: unknown) {
+  return sanitizeText(value).replace(/\D/g, "");
+}
+
+function buildRecipient(job: MarketingJob) {
+  if (job.channel === "email") return sanitizeText(job.recipient_email);
+  return normalizePhone(job.recipient_phone);
+}
+
+function buildMessage(job: MarketingJob) {
+  const payload = job.payload ?? {};
+  return sanitizeText(payload.message) || sanitizeText(payload.text) || sanitizeText(payload.mensagem);
+}
+
+function getProviderMessageId(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  return sanitizeText(record.id) || sanitizeText(record.message_id) || sanitizeText(record.messageId) || sanitizeText(record.delivery_id) || null;
+}
+
+function safeJson(value: unknown) {
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return null;
+  }
+}
+
+async function writeMarketingLog(admin: any, input: {
+  job: MarketingJob;
+  event: string;
+  level: "info" | "warning" | "error";
+  message: string;
+  payload?: unknown;
+  response?: unknown;
+}) {
+  const now = new Date().toISOString();
+  await admin.from("marketing_logs").insert({
+    campaign_id: input.job.campaign_id,
+    job_id: input.job.id,
+    user_id: input.job.user_id,
+    channel: input.job.channel,
+    status: input.event.endsWith("sent") ? "sent" : input.event.endsWith("failed") ? "failed" : input.event.endsWith("processing") ? "processing" : input.job.status,
+    event: input.event,
+    event_type: input.event,
+    level: input.level,
+    message: input.message,
+    payload: safeJson(input.payload) ?? {},
+    details: safeJson(input.payload) ?? {},
+    response: safeJson(input.response),
+    updated_at: now,
+  });
+}
+
+async function getActiveChannel(admin: any, channel: Channel) {
+  const { data, error } = await admin
+    .from("marketing_channels")
+    .select("id,type,provider,config")
+    .eq("type", channel)
+    .eq("active", true)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) return { data: null, error };
+  return { data: data ?? null, error: null };
+}
+
+async function sendViaWebhook(job: MarketingJob, channel: MarketingChannelRow): Promise<ProviderResult> {
+  const config = channel.config ?? {};
+  const apiUrl = sanitizeText(config.apiUrl);
+  const apiToken = sanitizeText(config.apiToken);
+  const instance = sanitizeText(config.instance);
+  const recipient = buildRecipient(job);
+  const message = buildMessage(job);
+
+  if (!apiUrl) {
+    return { ok: false, provider: channel.provider, errorMessage: "Canal ativo sem URL do provedor configurada." };
+  }
+  if (!recipient) {
+    return { ok: false, provider: channel.provider, errorMessage: "Job sem destinatário válido." };
+  }
+  if (!message) {
+    return { ok: false, provider: channel.provider, errorMessage: "Job sem mensagem." };
+  }
+
+  const payload = {
+    ...(job.payload ?? {}),
+    job_id: job.id,
+    campaign_id: job.campaign_id,
+    user_id: job.user_id,
+    channel: job.channel,
+    instance,
+    to: recipient,
+    phone: job.channel === "whatsapp" ? recipient : undefined,
+    number: job.channel === "whatsapp" ? recipient : undefined,
+    whatsapp: job.channel === "whatsapp" ? recipient : undefined,
+    email: job.channel === "email" ? recipient : job.recipient_email,
+    recipient,
+    recipient_name: job.recipient_name,
+    text: message,
+    message,
+    mensagem: message,
+    source: "harmomus.marketing_jobs",
+    created_at: new Date().toISOString(),
+  };
+
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (apiToken) {
+    headers.Authorization = `Bearer ${apiToken}`;
+    headers["X-Api-Key"] = apiToken;
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeout));
+
+    const responseText = await response.text();
+    let responseBody: unknown = responseText.slice(0, 5000);
+    try {
+      responseBody = responseText ? JSON.parse(responseText) : null;
+    } catch {
+      responseBody = responseText.slice(0, 5000);
+    }
+
+    return {
+      ok: response.ok,
+      provider: channel.provider,
+      providerMessageId: getProviderMessageId(responseBody),
+      status: response.status,
+      response: responseBody,
+      errorMessage: response.ok ? null : `Provedor retornou HTTP ${response.status}.`,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      provider: channel.provider,
+      errorMessage: error instanceof Error ? error.message : "Falha ao chamar provedor.",
+    };
+  }
+}
+
+async function markJobProcessing(admin: any, job: MarketingJob) {
+  const now = new Date().toISOString();
+  const attempts = Number(job.attempts ?? 0) + 1;
+  const { data, error } = await admin
+    .from("marketing_jobs")
+    .update({ status: "processing", attempts, updated_at: now })
+    .eq("id", job.id)
+    .in("status", ["pending", "processing"])
+    .select("id,status,attempts")
+    .maybeSingle();
+
+  if (error || !data) return false;
+  job.attempts = attempts;
+  job.status = "processing";
+  await writeMarketingLog(admin, {
+    job,
+    event: "marketing.job.processing",
+    level: "info",
+    message: "Job retirado da fila e marcado como processing.",
+    payload: { job_id: job.id, attempts },
+  });
+  return true;
+}
+
+async function finalizeJob(admin: any, job: MarketingJob, result: ProviderResult) {
+  const now = new Date().toISOString();
+  const status = result.ok ? "sent" : "failed";
+  await admin
+    .from("marketing_jobs")
+    .update({
+      status,
+      processed_at: now,
+      updated_at: now,
+      provider: result.provider,
+      provider_message_id: result.providerMessageId ?? null,
+      error_message: result.errorMessage ?? null,
+    })
+    .eq("id", job.id);
+
+  await writeMarketingLog(admin, {
+    job: { ...job, status },
+    event: result.ok ? "marketing.job.sent" : "marketing.job.failed",
+    level: result.ok ? "info" : "error",
+    message: result.ok ? "Mensagem enviada pelo provedor configurado." : result.errorMessage ?? "Falha ao enviar mensagem.",
+    payload: { job_id: job.id, provider: result.provider, status, provider_message_id: result.providerMessageId ?? null },
+    response: { status: result.status ?? 0, body: result.response ?? null, error: result.errorMessage ?? null },
+  });
+}
+
+export async function processMarketingQueue(limit = 50): Promise<ProcessMarketingQueueResult> {
+  const admin = createSupabaseAdminClient() as any;
+  const now = new Date().toISOString();
+  const { data: jobs, error } = await admin
+    .from("marketing_jobs")
+    .select("id,campaign_id,user_id,recipient_name,recipient_email,recipient_phone,channel,status,attempts,scheduled_at,payload")
+    .in("status", ["pending", "processing"])
+    .or(`scheduled_at.is.null,scheduled_at.lte.${now}`)
+    .order("created_at", { ascending: true })
+    .limit(limit);
+
+  if (error || !jobs?.length) return { processed: 0, sent: 0, failed: 0, skipped: 0 };
+
+  let sent = 0;
+  let failed = 0;
+  let skipped = 0;
+  const channels = new Map<Channel, MarketingChannelRow | null>();
+
+  for (const job of jobs as MarketingJob[]) {
+    const locked = await markJobProcessing(admin, job);
+    if (!locked) {
+      skipped += 1;
+      continue;
+    }
+
+    if (!channels.has(job.channel)) {
+      const { data: channel } = await getActiveChannel(admin, job.channel);
+      channels.set(job.channel, channel);
+    }
+
+    const channel = channels.get(job.channel);
+    const result = channel
+      ? await sendViaWebhook(job, channel)
+      : { ok: false, provider: "not_configured", errorMessage: `Canal ${job.channel} ativo não configurado.` };
+
+    await finalizeJob(admin, job, result);
+    if (result.ok) sent += 1;
+    else failed += 1;
+  }
+
+  return { processed: sent + failed, sent, failed, skipped };
+}
+
+export function scrubProviderConfig(config: Record<string, unknown> | null) {
+  return { ...(config ?? {}), apiToken: maskSecret(config?.apiToken) };
+}
