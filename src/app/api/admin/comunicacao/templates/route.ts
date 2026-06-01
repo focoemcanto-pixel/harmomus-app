@@ -1,8 +1,16 @@
 import { NextResponse } from "next/server";
 
-import { getCreatedBy, isMissingCommunicationTable, communicationTableErrorResponse, requireAdmin, sanitizeStringArray, sanitizeText } from "../_lib/marketing-api";
+import { requireAdmin, sanitizeStringArray, sanitizeText } from "../_lib/marketing-api";
 
-const CHANNELS = new Set(["whatsapp", "email", "both"]);
+const CHANNELS = new Set(["whatsapp", "email"]);
+
+function normalizeTemplate(template: any) {
+  return {
+    ...template,
+    body: template.content,
+    media_url: template.media_url ?? null,
+  };
+}
 
 export async function GET() {
   const { admin, response } = await requireAdmin();
@@ -10,19 +18,16 @@ export async function GET() {
 
   const { data, error } = await admin
     .from("communication_templates")
-    .select("id,created_at,updated_at,name,channel,category,subject,body,content,media_url,variables,active")
+    .select("id,created_at,updated_at,name,channel,category,subject,content,variables,active")
     .order("created_at", { ascending: false });
 
-  if (error) {
-    if (isMissingCommunicationTable(error)) return communicationTableErrorResponse();
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  return NextResponse.json({ data: (data ?? []).map((template: any) => ({ ...template, body: template.body ?? template.content ?? "" })) });
+  return NextResponse.json({ data: (data ?? []).map(normalizeTemplate) });
 }
 
 export async function POST(request: Request) {
-  const { admin, current, response } = await requireAdmin();
+  const { admin, response } = await requireAdmin();
   if (response) return response;
 
   const body = await request.json().catch(() => null);
@@ -42,23 +47,17 @@ export async function POST(request: Request) {
     .insert({
       name,
       channel,
-      category: sanitizeText(body.category) || null,
+      category: sanitizeText(body.category) || "promocao",
       subject: sanitizeText(body.subject) || null,
-      body: templateBody,
       content: templateBody,
-      media_url: sanitizeText(body.media_url) || null,
       variables,
       active: Boolean(body.active ?? true),
-      created_by: getCreatedBy(current.profile?.id),
       updated_at: new Date().toISOString(),
     })
-    .select("id,created_at,updated_at,name,channel,category,subject,body,content,media_url,variables,active")
+    .select("id,created_at,updated_at,name,channel,category,subject,content,variables,active")
     .single();
 
-  if (error) {
-    if (isMissingCommunicationTable(error)) return communicationTableErrorResponse();
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  return NextResponse.json({ data }, { status: 201 });
+  return NextResponse.json({ data: normalizeTemplate(data) }, { status: 201 });
 }

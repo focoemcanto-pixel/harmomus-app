@@ -273,7 +273,7 @@ export function CommunicationSettings() {
 
         <section className="rounded-3xl border border-emerald-400/20 bg-emerald-500/10 p-5 text-sm text-emerald-100">
           <div className="mb-2 flex items-center gap-2 font-semibold text-white"><CheckCircle2 size={17} /> Configuração persistente</div>
-          <p className="leading-6 text-emerald-100/90">As configurações agora são carregadas e salvas em marketing_channels. Os testes rápidos usam as rotas reais e registram resultado em communication_logs.</p>
+          <p className="leading-6 text-emerald-100/90">As configurações usam os canais reais e os testes rápidos registram resultado em communication_logs.</p>
         </section>
       </aside>
     </div>

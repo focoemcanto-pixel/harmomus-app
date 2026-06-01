@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getCreatedBy, isMissingCommunicationTable, communicationTableErrorResponse, requireAdmin, sanitizeObject, sanitizeStringArray, sanitizeText } from "../_lib/marketing-api";
+import { getCreatedBy, requireAdmin, sanitizeObject, sanitizeStringArray, sanitizeText } from "../_lib/marketing-api";
 
 const CHANNELS = new Set(["whatsapp", "email"]);
 
@@ -10,15 +10,20 @@ export async function GET() {
 
   const { data, error } = await admin
     .from("communication_campaigns")
-    .select("id,created_at,updated_at,name,status,channels,audience_filters,title,message,link_url,schedule_mode,scheduled_at,rate_limits,stats")
+    .select("id,created_at,updated_at,name,status,channel,audience_type,segment_slug,message,scheduled_at,preview_payload")
     .order("created_at", { ascending: false });
 
-  if (error) {
-    if (isMissingCommunicationTable(error)) return communicationTableErrorResponse();
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  return NextResponse.json({ data: data ?? [] });
+  return NextResponse.json({ data: (data ?? []).map((campaign) => ({
+    ...campaign,
+    channels: campaign.channel ? [campaign.channel] : [],
+    audience_filters: { segment: campaign.segment_slug, audience_type: campaign.audience_type, ...(campaign.preview_payload ?? {}) },
+    title: (campaign.preview_payload as Record<string, unknown> | null)?.title ?? campaign.name,
+    link_url: (campaign.preview_payload as Record<string, unknown> | null)?.link_url ?? null,
+    schedule_mode: campaign.scheduled_at ? "scheduled" : "now",
+    stats: campaign.preview_payload ?? {},
+  })) });
 }
 
 export async function POST(request: Request) {
@@ -41,17 +46,19 @@ export async function POST(request: Request) {
   const record = {
     name,
     status: "draft",
-    channel: channels[0],
-    channels,
-    audience_type: sanitizeText(body.audience_type) || sanitizeText(body.segment_slug) || "custom",
-    segment_slug: sanitizeText(body.segment_slug) || sanitizeText(sanitizeObject(body.audience_filters).segment) || null,
-    audience_filters: sanitizeObject(body.audience_filters),
-    title: sanitizeText(body.title) || null,
+    channel: (channels[0] ?? "whatsapp") as "whatsapp" | "email",
+    audience_type: sanitizeText(sanitizeObject(body.audience_filters).segment) || "custom",
+    segment_slug: sanitizeText(sanitizeObject(body.audience_filters).segment) || null,
     message,
-    link_url: sanitizeText(body.link_url) || null,
-    schedule_mode: scheduleMode,
+    preview_payload: {
+      ...sanitizeObject(body.audience_filters),
+      channels,
+      title: sanitizeText(body.title) || null,
+      link_url: sanitizeText(body.link_url) || null,
+      schedule_mode: scheduleMode,
+      rate_limits: sanitizeObject(body.rate_limits),
+    },
     scheduled_at: scheduledAt || null,
-    rate_limits: sanitizeObject(body.rate_limits),
     created_by: getCreatedBy(current.profile?.id),
     updated_at: new Date().toISOString(),
   };
@@ -59,13 +66,18 @@ export async function POST(request: Request) {
   const { data, error } = await admin
     .from("communication_campaigns")
     .insert(record)
-    .select("id,created_at,updated_at,name,status,channels,audience_filters,title,message,link_url,schedule_mode,scheduled_at,rate_limits,stats")
+    .select("id,created_at,updated_at,name,status,channel,audience_type,segment_slug,message,scheduled_at,preview_payload")
     .single();
 
-  if (error) {
-    if (isMissingCommunicationTable(error)) return communicationTableErrorResponse();
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  return NextResponse.json({ data }, { status: 201 });
+  return NextResponse.json({ data: data ? {
+    ...data,
+    channels: data.channel ? [data.channel] : [],
+    audience_filters: { segment: data.segment_slug, audience_type: data.audience_type, ...(data.preview_payload ?? {}) },
+    title: (data.preview_payload as Record<string, unknown> | null)?.title ?? data.name,
+    link_url: (data.preview_payload as Record<string, unknown> | null)?.link_url ?? null,
+    schedule_mode: data.scheduled_at ? "scheduled" : "now",
+    stats: data.preview_payload ?? {},
+  } : data }, { status: 201 });
 }

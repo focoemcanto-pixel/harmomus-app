@@ -1,4 +1,4 @@
-import { createPlaylist, getCurrentUserPlaylists } from "@/lib/data/playlists";
+import { addKitToPlaylist, createPlaylist, getCurrentUserPlaylists } from "@/lib/data/playlists";
 
 function asStringArray(value: unknown) {
   if (!Array.isArray(value)) return [];
@@ -32,5 +32,22 @@ export async function POST(request: Request) {
     return Response.json({ id: playlist.id, slug: playlist.slug });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Erro ao criar playlist." }, { status: 400 });
+  }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    const body = await request.json().catch(() => null);
+    const playlistId = String(body?.playlistId ?? "").trim();
+    const kitId = String(body?.kitId ?? "").trim();
+
+    if (!playlistId || !kitId) {
+      return Response.json({ error: "Informe a playlist e o kit." }, { status: 400 });
+    }
+
+    await addKitToPlaylist(playlistId, kitId);
+    return Response.json({ ok: true });
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : "Erro ao adicionar kit à playlist." }, { status: 400 });
   }
 }

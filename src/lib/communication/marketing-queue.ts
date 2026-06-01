@@ -85,30 +85,40 @@ async function writeCommunicationLog(admin: any, input: {
   payload?: unknown;
   response?: unknown;
 }) {
+  const now = new Date().toISOString();
   await admin.from("communication_logs").insert({
     campaign_id: input.job.campaign_id,
     user_id: input.job.user_id,
     channel: input.job.channel,
     status: input.event.endsWith("sent") ? "sent" : input.event.endsWith("failed") ? "failed" : input.event.endsWith("processing") ? "processing" : input.job.status,
-    details: { event_key: input.event, level: input.level, message: input.message, queue_id: input.job.id, payload: safeJson(input.payload) ?? {}, response: safeJson(input.response) },
+    provider_message_id: typeof (safeJson(input.response) as Record<string, unknown> | null)?.provider_message_id === "string" ? String((safeJson(input.response) as Record<string, unknown>).provider_message_id) : null,
+    details: {
+      event: input.event,
+      level: input.level,
+      message: input.message,
+      job_id: input.job.id,
+      payload: safeJson(input.payload) ?? {},
+      response: safeJson(input.response),
+      updated_at: now,
+    },
   });
 }
 
 async function getActiveChannel(admin: any, channel: Channel) {
+  const table = channel === "whatsapp" ? "communication_whatsapp_integrations" : "communication_email_integrations";
   const { data, error } = await admin
-    .from("marketing_channels")
-    .select("id,type,provider,config")
-    .eq("type", channel)
+    .from(table)
+    .select("id,provider,config")
     .eq("active", true)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
   if (error) return { data: null, error };
-  return { data: data ?? null, error: null };
+  return { data: data ? { ...data, type: channel } : null, error: null };
 }
 
-async function sendViaWebhook(job: CommunicationQueueJob, channel: CommunicationChannelRow): Promise<ProviderResult> {
+async function sendViaWebhook(job: CommunicationQueueJob, channel: MarketingChannelRow): Promise<ProviderResult> {
   const config = channel.config ?? {};
   const apiUrl = sanitizeText(config.apiUrl);
   const apiToken = sanitizeText(config.apiToken);
@@ -226,20 +236,6 @@ async function finalizeJob(admin: any, job: CommunicationQueueJob, result: Provi
       error_message: result.errorMessage ?? null,
     })
     .eq("id", job.id);
-
-  await admin.from("communication_deliveries").insert({
-    campaign_id: job.campaign_id,
-    queue_id: job.id,
-    user_id: job.user_id,
-    channel: job.channel,
-    status,
-    provider: result.provider,
-    provider_message_id: result.providerMessageId ?? null,
-    error_message: result.errorMessage ?? null,
-    sent_at: result.ok ? now : null,
-    delivered_at: result.ok ? now : null,
-    details: { response_status: result.status ?? 0, response: safeJson(result.response), error: result.errorMessage ?? null },
-  });
 
   await writeCommunicationLog(admin, {
     job: { ...job, status },

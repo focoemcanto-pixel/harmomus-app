@@ -32,7 +32,10 @@ function makeProfileFromAuthUser(user: any, profile?: any): Profile {
     role: profile?.role ?? metadata.role ?? "user",
     created_at: profile?.created_at ?? user.created_at ?? new Date().toISOString(),
     updated_at: profile?.updated_at ?? user.updated_at ?? user.created_at ?? new Date().toISOString(),
-  } as Profile;
+    last_sign_in_at: user.last_sign_in_at ?? null,
+    email_confirmed_at: user.email_confirmed_at ?? null,
+    confirmed_at: user.confirmed_at ?? null,
+  } as unknown as Profile;
 }
 
 async function listAllAuthUsers(supabase: any) {

@@ -79,7 +79,7 @@ create policy "Admins can manage marketing events"
   );
 
 -- 4) Marketing logs: compatibility table for older/newer dashboard reads.
-create table if not exists public.marketing_logs (
+create table if not exists public.communication_logs (
   id uuid primary key default gen_random_uuid(),
   campaign_id uuid references public.communication_campaigns(id) on delete set null,
   user_id uuid references public.profiles(id) on delete set null,
@@ -95,20 +95,20 @@ create table if not exists public.marketing_logs (
   updated_at timestamptz not null default now()
 );
 
-create index if not exists marketing_logs_status_created_at_idx
-  on public.marketing_logs (status, created_at desc);
+create index if not exists communication_logs_status_created_at_idx
+  on public.communication_logs (status, created_at desc);
 
-create index if not exists marketing_logs_channel_created_at_idx
-  on public.marketing_logs (channel, created_at desc);
+create index if not exists communication_logs_channel_created_at_idx
+  on public.communication_logs (channel, created_at desc);
 
-create index if not exists marketing_logs_campaign_id_created_at_idx
-  on public.marketing_logs (campaign_id, created_at desc);
+create index if not exists communication_logs_campaign_id_created_at_idx
+  on public.communication_logs (campaign_id, created_at desc);
 
-alter table public.marketing_logs enable row level security;
+alter table public.communication_logs enable row level security;
 
-drop policy if exists "Admins can manage marketing logs" on public.marketing_logs;
+drop policy if exists "Admins can manage marketing logs" on public.communication_logs;
 create policy "Admins can manage marketing logs"
-  on public.marketing_logs
+  on public.communication_logs
   for all
   using (
     exists (

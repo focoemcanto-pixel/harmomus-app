@@ -83,7 +83,7 @@ export function MediaLibrary() {
       const json = await response.json().catch(() => null);
       if (!response.ok) throw new Error(json?.error ?? "Falha ao salvar mídia.");
       setItems((current) => [json.data, ...current]);
-      setStatus("Mídia salva em marketing_media.");
+      setStatus("Mídia salva em communication_assets.");
       setFileName("");
       setFileType("");
       setFileSize(null);
