@@ -15,6 +15,19 @@ function isSupportedLegacyPlan(value: unknown) {
   return ["free", "plus", "premium", "ministry_10", "ministry_20", "ministry_40"].includes(slug);
 }
 
+function isEmailNotConfirmedError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const record = error as Record<string, unknown>;
+  const message = String(record.message ?? "").toLowerCase();
+  const code = String(record.code ?? "").toLowerCase();
+
+  return (
+    message.includes("email not confirmed") ||
+    message.includes("email_not_confirmed") ||
+    code.includes("email_not_confirmed")
+  );
+}
+
 export async function POST(request: Request) {
   const formData = await request.formData();
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
@@ -70,7 +83,11 @@ export async function POST(request: Request) {
 
   if (signInError) {
     const url = new URL("/login", request.url);
-    url.searchParams.set("error", "Credenciais inválidas. Tente novamente.");
+    const errorMessage = isEmailNotConfirmedError(signInError)
+      ? "Você ainda não confirmou seu e-mail. Acesse sua caixa de entrada e clique no link de confirmação para ativar sua conta. Verifique também Spam, Promoções ou Lixo Eletrônico."
+      : "E-mail ou senha inválidos.";
+
+    url.searchParams.set("error", errorMessage);
     url.searchParams.set("redirect", redirectPath);
     return NextResponse.redirect(url, 303);
   }
