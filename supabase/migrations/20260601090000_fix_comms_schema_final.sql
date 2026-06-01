@@ -36,6 +36,8 @@ do $$
 declare
   constraint_name text;
 begin
+  -- Existing environments may still have the original Portuguese-only CHECK on
+  -- communication_logs.status, which blocks the English statuses used by the app.
   if to_regclass('public.communication_logs') is not null then
     for constraint_name in
       select distinct con.conname
@@ -144,7 +146,7 @@ alter table if exists public.marketing_events
 update public.marketing_events
 set
   event_type = coalesce(event_type, event_key, action),
-  action = coalesce(action, event_type, event_key),
+  action = coalesce(action, event_key, event_type),
   source = coalesce(nullif(source, ''), 'harmomus'),
   metadata = coalesce(metadata, '{}'::jsonb),
   created_at = coalesce(created_at, now())
