@@ -1,7 +1,7 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { Channel } from "@/types/communication";
 
-type MarketingJob = {
+type CommunicationQueueJob = {
   id: string;
   campaign_id: string | null;
   user_id: string | null;
@@ -15,7 +15,7 @@ type MarketingJob = {
   payload: Record<string, unknown> | null;
 };
 
-type MarketingChannelRow = {
+type CommunicationChannelRow = {
   id: string;
   type: Channel;
   provider: string;
@@ -31,7 +31,7 @@ type ProviderResult = {
   errorMessage?: string | null;
 };
 
-type ProcessMarketingQueueResult = {
+type ProcessCommunicationQueueResult = {
   processed: number;
   sent: number;
   failed: number;
@@ -53,12 +53,12 @@ function normalizePhone(value: unknown) {
   return sanitizeText(value).replace(/\D/g, "");
 }
 
-function buildRecipient(job: MarketingJob) {
+function buildRecipient(job: CommunicationQueueJob) {
   if (job.channel === "email") return sanitizeText(job.recipient_email);
   return normalizePhone(job.recipient_phone);
 }
 
-function buildMessage(job: MarketingJob) {
+function buildMessage(job: CommunicationQueueJob) {
   const payload = job.payload ?? {};
   return sanitizeText(payload.message) || sanitizeText(payload.text) || sanitizeText(payload.mensagem);
 }
@@ -77,29 +77,20 @@ function safeJson(value: unknown) {
   }
 }
 
-async function writeMarketingLog(admin: any, input: {
-  job: MarketingJob;
+async function writeCommunicationLog(admin: any, input: {
+  job: CommunicationQueueJob;
   event: string;
   level: "info" | "warning" | "error";
   message: string;
   payload?: unknown;
   response?: unknown;
 }) {
-  const now = new Date().toISOString();
-  await admin.from("marketing_logs").insert({
+  await admin.from("communication_logs").insert({
     campaign_id: input.job.campaign_id,
-    job_id: input.job.id,
     user_id: input.job.user_id,
     channel: input.job.channel,
     status: input.event.endsWith("sent") ? "sent" : input.event.endsWith("failed") ? "failed" : input.event.endsWith("processing") ? "processing" : input.job.status,
-    event: input.event,
-    event_type: input.event,
-    level: input.level,
-    message: input.message,
-    payload: safeJson(input.payload) ?? {},
-    details: safeJson(input.payload) ?? {},
-    response: safeJson(input.response),
-    updated_at: now,
+    details: { event_key: input.event, level: input.level, message: input.message, queue_id: input.job.id, payload: safeJson(input.payload) ?? {}, response: safeJson(input.response) },
   });
 }
 
@@ -117,7 +108,7 @@ async function getActiveChannel(admin: any, channel: Channel) {
   return { data: data ?? null, error: null };
 }
 
-async function sendViaWebhook(job: MarketingJob, channel: MarketingChannelRow): Promise<ProviderResult> {
+async function sendViaWebhook(job: CommunicationQueueJob, channel: CommunicationChannelRow): Promise<ProviderResult> {
   const config = channel.config ?? {};
   const apiUrl = sanitizeText(config.apiUrl);
   const apiToken = sanitizeText(config.apiToken);
@@ -152,7 +143,7 @@ async function sendViaWebhook(job: MarketingJob, channel: MarketingChannelRow): 
     text: message,
     message,
     mensagem: message,
-    source: "harmomus.marketing_jobs",
+    source: "harmomus.communication_queue",
     created_at: new Date().toISOString(),
   };
 
@@ -197,11 +188,11 @@ async function sendViaWebhook(job: MarketingJob, channel: MarketingChannelRow): 
   }
 }
 
-async function markJobProcessing(admin: any, job: MarketingJob) {
+async function markJobProcessing(admin: any, job: CommunicationQueueJob) {
   const now = new Date().toISOString();
   const attempts = Number(job.attempts ?? 0) + 1;
   const { data, error } = await admin
-    .from("marketing_jobs")
+    .from("communication_queue")
     .update({ status: "processing", attempts, updated_at: now })
     .eq("id", job.id)
     .in("status", ["pending", "processing"])
@@ -211,9 +202,9 @@ async function markJobProcessing(admin: any, job: MarketingJob) {
   if (error || !data) return false;
   job.attempts = attempts;
   job.status = "processing";
-  await writeMarketingLog(admin, {
+  await writeCommunicationLog(admin, {
     job,
-    event: "marketing.job.processing",
+    event: "communication.queue.processing",
     level: "info",
     message: "Job retirado da fila e marcado como processing.",
     payload: { job_id: job.id, attempts },
@@ -221,11 +212,11 @@ async function markJobProcessing(admin: any, job: MarketingJob) {
   return true;
 }
 
-async function finalizeJob(admin: any, job: MarketingJob, result: ProviderResult) {
+async function finalizeJob(admin: any, job: CommunicationQueueJob, result: ProviderResult) {
   const now = new Date().toISOString();
   const status = result.ok ? "sent" : "failed";
   await admin
-    .from("marketing_jobs")
+    .from("communication_queue")
     .update({
       status,
       processed_at: now,
@@ -236,9 +227,23 @@ async function finalizeJob(admin: any, job: MarketingJob, result: ProviderResult
     })
     .eq("id", job.id);
 
-  await writeMarketingLog(admin, {
+  await admin.from("communication_deliveries").insert({
+    campaign_id: job.campaign_id,
+    queue_id: job.id,
+    user_id: job.user_id,
+    channel: job.channel,
+    status,
+    provider: result.provider,
+    provider_message_id: result.providerMessageId ?? null,
+    error_message: result.errorMessage ?? null,
+    sent_at: result.ok ? now : null,
+    delivered_at: result.ok ? now : null,
+    details: { response_status: result.status ?? 0, response: safeJson(result.response), error: result.errorMessage ?? null },
+  });
+
+  await writeCommunicationLog(admin, {
     job: { ...job, status },
-    event: result.ok ? "marketing.job.sent" : "marketing.job.failed",
+    event: result.ok ? "communication.queue.sent" : "communication.queue.failed",
     level: result.ok ? "info" : "error",
     message: result.ok ? "Mensagem enviada pelo provedor configurado." : result.errorMessage ?? "Falha ao enviar mensagem.",
     payload: { job_id: job.id, provider: result.provider, status, provider_message_id: result.providerMessageId ?? null },
@@ -246,11 +251,11 @@ async function finalizeJob(admin: any, job: MarketingJob, result: ProviderResult
   });
 }
 
-export async function processMarketingQueue(limit = 50): Promise<ProcessMarketingQueueResult> {
+export async function processCommunicationQueue(limit = 50): Promise<ProcessCommunicationQueueResult> {
   const admin = createSupabaseAdminClient() as any;
   const now = new Date().toISOString();
   const { data: jobs, error } = await admin
-    .from("marketing_jobs")
+    .from("communication_queue")
     .select("id,campaign_id,user_id,recipient_name,recipient_email,recipient_phone,channel,status,attempts,scheduled_at,payload")
     .in("status", ["pending", "processing"])
     .or(`scheduled_at.is.null,scheduled_at.lte.${now}`)
@@ -262,9 +267,9 @@ export async function processMarketingQueue(limit = 50): Promise<ProcessMarketin
   let sent = 0;
   let failed = 0;
   let skipped = 0;
-  const channels = new Map<Channel, MarketingChannelRow | null>();
+  const channels = new Map<Channel, CommunicationChannelRow | null>();
 
-  for (const job of jobs as MarketingJob[]) {
+  for (const job of jobs as CommunicationQueueJob[]) {
     const locked = await markJobProcessing(admin, job);
     if (!locked) {
       skipped += 1;

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getCreatedBy, isMissingMarketingTable, marketingTableErrorResponse, requireAdmin, sanitizeObject, sanitizeStringArray, sanitizeText } from "../_lib/marketing-api";
+import { getCreatedBy, isMissingCommunicationTable, communicationTableErrorResponse, requireAdmin, sanitizeObject, sanitizeStringArray, sanitizeText } from "../_lib/marketing-api";
 
 const CHANNELS = new Set(["whatsapp", "email"]);
 
@@ -9,12 +9,12 @@ export async function GET() {
   if (response) return response;
 
   const { data, error } = await admin
-    .from("marketing_campaigns")
+    .from("communication_campaigns")
     .select("id,created_at,updated_at,name,status,channels,audience_filters,title,message,link_url,schedule_mode,scheduled_at,rate_limits,stats")
     .order("created_at", { ascending: false });
 
   if (error) {
-    if (isMissingMarketingTable(error)) return marketingTableErrorResponse();
+    if (isMissingCommunicationTable(error)) return communicationTableErrorResponse();
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
@@ -41,7 +41,10 @@ export async function POST(request: Request) {
   const record = {
     name,
     status: "draft",
+    channel: channels[0],
     channels,
+    audience_type: sanitizeText(body.audience_type) || sanitizeText(body.segment_slug) || "custom",
+    segment_slug: sanitizeText(body.segment_slug) || sanitizeText(sanitizeObject(body.audience_filters).segment) || null,
     audience_filters: sanitizeObject(body.audience_filters),
     title: sanitizeText(body.title) || null,
     message,
@@ -54,13 +57,13 @@ export async function POST(request: Request) {
   };
 
   const { data, error } = await admin
-    .from("marketing_campaigns")
+    .from("communication_campaigns")
     .insert(record)
     .select("id,created_at,updated_at,name,status,channels,audience_filters,title,message,link_url,schedule_mode,scheduled_at,rate_limits,stats")
     .single();
 
   if (error) {
-    if (isMissingMarketingTable(error)) return marketingTableErrorResponse();
+    if (isMissingCommunicationTable(error)) return communicationTableErrorResponse();
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 

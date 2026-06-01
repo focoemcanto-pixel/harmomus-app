@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getCreatedBy, isMissingMarketingTable, marketingTableErrorResponse, requireAdmin, sanitizeObject, sanitizeText } from "../_lib/marketing-api";
+import { getCreatedBy, isMissingCommunicationTable, communicationTableErrorResponse, requireAdmin, sanitizeObject, sanitizeText } from "../_lib/marketing-api";
 
 function sanitizeFileSize(value: unknown) {
   const parsed = Number(value);
@@ -17,7 +17,7 @@ export async function GET() {
     .order("created_at", { ascending: false });
 
   if (error) {
-    if (isMissingMarketingTable(error)) return marketingTableErrorResponse();
+    if (isMissingCommunicationTable(error)) return communicationTableErrorResponse();
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
@@ -52,7 +52,7 @@ export async function POST(request: Request) {
     .single();
 
   if (error) {
-    if (isMissingMarketingTable(error)) return marketingTableErrorResponse();
+    if (isMissingCommunicationTable(error)) return communicationTableErrorResponse();
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 

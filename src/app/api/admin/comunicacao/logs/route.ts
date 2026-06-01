@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { isMissingMarketingTable, marketingTableErrorResponse, requireAdmin, sanitizeText } from "../_lib/marketing-api";
+import { isMissingCommunicationTable, communicationTableErrorResponse, requireAdmin, sanitizeText } from "../_lib/marketing-api";
 
 export async function GET(request: Request) {
   const { admin, response } = await requireAdmin();
@@ -12,21 +12,21 @@ export async function GET(request: Request) {
   const search = sanitizeText(url.searchParams.get("q"));
 
   let query = admin
-    .from("marketing_logs")
-    .select("id,created_at,campaign_id,job_id,channel,event,level,message,payload,response")
+    .from("communication_logs")
+    .select("id,created_at,campaign_id,user_id,channel,status,provider_message_id,details")
     .order("created_at", { ascending: false })
     .limit(100);
 
   if (channel) query = query.eq("channel", channel);
-  if (level) query = query.eq("level", level);
-  if (search) query = query.or(`message.ilike.%${search}%,event.ilike.%${search}%`);
+  if (level) query = query.eq("status", level);
+  if (search) query = query.or(`status.ilike.%${search}%`);
 
   const { data, error } = await query;
 
   if (error) {
-    if (isMissingMarketingTable(error)) return marketingTableErrorResponse();
+    if (isMissingCommunicationTable(error)) return communicationTableErrorResponse();
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ data: data ?? [] });
+  return NextResponse.json({ data: (data ?? []).map((row: any) => ({ ...row, event: row.details?.event_key ?? row.status, level: row.details?.level ?? row.status, message: row.details?.message ?? row.status, payload: row.details?.payload ?? row.details ?? {}, response: row.details?.response ?? null })) });
 }

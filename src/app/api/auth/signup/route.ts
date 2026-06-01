@@ -80,7 +80,8 @@ function runSignupSideEffectsAsync(input: {
   setTimeout(() => {
     void Promise.allSettled([
       trackMarketingEvent(input.supabase as any, {
-        eventType: "signup",
+        eventKey: "signup",
+        eventLabel: "Cadastro",
         channel: "email",
         metadata: { plan: input.plan, origin: input.origin },
       }),

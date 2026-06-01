@@ -5,7 +5,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-export const MARKETING_MIGRATION_MESSAGE = "Aplique a migration de marketing";
+export const COMMUNICATION_MIGRATION_MESSAGE = "Aplique a migration de comunicação";
 
 export type MarketingConfig = Record<string, unknown>;
 
@@ -39,12 +39,12 @@ export function sanitizeObject(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
-export function isMissingMarketingTable(error: { code?: string } | null | undefined) {
+export function isMissingCommunicationTable(error: { code?: string } | null | undefined) {
   return error?.code === "42P01";
 }
 
-export function marketingTableErrorResponse() {
-  return NextResponse.json({ error: MARKETING_MIGRATION_MESSAGE }, { status: 500 });
+export function communicationTableErrorResponse() {
+  return NextResponse.json({ error: COMMUNICATION_MIGRATION_MESSAGE }, { status: 500 });
 }
 
 export async function requireAdmin() {
@@ -80,13 +80,10 @@ export async function writeMarketingLog(input: {
   payload?: unknown;
   response?: unknown;
 }) {
-  const { error } = await input.admin.from("marketing_logs").insert({
+  const { error } = await input.admin.from("communication_logs").insert({
     channel: input.channel ?? null,
-    event: input.event,
-    level: input.level,
-    message: input.message,
-    payload: safeJson(input.payload),
-    response: safeJson(input.response),
+    status: input.level === "error" ? "failed" : "sent",
+    details: { event_key: input.event, level: input.level, message: input.message, payload: safeJson(input.payload), response: safeJson(input.response) },
   });
 
   return error;

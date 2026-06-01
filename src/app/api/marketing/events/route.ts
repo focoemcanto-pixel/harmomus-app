@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { trackMarketingEvent } from "@/lib/communications/events";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
-const EVENT_TYPES = new Set(["open", "click", "conversion"]);
+const EVENT_KEYS = new Set(["open", "click", "conversion"]);
 const TRANSPARENT_PIXEL = Buffer.from("R0lGODlhAQABAPAAAP///wAAACH5BAAAAAAALAAAAAABAAEAAAICRAEAOw==", "base64");
 
 function sanitizeText(value: unknown) {
@@ -27,16 +27,30 @@ function sanitizeUrl(value: unknown) {
   }
 }
 
-function eventFromRequest(request: Request, body?: Record<string, unknown> | null) {
+function eventKeyFromRequest(request: Request, body?: Record<string, unknown> | null) {
   const url = new URL(request.url);
-  const type = sanitizeText(body?.event_type ?? body?.event ?? url.searchParams.get("event_type") ?? url.searchParams.get("event")).toLowerCase();
-  return EVENT_TYPES.has(type) ? type : null;
+  const key = sanitizeText(body?.event_key ?? body?.event ?? url.searchParams.get("event_key") ?? url.searchParams.get("event")).toLowerCase();
+  return EVENT_KEYS.has(key) ? key : null;
+}
+
+async function updateDeliveryMetrics(supabase: ReturnType<typeof createSupabaseAdminClient>, eventKey: string, metadata: Record<string, unknown>, userId: string | null) {
+  const now = new Date().toISOString();
+  const jobId = sanitizeUuid(metadata.job_id);
+  const campaignId = sanitizeUuid(metadata.campaign_id);
+  const providerMessageId = sanitizeText(metadata.provider_message_id) || null;
+  const timestampColumn = eventKey === "open" ? "opened_at" : eventKey === "click" ? "clicked_at" : "converted_at";
+  const status = eventKey === "open" ? "opened" : eventKey === "click" ? "clicked" : "converted";
+  const patch = { [timestampColumn]: now, status, updated_at: now };
+
+  if (jobId) await supabase.from("communication_deliveries").update(patch).eq("queue_id", jobId);
+  if (providerMessageId) await supabase.from("communication_deliveries").update(patch).eq("provider_message_id", providerMessageId);
+  if (campaignId && userId) await supabase.from("communication_deliveries").update(patch).eq("campaign_id", campaignId).eq("user_id", userId);
 }
 
 async function recordEvent(request: Request, body?: Record<string, unknown> | null) {
   const url = new URL(request.url);
-  const eventType = eventFromRequest(request, body);
-  if (!eventType) return { ok: false as const, error: "Evento inválido." };
+  const eventKey = eventKeyFromRequest(request, body);
+  if (!eventKey) return { ok: false as const, error: "Evento inválido." };
 
   const metadata = {
     job_id: sanitizeUuid(body?.job_id ?? url.searchParams.get("job_id")),
@@ -46,22 +60,25 @@ async function recordEvent(request: Request, body?: Record<string, unknown> | nu
     user_agent: request.headers.get("user-agent"),
     ip: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
   };
+  const userId = sanitizeUuid(body?.user_id ?? url.searchParams.get("user_id"));
 
   const supabase = createSupabaseAdminClient();
   await trackMarketingEvent(supabase as any, {
-    userId: sanitizeUuid(body?.user_id ?? url.searchParams.get("user_id")),
-    eventType,
+    userId,
+    eventKey,
+    eventLabel: eventKey === "open" ? "Abertura" : eventKey === "click" ? "Clique" : "Conversão",
     channel: sanitizeText(body?.channel ?? url.searchParams.get("channel")) || undefined,
     metadata,
   });
+  await updateDeliveryMetrics(supabase, eventKey, metadata, userId);
 
-  return { ok: true as const, eventType, metadata };
+  return { ok: true as const, eventKey, metadata };
 }
 
 export async function GET(request: Request) {
   const result = await recordEvent(request);
   const url = new URL(request.url);
-  const redirectTo = result.ok && result.eventType === "click" ? sanitizeUrl(url.searchParams.get("url")) : null;
+  const redirectTo = result.ok && result.eventKey === "click" ? sanitizeUrl(url.searchParams.get("url")) : null;
 
   if (redirectTo) return NextResponse.redirect(redirectTo, { status: 302 });
 
@@ -78,5 +95,5 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   const result = await recordEvent(request, body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : null);
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
-  return NextResponse.json({ data: { ok: true, event_type: result.eventType } });
+  return NextResponse.json({ data: { ok: true, event_key: result.eventKey } });
 }

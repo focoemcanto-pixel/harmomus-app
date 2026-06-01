@@ -77,7 +77,7 @@ export async function POST(request: Request) {
 
   const user = data.user;
   if (user?.id) {
-    await trackMarketingEvent(supabase as any, { userId: user.id, eventType: "login" });
+    await trackMarketingEvent(supabase as any, { userId: user.id, eventKey: "login", eventLabel: "Login" });
 
     const admin = createSupabaseAdminClient() as any;
     const { data: profile } = await admin
