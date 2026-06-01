@@ -15,6 +15,7 @@ import {
   Waves,
   Webhook,
   Send,
+  Siren,
 } from "lucide-react";
 
 type AdminNavItem = {
@@ -52,6 +53,7 @@ const navGroups: AdminNavGroup[] = [
       { label: "Assinaturas", href: "/admin/assinaturas", icon: CreditCard },
       { label: "Planos", href: "/admin/planos", icon: Library },
       { label: "Membros", href: "/admin/membros", icon: Users },
+      { label: "Incidentes", href: "/admin/incidentes", icon: Siren },
       { label: "Billing", href: "/admin/billing", icon: CreditCard },
     ],
   },
