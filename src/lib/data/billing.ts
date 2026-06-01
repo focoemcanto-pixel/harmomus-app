@@ -202,6 +202,26 @@ async function hasUsedTrial(supabase: any, userId: string) {
   return Boolean(data?.id);
 }
 
+function normalizeSubscriptionValue(value: unknown) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function isActiveMigratedSubscription(subscription: any) {
+  if (!subscription) return false;
+
+  const status = normalizeSubscriptionValue(subscription.status);
+  const gateway = normalizeSubscriptionValue(subscription.gateway);
+  const originalGateway = normalizeSubscriptionValue(subscription.original_gateway);
+  const migrated = Boolean(
+    subscription.migrated_from_pms ||
+      subscription.legacy_pms_subscription_id ||
+      ["legacy", "manual_migration", "migration", "pms"].includes(gateway) ||
+      originalGateway === "pms",
+  );
+
+  return migrated && ["active", "trialing"].includes(status);
+}
+
 async function savePendingStripeSubscription(supabase: any, input: { userId: string; planId: string; customerId: string }) {
   if (!input.planId) throw new Error("Plano obrigatório para preparar assinatura.");
 
@@ -218,7 +238,7 @@ async function savePendingStripeSubscription(supabase: any, input: { userId: str
 
   const { data: existing, error: existingError } = await supabase
     .from("subscriptions")
-    .select("id")
+    .select("id,status,gateway,original_gateway,migrated_from_pms,legacy_pms_subscription_id")
     .eq("user_id", input.userId)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -226,6 +246,10 @@ async function savePendingStripeSubscription(supabase: any, input: { userId: str
 
   if (existingError) {
     throw new Error(`Falha ao verificar assinatura existente: ${existingError.message}`);
+  }
+
+  if (isActiveMigratedSubscription(existing)) {
+    return;
   }
 
   const result = existing?.id
