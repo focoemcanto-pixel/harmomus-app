@@ -4,6 +4,7 @@ export type EnsureUserAccessInput = {
   id: string;
   email?: string | null;
   fullName?: string | null;
+  phone?: string | null;
   avatarUrl?: string | null;
   legacyProvider?: string | null;
   legacyUserId?: string | null;
@@ -16,6 +17,14 @@ function normalizeEmail(email?: string | null) {
 
 function normalizeName(input: EnsureUserAccessInput) {
   return String(input.fullName ?? "").trim() || null;
+}
+
+function normalizePhone(value?: string | null) {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  if (!digits) return null;
+  if (digits.startsWith("55") && (digits.length === 12 || digits.length === 13)) return digits;
+  if (digits.length === 10 || digits.length === 11) return `55${digits}`;
+  return digits;
 }
 
 function normalizeRole(existingRole?: string | null) {
@@ -57,12 +66,13 @@ async function getPlanIdBySlug(admin: any, slug: string) {
 async function ensureProfile(admin: any, input: EnsureUserAccessInput) {
   const email = normalizeEmail(input.email);
   const fullName = normalizeName(input);
+  const phone = normalizePhone(input.phone);
   const avatarUrl = String(input.avatarUrl ?? "").trim() || null;
   const now = new Date().toISOString();
 
   const { data: existingProfile, error: existingError } = await admin
     .from("profiles")
-    .select("id, email, full_name, avatar_url, role, onboarding_status, onboarding_step")
+    .select("id, email, full_name, phone, avatar_url, role, onboarding_status, onboarding_step")
     .eq("id", input.id)
     .maybeSingle();
 
@@ -86,6 +96,7 @@ async function ensureProfile(admin: any, input: EnsureUserAccessInput) {
     id: input.id,
     email: email || existingProfile?.email || null,
     full_name: fullName ?? existingProfile?.full_name ?? null,
+    phone: phone ?? existingProfile?.phone ?? null,
     avatar_url: avatarUrl ?? existingProfile?.avatar_url ?? null,
     role: normalizeRole(existingProfile?.role),
     updated_at: now,
