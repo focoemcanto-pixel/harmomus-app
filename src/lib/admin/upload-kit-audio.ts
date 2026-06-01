@@ -263,7 +263,7 @@ export async function uploadKitAudioBundle({
     uploadedFiles += 1;
   }
 
-  const { error: upsertError } = await supabase.from("kit_audio_files").upsert(rows, { onConflict: "r2_key" });
+  const { error: upsertError } = await supabase.from("kit_audio_files").upsert(rows, { onConflict: "kit_id,r2_key" });
   if (upsertError) throw new Error(`Falha ao registrar áudios no banco: ${upsertError.message}`);
 
   return {
