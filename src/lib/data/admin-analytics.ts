@@ -132,7 +132,7 @@ export async function getAdminAnalyticsSummary(filters: AnalyticsFilters) {
   const [logs, usage, subscriptions, plans] = await Promise.all([
     getBaseLogs(filters),
     getUsageTracking(filters),
-    supabase.from("subscriptions").select("id,user_id,plan_id,status,billing_cycle").eq("status", "active").then((r: any) => r.data ?? []),
+    supabase.from("subscriptions").select("id,user_id,plan_id,status,billing_cycle").in("status", ["active", "trialing"]).then((r: any) => r.data ?? []),
     supabase.from("plans").select("id,slug,name").then((r: any) => r.data ?? []),
   ]);
 

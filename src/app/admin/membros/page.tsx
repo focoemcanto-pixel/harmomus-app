@@ -225,6 +225,7 @@ export default async function AdminMembrosPage({ searchParams }: { searchParams:
       if (!filter) return true;
       if (filter === "no_login") return item.flags.includes("profile_not_synced" as any) || item.flags.includes("no_real_access" as any);
       if (filter === "no_access" || filter === "no_content_access") return item.flags.includes("no_kit_access") || item.flags.includes("no_audio_access");
+      if (filter === "profile_not_synced") return item.flags.includes("no_login");
       return item.flags.includes(filter as any);
     });
   const total = members.length;

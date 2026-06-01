@@ -155,7 +155,7 @@ export function calculateMemberHealth(member: MemberLike, journey?: JourneyLike)
   const stripeSubscription = getStripeSubscription(subscription);
   const migrated = isMigratedFromPms(member, journey);
   const hasKitAccess = rows(journey, "kitAccessLogs").length > 0;
-  const hasAudioAccess = rows(journey, "audioAccessLogs").some((log: any) => normalize(log?.status) !== "denied") || rows(journey, "audioAccessLogs").length > 0;
+  const hasAudioAccess = rows(journey, "audioAccessLogs").some((log: any) => normalize(log?.status) !== "denied");
   const hasRecentWebhook = hasRecentRow([...rows(journey, "webhookLogs"), ...rows(journey, "webhookProcessedEvents")], 30);
   const failedCommunication = communicationFailed(journey);
 
