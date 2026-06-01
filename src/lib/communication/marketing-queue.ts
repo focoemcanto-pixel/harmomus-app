@@ -115,10 +115,10 @@ async function getActiveChannel(admin: any, channel: Channel) {
     .maybeSingle();
 
   if (error) return { data: null, error };
-  return { data: data ? { ...data, type: channel } : null, error: null };
+  return { data: data ? ({ ...data, type: channel } as CommunicationChannelRow) : null, error: null };
 }
 
-async function sendViaWebhook(job: CommunicationQueueJob, channel: MarketingChannelRow): Promise<ProviderResult> {
+async function sendViaWebhook(job: CommunicationQueueJob, channel: CommunicationChannelRow): Promise<ProviderResult> {
   const config = channel.config ?? {};
   const apiUrl = sanitizeText(config.apiUrl);
   const apiToken = sanitizeText(config.apiToken);
