@@ -4,6 +4,17 @@ import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
 
 type CheckoutMetadata = Record<string, string | null | undefined>;
 
+const ATTRIBUTION_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "fbclid", "gclid"] as const;
+
+function pickAttribution(metadata?: CheckoutMetadata | null) {
+  const attribution: Record<string, string> = {};
+  for (const key of ATTRIBUTION_KEYS) {
+    const value = String(metadata?.[key] ?? "").trim();
+    if (value) attribution[key] = value.slice(0, 500);
+  }
+  return attribution;
+}
+
 function resolveAppUrl(fallbackOrigin?: string | null) {
   const envBase = process.env.NEXT_PUBLIC_APP_URL?.trim();
   if (envBase) return envBase.replace(/\/$/, "");
@@ -91,6 +102,7 @@ async function dispatchCheckoutStarted(input: {
   sessionUrl?: string | null;
   trialDays: number;
   source?: string | null;
+  attribution?: Record<string, string>;
 }) {
   const events = getCheckoutStartedEvents(input.planSlug);
   await Promise.allSettled(
@@ -108,7 +120,8 @@ async function dispatchCheckoutStarted(input: {
           stripe_customer_id: input.customerId,
           checkout_url: input.sessionUrl ?? null,
           trial_days: input.trialDays,
-          source: input.source ?? null,
+          source: input.source ?? input.attribution?.utm_source ?? null,
+          attribution: input.attribution ?? {},
           started_at: new Date().toISOString(),
         },
       }),
@@ -224,7 +237,7 @@ function isActiveMigratedSubscription(subscription: any) {
   return migrated && ["active", "trialing"].includes(status);
 }
 
-async function savePendingStripeSubscription(supabase: any, input: { userId: string; planId: string; customerId: string }) {
+async function savePendingStripeSubscription(supabase: any, input: { userId: string; planId: string; customerId: string; attribution?: Record<string, string> }) {
   if (!input.planId) throw new Error("Plano obrigatório para preparar assinatura.");
 
   const now = new Date().toISOString();
@@ -235,6 +248,7 @@ async function savePendingStripeSubscription(supabase: any, input: { userId: str
     gateway: "stripe",
     stripe_customer_id: input.customerId,
     gateway_customer_id: input.customerId,
+    ...pickAttribution(input.attribution),
     updated_at: now,
   };
 
@@ -285,13 +299,14 @@ async function createStripeCheckoutWithSupabase(
     hasUsedTrial(supabase, userId),
   ]);
 
+  const attribution = pickAttribution(metadata);
   const customerId = await getOrCreateCustomer({
     email,
     userId,
     existingCustomerId: existing?.stripe_customer_id ?? existing?.gateway_customer_id,
   });
 
-  await savePendingStripeSubscription(supabase, { userId, planId, customerId });
+  await savePendingStripeSubscription(supabase, { userId, planId, customerId, attribution });
 
   const base = resolveAppUrl(fallbackOrigin);
   const trialDays = trialAlreadyUsed ? 0 : Number(plan.trial_days ?? 0);
@@ -319,7 +334,8 @@ async function createStripeCheckoutWithSupabase(
     customerId,
     sessionUrl: session?.url ?? null,
     trialDays,
-    source: metadata?.source ?? null,
+    source: metadata?.source ?? attribution.utm_source ?? null,
+    attribution,
   }).catch((error) => console.error("[billing] Falha ao disparar webhook checkout.started", error));
 
   return session;
