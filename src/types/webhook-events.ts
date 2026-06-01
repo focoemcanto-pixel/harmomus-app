@@ -19,8 +19,13 @@ export const WEBHOOK_EVENT_CATEGORIES = {
   ],
   "🔄 Assinaturas": [
     "subscription.created",
+    "subscription.free.created",
+    "subscription.plus.created",
+    "subscription.premium.created",
     "subscription.renewed",
     "subscription.canceled",
+    "subscription.plus.canceled",
+    "subscription.premium.canceled",
     "subscription.payment_failed",
   ],
   "✅ Plano ativado": [
