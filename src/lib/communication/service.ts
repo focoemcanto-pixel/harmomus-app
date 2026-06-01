@@ -336,12 +336,17 @@ export async function getAudience(params: { search?: string; page?: number; limi
     const commercial_status = commercialStatus({ subscription: sub, plays, blocks, lastActivity: last, failedPayment: segmentData.failedPaymentUsers.has(profile.id) });
     return {
       id: profile.id,
+      full_name: profile.full_name ?? null,
       name: profile.full_name ?? null,
       email: profile.email ?? null,
       phone: profile.phone ?? null,
+      plano: current,
+      status: sub?.status ?? null,
       whatsapp_opt_in: profile.whatsapp_opt_in ?? false,
       email_opt_in: profile.email_opt_in ?? false,
-      created_at: profile.created_at ?? null,
+      last_seen_at: profile.last_seen_at ?? null,
+      origin: profile.origin ?? null,
+      created_at: profile.created_at ?? new Date(0).toISOString(),
       current_plan: current,
       commercial_status,
       recent_plays: plays,
@@ -372,7 +377,7 @@ export async function getAudience(params: { search?: string; page?: number; limi
     }, {}),
   };
 
-  return { rows: paged, total, page, limit, summary, warnings: data.warnings };
+  return { rows: paged, total, count: total, page, limit, summary, warnings: data.warnings };
 }
 
 export async function getCommunicationLogs(limit = 100): Promise<{ logs: CommunicationLogRow[]; warnings: CommunicationWarning[] }> {
