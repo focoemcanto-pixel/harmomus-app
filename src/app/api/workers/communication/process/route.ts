@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getPendingQueue } from "@/lib/communication/service";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { processMarketingQueue } from "@/lib/communication/marketing-queue";
 
 function validateWorkerToken(request: Request) {
   const expectedToken = process.env.HARMOMUS_WORKER_TOKEN;
@@ -22,35 +21,10 @@ export async function POST(request: Request) {
   const authError = validateWorkerToken(request);
   if (authError) return authError;
 
-  const supabase = createSupabaseAdminClient() as any;
-  const items = await getPendingQueue(50);
-
-  if (!items.length) {
-    return NextResponse.json({ success: true, processed: 0, skipped: 0 });
-  }
-
-  let skipped = 0;
-
-  for (const item of items) {
-    skipped += 1;
-
-    await supabase
-      .from("communication_logs")
-      .update({
-        status: "queued",
-        details: {
-          ...(item.payload ?? {}),
-          worker_checked_at: new Date().toISOString(),
-          worker_note: "Nenhum provider real de comunicação está configurado. Mensagem mantida em fila.",
-        },
-      })
-      .eq("id", item.id);
-  }
+  const result = await processMarketingQueue(50);
 
   return NextResponse.json({
     success: true,
-    processed: 0,
-    skipped,
-    reason: "communication_provider_not_configured",
+    ...result,
   });
 }

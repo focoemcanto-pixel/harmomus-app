@@ -296,8 +296,8 @@ export async function getCommunicationDashboard(): Promise<CommunicationDashboar
   const sent = logs.filter((d) => ["sent", "opened", "clicked", "replied"].includes(normalizeStatus(d.status ?? d.event))).length;
   const pending = data.pendingJobs + logs.filter((d) => normalizeStatus(d.status ?? d.event) === "queued").length;
   const failed = logs.filter((d) => normalizeStatus(d.status ?? d.level) === "failed" || normalize(d.level) === "error").length;
-  const opened = logs.filter((d) => normalizeStatus(d.status ?? d.event) === "opened" || ["email_open", "email_opened"].includes(normalize(d.event))).length + data.events.filter((e) => ["email_open", "email_opened"].includes(normalize(e.event_type))).length;
-  const clicked = logs.filter((d) => normalizeStatus(d.status ?? d.event) === "clicked" || ["whatsapp_click", "link_clicked"].includes(normalize(d.event))).length + data.events.filter((e) => ["whatsapp_click", "link_clicked"].includes(normalize(e.event_type))).length;
+  const opened = logs.filter((d) => normalizeStatus(d.status ?? d.event) === "opened" || ["email_open", "email_opened"].includes(normalize(d.event))).length + data.events.filter((e) => ["open", "email_open", "email_opened"].includes(normalize(e.event_type))).length;
+  const clicked = logs.filter((d) => normalizeStatus(d.status ?? d.event) === "clicked" || ["whatsapp_click", "link_clicked"].includes(normalize(d.event))).length + data.events.filter((e) => ["click", "whatsapp_click", "link_clicked"].includes(normalize(e.event_type))).length;
   const converted = data.events.filter((e) => ["subscription_created", "conversion", "checkout_completed"].includes(normalize(e.event_type))).length;
   const failureRate = safeRate(failed, Math.max(1, sent + pending + failed)) ?? 0;
   const healthScore = Math.max(0, Math.round(100 - failureRate - Math.min(25, pending / 20)));
@@ -459,10 +459,12 @@ export async function enqueueCampaignDeliveries(campaignId: string, channel: Cha
   await supabase.from("marketing_logs").insert({
     campaign_id: campaignId,
     channel,
-    event: "communication.campaign.queued",
+    event: "marketing.job.pending",
+    status: "pending",
+    event_type: "marketing.job.pending",
     level: "info",
     message: `${rows.length} mensagens colocadas em fila para ${channel}.`,
-    payload: { campaign_id: campaignId, channel, queued: rows.length, status: "queued" },
+    payload: { campaign_id: campaignId, channel, queued: rows.length, status: "pending" },
   });
 
   await supabase.from("marketing_campaigns").update({ status: "queued", updated_at: new Date().toISOString(), stats: { queued: rows.length } }).eq("id", campaignId);
