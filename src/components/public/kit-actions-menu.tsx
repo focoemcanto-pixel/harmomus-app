@@ -16,7 +16,7 @@ export function KitActionsMenu({
   canRequestSongsAndTones = planSlug === "premium",
   onPremiumRequired,
 }: {
-  kitId: string;
+  kitId?: string;
   kitName: string;
   kitSlug: string;
   categorySlug?: string | null;
@@ -30,6 +30,7 @@ export function KitActionsMenu({
   const canRequestTone = isPremium && canRequestSongsAndTones;
   const isPremiumWithoutRequestPermission = isPremium && !canRequestSongsAndTones;
   const canUsePlaylists = canSavePlaylist(planSlug);
+  const kitReference = kitId || kitSlug;
 
   const requestToneHref = `/area-premium?kit=${encodeURIComponent(kitSlug)}&nome=${encodeURIComponent(kitName)}#solicitar-tom`;
 
@@ -105,7 +106,7 @@ export function KitActionsMenu({
       {canUsePlaylists ? (
         <PlaylistSaveDialog
           open={playlistOpen}
-          kitId={kitId}
+          kitId={kitReference}
           kitSlug={kitSlug}
           kitName={kitName}
           onClose={() => setPlaylistOpen(false)}
