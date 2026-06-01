@@ -1,8 +1,17 @@
-import { createPlaylist } from "@/lib/data/playlists";
+import { createPlaylist, getCurrentUserPlaylists } from "@/lib/data/playlists";
 
 function asStringArray(value: unknown) {
   if (!Array.isArray(value)) return [];
   return value.map((item) => String(item ?? "").trim()).filter(Boolean);
+}
+
+export async function GET() {
+  try {
+    const playlists = await getCurrentUserPlaylists();
+    return Response.json({ playlists });
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : "Erro ao carregar playlists." }, { status: 400 });
+  }
 }
 
 export async function POST(request: Request) {
@@ -20,7 +29,7 @@ export async function POST(request: Request) {
     }
 
     const playlist = await createPlaylist({ name, kitIds });
-    return Response.json({ slug: playlist.slug });
+    return Response.json({ id: playlist.id, slug: playlist.slug });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Erro ao criar playlist." }, { status: 400 });
   }
