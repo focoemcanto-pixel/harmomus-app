@@ -20,6 +20,7 @@ export const revalidate = 0;
 
 const STATUS_OPTIONS = ["active", "trialing", "pending", "canceled", "inactive"] as const;
 type JourneyStatus = "concluído" | "pendente" | "ausente" | "erro" | "informação";
+type Severity = "success" | "info" | "warning" | "critical";
 
 type JourneyTimelineEvent = {
   at?: string | null;
@@ -28,6 +29,15 @@ type JourneyTimelineEvent = {
   source: string;
   status: JourneyStatus | string;
   details?: unknown;
+};
+
+type JourneyDiagnosis = {
+  severity: Severity;
+  title: string;
+  cause: string;
+  action: string;
+  confidence: "baixa" | "média" | "alta";
+  evidence: string[];
 };
 
 function statusBadgeClass(status?: string | null) {
@@ -53,6 +63,19 @@ function statusBadgeClass(status?: string | null) {
       return "border-zinc-500/40 bg-zinc-500/10 text-zinc-300";
     default:
       return "border-border bg-surface-muted text-muted";
+  }
+}
+
+function severityClass(severity: Severity) {
+  switch (severity) {
+    case "critical":
+      return "border-red-400/40 bg-red-500/10 text-red-100";
+    case "warning":
+      return "border-amber-400/40 bg-amber-500/10 text-amber-100";
+    case "success":
+      return "border-emerald-400/40 bg-emerald-500/10 text-emerald-100";
+    default:
+      return "border-sky-400/40 bg-sky-500/10 text-sky-100";
   }
 }
 
@@ -87,14 +110,103 @@ function getEarliestDate(rows: any[], preferred: string[] = []) {
 }
 
 function getCurrentProblem(profile: any, subscription: any, journey: Awaited<ReturnType<typeof getSubscriberJourneyData>>) {
-  if (subscription?.status === "pending") return "Assinatura pendente de ativação";
-  if (isPresent(subscription?.stripe_customer_id ?? subscription?.gateway_customer_id) && !isPresent(subscription?.stripe_subscription_id ?? subscription?.gateway_subscription_id)) {
-    return "Customer Stripe encontrado, mas nenhuma subscription Stripe vinculada";
+  return buildDiagnosis(profile, subscription, journey).title;
+}
+
+function buildDiagnosis(profile: any, subscription: any, journey: Awaited<ReturnType<typeof getSubscriberJourneyData>>): JourneyDiagnosis {
+  const stripeCustomer = subscription?.stripe_customer_id ?? subscription?.gateway_customer_id;
+  const stripeSubscription = subscription?.stripe_subscription_id ?? subscription?.gateway_subscription_id;
+  const migrated = Boolean(profile?.migrated_from_pms || subscription?.migrated_from_pms || subscription?.original_gateway === "pms");
+  const hasFailedCommunication = (journey.communicationLogs ?? []).some((log: any) => log.status === "falhou" || log.error || log.error_message || log.details?.error);
+  const activeStatuses = new Set(["active", "trialing"]);
+
+  if (isPresent(stripeCustomer) && !isPresent(stripeSubscription)) {
+    return {
+      severity: subscription?.status === "pending" ? "critical" : "warning",
+      title: "Customer Stripe sem subscription vinculada",
+      cause: migrated
+        ? "Cliente migrado do PMS com customer Stripe localizado, mas sem assinatura Stripe vinculada no banco."
+        : "Customer Stripe existe, mas a subscription ainda não foi registrada ou sincronizada no Harmomus.",
+      action: "Conferir a assinatura no Stripe e, se existir, sincronizar ou preencher a subscription antes de ativar o plano.",
+      confidence: "alta",
+      evidence: [
+        `Status atual: ${subscription?.status ?? "sem assinatura"}`,
+        `Stripe customer: ${stripeCustomer}`,
+        "Stripe subscription: ausente",
+        migrated ? "Origem: migração PMS" : "Origem: cadastro/checkout Harmomus",
+      ],
+    };
   }
-  if (profile?.onboarding_status === "pending_email_confirmation") return "Aguardando confirmação de e-mail";
-  if (!profile?.last_login_at) return "Usuário ainda não realizou login";
-  if ((journey.communicationLogs ?? []).some((log: any) => log.status === "falhou" || log.error || log.error_message)) return "Falha recente em comunicação";
-  return "Nenhum problema crítico detectado";
+
+  if (subscription?.status === "pending") {
+    return {
+      severity: "warning",
+      title: "Assinatura pendente de ativação",
+      cause: "Existe assinatura registrada, mas ela ainda não está ativa/trialing.",
+      action: "Verificar último webhook, status do checkout e se o pagamento foi aprovado no gateway.",
+      confidence: "alta",
+      evidence: [
+        `Status atual: ${subscription.status}`,
+        `Último evento: ${subscription?.last_webhook_event ?? "não registrado"}`,
+      ],
+    };
+  }
+
+  if (profile?.onboarding_status === "pending_email_confirmation") {
+    return {
+      severity: "warning",
+      title: "Aguardando confirmação de e-mail",
+      cause: "O cadastro ainda está marcado como pendente de confirmação de e-mail.",
+      action: "Reenviar acesso/confirmar entrega do e-mail ou orientar o usuário a verificar caixa de entrada e spam.",
+      confidence: "alta",
+      evidence: [`Onboarding: ${profile.onboarding_status}`, `Etapa: ${profile?.onboarding_step ?? "sem etapa"}`],
+    };
+  }
+
+  if (!profile?.last_login_at) {
+    return {
+      severity: "info",
+      title: "Usuário ainda não realizou login",
+      cause: "O cadastro existe, mas não há registro de primeiro login.",
+      action: "Reenviar link de acesso ou orientar o usuário a entrar com o e-mail cadastrado.",
+      confidence: "alta",
+      evidence: [
+        profile?.password_setup_completed_at ? `Senha configurada em ${formatDateTimeBR(profile.password_setup_completed_at)}` : "Senha sem configuração registrada",
+        "last_login_at ausente",
+      ],
+    };
+  }
+
+  if (hasFailedCommunication) {
+    return {
+      severity: "warning",
+      title: "Falha recente em comunicação",
+      cause: "Há registros de comunicação com erro/falha para este usuário.",
+      action: "Abrir o bloco Comunicações e revisar o provider_message_id/erro retornado.",
+      confidence: "média",
+      evidence: ["communication_logs contém falha ou erro"],
+    };
+  }
+
+  if (activeStatuses.has(subscription?.status)) {
+    return {
+      severity: "success",
+      title: "Jornada saudável",
+      cause: "Assinatura ativa/trialing e sem problema crítico detectado na leitura administrativa.",
+      action: "Nenhuma ação obrigatória. Use a timeline apenas para auditoria fina.",
+      confidence: "média",
+      evidence: [`Status atual: ${subscription?.status}`],
+    };
+  }
+
+  return {
+    severity: "info",
+    title: "Sem diagnóstico crítico",
+    cause: "Não há dados suficientes para apontar uma falha específica.",
+    action: "Conferir timeline, Stripe, comunicações e atividade manualmente.",
+    confidence: "baixa",
+    evidence: ["Nenhuma regra automática foi acionada"],
+  };
 }
 
 function buildChecklist(profile: any, subscription: any, journey: Awaited<ReturnType<typeof getSubscriberJourneyData>>) {
@@ -172,7 +284,8 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
   const checklist = journey && profile ? buildChecklist(profile, subscription, journey) : [];
   const timeline = journey && profile ? buildTimeline(profile, subscription, journey) : [];
   const latestWebhook = journey?.webhookProcessedEvents[0] ?? journey?.webhookLogs[0] ?? null;
-  const currentProblem = journey && profile ? getCurrentProblem(profile, subscription, journey) : "Dados insuficientes";
+  const diagnosis = journey && profile ? buildDiagnosis(profile, subscription, journey) : null;
+  const currentProblem = diagnosis?.title ?? "Dados insuficientes";
 
   async function save(formData: FormData) {
     "use server";
@@ -300,6 +413,28 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
           <span className={`w-fit rounded-full border px-3 py-1 text-xs font-semibold ${statusBadgeClass(currentStatus)}`}>{currentProblem}</span>
         </div>
 
+        {diagnosis ? (
+          <div className={`rounded-3xl border p-5 ${severityClass(diagnosis.severity)}`}>
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-[0.22em] opacity-80">Centro de Diagnóstico</p>
+                <h4 className="mt-2 text-xl font-semibold text-white">{diagnosis.title}</h4>
+                <p className="mt-2 text-sm leading-6 opacity-90"><strong>Causa provável:</strong> {diagnosis.cause}</p>
+                <p className="mt-1 text-sm leading-6 opacity-90"><strong>Ação sugerida:</strong> {diagnosis.action}</p>
+              </div>
+              <div className="grid min-w-[220px] gap-2 text-sm">
+                <span className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2">Severidade: <strong>{diagnosis.severity}</strong></span>
+                <span className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2">Confiança: <strong>{diagnosis.confidence}</strong></span>
+              </div>
+            </div>
+            <div className="mt-4 grid gap-2 md:grid-cols-2">
+              {diagnosis.evidence.map((item) => (
+                <p key={item} className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-xs opacity-90">{item}</p>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         <div className="grid gap-4 xl:grid-cols-4">
           <div className="rounded-3xl border border-white/10 bg-black/20 p-4">
             <p className="text-xs uppercase tracking-[0.2em] text-muted">Status atual</p>
@@ -372,7 +507,7 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
             <h4 className="text-lg font-semibold text-white">Comunicações</h4>
             <div className="mt-4 space-y-3">
               {journey.communicationLogs.length ? journey.communicationLogs.slice(0, 10).map((log: any) => (
-                <div key={log.id} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                <div key={log.id ?? JSON.stringify(log)} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="font-medium text-white">{log.channel === "whatsapp" ? "WhatsApp enviado" : "E-mail enviado"}</p>
                     <span className={`rounded-full border px-2.5 py-1 text-xs ${statusBadgeClass(log.status)}`}>{log.status ?? "informação"}</span>
@@ -395,14 +530,14 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
               <div>
                 <p className="text-sm font-semibold text-white">Últimos kits acessados</p>
                 <div className="mt-2 space-y-2">
-                  {journey.kitAccessLogs.slice(0, 5).map((log: any) => <p key={log.id} className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs text-muted">{log.kit_id ?? "Kit"} · {formatDateTimeBR(log.accessed_at ?? log.created_at)}</p>)}
+                  {journey.kitAccessLogs.slice(0, 5).map((log: any) => <p key={log.id ?? JSON.stringify(log)} className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs text-muted">{log.kit_id ?? "Kit"} · {formatDateTimeBR(log.accessed_at ?? log.created_at)}</p>)}
                   {!journey.kitAccessLogs.length ? <p className="text-xs text-muted">Sem kits acessados.</p> : null}
                 </div>
               </div>
               <div>
                 <p className="text-sm font-semibold text-white">Últimos áudios acessados</p>
                 <div className="mt-2 space-y-2">
-                  {journey.audioAccessLogs.slice(0, 5).map((log: any) => <p key={log.id} className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs text-muted">{log.audio_file_id ?? "Áudio"} · {log.status ?? "-"} · {formatDateTimeBR(log.accessed_at ?? log.created_at)}</p>)}
+                  {journey.audioAccessLogs.slice(0, 5).map((log: any) => <p key={log.id ?? JSON.stringify(log)} className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs text-muted">{log.audio_file_id ?? "Áudio"} · {log.status ?? "-"} · {formatDateTimeBR(log.accessed_at ?? log.created_at)}</p>)}
                   {!journey.audioAccessLogs.length ? <p className="text-xs text-muted">Sem áudios acessados.</p> : null}
                 </div>
               </div>
