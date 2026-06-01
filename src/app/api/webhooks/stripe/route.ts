@@ -11,9 +11,18 @@ export const runtime = "nodejs";
 
 type StripeEvent = { id: string; type: string; data?: { object?: any } };
 
+type PreviousSubscriptionContext = {
+  id: string | null;
+  planId: string | null;
+  planSlug: string | null;
+};
+
 type SyncedSubscriptionContext = {
   userId: string;
+  planId: string | null;
   planSlug: string | null;
+  previousPlanId: string | null;
+  previousPlanSlug: string | null;
   status: string;
   customerId: string | null;
   subscriptionId: string | null;
@@ -152,6 +161,24 @@ async function getProfileForWebhook(supabase: any, userId: string) {
   return data ?? null;
 }
 
+async function getCurrentSubscriptionForHistory(supabase: any, userId: string): Promise<PreviousSubscriptionContext> {
+  const { data, error } = await supabase
+    .from("subscriptions")
+    .select("id, plan_id, plans(slug)")
+    .eq("user_id", userId)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) console.error("[stripe.webhook] Falha ao buscar assinatura anterior para histórico", error);
+
+  return {
+    id: data?.id ?? null,
+    planId: data?.plan_id ?? null,
+    planSlug: data?.plans?.slug ?? null,
+  };
+}
+
 async function saveSubscriptionByUserId(supabase: any, payload: Record<string, unknown>) {
   const userId = String(payload.user_id ?? "").trim();
   if (!userId) return { data: null, error: new Error("user_id ausente no payload de assinatura") };
@@ -175,11 +202,13 @@ async function saveSubscriptionByUserId(supabase: any, payload: Record<string, u
 }
 
 async function downgradeToFree(supabase: any, userId: string, patch: Record<string, unknown>) {
-  const { data: freePlan, error } = await supabase.from("plans").select("id").eq("slug", "free").single();
+  const { data: freePlan, error } = await supabase.from("plans").select("id, slug").eq("slug", "free").single();
   if (error) console.error("[stripe.webhook] Falha ao buscar plano free", error);
-  if (!freePlan?.id) return;
+  if (!freePlan?.id) return null;
 
-  await saveSubscriptionByUserId(supabase, {
+  const previous = await getCurrentSubscriptionForHistory(supabase, userId);
+
+  const saveResponse = await saveSubscriptionByUserId(supabase, {
     user_id: userId,
     plan_id: freePlan.id,
     ...patch,
@@ -193,6 +222,13 @@ async function downgradeToFree(supabase: any, userId: string, patch: Record<stri
   if (ministryError && ministryError.code !== "42P01") {
     console.error("[stripe.webhook] Falha ao cancelar ministério", ministryError);
   }
+
+  return {
+    localSubscriptionId: saveResponse.data?.[0]?.id ?? previous.id ?? null,
+    freePlanId: freePlan.id as string,
+    freePlanSlug: freePlan.slug as string,
+    previous,
+  };
 }
 
 function mapStripeEventToWebhookEvent(eventType: string, status: string) {
@@ -235,6 +271,69 @@ function getCheckoutCompletedEvent(planSlug?: string | null) {
 function shouldDispatchPlanActivated(eventType: string, context: NonNullable<SyncedSubscriptionContext>) {
   if (!["active", "trialing"].includes(context.status)) return false;
   return eventType === "checkout.session.completed" || eventType === "customer.subscription.created";
+}
+
+function planRank(slug?: string | null) {
+  const family = normalizePlanFamily(slug);
+  if (family === "free") return 0;
+  if (family === "plus") return 1;
+  if (family === "premium") return 2;
+  if (family === "ministry") return 3;
+  return -1;
+}
+
+function getHistoryChangeType(eventType: string, context: NonNullable<SyncedSubscriptionContext>) {
+  if (eventType === "customer.subscription.deleted") return "canceled";
+  if (eventType === "invoice.payment_failed") return "payment_failed";
+  if (eventType === "invoice.paid") return "renewed";
+
+  const fromSlug = context.previousPlanSlug;
+  const toSlug = context.planSlug;
+
+  if (!fromSlug && toSlug) return "created";
+  if (!toSlug || fromSlug === toSlug) return null;
+
+  const fromRank = planRank(fromSlug);
+  const toRank = planRank(toSlug);
+  if (fromRank >= 0 && toRank >= 0 && toRank > fromRank) return "upgrade";
+  if (fromRank >= 0 && toRank >= 0 && toRank < fromRank) return "downgrade";
+  return "change";
+}
+
+async function recordSubscriptionHistoryFromStripe(supabase: any, event: StripeEvent, context: SyncedSubscriptionContext) {
+  if (!context) return;
+
+  const changeType = getHistoryChangeType(event.type, context);
+  if (!changeType) return;
+
+  const payload = {
+    user_id: context.userId,
+    subscription_id: context.localSubscriptionId,
+    from_plan_id: context.previousPlanId,
+    to_plan_id: context.planId,
+    from_plan_slug: context.previousPlanSlug,
+    to_plan_slug: context.planSlug,
+    change_type: changeType,
+    source: "stripe",
+    provider_event_id: event.id,
+    metadata: {
+      stripe_event_type: event.type,
+      stripe_customer_id: context.customerId,
+      stripe_subscription_id: context.subscriptionId,
+      stripe_price_id: context.stripePriceId,
+      status: context.status,
+      current_period_end: context.currentPeriodEnd,
+      trial_ends_at: context.trialEndsAt,
+    },
+  };
+
+  const { error } = await supabase
+    .from("subscription_history")
+    .upsert(payload, { onConflict: "provider_event_id", ignoreDuplicates: true });
+
+  if (error && error.code !== "42P01") {
+    console.error("[stripe.webhook] Falha ao registrar subscription_history", error);
+  }
 }
 
 async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent): Promise<SyncedSubscriptionContext> {
@@ -301,9 +400,10 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
   const currentPeriodEnd = toIsoFromStripeSeconds(fullSubscription?.current_period_end);
   const trialEndsAt = toIsoFromStripeSeconds(fullSubscription?.trial_end);
   const syncedSubscriptionId = getStripeId(fullSubscription?.id) ?? subscriptionId;
+  const previous = await getCurrentSubscriptionForHistory(supabase, userId);
 
   if (event.type === "customer.subscription.deleted") {
-    await downgradeToFree(supabase, userId, {
+    const downgraded = await downgradeToFree(supabase, userId, {
       status: "canceled",
       gateway: "stripe",
       stripe_customer_id: customerId,
@@ -319,7 +419,21 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
       updated_at: new Date().toISOString(),
     });
 
-    return { userId, planSlug: "free", status: "canceled", customerId, subscriptionId: syncedSubscriptionId, localSubscriptionId: null, stripePriceId, customerEmail, currentPeriodEnd, trialEndsAt };
+    return {
+      userId,
+      planId: downgraded?.freePlanId ?? null,
+      planSlug: "free",
+      previousPlanId: downgraded?.previous.planId ?? previous.planId,
+      previousPlanSlug: downgraded?.previous.planSlug ?? previous.planSlug,
+      status: "canceled",
+      customerId,
+      subscriptionId: syncedSubscriptionId,
+      localSubscriptionId: downgraded?.localSubscriptionId ?? previous.id ?? null,
+      stripePriceId,
+      customerEmail,
+      currentPeriodEnd,
+      trialEndsAt,
+    };
   }
 
   const plan = await getPlanByStripePriceId(supabase, stripePriceId, metadataPlanSlug);
@@ -348,7 +462,7 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
 
   if (saveResponse.error) return null;
 
-  const localSubscriptionId = saveResponse.data?.[0]?.id ?? null;
+  const localSubscriptionId = saveResponse.data?.[0]?.id ?? previous.id ?? null;
 
   try {
     await ensureMinistryForSubscription({
@@ -365,7 +479,21 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
     console.error("[stripe.webhook] Falha ao sincronizar central ministerial", ministryError);
   }
 
-  return { userId, planSlug: plan.slug ?? null, status, customerId, subscriptionId: syncedSubscriptionId, localSubscriptionId, stripePriceId, customerEmail, currentPeriodEnd, trialEndsAt };
+  return {
+    userId,
+    planId: plan.id ?? null,
+    planSlug: plan.slug ?? null,
+    previousPlanId: previous.planId,
+    previousPlanSlug: previous.planSlug,
+    status,
+    customerId,
+    subscriptionId: syncedSubscriptionId,
+    localSubscriptionId,
+    stripePriceId,
+    customerEmail,
+    currentPeriodEnd,
+    trialEndsAt,
+  };
 }
 
 async function saveBillingInvoiceFromStripeEvent(supabase: any, event: StripeEvent, context: SyncedSubscriptionContext) {
@@ -441,6 +569,7 @@ async function dispatchStripeWebhookEvent(supabase: any, event: StripeEvent, con
     stripe_event_type: event.type,
     user_id: context.userId,
     plan: context.planSlug,
+    previous_plan: context.previousPlanSlug,
     status: context.status,
     stripe_customer_id: context.customerId,
     stripe_subscription_id: context.subscriptionId,
@@ -517,6 +646,7 @@ export async function POST(req: Request) {
 
   if (ACCEPTED_EVENTS.has(event.type)) {
     const context = await syncSubscriptionFromStripeEvent(supabase, event);
+    await recordSubscriptionHistoryFromStripe(supabase, event, context);
     await saveBillingInvoiceFromStripeEvent(supabase, event, context);
     await dispatchStripeWebhookEvent(supabase, event, context);
   }
