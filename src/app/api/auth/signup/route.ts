@@ -7,6 +7,7 @@ import { startStripeCheckoutForSignup } from "@/lib/data/billing";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
+import type { WebhookEvent } from "@/types/webhooks";
 
 const PLAN_OPTIONS = ["free", "plus", "premium", "ministry_10", "ministry_20", "ministry_40"] as const;
 type PlanSlug = (typeof PLAN_OPTIONS)[number];
@@ -28,6 +29,25 @@ function safeRedirect(raw: string) {
 
 function isPaidPlan(plan: PlanSlug) {
   return plan !== "free";
+}
+
+function resolveSignupWebhookEvent(plan: PlanSlug): WebhookEvent {
+  switch (plan) {
+    case "free":
+      return "subscription.free.created";
+    case "plus":
+      return "subscription.plus.created";
+    case "premium":
+      return "subscription.premium.created";
+    case "ministry_10":
+      return "subscription.ministry_10.created";
+    case "ministry_20":
+      return "subscription.ministry_20.created";
+    case "ministry_40":
+      return "subscription.ministry_40.created";
+    default:
+      return "user.created";
+  }
 }
 
 function isDuplicateAccountMessage(message: string) {
@@ -77,16 +97,18 @@ async function runSignupSideEffectsAsync(input: {
   utmSource: string;
   utmCampaign: string;
 }) {
+  const webhookEvent = resolveSignupWebhookEvent(input.plan);
+
   try {
     const results = await Promise.allSettled([
       trackMarketingEvent(input.supabase as any, {
         eventKey: "signup",
         eventLabel: "Cadastro",
         channel: "email",
-        metadata: { plan: input.plan, origin: input.origin },
+        metadata: { plan: input.plan, origin: input.origin, webhook_event: webhookEvent },
       }),
       dispatchWebhookEvent({
-        event: "user.created",
+        event: webhookEvent,
         source: "auth.signup",
         recipient: { name: input.fullName, email: input.email, phone: input.phone },
         data: {
