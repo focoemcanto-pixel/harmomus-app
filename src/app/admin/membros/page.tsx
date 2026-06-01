@@ -14,11 +14,12 @@ import {
 } from "lucide-react";
 
 import { PageHeader } from "@/components/admin/page-header";
-import { getMembers } from "@/lib/data/members";
+import { getMemberOperationalSummaries, getMembers } from "@/lib/data/members";
 import { formatDateTimeBR } from "@/lib/format-date-time-br";
 import { getPlans } from "@/lib/data/plans";
+import { calculateMemberHealth, getMemberDiagnosis, getOperationalFlags } from "@/lib/member-health";
 
-type SearchParams = Promise<{ q?: string; plan?: string; status?: string }>;
+type SearchParams = Promise<{ q?: string; plan?: string; status?: string; operational?: string }>;
 type Member = Awaited<ReturnType<typeof getMembers>>[number];
 
 type JourneyStage = "lead" | "checkout" | "pending" | "active" | "at_risk" | "lost";
@@ -134,6 +135,39 @@ function stagePillClass(stage: JourneyStage) {
   return "bg-cyan-500/10 text-cyan-200 border-cyan-400/30";
 }
 
+function healthSeverityClass(severity: "success" | "info" | "warning" | "critical") {
+  if (severity === "success") return "border-emerald-400/40 bg-emerald-500/10 text-emerald-200";
+  if (severity === "info") return "border-sky-400/40 bg-sky-500/10 text-sky-200";
+  if (severity === "warning") return "border-amber-400/40 bg-amber-500/10 text-amber-200";
+  return "border-red-400/40 bg-red-500/10 text-red-200";
+}
+
+function flagLabel(flag: string) {
+  const labels: Record<string, string> = {
+    pending: "Pending",
+    no_login: "Sem login",
+    no_stripe_subscription: "Sem sub Stripe",
+    failed_communication: "Falha comunicação",
+    no_kit_access: "Sem kit",
+    no_audio_access: "Sem áudio",
+    migrated_from_pms: "PMS",
+    healthy: "Saudável",
+    critical: "Crítico",
+  };
+  return labels[flag] ?? flag;
+}
+
+const operationalFilters = [
+  { value: "", label: "Todos" },
+  { value: "healthy", label: "Saudáveis" },
+  { value: "critical", label: "Críticos" },
+  { value: "pending", label: "Pending" },
+  { value: "no_login", label: "Sem login" },
+  { value: "no_stripe_subscription", label: "Sem subscription Stripe" },
+  { value: "failed_communication", label: "Falha comunicação" },
+  { value: "no_access", label: "Sem acesso" },
+];
+
 function StatCard({ label, value, detail, icon: Icon }: { label: string; value: string; detail: string; icon: any }) {
   return (
     <article className="rounded-3xl border border-white/10 bg-gradient-to-br from-surface via-surface to-background p-5 shadow-premium">
@@ -153,8 +187,22 @@ export default async function AdminMembrosPage({ searchParams }: { searchParams:
     getMembers({ query: params.q, planId: params.plan, status: params.status }),
     getPlans(),
   ]);
+  const operationalSummaries = await getMemberOperationalSummaries(members, { limit: 200 });
 
-  const journeys = members.map((member) => ({ member, journey: getJourney(member) }));
+  const journeys = members
+    .map((member) => {
+      const operationalJourney = operationalSummaries.get(member.profile.id) ?? null;
+      const health = calculateMemberHealth(member, operationalJourney);
+      const flags = getOperationalFlags(member, operationalJourney);
+      const diagnosis = getMemberDiagnosis(member, operationalJourney);
+      return { member, journey: getJourney(member), operationalJourney, health, flags, diagnosis };
+    })
+    .filter((item) => {
+      const filter = params.operational ?? "";
+      if (!filter) return true;
+      if (filter === "no_access") return item.flags.includes("no_kit_access") || item.flags.includes("no_audio_access");
+      return item.flags.includes(filter as any);
+    });
   const total = members.length;
   const paidActive = members.filter((member) => ["active", "trialing"].includes(normalize(member.subscription?.status)) && isPaidPlan(member));
   const freeActive = members.filter((member) => ["active", "trialing"].includes(normalize(member.subscription?.status)) && normalize(member.plan?.slug) === "free");
@@ -205,7 +253,7 @@ export default async function AdminMembrosPage({ searchParams }: { searchParams:
         </div>
       </div>
 
-      <form className="grid gap-3 rounded-3xl border border-border bg-surface p-4 shadow-premium md:grid-cols-[1.2fr_1fr_1fr_auto]">
+      <form className="grid gap-3 rounded-3xl border border-border bg-surface p-4 shadow-premium md:grid-cols-[1.2fr_1fr_1fr_1fr_auto]">
         <label className="relative block">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
           <input name="q" placeholder="Buscar por nome/email" defaultValue={params.q} className="w-full rounded-2xl border border-border bg-background py-3 pl-10 pr-3 text-sm outline-none transition focus:border-gold-400/50" />
@@ -217,6 +265,9 @@ export default async function AdminMembrosPage({ searchParams }: { searchParams:
         <select name="status" defaultValue={params.status ?? ""} className="rounded-2xl border border-border bg-background px-3 py-3 text-sm outline-none transition focus:border-gold-400/50">
           <option value="">Todos status</option>
           {["active", "trialing", "canceled", "expired", "pending", "abandoned", "inactive"].map((status) => <option key={status}>{status}</option>)}
+        </select>
+        <select name="operational" defaultValue={params.operational ?? ""} className="rounded-2xl border border-border bg-background px-3 py-3 text-sm outline-none transition focus:border-gold-400/50">
+          {operationalFilters.map((filter) => <option key={filter.value || "all"} value={filter.value}>{filter.label}</option>)}
         </select>
         <button className="rounded-2xl border border-gold-500/40 bg-gold-500/10 px-6 py-3 text-sm font-semibold text-gold-200 transition hover:bg-gold-500/20">Filtrar</button>
       </form>
@@ -235,13 +286,14 @@ export default async function AdminMembrosPage({ searchParams }: { searchParams:
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1250px] text-sm">
+          <table className="w-full min-w-[1450px] text-sm">
             <thead className="text-left text-xs uppercase tracking-wide text-muted">
               <tr className="border-b border-border/70">
                 <th className="p-4 font-medium">Membro</th>
                 <th className="font-medium">Plano</th>
                 <th className="font-medium">Etapa da jornada</th>
                 <th className="font-medium">Diagnóstico</th>
+                <th className="font-medium">Saúde operacional</th>
                 <th className="font-medium">Gateway</th>
                 <th className="font-medium">Stripe</th>
                 <th className="font-medium">Próxima cobrança</th>
@@ -249,7 +301,7 @@ export default async function AdminMembrosPage({ searchParams }: { searchParams:
               </tr>
             </thead>
             <tbody>
-              {journeys.map(({ member, journey }) => {
+              {journeys.map(({ member, journey, health, flags, diagnosis }) => {
                 const stripeCustomer = member.subscription?.stripe_customer_id ?? (member.subscription as any)?.gateway_customer_id;
                 const stripeSub = member.subscription?.stripe_subscription_id ?? (member.subscription as any)?.gateway_subscription_id;
                 return (
@@ -278,6 +330,20 @@ export default async function AdminMembrosPage({ searchParams }: { searchParams:
                         </div>
                       </div>
                     </td>
+                    <td className="align-top">
+                      <div className={`max-w-[260px] rounded-2xl border p-3 ${healthSeverityClass(health.severity)}`}>
+                        <div className="flex items-start gap-2">
+                          {health.severity === "success" ? <BadgeCheck className="mt-0.5 h-4 w-4" /> : <AlertTriangle className="mt-0.5 h-4 w-4" />}
+                          <div>
+                            <p className="text-xs font-semibold">{health.score}/100 · {health.label}</p>
+                            <p className="mt-1 text-[11px] opacity-80">{diagnosis.title}</p>
+                          </div>
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-1.5">
+                          {flags.slice(0, 3).map((flag) => <span key={flag} className="rounded-full border border-white/10 bg-black/20 px-2 py-0.5 text-[10px] text-zinc-200">{flagLabel(flag)}</span>)}
+                        </div>
+                      </div>
+                    </td>
                     <td className="align-top text-muted">{member.subscription?.gateway ?? "—"}</td>
                     <td className="align-top">
                       <p className="max-w-[180px] truncate text-xs text-muted">Customer: {stripeCustomer ?? "—"}</p>
@@ -299,7 +365,7 @@ export default async function AdminMembrosPage({ searchParams }: { searchParams:
               })}
               {!journeys.length ? (
                 <tr>
-                  <td colSpan={8} className="p-8 text-center text-muted">Nenhum membro encontrado para os filtros atuais.</td>
+                  <td colSpan={9} className="p-8 text-center text-muted">Nenhum membro encontrado para os filtros atuais.</td>
                 </tr>
               ) : null}
             </tbody>

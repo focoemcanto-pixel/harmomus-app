@@ -269,6 +269,59 @@ export async function getSubscriberJourneyData(member: MemberListItem): Promise<
   };
 }
 
+
+export async function getMemberOperationalSummaries(
+  members: MemberListItem[],
+  options: { limit?: number } = {},
+): Promise<Map<string, Partial<SubscriberJourneyData>>> {
+  const supabase = createSupabaseAdminClient() as any;
+  const limit = options.limit ?? 200;
+  const targetMembers = members.slice(0, limit);
+  const userIds = targetMembers.map((member) => member.profile.id).filter(Boolean);
+  const empty = new Map<string, Partial<SubscriberJourneyData>>();
+
+  for (const userId of userIds) {
+    empty.set(userId, {
+      communicationLogs: [],
+      kitAccessLogs: [],
+      audioAccessLogs: [],
+      webhookLogs: [],
+      webhookProcessedEvents: [],
+      legacyPmsSubscriptions: [],
+      legacyStripeCustomers: [],
+      legacyStripeCustomerImports: [],
+    });
+  }
+
+  if (!userIds.length) return empty;
+
+  const [communicationLogs, kitAccessLogs, audioAccessLogs] = await Promise.all([
+    safeTableQuery(supabase.from("communication_logs").select("*").in("user_id", userIds).order("created_at", { ascending: false }).limit(Math.max(userIds.length * 5, 100))),
+    safeTableQuery(supabase.from("kit_access_logs").select("*").in("user_id", userIds).order("accessed_at", { ascending: false }).limit(Math.max(userIds.length * 5, 100))),
+    safeTableQuery(supabase.from("audio_access_logs").select("*").in("user_id", userIds).order("accessed_at", { ascending: false }).limit(Math.max(userIds.length * 5, 100))),
+  ]);
+
+  for (const log of communicationLogs) {
+    const userId = String((log as any)?.user_id ?? "");
+    const summary = empty.get(userId);
+    if (summary) summary.communicationLogs = [...(summary.communicationLogs ?? []), log];
+  }
+
+  for (const log of kitAccessLogs) {
+    const userId = String((log as any)?.user_id ?? "");
+    const summary = empty.get(userId);
+    if (summary) summary.kitAccessLogs = [...(summary.kitAccessLogs ?? []), log];
+  }
+
+  for (const log of audioAccessLogs) {
+    const userId = String((log as any)?.user_id ?? "");
+    const summary = empty.get(userId);
+    if (summary) summary.audioAccessLogs = [...(summary.audioAccessLogs ?? []), log];
+  }
+
+  return empty;
+}
+
 export async function updateMemberSubscription(userId: string, payload: Database["public"]["Tables"]["subscriptions"]["Update"]): Promise<void> {
   const supabase = createSupabaseAdminClient() as any;
   const { data: existing } = await supabase.from("subscriptions").select("id").eq("user_id", userId).order("created_at", { ascending: false }).limit(1).maybeSingle();

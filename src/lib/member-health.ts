@@ -1,0 +1,377 @@
+import type { MemberListItem, SubscriberJourneyData } from "@/lib/data/members";
+
+export type MemberHealthLabel = "Saudável" | "Atenção" | "Risco" | "Crítico";
+export type MemberHealthSeverity = "success" | "info" | "warning" | "critical";
+export type RecommendedActionType = "manual" | "external" | "future_action";
+export type RecommendedActionPriority = "high" | "medium" | "low";
+export type OperationalFlag =
+  | "pending"
+  | "no_login"
+  | "no_stripe_subscription"
+  | "failed_communication"
+  | "no_kit_access"
+  | "no_audio_access"
+  | "migrated_from_pms"
+  | "healthy"
+  | "critical";
+
+export type MemberHealthResult = {
+  score: number;
+  label: MemberHealthLabel;
+  severity: MemberHealthSeverity;
+  reasons: string[];
+};
+
+export type MemberDiagnosis = {
+  severity: MemberHealthSeverity;
+  title: string;
+  cause: string;
+  action: string;
+  confidence: "baixa" | "média" | "alta";
+  evidence: string[];
+};
+
+export type RecommendedAction = {
+  label: string;
+  description: string;
+  type: RecommendedActionType;
+  priority: RecommendedActionPriority;
+};
+
+type JourneyLike = Partial<SubscriberJourneyData> | null | undefined;
+
+type MemberLike = MemberListItem | {
+  profile?: Record<string, any> | null;
+  subscription?: Record<string, any> | null;
+  plan?: Record<string, any> | null;
+};
+
+const POSITIVE_COMMUNICATION_STATUSES = new Set(["enviado", "entregue", "abriu", "clicou", "respondeu", "sent", "delivered", "opened", "clicked", "replied", "success"]);
+const ACTIVE_STATUSES = new Set(["active", "trialing"]);
+const FAILED_COMMUNICATION_STATUSES = new Set(["falhou", "failed", "erro", "error", "bounced"]);
+
+function normalize(value: unknown) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function isPresent(value: unknown) {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  return true;
+}
+
+function rows(journey: JourneyLike, key: keyof SubscriberJourneyData) {
+  const value = journey?.[key];
+  return Array.isArray(value) ? value : [];
+}
+
+function getRowDate(row: any) {
+  return row?.processed_at ?? row?.created_at ?? row?.updated_at ?? row?.accessed_at ?? row?.sent_at ?? null;
+}
+
+function hasRecentRow(items: any[], days: number) {
+  const since = Date.now() - days * 24 * 60 * 60 * 1000;
+  return items.some((row) => {
+    const value = getRowDate(row);
+    if (!value) return false;
+    const time = new Date(value).getTime();
+    return Number.isFinite(time) && time >= since;
+  });
+}
+
+function getStripeCustomer(subscription: any) {
+  return subscription?.stripe_customer_id ?? subscription?.gateway_customer_id ?? null;
+}
+
+function getStripeSubscription(subscription: any) {
+  return subscription?.stripe_subscription_id ?? subscription?.gateway_subscription_id ?? null;
+}
+
+function isMigratedFromPms(member: MemberLike, journey: JourneyLike) {
+  const profile = member.profile as any;
+  const subscription = member.subscription as any;
+  const gateway = normalize(subscription?.gateway);
+  const originalGateway = normalize(subscription?.original_gateway);
+
+  return Boolean(
+    profile?.migrated_from_pms ||
+      subscription?.migrated_from_pms ||
+      profile?.legacy_pms_member_id ||
+      subscription?.legacy_pms_subscription_id ||
+      rows(journey, "legacyPmsSubscriptions").length ||
+      gateway === "legacy" ||
+      gateway === "migration" ||
+      gateway === "pms" ||
+      originalGateway === "pms",
+  );
+}
+
+function hasPasswordConfigured(profile: any) {
+  return Boolean(
+    profile?.password_setup_completed_at ||
+      profile?.password_configured_at ||
+      profile?.confirmed_at ||
+      profile?.email_confirmed_at ||
+      profile?.requires_password_setup === false,
+  );
+}
+
+function hasLogin(profile: any) {
+  return Boolean(profile?.last_login_at || profile?.last_seen_at || profile?.last_sign_in_at);
+}
+
+function communicationFailed(journey: JourneyLike) {
+  return rows(journey, "communicationLogs").some((log: any) => {
+    const status = normalize(log?.status);
+    return FAILED_COMMUNICATION_STATUSES.has(status) || Boolean(log?.error || log?.error_message || log?.details?.error);
+  });
+}
+
+function communicationSucceeded(journey: JourneyLike) {
+  return rows(journey, "communicationLogs").some((log: any) => POSITIVE_COMMUNICATION_STATUSES.has(normalize(log?.status)));
+}
+
+function getBand(score: number): Pick<MemberHealthResult, "label" | "severity"> {
+  if (score >= 90) return { label: "Saudável", severity: "success" };
+  if (score >= 70) return { label: "Atenção", severity: "info" };
+  if (score >= 40) return { label: "Risco", severity: "warning" };
+  return { label: "Crítico", severity: "critical" };
+}
+
+export function calculateMemberHealth(member: MemberLike, journey?: JourneyLike): MemberHealthResult {
+  const profile = member.profile as any;
+  const subscription = member.subscription as any;
+  const status = normalize(subscription?.status);
+  const stripeCustomer = getStripeCustomer(subscription);
+  const stripeSubscription = getStripeSubscription(subscription);
+  const migrated = isMigratedFromPms(member, journey);
+  const hasKitAccess = rows(journey, "kitAccessLogs").length > 0;
+  const hasAudioAccess = rows(journey, "audioAccessLogs").some((log: any) => normalize(log?.status) !== "denied") || rows(journey, "audioAccessLogs").length > 0;
+  const hasRecentWebhook = hasRecentRow([...rows(journey, "webhookLogs"), ...rows(journey, "webhookProcessedEvents")], 30);
+  const failedCommunication = communicationFailed(journey);
+
+  let score = 0;
+  const reasons: string[] = [];
+
+  if (ACTIVE_STATUSES.has(status)) {
+    score += 20;
+    reasons.push("+20 assinatura active/trialing");
+  }
+
+  if (isPresent(stripeSubscription) || migrated) {
+    score += 15;
+    reasons.push(migrated ? "+15 vínculo legado/PMS reconhecido" : "+15 Stripe Subscription vinculada");
+  }
+
+  if (hasPasswordConfigured(profile)) {
+    score += 10;
+    reasons.push("+10 senha configurada");
+  }
+
+  if (hasLogin(profile)) {
+    score += 15;
+    reasons.push("+15 primeiro login realizado");
+  }
+
+  if (hasKitAccess) {
+    score += 10;
+    reasons.push("+10 acesso a kit");
+  }
+
+  if (hasAudioAccess) {
+    score += 10;
+    reasons.push("+10 áudio reproduzido");
+  }
+
+  if (communicationSucceeded(journey)) {
+    score += 10;
+    reasons.push("+10 comunicação enviada/entregue");
+  }
+
+  if (hasRecentWebhook) {
+    score += 10;
+    reasons.push("+10 webhook recente nos últimos 30 dias");
+  }
+
+  if (!migrated && isPresent(stripeCustomer) && !isPresent(stripeSubscription)) {
+    score -= 30;
+    reasons.push("-30 Stripe Customer existe mas Stripe Subscription está ausente");
+  }
+
+  if (status === "pending") {
+    score -= 20;
+    reasons.push("-20 assinatura pending");
+  }
+
+  if (failedCommunication) {
+    score -= 20;
+    reasons.push("-20 falha em comunicação");
+  }
+
+  if (!hasLogin(profile)) {
+    score -= 15;
+    reasons.push("-15 sem login registrado");
+  }
+
+  if (!hasKitAccess || !hasAudioAccess) {
+    score -= 10;
+    reasons.push("-10 sem acesso a kit/áudio");
+  }
+
+  const clamped = Math.max(0, Math.min(100, score));
+  return { score: clamped, ...getBand(clamped), reasons };
+}
+
+export function getOperationalFlags(member: MemberLike, journey?: JourneyLike): OperationalFlag[] {
+  const profile = member.profile as any;
+  const subscription = member.subscription as any;
+  const status = normalize(subscription?.status);
+  const stripeCustomer = getStripeCustomer(subscription);
+  const stripeSubscription = getStripeSubscription(subscription);
+  const migrated = isMigratedFromPms(member, journey);
+  const health = calculateMemberHealth(member, journey);
+  const flags: OperationalFlag[] = [];
+
+  if (status === "pending") flags.push("pending");
+  if (!hasLogin(profile)) flags.push("no_login");
+  if (!migrated && isPresent(stripeCustomer) && !isPresent(stripeSubscription)) flags.push("no_stripe_subscription");
+  if (communicationFailed(journey)) flags.push("failed_communication");
+  if (!rows(journey, "kitAccessLogs").length) flags.push("no_kit_access");
+  if (!rows(journey, "audioAccessLogs").length) flags.push("no_audio_access");
+  if (migrated) flags.push("migrated_from_pms");
+  if (health.score >= 90 && !flags.some((flag) => flag !== "migrated_from_pms")) flags.push("healthy");
+  if (health.score < 40) flags.push("critical");
+
+  return flags;
+}
+
+export function getRecommendedActions(member: MemberLike, journey?: JourneyLike): RecommendedAction[] {
+  const profile = member.profile as any;
+  const subscription = member.subscription as any;
+  const status = normalize(subscription?.status);
+  const stripeCustomer = getStripeCustomer(subscription);
+  const stripeSubscription = getStripeSubscription(subscription);
+  const migrated = isMigratedFromPms(member, journey);
+  const actions: RecommendedAction[] = [];
+
+  if (!migrated && isPresent(stripeCustomer) && !isPresent(stripeSubscription)) {
+    actions.push(
+      { label: "Conferir assinatura no Stripe", description: "Abrir o customer no Stripe e confirmar se existe subscription válida e paga antes de qualquer ajuste manual.", type: "external", priority: "high" },
+      { label: "Sincronizar subscription Stripe", description: "Ação futura/operacional: registrar a subscription ausente somente após confirmação do pagamento.", type: "future_action", priority: "high" },
+      { label: "Não ativar manualmente antes de confirmar pagamento", description: "Evita liberar acesso pago com customer incompleto ou checkout ainda não finalizado.", type: "manual", priority: "high" },
+    );
+  }
+
+  if (status === "pending") {
+    actions.push(
+      { label: "Verificar último webhook", description: "Conferir eventos recentes do gateway para entender se houve atraso, falha ou ausência de processamento.", type: "manual", priority: "high" },
+      { label: "Conferir se pagamento foi aprovado", description: "Validar a cobrança no provedor antes de alterar o status da assinatura.", type: "external", priority: "high" },
+      { label: "Validar se assinatura deveria estar ativa", description: "Cruzar status local, Stripe/PMS e comunicação antes de intervir.", type: "manual", priority: "medium" },
+    );
+  }
+
+  if (!hasLogin(profile)) {
+    actions.push(
+      { label: "Reenviar acesso", description: "Enviar instruções de primeiro acesso por e-mail/WhatsApp usando os fluxos existentes de comunicação.", type: "manual", priority: "medium" },
+      { label: "Orientar usuário a verificar e-mail/spam", description: "Mensagem curta reduz atrito quando o link de acesso já foi enviado.", type: "manual", priority: "medium" },
+      { label: "Confirmar se senha foi configurada", description: "Verificar evidências de configuração de senha antes de concluir que o usuário abandonou.", type: "manual", priority: "low" },
+    );
+  }
+
+  if (communicationFailed(journey)) {
+    actions.push(
+      { label: "Verificar provider_message_id", description: "Usar o identificador do provedor para rastrear rejeição, bounce ou erro de entrega.", type: "external", priority: "high" },
+      { label: "Reenviar comunicação", description: "Reenvio é apenas recomendação visual nesta etapa; use os fluxos manuais já existentes.", type: "future_action", priority: "medium" },
+      { label: "Checar erro do provedor", description: "Revisar mensagem de erro e canal alternativo antes de insistir no mesmo envio.", type: "manual", priority: "medium" },
+    );
+  }
+
+  if (!rows(journey, "kitAccessLogs").length || !rows(journey, "audioAccessLogs").length) {
+    actions.push(
+      { label: "Verificar se usuário conseguiu entrar", description: "Sem acesso a kit/áudio pode indicar barreira de login, onboarding ou entendimento da biblioteca.", type: "manual", priority: "medium" },
+      { label: "Orientar primeiro acesso", description: "Enviar passo a passo simples para abrir a biblioteca, acessar kits e reproduzir o primeiro áudio.", type: "manual", priority: "low" },
+    );
+  }
+
+  if (!actions.length) {
+    actions.push({ label: "Acompanhar jornada", description: "Conta sem incidente operacional crítico. Monitorar engajamento, comunicação e oportunidades de retenção.", type: "manual", priority: "low" });
+  }
+
+  const priorityWeight = { high: 0, medium: 1, low: 2 } as const;
+  return actions.sort((a, b) => priorityWeight[a.priority] - priorityWeight[b.priority]);
+}
+
+export function getMemberDiagnosis(member: MemberLike, journey?: JourneyLike): MemberDiagnosis {
+  const profile = member.profile as any;
+  const subscription = member.subscription as any;
+  const status = normalize(subscription?.status);
+  const stripeCustomer = getStripeCustomer(subscription);
+  const stripeSubscription = getStripeSubscription(subscription);
+  const migrated = isMigratedFromPms(member, journey);
+  const health = calculateMemberHealth(member, journey);
+  const actions = getRecommendedActions(member, journey);
+
+  if (!migrated && isPresent(stripeCustomer) && !isPresent(stripeSubscription)) {
+    return {
+      severity: status === "pending" ? "critical" : "warning",
+      title: "Customer Stripe sem subscription vinculada",
+      cause: "Customer Stripe existe, mas a subscription ainda não foi registrada ou sincronizada no Harmomus.",
+      action: actions[0]?.description ?? "Conferir a assinatura no Stripe antes de qualquer ativação manual.",
+      confidence: "alta",
+      evidence: [`Status atual: ${subscription?.status ?? "sem assinatura"}`, `Stripe customer: ${stripeCustomer}`, "Stripe subscription: ausente"],
+    };
+  }
+
+  if (status === "pending") {
+    return {
+      severity: "warning",
+      title: "Assinatura pendente de ativação",
+      cause: "Existe assinatura registrada, mas ela ainda não está ativa/trialing.",
+      action: actions[0]?.description ?? "Revisar último webhook e confirmação de pagamento.",
+      confidence: "alta",
+      evidence: [`Status atual: ${subscription?.status}`, `Último evento: ${subscription?.last_webhook_event ?? "não registrado"}`],
+    };
+  }
+
+  if (!hasLogin(profile)) {
+    return {
+      severity: health.score < 40 ? "critical" : "info",
+      title: "Usuário ainda não realizou login",
+      cause: "O cadastro existe, mas não há registro de login nos campos disponíveis para o suporte.",
+      action: actions.find((action) => action.label === "Reenviar acesso")?.description ?? "Enviar instruções de primeiro acesso.",
+      confidence: "alta",
+      evidence: ["last_login_at/last_seen_at ausentes"],
+    };
+  }
+
+  if (communicationFailed(journey)) {
+    return {
+      severity: "warning",
+      title: "Falha recente em comunicação",
+      cause: "Há registros de comunicação com erro/falha para este usuário.",
+      action: actions.find((action) => action.label === "Verificar provider_message_id")?.description ?? "Revisar erro do provedor.",
+      confidence: "média",
+      evidence: ["communication_logs contém falha ou erro"],
+    };
+  }
+
+  if (health.score >= 90) {
+    return {
+      severity: "success",
+      title: "Jornada saudável",
+      cause: "Assinatura, acesso e sinais operacionais estão consistentes nos dados disponíveis.",
+      action: "Acompanhar engajamento, uso de kits e oportunidades de upgrade/retenção.",
+      confidence: "média",
+      evidence: [`Score de saúde: ${health.score}/100`, ...health.reasons.slice(0, 3)],
+    };
+  }
+
+  return {
+    severity: health.severity,
+    title: `Conta em ${health.label.toLowerCase()}`,
+    cause: "O score operacional aponta pendências ou ausência de sinais suficientes para considerar a jornada saudável.",
+    action: actions[0]?.description ?? "Conferir timeline, Stripe, comunicações e atividade manualmente.",
+    confidence: "média",
+    evidence: [`Score de saúde: ${health.score}/100`, ...health.reasons.slice(0, 4)],
+  };
+}

@@ -30,6 +30,7 @@ import {
 import { getPlans } from "@/lib/data/plans";
 import { formatDateTimeBR } from "@/lib/format-date-time-br";
 import { setFlashToast } from "@/lib/flash";
+import { calculateMemberHealth, getMemberDiagnosis, getRecommendedActions } from "@/lib/member-health";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -356,7 +357,7 @@ function buildTimeline(profile: any, subscription: any, journey: Awaited<ReturnT
   return events.sort((a, b) => new Date(b.at ?? 0).getTime() - new Date(a.at ?? 0).getTime()).slice(0, 80);
 }
 
-function getCampaignSegment(diagnosis: JourneyDiagnosis | null, subscription: any) {
+function getCampaignSegment(diagnosis: { title?: string } | null, subscription: any) {
   if (subscription?.status === "pending") return "pending";
   if (["canceled", "inactive", "expired"].includes(normalize(subscription?.status))) return "churn";
   if (diagnosis?.title?.includes("login")) return "first_access";
@@ -421,7 +422,9 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
   const checklist = journey && profile ? buildChecklist(profile, subscription, journey) : [];
   const timeline = journey && profile ? buildTimeline(profile, subscription, journey) : [];
   const latestWebhook = journey?.webhookProcessedEvents[0] ?? journey?.webhookLogs[0] ?? null;
-  const diagnosis = journey && profile ? buildDiagnosis(profile, subscription, journey) : null;
+  const memberHealth = journey && member ? calculateMemberHealth(member, journey) : { score: 0, label: "Crítico", severity: "critical", reasons: [] } as const;
+  const diagnosis = journey && member ? getMemberDiagnosis(member, journey) : null;
+  const recommendedActions = journey && member ? getRecommendedActions(member, journey) : [];
   const currentProblem = diagnosis?.title ?? "Dados insuficientes";
   const scores = journey && profile ? calculateScores(checklist, diagnosis, journey, subscription) : { engagement: 0, risk: 100, conversion: 0 };
   const segment = getCampaignSegment(diagnosis, subscription);
@@ -540,7 +543,19 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-4">
+        <article className={`rounded-3xl border p-5 shadow-premium ${severityClass(memberHealth.severity)}`}>
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs uppercase tracking-[0.22em] opacity-80">Saúde da Conta</p>
+            <ShieldCheck className="h-4 w-4" />
+          </div>
+          <p className="text-3xl font-semibold text-white">{memberHealth.score}/100</p>
+          <p className="mt-2 text-sm font-semibold text-white">{memberHealth.label}</p>
+          <div className="mt-3 h-2 rounded-full bg-black/30">
+            <div className="h-2 rounded-full bg-current" style={{ width: `${Math.max(4, memberHealth.score)}%` }} />
+          </div>
+          <p className="mt-2 text-xs opacity-80">Score compartilhado para suporte operacional.</p>
+        </article>
         <ScoreCard label="Engajamento" value={scores.engagement} detail="Login, kits, áudios, comunicação e assinatura." icon={TrendingUp} />
         <ScoreCard label="Risco" value={scores.risk} detail="Quanto maior, mais urgente a intervenção." icon={AlertTriangle} inverted />
         <ScoreCard label="Jornada" value={scores.conversion} detail="Percentual de etapas essenciais concluídas." icon={Target} />
@@ -568,6 +583,29 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
           </div>
         </div>
       ) : null}
+
+      <div className="rounded-3xl border border-border bg-surface p-5 shadow-premium sm:p-6">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.22em] text-gold-300">Ações Recomendadas</p>
+            <h3 className="mt-2 text-lg font-semibold text-white">Próximos passos visuais para o suporte</h3>
+            <p className="mt-1 text-sm text-muted">Nenhuma ação abaixo executa Stripe, e-mail ou webhook automaticamente nesta etapa.</p>
+          </div>
+          <span className={`w-fit rounded-full border px-3 py-1 text-xs font-semibold ${statusBadgeClass(memberHealth.severity)}`}>{memberHealth.label}</span>
+        </div>
+        <div className="mt-5 grid gap-3 lg:grid-cols-3">
+          {recommendedActions.map((action) => (
+            <article key={`${action.label}-${action.type}`} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="mb-3 flex flex-wrap gap-2">
+                <span className={`rounded-full border px-2.5 py-1 text-xs ${action.priority === "high" ? "border-red-400/40 bg-red-500/10 text-red-200" : action.priority === "medium" ? "border-amber-400/40 bg-amber-500/10 text-amber-200" : "border-sky-400/40 bg-sky-500/10 text-sky-200"}`}>prioridade {action.priority}</span>
+                <span className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-xs text-zinc-300">{action.type}</span>
+              </div>
+              <h4 className="font-semibold text-white">{action.label}</h4>
+              <p className="mt-2 text-sm leading-6 text-muted">{action.description}</p>
+            </article>
+          ))}
+        </div>
+      </div>
 
       <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
         <div className="rounded-3xl border border-border bg-surface p-5 shadow-premium sm:p-6">
