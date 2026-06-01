@@ -5,7 +5,7 @@ import { notFound } from "next/navigation";
 import { FavoriteKitButton } from "@/components/public/favorite-kit-button";
 import { KitPageTemplate } from "@/components/public/kit-page-template";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
-import { registerKitAccess, resolveKitAccess } from "@/lib/access/access-rules";
+import { resolveKitAccess } from "@/lib/access/access-rules";
 import { canRequestSongsAndTones } from "@/lib/data/ministry";
 import { isFavoriteKit } from "@/lib/data/favorites";
 import { getPublishedKitBySlug } from "@/lib/data/public-kits";
@@ -33,9 +33,10 @@ export default async function BibliotecaKitPage({ params }: { params: Promise<{ 
   const accessContext = await resolveKitAccess(current, kit);
   const initialFavorited = current.isGuest ? false : await isFavoriteKit(kit.id).catch(() => false);
 
-  if (accessContext.play.allowed && current.effectiveSlug === "free" && current.profile?.id) {
-    accessContext.play.stats = await registerKitAccess(current.profile.id, kit.id);
-  }
+  // IMPORTANTE:
+  // Não registrar consumo de kit durante renderização da página.
+  // Next.js pode pré-carregar/renderizar múltiplas páginas e consumir acessos indevidamente.
+  // O consumo deve ocorrer apenas após interação explícita do usuário (play).
 
   if (!accessContext.play.allowed) {
     try {
