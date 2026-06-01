@@ -1,5 +1,6 @@
+import Link from "next/link";
 import { revalidatePath } from "next/cache";
-import { BarChart3, ExternalLink, MessageSquareText, Music2, Trash2, Wand2 } from "lucide-react";
+import { BarChart3, ExternalLink, Eye, MessageSquareText, Music2, Trash2, Wand2 } from "lucide-react";
 
 import { ConfirmSubmitButton } from "@/components/admin/confirm-submit-button";
 import { formatDateTimeBR } from "@/lib/format-date-time-br";
@@ -58,6 +59,7 @@ export default async function PremiumRequestsAdminPage({ searchParams }: { searc
     const status = String(formData.get("status") ?? "in_review") as PremiumRequestStatus;
     await updatePremiumRequestStatus(id, status);
     revalidatePath("/admin/harmomus-premium/solicitacoes");
+    revalidatePath(`/admin/harmomus-premium/solicitacoes/${id}`);
     revalidatePath("/admin/harmomus-premium");
   }
 
@@ -145,7 +147,7 @@ export default async function PremiumRequestsAdminPage({ searchParams }: { searc
                   <td className="px-5 py-4"><span className="rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-bold uppercase text-zinc-200">{typeLabels[row.type] ?? row.type}</span></td>
                   <td className="px-5 py-4">
                     <p className="max-w-md font-semibold text-white">{summarizeRequest(row)}</p>
-                    {row.message ? <p className="mt-1 max-w-md text-xs text-muted">{row.message}</p> : null}
+                    {row.message ? <p className="mt-1 max-w-md text-xs text-muted line-clamp-2">{row.message}</p> : null}
                     {row.reference_url ? <a href={row.reference_url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs text-cyan-300"><ExternalLink size={13} /> Abrir referência</a> : null}
                   </td>
                   <td className="px-5 py-4">
@@ -162,16 +164,23 @@ export default async function PremiumRequestsAdminPage({ searchParams }: { searc
                   <td className="px-5 py-4"><span className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold uppercase text-zinc-200">{statusLabels[row.status] ?? row.status}</span></td>
                   <td className="px-5 py-4">
                     <div className="flex flex-wrap gap-2">
-                      <form action={setStatus}>
-                        <input type="hidden" name="id" value={row.id} />
-                        <input type="hidden" name="status" value="in_review" />
-                        <button className="rounded-lg border border-violet-400/40 bg-violet-500/15 px-3 py-2 text-xs font-bold text-violet-200">Abrir</button>
-                      </form>
-                      <form action={setStatus}>
-                        <input type="hidden" name="id" value={row.id} />
-                        <input type="hidden" name="status" value="done" />
-                        <button className="rounded-lg border border-emerald-400/40 bg-emerald-500/15 px-3 py-2 text-xs font-bold text-emerald-200">Concluir</button>
-                      </form>
+                      <Link href={`/admin/harmomus-premium/solicitacoes/${row.id}`} className="inline-flex items-center gap-1 rounded-lg border border-violet-400/40 bg-violet-500/15 px-3 py-2 text-xs font-bold text-violet-200 transition hover:bg-violet-500/25">
+                        <Eye size={13} /> Detalhes
+                      </Link>
+                      {row.status !== "in_review" ? (
+                        <form action={setStatus}>
+                          <input type="hidden" name="id" value={row.id} />
+                          <input type="hidden" name="status" value="in_review" />
+                          <button className="rounded-lg border border-cyan-400/40 bg-cyan-500/15 px-3 py-2 text-xs font-bold text-cyan-200">Analisar</button>
+                        </form>
+                      ) : null}
+                      {row.status !== "done" ? (
+                        <form action={setStatus}>
+                          <input type="hidden" name="id" value={row.id} />
+                          <input type="hidden" name="status" value="done" />
+                          <button className="rounded-lg border border-emerald-400/40 bg-emerald-500/15 px-3 py-2 text-xs font-bold text-emerald-200">Concluir</button>
+                        </form>
+                      ) : null}
                       <form action={remove}>
                         <input type="hidden" name="id" value={row.id} />
                         <ConfirmSubmitButton message={`Tem certeza que deseja deletar esta solicitação premium? ${summarizeRequest(row)}`} className="inline-flex items-center gap-1 rounded-lg border border-red-400/40 bg-red-500/15 px-3 py-2 text-xs font-bold text-red-200 transition hover:bg-red-500/25"><Trash2 size={13} />Deletar</ConfirmSubmitButton>
