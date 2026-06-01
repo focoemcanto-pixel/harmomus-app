@@ -135,13 +135,19 @@ function safeR2Filename(value: string) {
 function buildAudioR2Key({ r2Folder, tone, voice, filename }: { r2Folder: string; tone: string; voice: string; filename: string }) {
   const safeTone = tone === "Original" ? "original" : tone;
   const safeVoice = slugify(voice || "todos");
-  return `${r2Folder}/${safeTone}/${safeVoice}/${safeR2Filename(filename)}`;
+  return `audio/${r2Folder}/${safeTone}/${safeVoice}/${safeR2Filename(filename)}`;
 }
 
 async function findExistingKit(supabase: any, slug: string) {
   const { data, error } = await supabase.from("kits").select("id, slug, r2_folder").eq("slug", slug).maybeSingle();
   if (error) throw new Error(error.message);
   return data ?? null;
+}
+
+function resolveAudioFolder(existingFolder: string | null | undefined, slug: string) {
+  const folder = existingFolder?.trim().replace(/^\/+|\/+$/g, "");
+  if (!folder || folder.startsWith("images/") || folder.startsWith("covers/") || folder.includes("/kits/")) return slug;
+  return folder.replace(/^audio\//, "");
 }
 
 async function ensureArtistCategory(supabase: any, artistName: string) {
@@ -189,7 +195,7 @@ export async function uploadKitAudioBundle({
   const kitName = inferKitName(audioFiles, name);
   const slug = slugify(kitName);
   const existing = await findExistingKit(supabase, slug);
-  const r2Folder = existing?.r2_folder?.trim() || slug;
+  const r2Folder = resolveAudioFolder(existing?.r2_folder, slug);
   const artistName = artist?.trim() || "Artista não informado";
   const artistCategory = await ensureArtistCategory(supabase, artistName);
   const resolvedOriginalTone = normalizeTone(originalTone);
