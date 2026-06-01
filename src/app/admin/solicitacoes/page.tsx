@@ -19,6 +19,7 @@ const STATUS_OPTIONS = [
 const TYPE_OPTIONS = [
   ["song", "Nova música"],
   ["tone", "Novo tom"],
+  ["feedback", "Feedback"],
 ] as const;
 
 function statusLabel(status?: string | null) {
@@ -31,13 +32,14 @@ function statusLabel(status?: string | null) {
 }
 
 function typeLabel(type?: string | null) {
-  return type === "tone" ? "Novo tom" : "Nova música";
+  if (type === "tone") return "Novo tom";
+  if (type === "feedback") return "Feedback";
+  return "Nova música";
 }
 
 function formatDate(value?: string | null) {
   return formatDateTimeBR(value).replace("-", "—");
 }
-
 
 function safeParam(value?: string | string[]) {
   return typeof value === "string" ? value : "";
@@ -79,15 +81,17 @@ export default async function AdminSolicitacoesPage({
   const pending = rows.filter((item: any) => item.status === "pending").length;
   const tones = rows.filter((item: any) => item.request_type === "tone").length;
   const songs = rows.filter((item: any) => item.request_type === "song").length;
+  const feedbacks = rows.filter((item: any) => item.request_type === "feedback").length;
 
   return (
     <section className="space-y-6">
-      <PageHeader title="Solicitações Premium" description="Acompanhe pedidos reais de novas músicas e novos tons enviados por assinantes Premium e responsáveis ministeriais." />
+      <PageHeader title="Solicitações Premium" description="Acompanhe pedidos reais de novas músicas, novos tons e feedbacks enviados por assinantes Premium e responsáveis ministeriais." />
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-4">
         <MetricCard icon={<MessageSquare className="h-5 w-5" />} label="Pendentes nesta visão" value={pending} />
         <MetricCard icon={<Wand2 className="h-5 w-5" />} label="Pedidos de tom" value={tones} />
         <MetricCard icon={<Music2 className="h-5 w-5" />} label="Novas músicas" value={songs} />
+        <MetricCard icon={<MessageSquare className="h-5 w-5" />} label="Feedbacks" value={feedbacks} />
       </div>
 
       <form className="rounded-xl border border-border bg-surface p-4 shadow-premium" action="/admin/solicitacoes">
@@ -132,7 +136,7 @@ export default async function AdminSolicitacoesPage({
               <thead className="border-b border-border bg-surface-muted text-xs uppercase tracking-[0.12em] text-muted">
                 <tr>
                   <th className="px-4 py-3">Tipo</th>
-                  <th className="px-4 py-3">Música</th>
+                  <th className="px-4 py-3">Música/Assunto</th>
                   <th className="px-4 py-3">Tom/Nipe</th>
                   <th className="px-4 py-3">Usuário</th>
                   <th className="px-4 py-3">Ministério</th>
@@ -150,7 +154,7 @@ export default async function AdminSolicitacoesPage({
                     </td>
                     <td className="px-4 py-4">
                       <p className="font-medium text-foreground">{item.song_name}</p>
-                      <p className="mt-1 text-xs text-muted">{item.artist_name || item.reference_link || item.notes || "Sem detalhes adicionais"}</p>
+                      <p className="mt-1 whitespace-pre-wrap text-xs text-muted">{item.artist_name || item.reference_link || item.notes || "Sem detalhes adicionais"}</p>
                       {item.delivered_kit_slug ? (
                         <Link href={`/biblioteca/${item.delivered_kit_slug}`} className="mt-2 inline-flex rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-300">
                           Kit entregue: {item.delivered_kit_slug}
@@ -175,7 +179,9 @@ export default async function AdminSolicitacoesPage({
                           ))}
                         </select>
 
-                        <input name="delivered_kit_slug" defaultValue={item.delivered_kit_slug ?? ""} placeholder="slug-do-kit-entregue" className="h-10 min-w-[170px] rounded-xl border border-border bg-surface-muted px-3 text-xs text-foreground outline-none focus:border-gold-400" />
+                        {item.request_type !== "feedback" ? (
+                          <input name="delivered_kit_slug" defaultValue={item.delivered_kit_slug ?? ""} placeholder="slug-do-kit-entregue" className="h-10 min-w-[170px] rounded-xl border border-border bg-surface-muted px-3 text-xs text-foreground outline-none focus:border-gold-400" />
+                        ) : null}
 
                         <button className="w-full rounded-xl bg-gold-500 px-3 py-2 text-xs font-semibold text-black transition hover:bg-gold-400">
                           Atualizar
