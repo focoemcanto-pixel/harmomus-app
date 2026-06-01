@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { MetaPurchaseEvent } from "@/components/analytics/meta-purchase-event";
 import { EmailConfirmationState } from "@/components/auth/email-confirmation-state";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -133,9 +134,7 @@ function syncResult(input: Partial<SyncCheckoutResult>): SyncCheckoutResult {
 }
 
 async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResult> {
-  if (!sessionId) {
-    return syncResult({ error: "Sessão não informada." });
-  }
+  if (!sessionId) return syncResult({ error: "Sessão não informada." });
 
   try {
     const session = await getCheckoutSession(sessionId);
@@ -150,19 +149,14 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
     const supabase = await createClient();
     let confirmationEmailResent = false;
 
-    if (!planSlug) {
-      return syncResult({ planSlug: null, error: "Plano não identificado pelo Stripe.", customerEmail, confirmationEmailResent });
-    }
+    if (!planSlug) return syncResult({ planSlug: null, error: "Plano não identificado pelo Stripe.", customerEmail, confirmationEmailResent });
 
     const admin = createSupabaseAdminClient() as any;
     const planResponse = await admin.from("plans").select("id, slug").eq("slug", planSlug).maybeSingle();
     const { data: plan } = planResponse;
 
     if (planResponse.error) console.error("[checkout.success.syncCheckoutSession] erro Supabase ao buscar plano", planResponse.error);
-
-    if (!plan?.id) {
-      return syncResult({ planSlug, error: `Plano ${planSlug} não encontrado no banco.`, customerEmail, confirmationEmailResent });
-    }
+    if (!plan?.id) return syncResult({ planSlug, error: `Plano ${planSlug} não encontrado no banco.`, customerEmail, confirmationEmailResent });
 
     if (!subscription?.id) {
       console.error("[checkout.success.syncCheckoutSession] SESSION_SUBSCRIPTION_NULL", { session_id: sessionId, session_subscription: session?.subscription ?? null });
@@ -201,11 +195,7 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
       updated_at: now,
     };
 
-    const existingResponse = await admin
-      .from("subscriptions")
-      .select("id")
-      .eq("user_id", profile.id)
-      .maybeSingle();
+    const existingResponse = await admin.from("subscriptions").select("id").eq("user_id", profile.id).maybeSingle();
     const { data: existing } = existingResponse;
 
     if (existingResponse.error) console.error("[checkout.success.syncCheckoutSession] erro Supabase ao buscar assinatura local", existingResponse.error);
@@ -246,6 +236,7 @@ export default async function CheckoutSucesso({ searchParams }: CheckoutSuccessP
   const planName = planDisplayName(sync.planSlug);
   const firstSignupFlow = sync.onboardingStatus === "pending_email_confirmation";
   const accessReady = sync.accessReady;
+  const purchaseEventEnabled = Boolean(sync.synced && accessReady && sync.planSlug && sessionId);
   const eyebrow = accessReady ? (firstSignupFlow ? "Pagamento aprovado" : `Onboarding ${planName}`) : "Pagamento em processamento";
   const title = accessReady
     ? firstSignupFlow
@@ -255,6 +246,7 @@ export default async function CheckoutSucesso({ searchParams }: CheckoutSuccessP
 
   return (
     <main className="min-h-screen bg-zinc-950 p-6 text-white">
+      <MetaPurchaseEvent enabled={purchaseEventEnabled} planSlug={sync.planSlug} sessionId={sessionId} subscriptionStatus={sync.subscriptionStatus} />
       <div className="mx-auto mt-10 max-w-3xl rounded-3xl border border-emerald-500/30 bg-zinc-900/90 p-8 shadow-2xl md:p-10">
         <p className="text-xs uppercase tracking-[0.2em] text-emerald-300">{eyebrow}</p>
 
