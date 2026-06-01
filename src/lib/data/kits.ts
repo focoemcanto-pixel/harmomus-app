@@ -259,6 +259,19 @@ export async function saveKitAudioSync(kitId: string, tones: KitAudioToneGroup[]
     }),
   );
 
+  if (rows.length === 0) {
+    const { error: deleteAllError } = await supabase
+      .from("kit_audio_files")
+      .delete()
+      .eq("kit_id", kitId);
+
+    if (deleteAllError) {
+      throw new Error(`Falha ao limpar áudios removidos: ${deleteAllError.message}`);
+    }
+
+    return;
+  }
+
   const { error: deleteError } = await supabase
     .from("kit_audio_files")
     .delete()
@@ -268,8 +281,6 @@ export async function saveKitAudioSync(kitId: string, tones: KitAudioToneGroup[]
   if (deleteError) {
     throw new Error(`Falha ao limpar áudios removidos: ${deleteError.message}`);
   }
-
-  if (rows.length === 0) return;
 
   const { error: upsertError } = await supabase
     .from("kit_audio_files")
