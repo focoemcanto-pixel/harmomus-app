@@ -5,7 +5,6 @@ import {
   Activity,
   AlertTriangle,
   ArrowLeft,
-  BadgeCheck,
   CalendarClock,
   CreditCard,
   MailPlus,
@@ -36,7 +35,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const STATUS_OPTIONS = ["active", "trialing", "pending", "canceled", "inactive"] as const;
-type JourneyStatus = "concluído" | "pendente" | "ausente" | "erro" | "informação";
+type JourneyStatus = "concluído" | "pendente" | "ausente" | "erro" | "informação" | "não aplicável";
 type Severity = "success" | "info" | "warning" | "critical";
 
 type JourneyTimelineEvent = {
@@ -85,6 +84,8 @@ function statusBadgeClass(status?: string | null) {
       return "border-red-400/40 bg-red-500/10 text-red-200";
     case "ausente":
       return "border-zinc-500/40 bg-zinc-500/10 text-zinc-300";
+    case "não aplicável":
+      return "border-sky-400/30 bg-sky-500/10 text-sky-200";
     default:
       return "border-border bg-surface-muted text-muted";
   }
@@ -144,28 +145,66 @@ function getLatestDate(rows: any[], preferred: string[] = []) {
     .sort((a, b) => new Date(String(b)).getTime() - new Date(String(a)).getTime())[0] ?? null;
 }
 
+function isLegacyMember(profile: any, subscription: any) {
+  const gateway = normalize(subscription?.gateway);
+  const originalGateway = normalize(subscription?.original_gateway);
+  return Boolean(
+    profile?.migrated_from_pms ||
+      subscription?.migrated_from_pms ||
+      gateway === "legacy" ||
+      gateway === "migration" ||
+      gateway === "pms" ||
+      originalGateway === "pms"
+  );
+}
+
+function getActivityEvidence(profile: any, journey: Awaited<ReturnType<typeof getSubscriberJourneyData>>) {
+  const communicationSetup = (journey.communicationLogs ?? []).some((log: any) =>
+    JSON.stringify(log ?? {}).toLowerCase().includes("password_setup"),
+  );
+  const webhookSetup = [...(journey.webhookLogs ?? []), ...(journey.webhookProcessedEvents ?? [])].some((event: any) =>
+    JSON.stringify(event ?? {}).toLowerCase().includes("password_setup"),
+  );
+
+  return {
+    hasAny:
+      Boolean(profile?.last_seen_at) ||
+      Boolean(profile?.password_setup_completed_at) ||
+      Boolean(profile?.password_setup_sent_at) ||
+      Boolean(profile?.onboarding_completed_at) ||
+      Boolean(journey.kitAccessLogs?.length) ||
+      Boolean(journey.audioAccessLogs?.length) ||
+      communicationSetup ||
+      webhookSetup,
+    evidence: [
+      profile?.last_seen_at ? `last_seen_at: ${safeDate(profile.last_seen_at)}` : null,
+      profile?.password_setup_completed_at ? `senha configurada: ${safeDate(profile.password_setup_completed_at)}` : null,
+      profile?.password_setup_sent_at ? `link de senha enviado: ${safeDate(profile.password_setup_sent_at)}` : null,
+      profile?.onboarding_completed_at ? `onboarding concluído: ${safeDate(profile.onboarding_completed_at)}` : null,
+      journey.kitAccessLogs?.length ? `${journey.kitAccessLogs.length} acesso(s) a kit` : null,
+      journey.audioAccessLogs?.length ? `${journey.audioAccessLogs.length} áudio(s) registrado(s)` : null,
+      communicationSetup ? "comunicação de configuração de senha detectada" : null,
+      webhookSetup ? "evento de configuração de senha detectado" : null,
+    ].filter(Boolean) as string[],
+  };
+}
+
 function buildDiagnosis(profile: any, subscription: any, journey: Awaited<ReturnType<typeof getSubscriberJourneyData>>): JourneyDiagnosis {
   const stripeCustomer = subscription?.stripe_customer_id ?? subscription?.gateway_customer_id;
   const stripeSubscription = subscription?.stripe_subscription_id ?? subscription?.gateway_subscription_id;
-  const migrated = Boolean(profile?.migrated_from_pms || subscription?.migrated_from_pms || subscription?.original_gateway === "pms");
+  const migrated = isLegacyMember(profile, subscription);
+  const activityEvidence = getActivityEvidence(profile, journey);
   const hasFailedCommunication = (journey.communicationLogs ?? []).some((log: any) => log.status === "falhou" || log.error || log.error_message || log.details?.error);
   const activeStatuses = new Set(["active", "trialing"]);
 
-  if (isPresent(stripeCustomer) && !isPresent(stripeSubscription)) {
+  if (!migrated && isPresent(stripeCustomer) && !isPresent(stripeSubscription)) {
     return {
       severity: subscription?.status === "pending" ? "critical" : "warning",
       title: "Customer Stripe sem subscription vinculada",
-      cause: migrated
-        ? "Cliente migrado do PMS com customer Stripe localizado, mas sem assinatura Stripe vinculada no banco."
-        : "Customer Stripe existe, mas a subscription ainda não foi registrada ou sincronizada no Harmomus.",
+      cause: "Customer Stripe existe, mas a subscription ainda não foi registrada ou sincronizada no Harmomus.",
       action: "Conferir a assinatura no Stripe e sincronizar a subscription antes de ativar ou considerar o acesso saudável.",
       confidence: "alta",
-      evidence: [
-        `Status atual: ${subscription?.status ?? "sem assinatura"}`,
-        `Stripe customer: ${stripeCustomer}`,
-        "Stripe subscription: ausente",
-        migrated ? "Origem: migração PMS" : "Origem: cadastro/checkout Harmomus",
-      ],
+      evidence: [`Status atual: ${subscription?.status ?? "sem assinatura"}`, `Stripe customer: ${stripeCustomer}`, "Stripe subscription: ausente"],
     };
   }
 
@@ -176,10 +215,7 @@ function buildDiagnosis(profile: any, subscription: any, journey: Awaited<Return
       cause: "Existe assinatura registrada, mas ela ainda não está ativa/trialing.",
       action: "Enviar recuperação de checkout/pagamento e revisar último webhook do gateway.",
       confidence: "alta",
-      evidence: [
-        `Status atual: ${subscription.status}`,
-        `Último evento: ${subscription?.last_webhook_event ?? "não registrado"}`,
-      ],
+      evidence: [`Status atual: ${subscription.status}`, `Último evento: ${subscription?.last_webhook_event ?? "não registrado"}`],
     };
   }
 
@@ -194,17 +230,25 @@ function buildDiagnosis(profile: any, subscription: any, journey: Awaited<Return
     };
   }
 
-  if (!profile?.last_login_at) {
+  if (!profile?.last_login_at && !activityEvidence.hasAny) {
     return {
       severity: "info",
       title: "Usuário ainda não realizou login",
-      cause: "O cadastro existe, mas não há registro de primeiro login.",
+      cause: "O cadastro existe, mas não há registro de login nem outra evidência de uso.",
       action: "Enviar campanha de primeiro acesso com link de login e instruções simples.",
       confidence: "alta",
-      evidence: [
-        profile?.password_setup_completed_at ? `Senha configurada em ${formatDateTimeBR(profile.password_setup_completed_at)}` : "Senha sem configuração registrada",
-        "last_login_at ausente",
-      ],
+      evidence: ["last_login_at ausente", "nenhuma atividade detectada"],
+    };
+  }
+
+  if (!profile?.last_login_at && activityEvidence.hasAny) {
+    return {
+      severity: activeStatuses.has(subscription?.status) ? "success" : "info",
+      title: "Acesso detectado sem registro formal de login",
+      cause: "O campo last_login_at está vazio, mas existem sinais de interação, migração ou configuração de senha.",
+      action: "Não tratar como usuário inativo automaticamente. Use a timeline para confirmar o tipo de acesso e normalize last_login_at apenas se necessário.",
+      confidence: "média",
+      evidence: ["last_login_at ausente", ...activityEvidence.evidence],
     };
   }
 
@@ -244,16 +288,24 @@ function buildChecklist(profile: any, subscription: any, journey: Awaited<Return
   const stripeCustomer = subscription?.stripe_customer_id ?? subscription?.gateway_customer_id;
   const stripeSubscription = subscription?.stripe_subscription_id ?? subscription?.gateway_subscription_id;
   const activeStatuses = new Set(["active", "trialing"]);
+  const migrated = isLegacyMember(profile, subscription);
+  const activityEvidence = getActivityEvidence(profile, journey);
+  const loginStatus: JourneyStatus = profile?.last_login_at ? "concluído" : activityEvidence.hasAny ? "informação" : "pendente";
+  const loginDetail = profile?.last_login_at
+    ? safeDate(profile.last_login_at)
+    : activityEvidence.hasAny
+      ? "Há sinais de uso/migração, mas last_login_at está vazio"
+      : "Sem login ou atividade detectada";
 
   return [
     { label: "Perfil criado", status: profile?.created_at ? "concluído" : "ausente", detail: safeDate(profile?.created_at) },
-    { label: "Senha configurada", status: profile?.password_setup_completed_at ? "concluído" : profile?.requires_password_setup ? "pendente" : "informação", detail: profile?.password_setup_completed_at ? safeDate(profile.password_setup_completed_at) : "Sem data registrada" },
+    { label: "Senha configurada", status: profile?.password_setup_completed_at ? "concluído" : activityEvidence.evidence.some((item) => item.includes("senha") || item.includes("password_setup")) ? "informação" : profile?.requires_password_setup ? "pendente" : "informação", detail: profile?.password_setup_completed_at ? safeDate(profile.password_setup_completed_at) : activityEvidence.evidence.find((item) => item.includes("senha") || item.includes("password_setup")) ?? "Sem data registrada" },
     { label: "E-mail confirmado", status: profile?.onboarding_status === "pending_email_confirmation" ? "pendente" : "informação", detail: profile?.onboarding_status === "pending_email_confirmation" ? "Aguardando confirmação de e-mail" : profile?.onboarding_status ?? "Sem status específico" },
     { label: "Assinatura criada", status: subscription?.created_at ? "concluído" : "ausente", detail: safeDate(subscription?.created_at) },
-    { label: "Stripe Customer vinculado", status: stripeCustomer ? "concluído" : "ausente", detail: stripeCustomer ?? "Sem customer" },
-    { label: "Stripe Subscription vinculada", status: stripeSubscription ? "concluído" : stripeCustomer ? "erro" : "ausente", detail: stripeSubscription ?? "Sem subscription" },
+    { label: "Stripe Customer vinculado", status: migrated ? "não aplicável" : stripeCustomer ? "concluído" : "ausente", detail: migrated ? "Plano legado/PMS não exige customer Stripe" : stripeCustomer ?? "Sem customer" },
+    { label: "Stripe Subscription vinculada", status: migrated ? "não aplicável" : stripeSubscription ? "concluído" : stripeCustomer ? "erro" : "ausente", detail: migrated ? "Plano legado/PMS não exige subscription Stripe" : stripeSubscription ?? "Sem subscription" },
     { label: "Plano ativo", status: activeStatuses.has(subscription?.status) ? "concluído" : subscription?.status === "pending" ? "pendente" : "ausente", detail: subscription?.status ?? "Sem assinatura" },
-    { label: "Primeiro login realizado", status: profile?.last_login_at ? "concluído" : "pendente", detail: safeDate(profile?.last_login_at) },
+    { label: "Primeiro login realizado", status: loginStatus, detail: loginDetail },
     { label: "Primeiro acesso a kit", status: journey.kitAccessLogs.length ? "concluído" : "ausente", detail: journey.kitAccessLogs.length ? safeDate(getEarliestDate(journey.kitAccessLogs, ["accessed_at"])) : "Sem acesso registrado" },
     { label: "Primeiro áudio reproduzido", status: journey.audioAccessLogs.some((log: any) => log.status !== "denied") ? "concluído" : journey.audioAccessLogs.length ? "erro" : "ausente", detail: journey.audioAccessLogs.length ? safeDate(getEarliestDate(journey.audioAccessLogs, ["accessed_at"])) : "Sem áudio registrado" },
     { label: "Comunicação enviada", status: journey.communicationLogs.some((log: any) => ["enviado", "entregue", "abriu", "clicou", "respondeu"].includes(log.status)) ? "concluído" : journey.communicationLogs.some((log: any) => log.status === "falhou") ? "erro" : "ausente", detail: journey.communicationLogs[0]?.status ?? "Sem comunicação" },
@@ -261,14 +313,16 @@ function buildChecklist(profile: any, subscription: any, journey: Awaited<Return
 }
 
 function calculateScores(checklist: Array<{ status: JourneyStatus }>, diagnosis: JourneyDiagnosis | null, journey: Awaited<ReturnType<typeof getSubscriberJourneyData>>, subscription: any) {
-  const done = checklist.filter((item) => item.status === "concluído").length;
-  const errors = checklist.filter((item) => item.status === "erro").length;
-  const pending = checklist.filter((item) => item.status === "pendente").length;
+  const applicableChecklist = checklist.filter((item) => item.status !== "não aplicável");
+  const done = applicableChecklist.filter((item) => item.status === "concluído").length;
+  const info = applicableChecklist.filter((item) => item.status === "informação").length;
+  const errors = applicableChecklist.filter((item) => item.status === "erro").length;
+  const pending = applicableChecklist.filter((item) => item.status === "pendente").length;
   const engagementSignals = Math.min(4, Number(Boolean(subscription?.status === "active" || subscription?.status === "trialing")) + Number(Boolean(journey.kitAccessLogs.length)) + Number(Boolean(journey.audioAccessLogs.length)) + Number(Boolean(journey.communicationLogs.length)));
-  const engagement = Math.min(100, Math.round(((done / Math.max(checklist.length, 1)) * 70) + (engagementSignals * 7.5)));
+  const engagement = Math.min(100, Math.round(((done + info * 0.35) / Math.max(applicableChecklist.length, 1)) * 70 + engagementSignals * 7.5));
   const riskBase = diagnosis?.severity === "critical" ? 85 : diagnosis?.severity === "warning" ? 60 : diagnosis?.severity === "info" ? 35 : 15;
   const risk = Math.min(100, Math.max(0, riskBase + errors * 10 + pending * 4 - engagementSignals * 6));
-  const conversion = Math.min(100, Math.round((done / Math.max(checklist.length, 1)) * 100));
+  const conversion = Math.min(100, Math.round(((done + info * 0.35) / Math.max(applicableChecklist.length, 1)) * 100));
   return { engagement, risk, conversion };
 }
 
@@ -526,7 +580,7 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
             <Field label="Cadastro" value={safeDate(profile.created_at)} />
             <Field label="Atualizado" value={safeDate(profile.updated_at)} />
             <Field label="Último login" value={safeDate(profile.last_login_at)} />
-            <Field label="Origem" value={profile.migrated_from_pms || subscription?.migrated_from_pms ? "Usuário migrado do PMS" : "Novo cadastro"} />
+            <Field label="Origem" value={isLegacyMember(profile, subscription) ? "Usuário migrado/legado" : "Novo cadastro"} />
           </div>
         </div>
 
@@ -536,8 +590,8 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
             <Field label="Plano atual" value={member.plan?.name ?? "Free"} />
             <Field label="Status" value={currentStatus} />
             <Field label="Gateway" value={subscription?.gateway ?? subscription?.original_gateway} />
-            <Field label="Stripe Customer" value={subscription?.stripe_customer_id ?? subscription?.gateway_customer_id} />
-            <Field label="Stripe Sub" value={subscription?.stripe_subscription_id ?? subscription?.gateway_subscription_id} />
+            <Field label="Stripe Customer" value={isLegacyMember(profile, subscription) ? "Não aplicável ao legado/PMS" : subscription?.stripe_customer_id ?? subscription?.gateway_customer_id} />
+            <Field label="Stripe Sub" value={isLegacyMember(profile, subscription) ? "Não aplicável ao legado/PMS" : subscription?.stripe_subscription_id ?? subscription?.gateway_subscription_id} />
             <Field label="Stripe Price" value={subscription?.stripe_price_id} />
             <Field label="Próx. cobrança" value={safeDate(subscription?.next_billing_at ?? subscription?.current_period_end)} />
             <Field label="Auto renovação" value={formatBoolean(subscription?.auto_renew)} />
