@@ -2,6 +2,8 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createCheckoutSession, createCustomerPortalSession, getOrCreateCustomer, updateSubscription } from "@/lib/stripe/client";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
 
+type CheckoutMetadata = Record<string, string | null | undefined>;
+
 function resolveAppUrl(fallbackOrigin?: string | null) {
   const envBase = process.env.NEXT_PUBLIC_APP_URL?.trim();
   if (envBase) return envBase.replace(/\/$/, "");
@@ -267,7 +269,7 @@ async function createStripeCheckoutWithSupabase(
   email: string,
   planId: string,
   fallbackOrigin?: string | null,
-  metadata?: Record<string, string | null | undefined>,
+  metadata?: CheckoutMetadata,
 ) {
   assertStripeReady();
 
@@ -323,16 +325,17 @@ async function createStripeCheckoutWithSupabase(
   return session;
 }
 
-export async function startStripeCheckout(userId: string, email: string, planId: string, fallbackOrigin?: string | null) {
+export async function startStripeCheckout(userId: string, email: string, planId: string, fallbackOrigin?: string | null, metadata?: CheckoutMetadata) {
   const supabase = createSupabaseAdminClient() as any;
-  return createStripeCheckoutWithSupabase(supabase, userId, email, planId, fallbackOrigin);
+  return createStripeCheckoutWithSupabase(supabase, userId, email, planId, fallbackOrigin, metadata);
 }
 
-export async function startStripeCheckoutForSignup(userId: string, email: string, planSlug: string, fallbackOrigin?: string | null) {
+export async function startStripeCheckoutForSignup(userId: string, email: string, planSlug: string, fallbackOrigin?: string | null, metadata?: CheckoutMetadata) {
   const supabase = createSupabaseAdminClient() as any;
   const plan = await getPlanBySlug(supabase, planSlug);
   return createStripeCheckoutWithSupabase(supabase, userId, email, plan.id, fallbackOrigin, {
     source: "paid_signup",
+    ...metadata,
   });
 }
 
