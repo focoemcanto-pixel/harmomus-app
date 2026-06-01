@@ -49,6 +49,7 @@ const navGroups: AdminNavGroup[] = [
     label: "Assinaturas",
     description: "Planos, membros e cobrança",
     items: [
+      { label: "Assinaturas", href: "/admin/assinaturas", icon: CreditCard },
       { label: "Planos", href: "/admin/planos", icon: Library },
       { label: "Membros", href: "/admin/membros", icon: Users },
       { label: "Billing", href: "/admin/billing", icon: CreditCard },
