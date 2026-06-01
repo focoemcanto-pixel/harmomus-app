@@ -6,6 +6,7 @@ export type RecommendedActionType = "manual" | "external" | "future_action";
 export type RecommendedActionPriority = "high" | "medium" | "low";
 export type OperationalFlag =
   | "pending"
+  | "profile_not_synced"
   | "no_login"
   | "no_real_access"
   | "no_stripe_subscription"
@@ -50,6 +51,7 @@ type MemberLike = MemberListItem | {
 const POSITIVE_COMMUNICATION_STATUSES = new Set(["enviado", "entregue", "abriu", "clicou", "respondeu", "sent", "delivered", "opened", "clicked", "replied", "success"]);
 const ACTIVE_STATUSES = new Set(["active", "trialing"]);
 const FAILED_COMMUNICATION_STATUSES = new Set(["falhou", "failed", "erro", "error", "bounced"]);
+const CONTENT_ENGAGEMENT_GRACE_DAYS = 14;
 
 function normalize(value: unknown) {
   return String(value ?? "").trim().toLowerCase();
@@ -129,6 +131,29 @@ function hasLogin(profile: any) {
   return hasProfileLogin(profile) || hasAuthLogin(profile);
 }
 
+function daysSince(value: unknown) {
+  if (!value) return null;
+  const time = new Date(String(value)).getTime();
+  if (!Number.isFinite(time)) return null;
+  return Math.floor((Date.now() - time) / (24 * 60 * 60 * 1000));
+}
+
+function isPaidPlan(member: MemberLike) {
+  const plan = member.plan as any;
+  const slug = normalize(plan?.slug);
+  const priceCents = Number(plan?.price_cents ?? 0);
+  return slug !== "free" && priceCents > 0;
+}
+
+function shouldEvaluateContentEngagement(member: MemberLike) {
+  const profile = member.profile as any;
+  if (!isPaidPlan(member)) return false;
+  if (!hasLogin(profile)) return false;
+
+  const ageDays = daysSince(profile?.created_at);
+  return ageDays === null || ageDays >= CONTENT_ENGAGEMENT_GRACE_DAYS;
+}
+
 function communicationFailed(journey: JourneyLike) {
   return rows(journey, "communicationLogs").some((log: any) => {
     const status = normalize(log?.status);
@@ -158,6 +183,7 @@ export function calculateMemberHealth(member: MemberLike, journey?: JourneyLike)
   const hasAudioAccess = rows(journey, "audioAccessLogs").some((log: any) => normalize(log?.status) !== "denied");
   const hasRecentWebhook = hasRecentRow([...rows(journey, "webhookLogs"), ...rows(journey, "webhookProcessedEvents")], 30);
   const failedCommunication = communicationFailed(journey);
+  const evaluateContentEngagement = shouldEvaluateContentEngagement(member);
 
   let score = 0;
   const reasons: string[] = [];
@@ -226,9 +252,11 @@ export function calculateMemberHealth(member: MemberLike, journey?: JourneyLike)
     reasons.push("-15 sem login registrado");
   }
 
-  if (!hasKitAccess || !hasAudioAccess) {
-    score -= 10;
-    reasons.push("-10 sem acesso a kit/áudio");
+  if (evaluateContentEngagement && (!hasKitAccess || !hasAudioAccess)) {
+    score -= 5;
+    reasons.push(`-5 sem consumo de kit/áudio após ${CONTENT_ENGAGEMENT_GRACE_DAYS} dias`);
+  } else if (isPaidPlan(member) && hasLogin(profile) && (!hasKitAccess || !hasAudioAccess)) {
+    reasons.push(`Consumo de kit/áudio ainda em janela inicial de ${CONTENT_ENGAGEMENT_GRACE_DAYS} dias`);
   }
 
   const clamped = Math.max(0, Math.min(100, score));
@@ -244,14 +272,15 @@ export function getOperationalFlags(member: MemberLike, journey?: JourneyLike): 
   const migrated = isMigratedFromPms(member, journey);
   const health = calculateMemberHealth(member, journey);
   const flags: OperationalFlag[] = [];
+  const evaluateContentEngagement = shouldEvaluateContentEngagement(member);
 
   if (status === "pending") flags.push("pending");
-  if (!hasProfileLogin(profile)) flags.push("no_login");
+  if (!hasProfileLogin(profile) && hasAuthLogin(profile)) flags.push("profile_not_synced");
   if (!hasLogin(profile)) flags.push("no_real_access");
   if (!migrated && isPresent(stripeCustomer) && !isPresent(stripeSubscription)) flags.push("no_stripe_subscription");
   if (communicationFailed(journey)) flags.push("failed_communication");
-  if (!rows(journey, "kitAccessLogs").length) flags.push("no_kit_access");
-  if (!rows(journey, "audioAccessLogs").length) flags.push("no_audio_access");
+  if (evaluateContentEngagement && !rows(journey, "kitAccessLogs").length) flags.push("no_kit_access");
+  if (evaluateContentEngagement && !rows(journey, "audioAccessLogs").length) flags.push("no_audio_access");
   if (migrated) flags.push("migrated_from_pms");
   if (health.score >= 90 && !flags.some((flag) => flag !== "migrated_from_pms")) flags.push("healthy");
   if (health.score < 40) flags.push("critical");
@@ -307,15 +336,15 @@ export function getRecommendedActions(member: MemberLike, journey?: JourneyLike)
     );
   }
 
-  if (!rows(journey, "kitAccessLogs").length || !rows(journey, "audioAccessLogs").length) {
+  if (shouldEvaluateContentEngagement(member) && (!rows(journey, "kitAccessLogs").length || !rows(journey, "audioAccessLogs").length)) {
     actions.push(
-      { label: "Verificar se usuário conseguiu entrar", description: "Sem acesso a kit/áudio pode indicar barreira de login, onboarding ou entendimento da biblioteca.", type: "manual", priority: "medium" },
-      { label: "Orientar primeiro acesso", description: "Enviar passo a passo simples para abrir a biblioteca, acessar kits e reproduzir o primeiro áudio.", type: "manual", priority: "low" },
+      { label: "Estimular consumo de conteúdo", description: "Usuário pago com login registrado, mas sem consumo de kit/áudio após a janela inicial. Enviar orientação de uso.", type: "manual", priority: "medium" },
+      { label: "Orientar primeiro acesso aos kits", description: "Enviar passo a passo simples para abrir a biblioteca, acessar kits e reproduzir o primeiro áudio.", type: "manual", priority: "low" },
     );
   }
 
   if (!actions.length) {
-    actions.push({ label: "Acompanhar jornada", description: "Conta sem incidente operacional crítico. Monitorar engajamento, comunicação e oportunidades de retenção.", type: "manual", priority: "low" });
+    actions.push({ label: "Acompanhar jornada", description: "Conta sem incidente operacional crítico. Monitorar engajamento, uso de kits e oportunidades de retenção.", type: "manual", priority: "low" });
   }
 
   const priorityWeight = { high: 0, medium: 1, low: 2 } as const;
