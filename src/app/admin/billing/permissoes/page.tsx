@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { ArrowLeft, CheckCircle2, Crown, Save, ShieldCheck } from "lucide-react";
@@ -166,8 +167,8 @@ export default async function BillingPermissionsPage() {
               </thead>
               <tbody>
                 {FEATURE_CATALOG.map((group) => (
-                  <>
-                    <tr key={`${group.category}-header`}>
+                  <Fragment key={group.category}>
+                    <tr>
                       <td colSpan={plans.length + 1} className="border-y border-border/70 bg-background/60 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-gold-300">
                         {group.category}
                       </td>
@@ -191,7 +192,7 @@ export default async function BillingPermissionsPage() {
                         })}
                       </tr>
                     ))}
-                  </>
+                  </Fragment>
                 ))}
 
                 {unknownFeatures.length ? (
