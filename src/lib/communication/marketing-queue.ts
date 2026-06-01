@@ -15,7 +15,7 @@ type CommunicationQueueJob = {
   payload: Record<string, unknown> | null;
 };
 
-type MarketingChannelRow = {
+type CommunicationChannelRow = {
   id: string;
   type: Channel;
   provider: string;
@@ -31,7 +31,7 @@ type ProviderResult = {
   errorMessage?: string | null;
 };
 
-type ProcessMarketingQueueResult = {
+type ProcessCommunicationQueueResult = {
   processed: number;
   sent: number;
   failed: number;
@@ -247,7 +247,7 @@ async function finalizeJob(admin: any, job: CommunicationQueueJob, result: Provi
   });
 }
 
-export async function processMarketingQueue(limit = 50): Promise<ProcessMarketingQueueResult> {
+export async function processCommunicationQueue(limit = 50): Promise<ProcessCommunicationQueueResult> {
   const admin = createSupabaseAdminClient() as any;
   const now = new Date().toISOString();
   const { data: jobs, error } = await admin
@@ -263,7 +263,7 @@ export async function processMarketingQueue(limit = 50): Promise<ProcessMarketin
   let sent = 0;
   let failed = 0;
   let skipped = 0;
-  const channels = new Map<Channel, MarketingChannelRow | null>();
+  const channels = new Map<Channel, CommunicationChannelRow | null>();
 
   for (const job of jobs as CommunicationQueueJob[]) {
     const locked = await markJobProcessing(admin, job);

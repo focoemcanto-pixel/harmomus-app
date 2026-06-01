@@ -5,7 +5,8 @@ type SupabaseAdmin = ReturnType<typeof createSupabaseAdminClient>;
 type QueryResult<T> = { data: T | null; error: { message?: string; code?: string } | null; count?: number | null };
 
 type LogLite = { id?: string; status?: string | null; channel?: string | null; created_at?: string | null; event?: string | null; level?: string | null };
-type EventLite = { event_type?: string | null; created_at?: string | null };
+type EventLite = { event_key?: string | null; event_label?: string | null; created_at?: string | null };
+type DeliveryLite = { id?: string; status?: string | null; channel?: string | null; opened_at?: string | null; clicked_at?: string | null; converted_at?: string | null; created_at?: string | null };
 type ProfileLite = { id: string; full_name?: string | null; email?: string | null; phone?: string | null; whatsapp_opt_in?: boolean | null; email_opt_in?: boolean | null; last_seen_at?: string | null; created_at?: string | null; origin?: string | null };
 type SubscriptionLite = { id?: string; user_id: string; status?: string | null; plans?: { name?: string | null; slug?: string | null; hierarchy_level?: number | null } | null; updated_at?: string | null; canceled_at?: string | null; current_period_end?: string | null };
 type AccessLite = { user_id?: string | null; status?: string | null; reason?: string | null; accessed_at?: string | null; created_at?: string | null; kits?: { name?: string | null; slug?: string | null } | null };
@@ -61,7 +62,7 @@ export type CommunicationDashboardData = {
   ctr: number | null;
   conversion: number | null;
   operationalHealth: { label: string; score: number; tone: "emerald" | "amber" | "rose" };
-  deliveries: LogLite[];
+  deliveries: DeliveryLite[];
   segments: SmartSegment[];
   recommendedCampaigns: RecommendedCampaign[];
   funnel: CommercialFunnelItem[];
@@ -310,7 +311,7 @@ export async function getCommunicationDashboard(): Promise<CommunicationDashboar
     ctr: safeRate(clicked, sent),
     conversion: safeRate(converted, sent),
     operationalHealth: { label: healthTone === "emerald" ? "Saudável" : healthTone === "amber" ? "Atenção" : "Crítico", score: healthScore, tone: healthTone },
-    deliveries: logs,
+    deliveries,
     segments: segmentData.segments,
     recommendedCampaigns: buildRecommended(segmentData.segments),
     funnel: buildFunnel(data.history),

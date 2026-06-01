@@ -39,7 +39,7 @@ export function sanitizeObject(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
-export function isMissingMarketingTable(error: { code?: string } | null | undefined) {
+export function isMissingCommunicationTable(error: { code?: string } | null | undefined) {
   return error?.code === "42P01";
 }
 

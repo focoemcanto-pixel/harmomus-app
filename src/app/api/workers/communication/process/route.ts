@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { processMarketingQueue } from "@/lib/communication/marketing-queue";
+import { processCommunicationQueue } from "@/lib/communication/marketing-queue";
 
 function validateWorkerToken(request: Request) {
   const expectedToken = process.env.HARMOMUS_WORKER_TOKEN;
@@ -21,7 +21,7 @@ export async function POST(request: Request) {
   const authError = validateWorkerToken(request);
   if (authError) return authError;
 
-  const result = await processMarketingQueue(50);
+  const result = await processCommunicationQueue(50);
 
   return NextResponse.json({
     success: true,
