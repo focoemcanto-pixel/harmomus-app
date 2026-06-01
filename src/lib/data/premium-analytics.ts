@@ -21,6 +21,8 @@ export type PremiumRequestStatus = "pending" | "reviewing" | "approved" | "done"
 
 type AudioLog = { id: string; kit_id: string | null; accessed_at?: string | null; kits?: { category_id?: string | null } | null };
 
+const PREMIUM_REQUEST_SELECT = "id,user_id,ministry_id,request_type,song_name,artist_name,reference_link,kit_slug,desired_tone,voice_part,notes,status,created_at,updated_at,delivered_kit_slug,delivered_at,profile:profiles(full_name,email,avatar_url)";
+
 function sinceDate(days = 90) {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 }
@@ -60,6 +62,20 @@ function toAdminRequestStatus(status?: string | null) {
   if (status === "done") return "done";
   if (status === "rejected") return "archived";
   return status ?? "new";
+}
+
+function normalizePremiumRequest(row: any) {
+  return {
+    ...row,
+    type: toAdminRequestType(row.request_type),
+    status: toAdminRequestStatus(row.status),
+    title: row.song_name ?? "Solicitação premium",
+    artist: row.artist_name ?? null,
+    requested_tone: row.desired_tone ?? null,
+    reference_url: row.reference_link ?? null,
+    message: row.notes ?? null,
+    profiles: row.profile ?? row.profiles ?? null,
+  };
 }
 
 async function fetchAllowedAudioLogs(input?: { userId?: string; days?: number; limit?: number; withCategory?: boolean }) {
@@ -230,23 +246,25 @@ export async function getPremiumRequests() {
   const supabase = createSupabaseAdminClient() as any;
   const { data, error } = await supabase
     .from("premium_requests")
-    .select("id,user_id,ministry_id,request_type,song_name,artist_name,reference_link,kit_slug,desired_tone,voice_part,notes,status,created_at,updated_at,delivered_kit_slug,delivered_at,profile:profiles(full_name,email,avatar_url)")
+    .select(PREMIUM_REQUEST_SELECT)
     .order("created_at", { ascending: false })
     .limit(200);
 
   if (error) throw new Error(error.message);
+  return (data ?? []).map(normalizePremiumRequest);
+}
 
-  return (data ?? []).map((row: any) => ({
-    ...row,
-    type: toAdminRequestType(row.request_type),
-    status: toAdminRequestStatus(row.status),
-    title: row.song_name ?? "Solicitação premium",
-    artist: row.artist_name ?? null,
-    requested_tone: row.desired_tone ?? null,
-    reference_url: row.reference_link ?? null,
-    message: row.notes ?? null,
-    profiles: row.profile ?? row.profiles ?? null,
-  }));
+export async function getPremiumRequestById(id: string) {
+  const supabase = createSupabaseAdminClient() as any;
+  const { data, error } = await supabase
+    .from("premium_requests")
+    .select(PREMIUM_REQUEST_SELECT)
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+  return normalizePremiumRequest(data);
 }
 
 export async function createPremiumRequest(input: {
