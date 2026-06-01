@@ -6,6 +6,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const MAX_TEXT = 120;
 const MAX_NOTES = 1000;
+const ALLOWED_REQUEST_TYPES = ["song", "tone", "feedback"] as const;
 
 function clean(value: unknown, max = MAX_TEXT) {
   return String(value ?? "").trim().slice(0, max);
@@ -34,7 +35,7 @@ export async function POST(request: Request) {
 
     if (!canSubmitPremiumRequests(context)) {
       return NextResponse.json(
-        { error: "No plano ministerial, apenas o responsável pode solicitar novas músicas e novos tons." },
+        { error: "No plano ministerial, apenas o responsável pode solicitar novas músicas, novos tons e feedbacks." },
         { status: 403 },
       );
     }
@@ -44,12 +45,12 @@ export async function POST(request: Request) {
     const songName = clean(body?.song_name);
     const desiredTone = clean(body?.desired_tone, 40);
 
-    if (!["song", "tone"].includes(requestType)) {
+    if (!ALLOWED_REQUEST_TYPES.includes(requestType as any)) {
       return NextResponse.json({ error: "Tipo de solicitação inválido." }, { status: 400 });
     }
 
     if (!songName) {
-      return NextResponse.json({ error: "Informe o nome da música." }, { status: 400 });
+      return NextResponse.json({ error: requestType === "feedback" ? "Informe o assunto do feedback." : "Informe o nome da música." }, { status: 400 });
     }
 
     if (requestType === "tone" && !desiredTone) {
@@ -63,11 +64,11 @@ export async function POST(request: Request) {
       ministry_id: context.ministry?.ministryId ?? null,
       request_type: requestType,
       song_name: songName,
-      artist_name: clean(body?.artist_name) || null,
+      artist_name: requestType === "feedback" ? "Feedback do usuário" : clean(body?.artist_name) || null,
       reference_link: cleanUrl(body?.reference_link),
       kit_slug: clean(body?.kit_slug, 100) || null,
-      desired_tone: desiredTone || null,
-      voice_part: clean(body?.voice_part, 80) || null,
+      desired_tone: requestType === "tone" ? desiredTone || null : null,
+      voice_part: requestType === "tone" ? clean(body?.voice_part, 80) || null : null,
       notes: clean(body?.notes, MAX_NOTES) || null,
       status: "pending",
     });
