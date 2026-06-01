@@ -195,6 +195,15 @@ function normalizeChannelRow(value: unknown): SafeMarketingChannelRow | null {
   return sanitizeChannelForResponse(value);
 }
 
+
+function integrationTable(type: ChannelType) {
+  return type === "whatsapp" ? "communication_whatsapp_integrations" : "communication_email_integrations";
+}
+
+function withChannelType(row: unknown, type: ChannelType): unknown {
+  return row && typeof row === "object" ? { ...(row as Record<string, unknown>), type } : row;
+}
+
 function sanitizeChannelForResponse(channel: MarketingChannelRow): SafeMarketingChannelRow {
   const base = {
     ...channel,
@@ -231,19 +240,18 @@ export async function GET() {
   if (!current.isAdmin) return NextResponse.json({ error: "Acesso negado" }, { status: 403 });
 
   const admin = createSupabaseAdminClient();
-  const { data, error } = await admin
-    .from("marketing_channels")
-    .select("id,created_at,updated_at,name,type,provider,active,config,limits,created_by")
-    .order("created_at", { ascending: false });
+  const [whatsappResult, emailResult] = await Promise.all([
+    admin.from(integrationTable("whatsapp")).select("id,created_at,updated_at,name,provider,active,config,limits,created_by").order("created_at", { ascending: false }),
+    admin.from(integrationTable("email")).select("id,created_at,updated_at,name,provider,active,config,limits,created_by").order("created_at", { ascending: false }),
+  ]);
 
-  if (error) {
-    if (error.code === "42P01") {
-      return NextResponse.json({ error: "Aplique a migration de marketing" }, { status: 500 });
-    }
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+  if (whatsappResult.error) return NextResponse.json({ error: whatsappResult.error.message }, { status: 500 });
+  if (emailResult.error) return NextResponse.json({ error: emailResult.error.message }, { status: 500 });
 
-  const channels = (data ?? []).map(normalizeChannelRow).filter((item): item is SafeMarketingChannelRow => item !== null);
+  const channels = [
+    ...(whatsappResult.data ?? []).map((row) => withChannelType(row, "whatsapp")),
+    ...(emailResult.data ?? []).map((row) => withChannelType(row, "email")),
+  ].map(normalizeChannelRow).filter((item): item is SafeMarketingChannelRow => item !== null);
   const whatsapp = channels.find((item) => item.type === "whatsapp") ?? null;
   const email = channels.find((item) => item.type === "email") ?? null;
 
@@ -270,19 +278,18 @@ export async function POST(request: Request) {
   const admin = createSupabaseAdminClient();
   const now = new Date().toISOString();
 
-  const { data: existingChannels, error: existingChannelsError } = await admin
-    .from("marketing_channels")
-    .select("id,created_at,updated_at,name,type,provider,active,config,limits,created_by")
-    .in("type", ["whatsapp", "email"]);
+  const [existingWhatsappResult, existingEmailResult] = await Promise.all([
+    admin.from(integrationTable("whatsapp")).select("id,created_at,updated_at,name,provider,active,config,limits,created_by"),
+    admin.from(integrationTable("email")).select("id,created_at,updated_at,name,provider,active,config,limits,created_by"),
+  ]);
 
-  if (existingChannelsError) {
-    if (existingChannelsError.code === "42P01") {
-      return NextResponse.json({ error: "Aplique a migration de marketing" }, { status: 500 });
-    }
-    return NextResponse.json({ error: existingChannelsError.message }, { status: 500 });
-  }
+  if (existingWhatsappResult.error) return NextResponse.json({ error: existingWhatsappResult.error.message }, { status: 500 });
+  if (existingEmailResult.error) return NextResponse.json({ error: existingEmailResult.error.message }, { status: 500 });
 
-  const existingRows = (existingChannels ?? []).filter(isChannelRow);
+  const existingRows = [
+    ...(existingWhatsappResult.data ?? []).map((row) => withChannelType(row, "whatsapp")),
+    ...(existingEmailResult.data ?? []).map((row) => withChannelType(row, "email")),
+  ].filter(isChannelRow);
   const existingWhatsapp = existingRows.find((item) => item.type === "whatsapp")?.config as WhatsAppConfig | undefined;
   const existingEmail = existingRows.find((item) => item.type === "email")?.config as EmailConfig | undefined;
   const whatsappConfig = buildWhatsAppConfig(whatsapp, existingWhatsapp);
@@ -316,13 +323,14 @@ export async function POST(request: Request) {
   const results: SafeMarketingChannelRow[] = [];
   for (const record of records) {
     const existing = existingRows.find((item) => item.type === record.type);
+    const { type, ...dbRecord } = record;
     const query = existing?.id
-      ? admin.from("marketing_channels").update(record).eq("id", existing.id).select("id,name,type,provider,active,config,limits,created_by,updated_at").single()
-      : admin.from("marketing_channels").insert(record).select("id,name,type,provider,active,config,limits,created_by,updated_at").single();
+      ? admin.from(integrationTable(type)).update(dbRecord).eq("id", existing.id).select("id,name,provider,active,config,limits,created_by,updated_at").single()
+      : admin.from(integrationTable(type)).insert(dbRecord).select("id,name,provider,active,config,limits,created_by,updated_at").single();
 
     const { data, error } = await query;
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    const safeData = normalizeChannelRow(data);
+    const safeData = normalizeChannelRow(withChannelType(data, type));
     if (safeData) results.push(safeData);
   }
 

@@ -4,7 +4,7 @@
 create extension if not exists pgcrypto;
 
 -- 1) Marketing campaigns used by the Communication Center.
-create table if not exists public.marketing_campaigns (
+create table if not exists public.communication_campaigns (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   title text,
@@ -21,7 +21,7 @@ create table if not exists public.marketing_campaigns (
   updated_at timestamptz not null default now()
 );
 
-alter table public.marketing_campaigns
+alter table public.communication_campaigns
   add column if not exists title text,
   add column if not exists message text,
   add column if not exists link_url text,
@@ -35,18 +35,18 @@ alter table public.marketing_campaigns
   add column if not exists created_at timestamptz not null default now(),
   add column if not exists updated_at timestamptz not null default now();
 
-create index if not exists marketing_campaigns_status_created_at_idx
-  on public.marketing_campaigns (status, created_at desc);
+create index if not exists communication_campaigns_status_created_at_idx
+  on public.communication_campaigns (status, created_at desc);
 
-create index if not exists marketing_campaigns_scheduled_at_idx
-  on public.marketing_campaigns (scheduled_at)
+create index if not exists communication_campaigns_scheduled_at_idx
+  on public.communication_campaigns (scheduled_at)
   where scheduled_at is not null;
 
-alter table public.marketing_campaigns enable row level security;
+alter table public.communication_campaigns enable row level security;
 
-drop policy if exists "Admins can manage marketing campaigns" on public.marketing_campaigns;
+drop policy if exists "Admins can manage marketing campaigns" on public.communication_campaigns;
 create policy "Admins can manage marketing campaigns"
-  on public.marketing_campaigns
+  on public.communication_campaigns
   for all
   using (
     exists (
@@ -64,9 +64,9 @@ create policy "Admins can manage marketing campaigns"
   );
 
 -- 2) Marketing jobs: actual send queue.
-create table if not exists public.marketing_jobs (
+create table if not exists public.communication_queue (
   id uuid primary key default gen_random_uuid(),
-  campaign_id uuid references public.marketing_campaigns(id) on delete cascade,
+  campaign_id uuid references public.communication_campaigns(id) on delete cascade,
   user_id uuid references public.profiles(id) on delete set null,
   recipient_name text,
   recipient_email text,
@@ -84,8 +84,8 @@ create table if not exists public.marketing_jobs (
   updated_at timestamptz not null default now()
 );
 
-alter table public.marketing_jobs
-  add column if not exists campaign_id uuid references public.marketing_campaigns(id) on delete cascade,
+alter table public.communication_queue
+  add column if not exists campaign_id uuid references public.communication_campaigns(id) on delete cascade,
   add column if not exists user_id uuid references public.profiles(id) on delete set null,
   add column if not exists recipient_name text,
   add column if not exists recipient_email text,
@@ -102,20 +102,20 @@ alter table public.marketing_jobs
   add column if not exists created_at timestamptz not null default now(),
   add column if not exists updated_at timestamptz not null default now();
 
-create index if not exists marketing_jobs_status_scheduled_at_idx
-  on public.marketing_jobs (status, scheduled_at nulls first, created_at desc);
+create index if not exists communication_queue_status_scheduled_at_idx
+  on public.communication_queue (status, scheduled_at nulls first, created_at desc);
 
-create index if not exists marketing_jobs_campaign_id_status_idx
-  on public.marketing_jobs (campaign_id, status);
+create index if not exists communication_queue_campaign_id_status_idx
+  on public.communication_queue (campaign_id, status);
 
-create index if not exists marketing_jobs_user_id_created_at_idx
-  on public.marketing_jobs (user_id, created_at desc);
+create index if not exists communication_queue_user_id_created_at_idx
+  on public.communication_queue (user_id, created_at desc);
 
-alter table public.marketing_jobs enable row level security;
+alter table public.communication_queue enable row level security;
 
-drop policy if exists "Admins can manage marketing jobs" on public.marketing_jobs;
+drop policy if exists "Admins can manage marketing jobs" on public.communication_queue;
 create policy "Admins can manage marketing jobs"
-  on public.marketing_jobs
+  on public.communication_queue
   for all
   using (
     exists (
@@ -132,18 +132,18 @@ create policy "Admins can manage marketing jobs"
     )
   );
 
--- 3) Complete marketing_logs columns expected by service/UI.
-alter table if exists public.marketing_logs
+-- 3) Complete communication_logs columns expected by service/UI.
+alter table if exists public.communication_logs
   add column if not exists event text,
   add column if not exists level text not null default 'info',
   add column if not exists message text,
   add column if not exists payload jsonb not null default '{}'::jsonb;
 
-create index if not exists marketing_logs_event_created_at_idx
-  on public.marketing_logs (event, created_at desc);
+create index if not exists communication_logs_event_created_at_idx
+  on public.communication_logs (event, created_at desc);
 
-create index if not exists marketing_logs_level_created_at_idx
-  on public.marketing_logs (level, created_at desc);
+create index if not exists communication_logs_level_created_at_idx
+  on public.communication_logs (level, created_at desc);
 
 -- 4) Optional compatibility columns for communication_campaigns if older table is used.
 alter table if exists public.communication_campaigns
