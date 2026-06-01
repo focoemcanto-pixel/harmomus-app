@@ -66,7 +66,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
   });
 }
 
-function runSignupSideEffectsAsync(input: {
+async function runSignupSideEffectsAsync(input: {
   supabase: Awaited<ReturnType<typeof createClient>>;
   plan: PlanSlug;
   origin: string;
@@ -77,8 +77,8 @@ function runSignupSideEffectsAsync(input: {
   utmSource: string;
   utmCampaign: string;
 }) {
-  setTimeout(() => {
-    void Promise.allSettled([
+  try {
+    const results = await Promise.allSettled([
       trackMarketingEvent(input.supabase as any, {
         eventKey: "signup",
         eventLabel: "Cadastro",
@@ -97,14 +97,16 @@ function runSignupSideEffectsAsync(input: {
           utm_campaign: input.utmCampaign,
         },
       }),
-    ]).then((results) => {
-      for (const result of results) {
-        if (result.status === "rejected") {
-          console.error("[signup] Async side effect failed", result.reason);
-        }
+    ]);
+
+    for (const result of results) {
+      if (result.status === "rejected") {
+        console.error("[signup] Async side effect failed", result.reason);
       }
-    });
-  }, 0);
+    }
+  } catch (error) {
+    console.error("[signup] Async side effects failed", error);
+  }
 }
 
 function mapSupabaseError(message: string): { message: string; field: Field } {
@@ -321,7 +323,7 @@ export async function POST(request: Request) {
   if (isMinistryInviteSignup) {
     try {
       const response = await createConfirmedMinistryMemberAccount({ request, supabase, token: inviteToken, email, password: pass, fullName, username, phone, plan, origin });
-      runSignupSideEffectsAsync({ supabase, plan, origin, fullName, email, phone, username, utmSource, utmCampaign });
+      await runSignupSideEffectsAsync({ supabase, plan, origin, fullName, email, phone, username, utmSource, utmCampaign });
       return response;
     } catch (error) {
       return fail(error instanceof Error ? error.message : "Não foi possível ativar o convite ministerial.", "form");
@@ -364,6 +366,6 @@ export async function POST(request: Request) {
     return fail(accessError instanceof Error ? accessError.message : "Não foi possível preparar sua conta agora.", "form");
   }
 
-  runSignupSideEffectsAsync({ supabase, plan, origin, fullName, email, phone, username, utmSource, utmCampaign });
+  await runSignupSideEffectsAsync({ supabase, plan, origin, fullName, email, phone, username, utmSource, utmCampaign });
   return NextResponse.redirect(new URL(next, request.url), 303);
 }
