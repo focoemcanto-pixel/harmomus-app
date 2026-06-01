@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { KitAudioSyncCard } from "@/components/admin/kit-audio-sync-card";
 import { KitBulkUpload } from "@/components/admin/kit-bulk-upload";
 import { KitForm } from "@/components/admin/kit-form";
-import { createKit, ensureArtistCategory, getArtistCategories, getKitById, getKitFormOptions, updateKit } from "@/lib/data/kits";
+import { createKit, ensureArtistCategory, getArtistCategories, getKitFormOptions, type Kit, updateKit } from "@/lib/data/kits";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -40,6 +41,16 @@ function getSingleParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
+async function getImportedKitById(id?: string | null): Promise<Kit | null> {
+  const kitId = id?.trim();
+  if (!kitId) return null;
+
+  const supabase = createSupabaseAdminClient() as any;
+  const { data, error } = await supabase.from("kits").select("*").eq("id", kitId).maybeSingle();
+  if (error) throw new Error(`Falha ao buscar kit importado: ${error.message}`);
+  return (data as Kit | null) ?? null;
+}
+
 export default async function NovoKitPage({ searchParams }: { searchParams: NovoKitSearchParams }) {
   const resolvedSearchParams = await searchParams;
   const importedKitId = getSingleParam(resolvedSearchParams.importedKitId);
@@ -47,7 +58,7 @@ export default async function NovoKitPage({ searchParams }: { searchParams: Novo
   const [{ categories, plans }, artistCategories, importedKit] = await Promise.all([
     getKitFormOptions(),
     getArtistCategories(),
-    importedKitId ? getKitById(importedKitId) : Promise.resolve(null),
+    getImportedKitById(importedKitId),
   ]);
 
   async function createKitAction(formData: FormData) {
@@ -129,7 +140,7 @@ export default async function NovoKitPage({ searchParams }: { searchParams: Novo
     revalidatePath("/biblioteca", "page");
     revalidatePath("/todos-os-kits", "page");
     revalidatePath(`/biblioteca/${slug}`, "page");
-    redirect(`/admin/kits/novo?importedKitId=${importedKit.id}#kit-editor`);
+    redirect(`/admin/kits/novo?importedKitId=${importedKit.id}&savedAt=${Date.now()}#kit-editor`);
   }
 
   const editorLabel = importedKit ? "Editor do kit importado" : "Cadastro manual";
@@ -151,8 +162,16 @@ export default async function NovoKitPage({ searchParams }: { searchParams: Novo
           <div className="rounded-3xl border border-emerald-400/20 bg-emerald-500/10 p-4 text-sm text-emerald-100">
             Kit importado e carregado nesta página. Complete capa, letra, descrição, publicação e configurações vocais abaixo.
           </div>
-          <KitForm mode="edit" categories={categories} artistCategories={artistCategories} plans={plans} initialData={importedKit} action={updateImportedKitAction} />
-          <KitAudioSyncCard kitId={importedKit.id} />
+          <KitForm
+            key={importedKit.id}
+            mode="edit"
+            categories={categories}
+            artistCategories={artistCategories}
+            plans={plans}
+            initialData={importedKit}
+            action={updateImportedKitAction}
+          />
+          <KitAudioSyncCard key={`audio-${importedKit.id}`} kitId={importedKit.id} />
         </div>
       ) : (
         <KitForm mode="create" categories={categories} artistCategories={artistCategories} plans={plans} action={createKitAction} />
