@@ -1,4 +1,4 @@
-create table if not exists marketing_channels (
+create table if not exists communication_whatsapp_integrations (
   id uuid primary key default gen_random_uuid(),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -11,7 +11,7 @@ create table if not exists marketing_channels (
   created_by uuid null
 );
 
-create table if not exists marketing_templates (
+create table if not exists communication_templates (
   id uuid primary key default gen_random_uuid(),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -26,7 +26,7 @@ create table if not exists marketing_templates (
   created_by uuid null
 );
 
-create table if not exists marketing_media (
+create table if not exists communication_assets (
   id uuid primary key default gen_random_uuid(),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -40,7 +40,7 @@ create table if not exists marketing_media (
   created_by uuid null
 );
 
-create table if not exists marketing_campaigns (
+create table if not exists communication_campaigns (
   id uuid primary key default gen_random_uuid(),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -51,7 +51,7 @@ create table if not exists marketing_campaigns (
   title text null,
   message text not null,
   link_url text null,
-  media_id uuid null references marketing_media(id) on delete set null,
+  media_id uuid null references communication_assets(id) on delete set null,
   schedule_mode text not null default 'now' check (schedule_mode in ('now','scheduled')),
   scheduled_at timestamptz null,
   rate_limits jsonb not null default '{}'::jsonb,
@@ -60,11 +60,11 @@ create table if not exists marketing_campaigns (
   created_by uuid null
 );
 
-create table if not exists marketing_jobs (
+create table if not exists communication_queue (
   id uuid primary key default gen_random_uuid(),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  campaign_id uuid not null references marketing_campaigns(id) on delete cascade,
+  campaign_id uuid not null references communication_campaigns(id) on delete cascade,
   user_id uuid null,
   recipient_name text null,
   recipient_email text null,
@@ -79,11 +79,11 @@ create table if not exists marketing_jobs (
   error_message text null
 );
 
-create table if not exists marketing_logs (
+create table if not exists communication_logs (
   id uuid primary key default gen_random_uuid(),
   created_at timestamptz not null default now(),
-  campaign_id uuid null references marketing_campaigns(id) on delete set null,
-  job_id uuid null references marketing_jobs(id) on delete set null,
+  campaign_id uuid null references communication_campaigns(id) on delete set null,
+  job_id uuid null references communication_queue(id) on delete set null,
   channel text null,
   event text not null,
   level text not null default 'info' check (level in ('debug','info','warning','error')),
@@ -92,7 +92,7 @@ create table if not exists marketing_logs (
   response jsonb null
 );
 
-create index if not exists marketing_campaigns_status_idx on marketing_campaigns(status);
-create index if not exists marketing_jobs_campaign_status_idx on marketing_jobs(campaign_id, status);
-create index if not exists marketing_logs_campaign_idx on marketing_logs(campaign_id, created_at desc);
-create index if not exists marketing_channels_type_active_idx on marketing_channels(type, active);
+create index if not exists communication_campaigns_status_idx on communication_campaigns(status);
+create index if not exists communication_queue_campaign_status_idx on communication_queue(campaign_id, status);
+create index if not exists communication_logs_campaign_idx on communication_logs(campaign_id, created_at desc);
+create index if not exists communication_whatsapp_integrations_type_active_idx on communication_whatsapp_integrations(type, active);

@@ -60,7 +60,7 @@ export function TemplateManager() {
       const json = await response.json().catch(() => null);
       if (!response.ok) throw new Error(json?.error ?? "Falha ao salvar template.");
       setItems((current) => [json.data, ...current]);
-      setStatus("Template salvo em marketing_templates.");
+      setStatus("Template salvo em communication_templates.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Falha ao salvar template.");
     } finally {

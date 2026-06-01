@@ -2,8 +2,8 @@
 -- Keeps production compatible while allowing jobs to leave the queue with
 -- pending -> processing -> sent/failed and tracking open/click/conversion.
 
-alter table if exists public.marketing_logs
-  add column if not exists job_id uuid references public.marketing_jobs(id) on delete set null,
+alter table if exists public.communication_logs
+  add column if not exists job_id uuid references public.communication_queue(id) on delete set null,
   add column if not exists user_id uuid references public.profiles(id) on delete set null,
   add column if not exists status text,
   add column if not exists event_type text,
@@ -11,20 +11,20 @@ alter table if exists public.marketing_logs
   add column if not exists response jsonb,
   add column if not exists updated_at timestamptz not null default now();
 
-create index if not exists marketing_logs_job_id_created_at_idx
-  on public.marketing_logs (job_id, created_at desc);
+create index if not exists communication_logs_job_id_created_at_idx
+  on public.communication_logs (job_id, created_at desc);
 
-create index if not exists marketing_logs_status_created_at_idx
-  on public.marketing_logs (status, created_at desc);
+create index if not exists communication_logs_status_created_at_idx
+  on public.communication_logs (status, created_at desc);
 
-alter table if exists public.marketing_jobs
+alter table if exists public.communication_queue
   add column if not exists processed_at timestamptz,
   add column if not exists provider text,
   add column if not exists provider_message_id text,
   add column if not exists response jsonb;
 
-create index if not exists marketing_jobs_queue_status_idx
-  on public.marketing_jobs (status, scheduled_at nulls first, created_at)
+create index if not exists communication_queue_queue_status_idx
+  on public.communication_queue (status, scheduled_at nulls first, created_at)
   where status in ('pending', 'processing');
 
 alter table if exists public.marketing_events

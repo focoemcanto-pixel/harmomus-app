@@ -5,7 +5,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-export const MARKETING_MIGRATION_MESSAGE = "Aplique a migration de marketing";
+export const COMMUNICATION_MIGRATION_MESSAGE = "Aplique a migration da Central de Comunicação";
 
 export type MarketingConfig = Record<string, unknown>;
 
@@ -44,7 +44,7 @@ export function isMissingMarketingTable(error: { code?: string } | null | undefi
 }
 
 export function marketingTableErrorResponse() {
-  return NextResponse.json({ error: MARKETING_MIGRATION_MESSAGE }, { status: 500 });
+  return NextResponse.json({ error: COMMUNICATION_MIGRATION_MESSAGE }, { status: 500 });
 }
 
 export async function requireAdmin() {
@@ -80,25 +80,33 @@ export async function writeMarketingLog(input: {
   payload?: unknown;
   response?: unknown;
 }) {
-  const { error } = await input.admin.from("marketing_logs").insert({
+  const { error } = await input.admin.from("communication_logs").insert({
     channel: input.channel ?? null,
-    event: input.event,
-    level: input.level,
-    message: input.message,
-    payload: safeJson(input.payload),
-    response: safeJson(input.response),
+    status: input.level === "error" ? "failed" : input.level === "warning" ? "queued" : "sent",
+    details: {
+      event: input.event,
+      level: input.level,
+      message: input.message,
+      payload: safeJson(input.payload),
+      response: safeJson(input.response),
+    },
   });
 
   return error;
 }
 
 export async function getActiveChannel(admin: ReturnType<typeof createSupabaseAdminClient>, type: "whatsapp" | "email") {
-  return admin
-    .from("marketing_channels")
-    .select("id,name,type,provider,active,config,limits")
-    .eq("type", type)
+  const table = type === "whatsapp" ? "communication_whatsapp_integrations" : "communication_email_integrations";
+  const result = await admin
+    .from(table)
+    .select("id,name,provider,active,config,limits")
     .eq("active", true)
     .order("created_at", { ascending: false })
     .limit(1)
-    .maybeSingle<MarketingChannel>();
+    .maybeSingle();
+
+  return {
+    ...result,
+    data: result.data ? ({ ...result.data, type } as MarketingChannel) : null,
+  };
 }
