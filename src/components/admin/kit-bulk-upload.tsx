@@ -2,7 +2,7 @@
 
 import { type ChangeEvent, type DragEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Music2, Sparkles, UploadCloud, Wand2, XCircle } from "lucide-react";
+import { FolderUp, Loader2, Music2, Sparkles, UploadCloud, Wand2, XCircle } from "lucide-react";
 
 type ImportStatus = "idle" | "ready" | "uploading" | "success" | "error";
 
@@ -24,6 +24,17 @@ type UploadResult = {
 const AUDIO_EXTENSIONS = new Set(["mp3", "wav", "m4a", "aac", "ogg", "flac"]);
 const TONE_RE = /^(A|A#|Bb|B|C|C#|Db|D|D#|Eb|E|F|F#|Gb|G|G#|Ab)$/i;
 const TONE_ORDER = ["C", "C#", "Db", "D", "D#", "Eb", "E", "F", "F#", "Gb", "G", "G#", "Ab", "A", "A#", "Bb", "B"];
+
+type FileWithRelativePath = File & { webkitRelativePath?: string; relativePath?: string };
+type FileSystemEntry = {
+  isFile: boolean;
+  isDirectory: boolean;
+  name: string;
+  fullPath: string;
+};
+type FileSystemFileEntry = FileSystemEntry & { file: (success: (file: File) => void, error?: (error: DOMException) => void) => void };
+type FileSystemDirectoryEntry = FileSystemEntry & { createReader: () => { readEntries: (success: (entries: FileSystemEntry[]) => void, error?: (error: DOMException) => void) => void } };
+type DataTransferItemWithEntry = DataTransferItem & { webkitGetAsEntry?: () => FileSystemEntry | null };
 
 function normalizePath(value: string) {
   return value.replace(/\\+/g, "/").split("/").filter(Boolean).join("/");
@@ -61,8 +72,13 @@ function normalizeVoice(value: string) {
   return "todos";
 }
 
+function getRelativePath(file: File) {
+  const typed = file as FileWithRelativePath;
+  return typed.relativePath || typed.webkitRelativePath || file.name;
+}
+
 function inferToneAndVoice(file: File) {
-  const relativePath = normalizePath((file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name);
+  const relativePath = normalizePath(getRelativePath(file));
   const parts = relativePath.split("/").filter(Boolean);
   const filename = parts[parts.length - 1] || file.name;
   const filenameWithoutExt = filename.replace(/\.[a-z0-9]+$/i, "");
@@ -87,7 +103,7 @@ function inferKitName(files: File[]) {
   const firstFile = files[0];
   if (!firstFile) return "";
 
-  const relativePath = normalizePath((firstFile as File & { webkitRelativePath?: string }).webkitRelativePath || firstFile.name);
+  const relativePath = normalizePath(getRelativePath(firstFile));
   const parts = relativePath.split("/").filter(Boolean);
   if (parts.length > 1) return cleanName(parts[0]);
   return cleanName(parts[0] || firstFile.name);
@@ -111,8 +127,65 @@ function sortTones(tones: string[]) {
   });
 }
 
+function readFileEntry(entry: FileSystemFileEntry, pathPrefix = "") {
+  return new Promise<File>((resolve, reject) => {
+    entry.file((file) => {
+      Object.defineProperty(file, "relativePath", {
+        value: normalizePath(`${pathPrefix}/${file.name}`),
+        configurable: true,
+      });
+      resolve(file);
+    }, reject);
+  });
+}
+
+function readDirectoryEntry(entry: FileSystemDirectoryEntry, pathPrefix = ""): Promise<File[]> {
+  const reader = entry.createReader();
+  const directoryPath = normalizePath(`${pathPrefix}/${entry.name}`);
+
+  return new Promise((resolve, reject) => {
+    const files: File[] = [];
+
+    function readBatch() {
+      reader.readEntries(async (entries) => {
+        if (!entries.length) {
+          resolve(files);
+          return;
+        }
+
+        try {
+          const nested = await Promise.all(entries.map((item) => readEntry(item, directoryPath)));
+          files.push(...nested.flat());
+          readBatch();
+        } catch (error) {
+          reject(error);
+        }
+      }, reject);
+    }
+
+    readBatch();
+  });
+}
+
+function readEntry(entry: FileSystemEntry, pathPrefix = ""): Promise<File[]> {
+  if (entry.isFile) return readFileEntry(entry as FileSystemFileEntry, pathPrefix).then((file) => [file]);
+  if (entry.isDirectory) return readDirectoryEntry(entry as FileSystemDirectoryEntry, pathPrefix);
+  return Promise.resolve([]);
+}
+
+async function extractDroppedFiles(event: DragEvent<HTMLDivElement>) {
+  const items = Array.from(event.dataTransfer.items ?? []) as DataTransferItemWithEntry[];
+  const entries = items.map((item) => item.webkitGetAsEntry?.()).filter(Boolean) as FileSystemEntry[];
+
+  if (!entries.length) return Array.from(event.dataTransfer.files ?? []);
+
+  const files = await Promise.all(entries.map((entry) => readEntry(entry)));
+  return files.flat();
+}
+
 export function KitBulkUpload() {
   const router = useRouter();
+  const folderInputRef = useRef<HTMLInputElement | null>(null);
   const filesInputRef = useRef<HTMLInputElement | null>(null);
 
   const [files, setFiles] = useState<File[]>([]);
@@ -152,22 +225,30 @@ export function KitBulkUpload() {
 
   const canImport = audioFiles.length > 0 && status !== "uploading";
 
-  function receiveFiles(fileList?: FileList | null) {
-    const nextFiles = Array.from(fileList ?? []);
+  function receiveFiles(nextFiles: File[]) {
     setFiles(nextFiles);
     setError(null);
     setStatus(nextFiles.length ? "ready" : "idle");
   }
 
-  function onFilesChange(event: ChangeEvent<HTMLInputElement>) {
-    receiveFiles(event.target.files);
+  function onFolderChange(event: ChangeEvent<HTMLInputElement>) {
+    receiveFiles(Array.from(event.target.files ?? []));
     event.target.value = "";
   }
 
-  function onDrop(event: DragEvent<HTMLDivElement>) {
+  function onFilesChange(event: ChangeEvent<HTMLInputElement>) {
+    receiveFiles(Array.from(event.target.files ?? []));
+    event.target.value = "";
+  }
+
+  async function onDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     setIsDragOver(false);
-    receiveFiles(event.dataTransfer.files);
+    try {
+      receiveFiles(await extractDroppedFiles(event));
+    } catch {
+      receiveFiles(Array.from(event.dataTransfer.files ?? []));
+    }
   }
 
   async function submitImport() {
@@ -186,7 +267,7 @@ export function KitBulkUpload() {
 
       for (const file of audioFiles) {
         body.append("files", file);
-        body.append("relativePaths", (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name);
+        body.append("relativePaths", getRelativePath(file));
       }
 
       const response = await fetch("/api/admin/kits/upload", {
@@ -228,7 +309,7 @@ export function KitBulkUpload() {
         <div>
           <h2 className="text-xl font-semibold tracking-tight text-white sm:text-2xl">Upload inteligente de kit completo</h2>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-muted">
-            Envie os áudios, o Harmomus cria o kit no banco/R2 e libera o editor preenchido logo abaixo nesta mesma página.
+            Envie uma pasta completa ou áudios avulsos. O Harmomus cria o kit no banco/R2 e libera o editor preenchido logo abaixo nesta mesma página.
           </p>
         </div>
       </div>
@@ -248,20 +329,40 @@ export function KitBulkUpload() {
           <div className="flex h-14 w-14 items-center justify-center rounded-3xl border border-gold-500/30 bg-gold-500/10 text-gold-200">
             <UploadCloud size={24} />
           </div>
-          <p className="mt-4 text-base font-semibold text-foreground">Arraste os áudios aqui</p>
+          <p className="mt-4 text-base font-semibold text-foreground">Arraste a pasta ou selecione os áudios</p>
           <p className="mt-2 max-w-md text-sm leading-6 text-muted">
-            Formato recomendado: nome do kit / tom / voz.mp3. Para evitar a confirmação do navegador, use arrastar e soltar ou selecione arquivos.
+            Estrutura recomendada: nome do kit / tom / voz.mp3. Ao selecionar pasta, o navegador pode pedir confirmação de segurança.
           </p>
 
-          <button
-            type="button"
-            onClick={() => filesInputRef.current?.click()}
-            disabled={status === "uploading"}
-            className="mt-5 inline-flex items-center justify-center gap-2 rounded-2xl border border-border bg-surface-muted px-5 py-3 text-sm font-semibold text-foreground transition hover:border-gold-500/40 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <Music2 size={16} /> Selecionar arquivos
-          </button>
+          <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+            <button
+              type="button"
+              onClick={() => folderInputRef.current?.click()}
+              disabled={status === "uploading"}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-gold-500/40 bg-gold-500/10 px-5 py-3 text-sm font-semibold text-gold-100 transition hover:bg-gold-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <FolderUp size={16} /> Selecionar pasta
+            </button>
+            <button
+              type="button"
+              onClick={() => filesInputRef.current?.click()}
+              disabled={status === "uploading"}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-border bg-surface-muted px-5 py-3 text-sm font-semibold text-foreground transition hover:border-gold-500/40 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Music2 size={16} /> Selecionar arquivos
+            </button>
+          </div>
 
+          <input
+            ref={folderInputRef}
+            type="file"
+            multiple
+            // @ts-expect-error Chromium supports folder selection through webkitdirectory.
+            webkitdirectory="true"
+            directory="true"
+            className="hidden"
+            onChange={onFolderChange}
+          />
           <input ref={filesInputRef} type="file" multiple accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac" className="hidden" onChange={onFilesChange} />
         </div>
 
