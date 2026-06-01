@@ -7,6 +7,18 @@ type Stats = { playlists: number; favorites: number; history: number; kitsToday:
 type Point = { x: number; y: number };
 type TouchPoint = { clientX: number; clientY: number };
 
+type ProfilePageClientProps = {
+  initialName: string;
+  email: string;
+  username: string;
+  planName: string;
+  subscriptionStatus: string;
+  avatarUrl: string | null;
+  userId: string;
+  emailConfirmed?: boolean;
+  stats: Stats;
+};
+
 const AVATAR_SIZE = 720;
 const CROP_SIZE = 320;
 const MIN_ZOOM = 0.6;
@@ -41,12 +53,14 @@ function isPendingSubscription(status: string) {
   return ["pending", "incomplete", "past_due"].includes(normalized);
 }
 
-export function ProfilePageClient({ initialName, email, username, planName, subscriptionStatus, avatarUrl, userId: _userId, stats }: { initialName: string; email: string; username: string; planName: string; subscriptionStatus: string; avatarUrl: string | null; userId: string; stats: Stats }) {
+export function ProfilePageClient({ initialName, email, username, planName, subscriptionStatus, avatarUrl, userId: _userId, emailConfirmed = false, stats }: ProfilePageClientProps) {
   const [name, setName] = useState(initialName);
   const [avatar, setAvatar] = useState<string | null>(avatarUrl);
   const [savingName, setSavingName] = useState(false);
   const [passwordResetState, setPasswordResetState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [passwordResetMessage, setPasswordResetMessage] = useState("");
+  const [emailConfirmationState, setEmailConfirmationState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [emailConfirmationMessage, setEmailConfirmationMessage] = useState("");
   const [open, setOpen] = useState(false);
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -92,6 +106,25 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
     } catch (error) {
       setPasswordResetState("error");
       setPasswordResetMessage(error instanceof Error ? error.message : "Erro ao solicitar alteração de senha.");
+    }
+  }
+
+  async function requestEmailConfirmation() {
+    try {
+      setEmailConfirmationState("sending");
+      setEmailConfirmationMessage("");
+      const response = await fetch("/api/auth/email-confirmation/resend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || "Não foi possível reenviar a confirmação.");
+      setEmailConfirmationState("sent");
+      setEmailConfirmationMessage("Enviamos um novo link de confirmação para seu e-mail.");
+    } catch (error) {
+      setEmailConfirmationState("error");
+      setEmailConfirmationMessage(error instanceof Error ? error.message : "Erro ao reenviar confirmação.");
     }
   }
 
@@ -268,6 +301,32 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
         <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className="w-full rounded-xl border border-white/25 bg-white/10 px-4 py-3 transition hover:bg-white/20 disabled:opacity-60 md:w-auto">
           {uploading ? "Carregando..." : "Alterar foto"}
         </button>
+      </div>
+
+      <div className={`mt-5 rounded-2xl border p-4 text-sm ${emailConfirmed ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-100" : "border-amber-300/30 bg-amber-400/10 text-amber-100"}`}>
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="font-semibold">{emailConfirmed ? "E-mail confirmado" : "E-mail não confirmado"}</p>
+            <p className="mt-1 opacity-90">
+              {emailConfirmed
+                ? "Sua conta está protegida e pronta para recuperação de senha."
+                : "Confirme seu e-mail para proteger sua conta e facilitar a recuperação de senha."}
+            </p>
+          </div>
+          {!emailConfirmed ? (
+            <button
+              type="button"
+              onClick={requestEmailConfirmation}
+              disabled={emailConfirmationState === "sending"}
+              className="rounded-xl border border-amber-200/30 bg-amber-200 px-4 py-2 text-sm font-black text-slate-950 transition hover:bg-amber-100 disabled:cursor-wait disabled:opacity-70"
+            >
+              {emailConfirmationState === "sending" ? "Enviando..." : "Enviar confirmação"}
+            </button>
+          ) : null}
+        </div>
+        {emailConfirmationMessage ? (
+          <p className={`mt-3 text-xs ${emailConfirmationState === "error" ? "text-rose-100" : "text-emerald-100"}`}>{emailConfirmationMessage}</p>
+        ) : null}
       </div>
 
       {pendingSubscription ? (
