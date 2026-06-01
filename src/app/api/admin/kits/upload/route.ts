@@ -23,6 +23,8 @@ export async function POST(request: Request) {
     const relativePaths = formData.getAll("relativePaths").map((value) => String(value ?? ""));
     const name = String(formData.get("name") ?? "").trim();
     const artist = String(formData.get("artist") ?? "").trim();
+    const originalTone = String(formData.get("originalTone") ?? "").trim();
+    const defaultTone = String(formData.get("defaultTone") ?? "").trim();
     const published = String(formData.get("published") ?? "") === "true";
 
     const files: UploadedKitAudioInput[] = rawFiles
@@ -43,6 +45,8 @@ export async function POST(request: Request) {
       files,
       name: name || null,
       artist: artist || null,
+      originalTone: originalTone || null,
+      defaultTone: defaultTone || originalTone || null,
       published,
     });
 
