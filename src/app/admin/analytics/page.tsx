@@ -60,6 +60,14 @@ function percent(value: number, base: number) {
   return Math.round((value / base) * 100);
 }
 
+function funnelRateLabel(value: number, previous: number, index: number) {
+  if (index === 0) return "Base";
+  if (!previous) return "0%";
+  const rate = percent(value, previous);
+  if (rate > 300) return `${(value / previous).toFixed(1).replace(".", ",")}x`;
+  return `${rate}%`;
+}
+
 function potentialLabel(kind: Opportunity["kind"]) {
   if (kind === "high") return "🔥 Alto";
   if (kind === "medium") return "🟡 Médio";
@@ -74,10 +82,10 @@ function MetricCard({ title, value, caption, tone = "default" }: { title: string
     danger: "from-rose-500/15 via-zinc-950/70 to-zinc-950/80 border-rose-400/20",
   };
   return (
-    <div className={`rounded-3xl border bg-gradient-to-br ${tones[tone]} p-5 shadow-[0_0_40px_rgba(34,211,238,0.06)]`}>
-      <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">{title}</p>
-      <p className="mt-3 text-3xl font-semibold tracking-tight text-white">{typeof value === "number" ? formatNumber(value) : value}</p>
-      <p className="mt-1 text-xs text-zinc-500">{caption}</p>
+    <div className={`min-w-0 overflow-hidden rounded-3xl border bg-gradient-to-br ${tones[tone]} p-5 shadow-[0_0_40px_rgba(34,211,238,0.06)]`}>
+      <p className="truncate text-xs uppercase tracking-[0.18em] text-zinc-500">{title}</p>
+      <p className="mt-3 truncate text-3xl font-semibold tracking-tight text-white">{typeof value === "number" ? formatNumber(value) : value}</p>
+      <p className="mt-1 truncate text-xs text-zinc-500">{caption}</p>
     </div>
   );
 }
@@ -85,9 +93,9 @@ function MetricCard({ title, value, caption, tone = "default" }: { title: string
 function BlockList({ title, data, caption }: { title: string; data: ListItem[]; caption?: string }) {
   const max = Math.max(...data.map((d) => d.value), 1);
   return (
-    <div className="rounded-3xl border border-white/10 bg-zinc-950/55 p-5 shadow-2xl shadow-black/20">
+    <div className="min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-zinc-950/55 p-5 shadow-2xl shadow-black/20">
       <div className="mb-4 flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <h3 className="text-sm font-semibold text-cyan-100">{title}</h3>
           {caption ? <p className="mt-1 text-xs text-zinc-500">{caption}</p> : null}
         </div>
@@ -100,10 +108,10 @@ function BlockList({ title, data, caption }: { title: string; data: ListItem[]; 
             <div key={`${item.label}-${index}`}>
               <div className="mb-1.5 flex justify-between gap-3 text-xs">
                 <span className="truncate text-zinc-300">{item.label}</span>
-                <span className="font-medium text-zinc-100">{formatNumber(item.value)}</span>
+                <span className="shrink-0 font-medium text-zinc-100">{formatNumber(item.value)}</span>
               </div>
-              <div className="h-2 rounded-full bg-white/10">
-                <div className="h-2 rounded-full bg-gradient-to-r from-emerald-400 via-cyan-400 to-violet-400" style={{ width: `${Math.max((item.value / max) * 100, 4)}%` }} />
+              <div className="h-2 overflow-hidden rounded-full bg-white/10">
+                <div className="h-2 rounded-full bg-gradient-to-r from-emerald-400 via-cyan-400 to-violet-400" style={{ width: `${Math.min(100, Math.max((item.value / max) * 100, 4))}%` }} />
               </div>
             </div>
           ))}
@@ -119,13 +127,13 @@ function TrendChart({ data }: { data: { date: string; plays: number }[] }) {
   const previous = data[data.length - 2]?.plays ?? 0;
   const trend = previous ? Math.round(((last - previous) / previous) * 100) : 0;
   return (
-    <div className="rounded-3xl border border-white/10 bg-zinc-950/55 p-5 shadow-2xl shadow-black/20 xl:col-span-2">
+    <div className="min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-zinc-950/55 p-5 shadow-2xl shadow-black/20 xl:col-span-2">
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-base font-semibold text-white">Tendência de reproduções</h3>
           <p className="mt-1 text-sm text-zinc-500">Evolução diária no período selecionado.</p>
         </div>
-        <span className={`rounded-full border px-3 py-1 text-xs ${trend >= 0 ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-200" : "border-rose-400/30 bg-rose-500/10 text-rose-200"}`}>{trend >= 0 ? "+" : ""}{trend}% vs dia anterior</span>
+        <span className={`shrink-0 rounded-full border px-3 py-1 text-xs ${trend >= 0 ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-200" : "border-rose-400/30 bg-rose-500/10 text-rose-200"}`}>{trend >= 0 ? "+" : ""}{trend}% vs dia anterior</span>
       </div>
       {data.length === 0 ? <EmptyState /> : (
         <div className="flex h-56 items-end gap-1.5 rounded-2xl border border-white/10 bg-black/20 p-4">
@@ -145,11 +153,11 @@ function TrendChart({ data }: { data: { date: string; plays: number }[] }) {
 
 function CeoDashboard({ metrics }: { metrics: CeoMetric[] }) {
   return (
-    <div className="rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(16,185,129,0.16),transparent_32%),rgba(9,9,11,0.82)] p-5 shadow-2xl shadow-black/30">
+    <div className="min-w-0 overflow-hidden rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(16,185,129,0.16),transparent_32%),rgba(9,9,11,0.82)] p-5 shadow-2xl shadow-black/30">
       <div className="mb-5">
         <p className="text-xs font-semibold uppercase tracking-[0.28em] text-emerald-200/70">Dashboard CEO</p>
-        <h2 className="mt-1 text-xl font-semibold text-white">Receita, crescimento e potencial</h2>
-        <p className="mt-1 text-sm text-zinc-500">Estimativas baseadas nos planos ativos e sinais comerciais disponíveis hoje.</p>
+        <h2 className="mt-1 text-xl font-semibold text-white">Simulações comerciais e sinais de crescimento</h2>
+        <p className="mt-1 text-sm text-zinc-500">Valores aproximados para planejamento. Não substituem relatórios financeiros reais.</p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
         {metrics.map((metric) => <MetricCard key={metric.title} title={metric.title} value={metric.value} caption={metric.caption} tone={metric.tone} />)}
@@ -161,7 +169,7 @@ function CeoDashboard({ metrics }: { metrics: CeoMetric[] }) {
 function FunnelCard({ steps }: { steps: FunnelStep[] }) {
   const base = Math.max(steps[0]?.value ?? 0, 1);
   return (
-    <div className="rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.12),transparent_35%),rgba(9,9,11,0.72)] p-5 shadow-2xl shadow-black/20 xl:col-span-3">
+    <div className="min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.12),transparent_35%),rgba(9,9,11,0.72)] p-5 shadow-2xl shadow-black/20 xl:col-span-3">
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200/70">Crescimento</p>
@@ -169,23 +177,23 @@ function FunnelCard({ steps }: { steps: FunnelStep[] }) {
           <p className="mt-1 text-sm text-zinc-500">Leitura executiva com as métricas disponíveis hoje. Conversões financeiras reais entram quando adicionarmos eventos de checkout/assinatura ao analytics.</p>
         </div>
       </div>
-      <div className="grid gap-3 lg:grid-cols-5">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         {steps.map((step, index) => {
-          const width = Math.max(percent(step.value, base), step.value > 0 ? 8 : 2);
+          const rawWidth = Math.max(percent(step.value, base), step.value > 0 ? 8 : 2);
+          const width = Math.min(100, Math.max(step.value > 0 ? 8 : 2, rawWidth));
           const prev = index > 0 ? steps[index - 1]?.value ?? 0 : step.value;
-          const localRate = index === 0 ? 100 : percent(step.value, prev);
           return (
-            <div key={step.label} className="rounded-3xl border border-white/10 bg-black/25 p-4">
+            <div key={step.label} className="min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-black/25 p-4">
               <div className="flex items-start justify-between gap-2">
-                <div>
+                <div className="min-w-0">
                   <p className="text-xs text-zinc-500">Etapa {index + 1}</p>
-                  <h4 className="mt-1 text-sm font-semibold text-white">{step.label}</h4>
+                  <h4 className="mt-1 truncate text-sm font-semibold text-white">{step.label}</h4>
                 </div>
-                <span className="rounded-full border border-cyan-400/20 bg-cyan-500/10 px-2 py-1 text-[10px] text-cyan-100">{localRate}%</span>
+                <span className="shrink-0 rounded-full border border-cyan-400/20 bg-cyan-500/10 px-2 py-1 text-[10px] text-cyan-100">{funnelRateLabel(step.value, prev, index)}</span>
               </div>
               <p className="mt-4 text-3xl font-semibold text-white">{formatNumber(step.value)}</p>
               <p className="mt-1 min-h-8 text-xs text-zinc-500">{step.caption}</p>
-              <div className="mt-4 h-2 rounded-full bg-white/10">
+              <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
                 <div className="h-2 rounded-full bg-gradient-to-r from-emerald-400 via-cyan-400 to-violet-400" style={{ width: `${width}%` }} />
               </div>
             </div>
@@ -205,7 +213,7 @@ function AutomatedInsights({ insights }: { insights: Insight[] }) {
     amber: "border-amber-400/20 bg-amber-500/10 text-amber-100",
   };
   return (
-    <div className="rounded-3xl border border-white/10 bg-zinc-950/55 p-5 shadow-2xl shadow-black/20">
+    <div className="min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-zinc-950/55 p-5 shadow-2xl shadow-black/20">
       <div className="mb-4">
         <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-200/70">Intelligence</p>
         <h3 className="mt-1 text-lg font-semibold text-white">Insights automáticos</h3>
@@ -213,7 +221,7 @@ function AutomatedInsights({ insights }: { insights: Insight[] }) {
       </div>
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {insights.map((insight) => (
-          <article key={insight.title} className={`rounded-3xl border p-4 ${tones[insight.tone]}`}>
+          <article key={insight.title} className={`min-w-0 overflow-hidden rounded-3xl border p-4 ${tones[insight.tone]}`}>
             <p className="text-sm font-semibold text-white">{insight.title}</p>
             <p className="mt-2 text-xs leading-relaxed opacity-80">{insight.body}</p>
           </article>
@@ -225,7 +233,7 @@ function AutomatedInsights({ insights }: { insights: Insight[] }) {
 
 function OpportunityCenter({ opportunities }: { opportunities: Opportunity[] }) {
   return (
-    <div className="rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(244,63,94,0.10),transparent_34%),rgba(9,9,11,0.72)] p-5 shadow-2xl shadow-black/20">
+    <div className="min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(244,63,94,0.10),transparent_34%),rgba(9,9,11,0.72)] p-5 shadow-2xl shadow-black/20">
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-rose-200/70">Receita</p>
@@ -236,13 +244,13 @@ function OpportunityCenter({ opportunities }: { opportunities: Opportunity[] }) 
       {opportunities.length === 0 ? <EmptyState label="Nenhuma oportunidade de bloqueio encontrada no período." /> : (
         <div className="grid gap-3 lg:grid-cols-3">
           {opportunities.map((item) => (
-            <article key={item.label} className="rounded-3xl border border-white/10 bg-black/25 p-4">
+            <article key={item.label} className="min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-black/25 p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <h4 className="truncate text-sm font-semibold text-white">{item.label}</h4>
                   <p className="mt-1 text-xs text-zinc-500">{item.usersHint ?? "Usuários únicos ainda não disponíveis para este recorte."}</p>
                 </div>
-                <span className={`rounded-full px-2 py-1 text-[10px] ${item.kind === "high" ? "border border-rose-400/30 bg-rose-500/10 text-rose-100" : item.kind === "medium" ? "border border-amber-400/30 bg-amber-500/10 text-amber-100" : "border border-white/10 bg-white/[0.03] text-zinc-300"}`}>{potentialLabel(item.kind)}</span>
+                <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] ${item.kind === "high" ? "border border-rose-400/30 bg-rose-500/10 text-rose-100" : item.kind === "medium" ? "border border-amber-400/30 bg-amber-500/10 text-amber-100" : "border border-white/10 bg-white/[0.03] text-zinc-300"}`}>{potentialLabel(item.kind)}</span>
               </div>
               <p className="mt-5 text-3xl font-semibold text-white">{formatNumber(item.value)}</p>
               <p className="mt-1 text-xs text-zinc-500">bloqueios no período</p>
@@ -283,14 +291,18 @@ function InsightCard({ label, value, tone = "cyan" }: { label: string; value: st
     violet: "border-violet-300/20 bg-violet-500/5 text-violet-100",
     rose: "border-rose-300/20 bg-rose-500/5 text-rose-100",
   };
-  return <div className={`rounded-3xl border ${tones[tone]} p-5 text-sm`}><p className="text-xs uppercase tracking-[0.18em] opacity-60">{label}</p><p className="mt-2 font-semibold text-white">{value}</p></div>;
+  return <div className={`min-w-0 overflow-hidden rounded-3xl border ${tones[tone]} p-5 text-sm`}><p className="truncate text-xs uppercase tracking-[0.18em] opacity-60">{label}</p><p className="mt-2 truncate font-semibold text-white">{value}</p></div>;
 }
 
 function DataTable({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="overflow-x-auto rounded-3xl border border-white/10 bg-zinc-950/55 p-5 shadow-2xl shadow-black/20">
-      <h3 className="mb-4 text-sm font-semibold text-cyan-100">{title}</h3>
-      {children}
+    <div className="min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-zinc-950/55 shadow-2xl shadow-black/20">
+      <div className="p-5 pb-0">
+        <h3 className="mb-4 truncate text-sm font-semibold text-cyan-100">{title}</h3>
+      </div>
+      <div className="overflow-x-auto px-5 pb-5">
+        {children}
+      </div>
     </div>
   );
 }
@@ -324,9 +336,9 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
     kind: item.value >= 20 ? "high" : item.value >= 8 ? "medium" : "low",
   }));
   const ceoMetrics: CeoMetric[] = [
-    { title: "MRR estimado", value: formatCurrency(estimatedMrr), caption: "Baseado em Plus/Premium ativos", tone: "good" },
-    { title: "Receita potencial", value: formatCurrency(potentialRevenue), caption: "Pedidos Premium abertos × preço Premium", tone: premiumRequests.open > 0 ? "warn" : "default" },
-    { title: "Potencial bloqueado", value: formatCurrency(opportunityRevenue), caption: "Estimativa conservadora dos principais bloqueios", tone: opportunityRevenue > 0 ? "warn" : "default" },
+    { title: "Simulação de MRR", value: formatCurrency(estimatedMrr), caption: "Simulação com preço fixo no código", tone: "good" },
+    { title: "Simulação de potencial", value: formatCurrency(potentialRevenue), caption: "Estimativa baseada em pedidos abertos", tone: premiumRequests.open > 0 ? "warn" : "default" },
+    { title: "Sinal de oportunidade", value: formatCurrency(opportunityRevenue), caption: "Sinal comercial, não receita confirmada", tone: opportunityRevenue > 0 ? "warn" : "default" },
     { title: "Assinantes", value: summary.activeSubscribers, caption: `${summary.plusActive} Plus · ${summary.premiumActive} Premium/Minist.` },
     { title: "Mix Premium", value: `${percent(summary.premiumActive, summary.activeSubscribers)}%`, caption: "Participação Premium/Ministerial na base" },
     { title: "Bloqueio", value: `${summary.denyRate}%`, caption: "Tentativas travadas no período", tone: summary.denyRate > 20 ? "danger" : summary.denyRate > 0 ? "warn" : "default" },
@@ -354,7 +366,7 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
     },
   ];
 
-  return <section className="space-y-6 text-zinc-100">
+  return <section className="min-w-0 space-y-6 overflow-hidden text-zinc-100">
     <PageHeader title="Analytics" description="Inteligência de consumo, retenção e oportunidades comerciais da plataforma Harmomus." />
 
     <form className="rounded-3xl border border-white/10 bg-zinc-950/55 p-4 shadow-2xl shadow-black/20">
