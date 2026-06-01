@@ -8,18 +8,10 @@ const ACCESS_WINDOW_HOURS = 24;
 
 export interface FreeAccessStats {
   accessCountToday: number;
-  uniqueKitCount24h: number;
-  accessedKitIds: string[];
   remaining: number;
   limit: number;
   nextResetAt: string;
 }
-
-type AccessLogRow = {
-  id?: string;
-  kit_id: string | null;
-  accessed_at?: string | null;
-};
 
 function getAccessWindow() {
   const now = new Date();
@@ -28,21 +20,11 @@ function getAccessWindow() {
   return { start: start.toISOString(), nextResetAt: nextReset.toISOString() };
 }
 
-function summarizeAccessRows(rows: AccessLogRow[], limit = FREE_LIMIT) {
-  const accessedKitIds = Array.from(
-    new Set(
-      rows
-        .map((row) => String(row.kit_id ?? "").trim())
-        .filter(Boolean),
-    ),
-  );
-  const uniqueKitCount24h = accessedKitIds.length;
-  const remaining = Math.max(0, limit - uniqueKitCount24h);
+function summarizeAccessCount(accessCountToday: number, limit = FREE_LIMIT) {
+  const remaining = Math.max(0, limit - accessCountToday);
 
   return {
-    accessCountToday: uniqueKitCount24h,
-    uniqueKitCount24h,
-    accessedKitIds,
+    accessCountToday,
     remaining,
   };
 }
@@ -55,12 +37,12 @@ export async function getFreeAccessStats(userId: string): Promise<FreeAccessStat
   const supabase = createSupabaseAdminClient() as any;
   const { start, nextResetAt } = getAccessWindow();
 
-  const { data, error } = await supabase
+  const { count, error } = await supabase
     .from("kit_access_logs")
-    .select("id,kit_id,accessed_at")
+    .select("*", { count: "exact", head: true })
     .eq("user_id", userId)
     .gte("accessed_at", start)
-    .order("accessed_at", { ascending: true });
+    .not("kit_id", "is", null);
 
   if (error) {
     console.error("[access-rules] Could not load kit access logs", {
@@ -69,7 +51,7 @@ export async function getFreeAccessStats(userId: string): Promise<FreeAccessStat
     });
   }
 
-  const summary = summarizeAccessRows(((data ?? []) as AccessLogRow[]).filter((row) => row.kit_id), FREE_LIMIT);
+  const summary = summarizeAccessCount(count ?? 0, FREE_LIMIT);
 
   return { ...summary, limit: FREE_LIMIT, nextResetAt };
 }
@@ -80,12 +62,7 @@ export async function registerKitAccess(userId: string, kitId: string): Promise<
   const stats = await getFreeAccessStats(userId);
 
   if (!normalizedKitId) return stats;
-
-  if (stats.accessedKitIds.includes(normalizedKitId)) {
-    return stats;
-  }
-
-  if (stats.uniqueKitCount24h >= FREE_LIMIT) return stats;
+  if (stats.accessCountToday >= FREE_LIMIT) return stats;
 
   const { error: insertError } = await supabase.from("kit_access_logs").insert({ user_id: userId, kit_id: normalizedKitId });
 
@@ -119,9 +96,8 @@ export async function canPlayAudio(context: CurrentUserAccessContext, kit: Publi
   if (context.effectiveSlug === "free" && context.profile) {
     const stats = await getFreeAccessStats(context.profile.id);
     const dailyLimit = getDailyKitLimit(context.effectiveSlug) ?? FREE_LIMIT;
-    const hasAlreadyAccessedThisKit = stats.accessedKitIds.includes(kit.id);
 
-    if (kitAllowsFree(kit) && stats.uniqueKitCount24h >= dailyLimit && !hasAlreadyAccessedThisKit) {
+    if (kitAllowsFree(kit) && stats.accessCountToday >= dailyLimit) {
       return { allowed: false, reason: "free_limit" as const, stats: { ...stats, limit: dailyLimit } };
     }
 

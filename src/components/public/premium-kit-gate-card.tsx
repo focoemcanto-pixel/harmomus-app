@@ -3,7 +3,7 @@ type PremiumKitGateCardProps = {
   reason?: "guest" | "free_limit" | "plan_hierarchy" | string;
   requiredPlan?: "plus" | "premium" | string | null;
   stats?: {
-    uniqueKitCount24h?: number;
+    accessCountToday?: number;
     limit?: number;
     nextResetAt?: string;
   } | null;
@@ -40,15 +40,15 @@ function resolveGateContent({ mode, reason, requiredPlan, stats }: PremiumKitGat
   }
 
   if (reason === "free_limit") {
-    const used = stats?.uniqueKitCount24h ?? stats?.limit ?? 3;
+    const used = stats?.accessCountToday ?? stats?.limit ?? 3;
     const limit = stats?.limit ?? 3;
     const resetAt = formatResetTime(stats?.nextResetAt);
 
     return {
       eyebrow: "Limite diário atingido",
       icon: "⏳",
-      title: "Você atingiu seu limite diário de kits",
-      description: `Seu plano Free permite acessar até ${limit} kits diferentes a cada 24 horas. Você já utilizou ${used}/${limit} acessos disponíveis. Retorne após ${resetAt} ou faça upgrade para continuar estudando sem limites.`,
+      title: "Você atingiu seu limite diário de visitas",
+      description: `Seu plano Free permite até ${limit} visitas válidas a kits a cada 24 horas. Você já utilizou ${used}/${limit} acessos disponíveis. Retorne após ${resetAt} ou faça upgrade para continuar estudando sem limites.`,
       primaryHref: "/assinar?plan=plus",
       primaryLabel: "Fazer upgrade",
       secondaryHref: "/biblioteca",
