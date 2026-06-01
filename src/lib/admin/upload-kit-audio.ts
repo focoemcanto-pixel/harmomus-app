@@ -138,23 +138,23 @@ function buildAudioR2Key({ r2Folder, tone, voice, filename }: { r2Folder: string
   return `${r2Folder}/${safeTone}/${safeVoice}/${safeR2Filename(filename)}`;
 }
 
-async function resolveUniqueSlug(supabase: any, desiredSlug: string) {
-  let slug = desiredSlug;
-  let suffix = 2;
-
-  while (true) {
-    const { data, error } = await supabase.from("kits").select("id").eq("slug", slug).maybeSingle();
-    if (error) throw new Error(error.message);
-    if (!data) return slug;
-    slug = `${desiredSlug}-${suffix}`;
-    suffix += 1;
-  }
-}
-
 async function findExistingKit(supabase: any, slug: string) {
   const { data, error } = await supabase.from("kits").select("id, slug, r2_folder").eq("slug", slug).maybeSingle();
   if (error) throw new Error(error.message);
   return data ?? null;
+}
+
+async function ensureArtistCategory(supabase: any, artistName: string) {
+  const name = artistName.trim();
+  const slug = slugify(name);
+
+  const { data: existing, error: existingError } = await supabase.from("categories").select("id, name, slug").eq("slug", slug).maybeSingle();
+  if (existingError) throw new Error(`Falha ao verificar artista: ${existingError.message}`);
+  if (existing) return existing;
+
+  const { data, error } = await supabase.from("categories").insert({ name, slug }).select("id, name, slug").single();
+  if (error) throw new Error(`Falha ao criar artista automático: ${error.message}`);
+  return data;
 }
 
 function validateAudioFile(file: File) {
@@ -187,11 +187,11 @@ export async function uploadKitAudioBundle({
 
   const supabase = createSupabaseAdminClient() as any;
   const kitName = inferKitName(audioFiles, name);
-  const desiredSlug = slugify(kitName);
-  const existing = await findExistingKit(supabase, desiredSlug);
-  const slug = existing?.slug ?? (await resolveUniqueSlug(supabase, desiredSlug));
-  const r2Folder = existing?.r2_folder || slug;
+  const slug = slugify(kitName);
+  const existing = await findExistingKit(supabase, slug);
+  const r2Folder = existing?.r2_folder?.trim() || slug;
   const artistName = artist?.trim() || "Artista não informado";
+  const artistCategory = await ensureArtistCategory(supabase, artistName);
   const resolvedOriginalTone = normalizeTone(originalTone);
   const resolvedDefaultTone = normalizeTone(defaultTone) || resolvedOriginalTone;
 
@@ -200,25 +200,21 @@ export async function uploadKitAudioBundle({
 
   const kitPayload = {
     name: kitName,
+    slug,
     artist: artistName,
+    category_id: artistCategory.id,
     r2_folder: r2Folder,
+    required_plan: null,
+    allowed_plan_slugs: DEFAULT_ALLOWED_PLANS,
     original_tone: resolvedOriginalTone,
     default_tone: resolvedDefaultTone,
     allow_pitch_shift: true,
     max_pitch_shift_semitones: 2,
+    published,
   };
 
   if (!kitId) {
-    const { data: createdKit, error } = await supabase
-      .from("kits")
-      .insert({
-        ...kitPayload,
-        slug,
-        published,
-        allowed_plan_slugs: DEFAULT_ALLOWED_PLANS,
-      })
-      .select("id")
-      .single();
+    const { data: createdKit, error } = await supabase.from("kits").insert(kitPayload).select("id").single();
 
     if (error) throw new Error(`Falha ao criar kit: ${error.message}`);
     kitId = createdKit.id as string;
@@ -278,6 +274,6 @@ export async function uploadKitAudioBundle({
     voices: Array.from(voices),
     originalTone: resolvedOriginalTone,
     defaultTone: resolvedDefaultTone,
-    editUrl: `/admin/kits/${kitId}/editar`,
+    editUrl: `/admin/kits/novo?importedKitId=${kitId}`,
   };
 }
