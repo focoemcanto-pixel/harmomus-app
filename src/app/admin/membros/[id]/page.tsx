@@ -125,6 +125,28 @@ function safeDate(value?: string | null) {
   return value ? formatDateTimeBR(value) : "—";
 }
 
+function getProfileLoginEvidence(profile: any) {
+  const lastLoginAt = profile?.last_login_at ?? null;
+  const lastSeenAt = profile?.last_seen_at ?? null;
+  const lastSignInAt = profile?.last_sign_in_at ?? null;
+
+  return {
+    hasProfileLogin: Boolean(lastLoginAt || lastSeenAt),
+    hasAnyLogin: Boolean(lastLoginAt || lastSeenAt || lastSignInAt),
+    evidence: [
+      lastLoginAt ? `profiles.last_login_at: ${safeDate(lastLoginAt)}` : null,
+      lastSeenAt ? `profiles.last_seen_at: ${safeDate(lastSeenAt)}` : null,
+      lastSignInAt ? `auth.last_sign_in_at: ${safeDate(lastSignInAt)}` : null,
+    ].filter(Boolean) as string[],
+  };
+}
+
+function getBillingSource(profile: any, subscription: any) {
+  if (isLegacyMember(profile, subscription)) return "PMS/legado";
+  if (subscription?.stripe_customer_id || subscription?.stripe_subscription_id || subscription?.gateway === "stripe") return "Stripe";
+  return subscription ? "Assinatura local/indefinida" : "Sem assinatura";
+}
+
 function getRowDate(row: any, preferred: string[] = []) {
   for (const key of [...preferred, "created_at", "updated_at", "processed_at", "accessed_at", "sent_at"]) {
     if (row?.[key]) return row[key] as string;
@@ -169,7 +191,9 @@ function getActivityEvidence(profile: any, journey: Awaited<ReturnType<typeof ge
 
   return {
     hasAny:
+      Boolean(profile?.last_login_at) ||
       Boolean(profile?.last_seen_at) ||
+      Boolean(profile?.last_sign_in_at) ||
       Boolean(profile?.password_setup_completed_at) ||
       Boolean(profile?.password_setup_sent_at) ||
       Boolean(profile?.onboarding_completed_at) ||
@@ -178,7 +202,9 @@ function getActivityEvidence(profile: any, journey: Awaited<ReturnType<typeof ge
       communicationSetup ||
       webhookSetup,
     evidence: [
+      profile?.last_login_at ? `last_login_at: ${safeDate(profile.last_login_at)}` : null,
       profile?.last_seen_at ? `last_seen_at: ${safeDate(profile.last_seen_at)}` : null,
+      profile?.last_sign_in_at ? `last_sign_in_at Auth: ${safeDate(profile.last_sign_in_at)}` : null,
       profile?.password_setup_completed_at ? `senha configurada: ${safeDate(profile.password_setup_completed_at)}` : null,
       profile?.password_setup_sent_at ? `link de senha enviado: ${safeDate(profile.password_setup_sent_at)}` : null,
       profile?.onboarding_completed_at ? `onboarding concluído: ${safeDate(profile.onboarding_completed_at)}` : null,
@@ -291,11 +317,12 @@ function buildChecklist(profile: any, subscription: any, journey: Awaited<Return
   const activeStatuses = new Set(["active", "trialing"]);
   const migrated = isLegacyMember(profile, subscription);
   const activityEvidence = getActivityEvidence(profile, journey);
-  const loginStatus: JourneyStatus = profile?.last_login_at ? "concluído" : activityEvidence.hasAny ? "informação" : "pendente";
-  const loginDetail = profile?.last_login_at
-    ? safeDate(profile.last_login_at)
+  const loginEvidence = getProfileLoginEvidence(profile);
+  const loginStatus: JourneyStatus = loginEvidence.hasProfileLogin ? "concluído" : loginEvidence.hasAnyLogin || activityEvidence.hasAny ? "informação" : "pendente";
+  const loginDetail = loginEvidence.evidence.length
+    ? loginEvidence.evidence.join(" · ")
     : activityEvidence.hasAny
-      ? "Há sinais de uso/migração, mas last_login_at está vazio"
+      ? "Há sinais de uso/migração, mas last_login_at/last_seen_at estão vazios"
       : "Sem login ou atividade detectada";
 
   return [
@@ -344,7 +371,9 @@ function buildTimeline(profile: any, subscription: any, journey: Awaited<ReturnT
   const events: JourneyTimelineEvent[] = [];
   addTimelineEvent(events, { at: profile?.created_at, type: "Perfil", description: "Perfil criado", source: "profiles.created_at", status: "concluído", details: profile });
   addTimelineEvent(events, { at: profile?.password_setup_completed_at, type: "Onboarding", description: "Senha configurada", source: "profiles.password_setup_completed_at", status: "concluído", details: { password_setup_completed_at: profile?.password_setup_completed_at } });
-  addTimelineEvent(events, { at: profile?.last_login_at, type: "Login", description: "Primeiro/último login registrado", source: "profiles.last_login_at", status: "concluído", details: { last_login_at: profile?.last_login_at } });
+  addTimelineEvent(events, { at: profile?.last_login_at, type: "Login", description: "Login registrado no profile", source: "profiles.last_login_at", status: "concluído", details: { last_login_at: profile?.last_login_at } });
+  addTimelineEvent(events, { at: profile?.last_seen_at, type: "Atividade", description: "Última presença registrada no profile", source: "profiles.last_seen_at", status: "concluído", details: { last_seen_at: profile?.last_seen_at } });
+  addTimelineEvent(events, { at: profile?.last_sign_in_at, type: "Supabase Auth", description: "Último login registrado no Auth", source: "auth.last_sign_in_at", status: "concluído", details: { last_sign_in_at: profile?.last_sign_in_at, email_confirmed_at: profile?.email_confirmed_at } });
   addTimelineEvent(events, { at: subscription?.created_at, type: "Assinatura", description: `Assinatura criada (${subscription?.status ?? "sem status"})`, source: "subscriptions.created_at", status: subscription?.status ?? "informação", details: subscription });
   addTimelineEvent(events, { at: subscription?.updated_at, type: "Assinatura", description: "Assinatura atualizada", source: "subscriptions.updated_at", status: subscription?.status ?? "informação", details: subscription });
 
@@ -417,6 +446,8 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
   const subscription: any = member?.subscription ?? null;
   const currentPlanId = subscription?.plan_id ?? "";
   const currentStatus = subscription?.status ?? "inactive";
+  const loginEvidence = getProfileLoginEvidence(profile);
+  const billingSource = getBillingSource(profile, subscription);
   const username = getMetadataValue(profile, "username") ?? "—";
   const phone = profile?.phone ?? getMetadataValue(profile, "phone") ?? "";
   const checklist = journey && profile ? buildChecklist(profile, subscription, journey) : [];
@@ -615,9 +646,11 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
             <Field label="E-mail" value={profile.email} />
             <Field label="Username" value={username} />
             <Field label="Telefone" value={phone || "—"} />
-            <Field label="Cadastro" value={safeDate(profile.created_at)} />
-            <Field label="Atualizado" value={safeDate(profile.updated_at)} />
-            <Field label="Último login" value={safeDate(profile.last_login_at)} />
+            <Field label="Cadastro profile" value={safeDate(profile.created_at)} />
+            <Field label="Atualizado profile" value={safeDate(profile.updated_at)} />
+            <Field label="profiles.last_login_at" value={safeDate(profile.last_login_at)} />
+            <Field label="profiles.last_seen_at" value={safeDate(profile.last_seen_at)} />
+            <Field label="auth.last_sign_in_at" value={safeDate(profile.last_sign_in_at)} />
             <Field label="Origem" value={isLegacyMember(profile, subscription) ? "Usuário migrado/legado" : "Novo cadastro"} />
           </div>
         </div>
@@ -627,6 +660,7 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
           <div className="mt-4 grid gap-3 text-sm text-muted md:grid-cols-2">
             <Field label="Plano atual" value={member.plan?.name ?? "Free"} />
             <Field label="Status" value={currentStatus} />
+            <Field label="Fonte cobrança" value={billingSource} />
             <Field label="Gateway" value={subscription?.gateway ?? subscription?.original_gateway} />
             <Field label="Stripe Customer" value={isLegacyMember(profile, subscription) ? "Não aplicável ao legado/PMS" : subscription?.stripe_customer_id ?? subscription?.gateway_customer_id} />
             <Field label="Stripe Sub" value={isLegacyMember(profile, subscription) ? "Não aplicável ao legado/PMS" : subscription?.stripe_subscription_id ?? subscription?.gateway_subscription_id} />
@@ -634,6 +668,25 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
             <Field label="Próx. cobrança" value={safeDate(subscription?.next_billing_at ?? subscription?.current_period_end)} />
             <Field label="Auto renovação" value={formatBoolean(subscription?.auto_renew)} />
           </div>
+        </div>
+      </div>
+
+      <div className="rounded-3xl border border-border bg-surface p-5 shadow-premium sm:p-6">
+        <h3 className="flex items-center gap-2 text-lg font-semibold text-white"><ShieldCheck className="h-5 w-5 text-sky-300" /> Evidências Supabase Auth x Profile</h3>
+        <p className="mt-2 text-sm text-muted">Leitura diagnóstica: estes campos apenas comparam Auth e profiles; não alteram assinatura, cobrança ou permissões.</p>
+        <div className="mt-4 grid gap-3 text-sm text-muted md:grid-cols-2 xl:grid-cols-3">
+          <Field label="Auth user id" value={profile.id} />
+          <Field label="Auth e-mail" value={profile.auth_email ?? profile.email} />
+          <Field label="Auth criado em" value={safeDate(profile.auth_created_at)} />
+          <Field label="Auth atualizado em" value={safeDate(profile.auth_updated_at)} />
+          <Field label="auth.email_confirmed_at" value={safeDate(profile.email_confirmed_at)} />
+          <Field label="auth.confirmed_at" value={safeDate(profile.confirmed_at)} />
+          <Field label="auth.last_sign_in_at" value={safeDate(profile.last_sign_in_at)} />
+          <Field label="profiles.last_login_at" value={safeDate(profile.last_login_at)} />
+          <Field label="profiles.last_seen_at" value={safeDate(profile.last_seen_at)} />
+        </div>
+        <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-zinc-200">
+          <strong>Evidência de login:</strong> {loginEvidence.evidence.length ? loginEvidence.evidence.join(" · ") : "nenhum last_login_at, last_seen_at ou last_sign_in_at encontrado"}
         </div>
       </div>
 
@@ -704,6 +757,8 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
         <div className="rounded-3xl border border-border bg-surface p-5 shadow-premium sm:p-6">
           <h3 className="flex items-center gap-2 text-lg font-semibold text-white"><ShieldCheck className="h-5 w-5 text-emerald-300" /> Stripe e legado</h3>
           <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <Field label="Fonte interpretada" value={billingSource} />
+            <Field label="gateway" value={subscription?.gateway ?? subscription?.original_gateway} />
             <Field label="gateway_customer_id" value={subscription?.gateway_customer_id} />
             <Field label="gateway_subscription_id" value={subscription?.gateway_subscription_id} />
             <Field label="legacy_pms_member_id" value={profile.legacy_pms_member_id} />
@@ -730,6 +785,56 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
                 {(log.error || log.error_message || log.details?.error) ? <p className="mt-2 text-xs text-red-200">Erro: {log.error ?? log.error_message ?? log.details?.error}</p> : null}
               </div>
             )) : <p className="rounded-2xl border border-dashed border-white/10 p-4 text-sm text-muted">Nenhuma comunicação encontrada para este usuário.</p>}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-3">
+        <div className="rounded-3xl border border-border bg-surface p-5 shadow-premium sm:p-6">
+          <h3 className="flex items-center gap-2 text-lg font-semibold text-white"><PlayCircle className="h-5 w-5 text-cyan-300" /> Logs de kit</h3>
+          <div className="mt-4 space-y-3">
+            {journey.kitAccessLogs.length ? journey.kitAccessLogs.slice(0, 5).map((log: any) => (
+              <div key={log.id ?? JSON.stringify(log)} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-medium text-white">Kit {log.kit_id ?? "sem kit_id"}</p>
+                  <span className={`rounded-full border px-2.5 py-1 text-xs ${statusBadgeClass(log.status ?? "concluído")}`}>{log.status ?? "concluído"}</span>
+                </div>
+                <p className="mt-1 text-xs text-muted">{safeDate(log.accessed_at ?? log.created_at)} · {log.action ?? log.event ?? "acesso registrado"}</p>
+                <JsonDetails value={log} />
+              </div>
+            )) : <p className="rounded-2xl border border-dashed border-white/10 p-4 text-sm text-muted">Nenhum log de kit encontrado para este usuário.</p>}
+          </div>
+        </div>
+
+        <div className="rounded-3xl border border-border bg-surface p-5 shadow-premium sm:p-6">
+          <h3 className="flex items-center gap-2 text-lg font-semibold text-white"><Zap className="h-5 w-5 text-gold-300" /> Logs de áudio</h3>
+          <div className="mt-4 space-y-3">
+            {journey.audioAccessLogs.length ? journey.audioAccessLogs.slice(0, 5).map((log: any) => (
+              <div key={log.id ?? JSON.stringify(log)} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-medium text-white">Áudio {log.audio_file_id ?? "sem audio_file_id"}</p>
+                  <span className={`rounded-full border px-2.5 py-1 text-xs ${statusBadgeClass(log.status ?? "concluído")}`}>{log.status ?? "concluído"}</span>
+                </div>
+                <p className="mt-1 text-xs text-muted">{safeDate(log.accessed_at ?? log.created_at)} · {log.action ?? log.event ?? "reprodução registrada"}</p>
+                <JsonDetails value={log} />
+              </div>
+            )) : <p className="rounded-2xl border border-dashed border-white/10 p-4 text-sm text-muted">Nenhum log de áudio encontrado para este usuário.</p>}
+          </div>
+        </div>
+
+        <div className="rounded-3xl border border-border bg-surface p-5 shadow-premium sm:p-6">
+          <h3 className="flex items-center gap-2 text-lg font-semibold text-white"><CalendarClock className="h-5 w-5 text-violet-300" /> Logs de webhook</h3>
+          <div className="mt-4 space-y-3">
+            {[...journey.webhookProcessedEvents, ...journey.webhookLogs].length ? [...journey.webhookProcessedEvents, ...journey.webhookLogs].slice(0, 5).map((log: any) => (
+              <div key={log.id ?? log.event_id ?? JSON.stringify(log)} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-medium text-white">{log.event_type ?? log.event ?? log.delivery_id ?? "Webhook"}</p>
+                  <span className={`rounded-full border px-2.5 py-1 text-xs ${statusBadgeClass(log.success === false ? "erro" : "concluído")}`}>{log.success === false ? "erro" : "concluído"}</span>
+                </div>
+                <p className="mt-1 text-xs text-muted">{safeDate(log.processed_at ?? log.created_at)} · {log.event_id ?? log.provider ?? "sem event_id"}</p>
+                <JsonDetails value={log} />
+              </div>
+            )) : <p className="rounded-2xl border border-dashed border-white/10 p-4 text-sm text-muted">Nenhum webhook encontrado pelos fallbacks seguros.</p>}
           </div>
         </div>
       </div>

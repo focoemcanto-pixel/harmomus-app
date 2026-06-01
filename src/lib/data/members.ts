@@ -25,16 +25,23 @@ export interface SubscriberJourneyData {
 function makeProfileFromAuthUser(user: any, profile?: any): Profile {
   const metadata = user.user_metadata ?? {};
   return {
-    id: user.id,
+    ...(profile ?? {}),
+    id: profile?.id ?? user.id,
     email: profile?.email ?? user.email ?? null,
+    auth_email: user.email ?? null,
     full_name: profile?.full_name ?? metadata.full_name ?? metadata.name ?? metadata.username ?? null,
     avatar_url: profile?.avatar_url ?? metadata.avatar_url ?? null,
     role: profile?.role ?? metadata.role ?? "user",
     created_at: profile?.created_at ?? user.created_at ?? new Date().toISOString(),
     updated_at: profile?.updated_at ?? user.updated_at ?? user.created_at ?? new Date().toISOString(),
+    auth_created_at: user.created_at ?? null,
+    auth_updated_at: user.updated_at ?? null,
     last_sign_in_at: user.last_sign_in_at ?? null,
     email_confirmed_at: user.email_confirmed_at ?? null,
     confirmed_at: user.confirmed_at ?? null,
+    user_metadata: metadata,
+    raw_user_meta_data: user.raw_user_meta_data ?? metadata,
+    app_metadata: user.app_metadata ?? null,
   } as unknown as Profile;
 }
 
