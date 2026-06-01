@@ -23,6 +23,8 @@ export type UploadedKitAudioResult = {
   skippedFiles: number;
   tones: string[];
   voices: string[];
+  originalTone: string | null;
+  defaultTone: string | null;
   editUrl: string;
 };
 
@@ -69,6 +71,12 @@ function normalizeVoice(value: string) {
 
 function getExtension(filename: string) {
   return filename.split(".").pop()?.toLowerCase() ?? "";
+}
+
+function normalizeTone(value?: string | null) {
+  const tone = value?.trim();
+  if (!tone || tone === "Original") return null;
+  return tone;
 }
 
 function buildPublicUrl(key: string) {
@@ -160,11 +168,15 @@ export async function uploadKitAudioBundle({
   name,
   artist,
   published = false,
+  originalTone,
+  defaultTone,
 }: {
   files: UploadedKitAudioInput[];
   name?: string | null;
   artist?: string | null;
   published?: boolean;
+  originalTone?: string | null;
+  defaultTone?: string | null;
 }): Promise<UploadedKitAudioResult> {
   if (!r2BucketName) throw new Error("R2_BUCKET_NAME não configurado.");
 
@@ -180,18 +192,28 @@ export async function uploadKitAudioBundle({
   const slug = existing?.slug ?? (await resolveUniqueSlug(supabase, desiredSlug));
   const r2Folder = existing?.r2_folder || slug;
   const artistName = artist?.trim() || "Artista não informado";
+  const resolvedOriginalTone = normalizeTone(originalTone);
+  const resolvedDefaultTone = normalizeTone(defaultTone) || resolvedOriginalTone;
 
   let kitId = existing?.id as string | undefined;
   let created = false;
+
+  const kitPayload = {
+    name: kitName,
+    artist: artistName,
+    r2_folder: r2Folder,
+    original_tone: resolvedOriginalTone,
+    default_tone: resolvedDefaultTone,
+    allow_pitch_shift: true,
+    max_pitch_shift_semitones: 2,
+  };
 
   if (!kitId) {
     const { data: createdKit, error } = await supabase
       .from("kits")
       .insert({
-        name: kitName,
+        ...kitPayload,
         slug,
-        artist: artistName,
-        r2_folder: r2Folder,
         published,
         allowed_plan_slugs: DEFAULT_ALLOWED_PLANS,
       })
@@ -202,11 +224,7 @@ export async function uploadKitAudioBundle({
     kitId = createdKit.id as string;
     created = true;
   } else {
-    const { error } = await supabase
-      .from("kits")
-      .update({ name: kitName, artist: artistName, r2_folder: r2Folder })
-      .eq("id", kitId);
-
+    const { error } = await supabase.from("kits").update(kitPayload).eq("id", kitId);
     if (error) throw new Error(`Falha ao atualizar kit existente: ${error.message}`);
   }
 
@@ -258,6 +276,8 @@ export async function uploadKitAudioBundle({
     skippedFiles: files.length - audioFiles.length,
     tones: Array.from(tones),
     voices: Array.from(voices),
+    originalTone: resolvedOriginalTone,
+    defaultTone: resolvedDefaultTone,
     editUrl: `/admin/kits/${kitId}/editar`,
   };
 }
