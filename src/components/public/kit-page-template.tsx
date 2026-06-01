@@ -217,6 +217,7 @@ function mapApiTonesToPublicToneGroups(tones: AudioFilesApiTone[]) {
 export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageTemplateProps) {
   const audioEngine = useKitAudioEngine();
   const { stopPlayback, preloadTrack } = audioEngine;
+  const canPlay = Boolean(accessContext?.play?.allowed);
   const [liveKit, setLiveKit] = useState<PublicKit>(kit);
 
   useEffect(() => {
@@ -248,16 +249,6 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
     };
   }, [kit.id]);
 
-  if (!accessContext?.play?.allowed) {
-    return (
-      <PremiumKitGateCard
-        mode={accessContext?.isGuest ? "guest" : "upgrade"}
-        reason={accessContext?.play?.reason}
-        requiredPlan={accessContext?.play?.requiredPlan}
-        stats={accessContext?.play?.stats}
-      />
-    );
-  }
   const realToneOptions = useMemo(() => sortTonesByChromaticOrder(liveKit.tones.map((tone) => tone.tone)), [liveKit.tones]);
   const initialTone = normalizeTone(liveKit.defaultTone) ?? normalizeTone(liveKit.originalTone) ?? realToneOptions[0] ?? "";
 
@@ -313,7 +304,7 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
   const sourceTone = toneResolution.sourceTone ?? selectedTone;
   const currentTone = getToneGroup(liveKit, sourceTone) ?? null;
   const selectedFile = currentTone?.voices[selectedVoice] ?? currentTone?.voices.todos ?? toneResolution.sourceTrack ?? null;
-  const canPlaySelected = accessContext.play.allowed && Boolean(selectedFile?.streamUrl) && Boolean(getToneGroup(liveKit, selectedTone));
+  const canPlaySelected = canPlay && Boolean(selectedFile?.streamUrl) && Boolean(getToneGroup(liveKit, selectedTone));
   const semitoneShift = 0;
   const isModulated = false;
   const selectedSourceType = normalizeAudioSource(selectedFile?.source_type);
@@ -350,7 +341,7 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
   );
 
   useEffect(() => {
-    if (!accessContext.play.allowed || !selectedTone) return;
+    if (!canPlay || !selectedTone) return;
 
     const warmed = new Set<string>();
     const selected = normalizeTone(selectedTone) ?? selectedTone;
@@ -379,7 +370,7 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
       const neighborGroup = getToneGroup(liveKit, neighborTone);
       warmFile(neighborGroup?.voices[selectedVoice] ?? neighborGroup?.voices.todos, neighborTone, selectedVoice);
     }
-  }, [accessContext.play.allowed, liveKit, preloadTrack, selectedTone, selectedVoice, toneOptions]);
+  }, [canPlay, liveKit, preloadTrack, selectedTone, selectedVoice, toneOptions]);
 
   function openPremiumToneUpgrade() {
     setUpgradeConfig({
@@ -429,6 +420,17 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
     const fallback = toneOptions[0]?.tone;
     if (fallback) setSelectedTone(fallback);
   }, [selectedTone, toneOptions]);
+
+  if (!canPlay) {
+    return (
+      <PremiumKitGateCard
+        mode={accessContext?.isGuest ? "guest" : "upgrade"}
+        reason={accessContext?.play?.reason}
+        requiredPlan={accessContext?.play?.requiredPlan}
+        stats={accessContext?.play?.stats}
+      />
+    );
+  }
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,#1f2840_0%,#06070c_40%)] px-4 py-6 md:px-8 md:py-10">
