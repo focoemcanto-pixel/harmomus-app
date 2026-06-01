@@ -7,6 +7,7 @@ export type RecommendedActionPriority = "high" | "medium" | "low";
 export type OperationalFlag =
   | "pending"
   | "no_login"
+  | "no_real_access"
   | "no_stripe_subscription"
   | "failed_communication"
   | "no_kit_access"
@@ -116,8 +117,16 @@ function hasPasswordConfigured(profile: any) {
   );
 }
 
+function hasProfileLogin(profile: any) {
+  return Boolean(profile?.last_login_at || profile?.last_seen_at);
+}
+
+function hasAuthLogin(profile: any) {
+  return Boolean(profile?.last_sign_in_at);
+}
+
 function hasLogin(profile: any) {
-  return Boolean(profile?.last_login_at || profile?.last_seen_at || profile?.last_sign_in_at);
+  return hasProfileLogin(profile) || hasAuthLogin(profile);
 }
 
 function communicationFailed(journey: JourneyLike) {
@@ -198,9 +207,13 @@ export function calculateMemberHealth(member: MemberLike, journey?: JourneyLike)
     reasons.push("-30 Stripe Customer existe mas Stripe Subscription está ausente");
   }
 
-  if (status === "pending") {
+  if (status === "pending" && !migrated) {
     score -= 20;
     reasons.push("-20 assinatura pending");
+  }
+
+  if (status === "pending" && migrated) {
+    reasons.push("Assinatura pending de legado/PMS exige conferência de ativação");
   }
 
   if (failedCommunication) {
@@ -233,7 +246,8 @@ export function getOperationalFlags(member: MemberLike, journey?: JourneyLike): 
   const flags: OperationalFlag[] = [];
 
   if (status === "pending") flags.push("pending");
-  if (!hasLogin(profile)) flags.push("no_login");
+  if (!hasProfileLogin(profile)) flags.push("no_login");
+  if (!hasLogin(profile)) flags.push("no_real_access");
   if (!migrated && isPresent(stripeCustomer) && !isPresent(stripeSubscription)) flags.push("no_stripe_subscription");
   if (communicationFailed(journey)) flags.push("failed_communication");
   if (!rows(journey, "kitAccessLogs").length) flags.push("no_kit_access");
@@ -254,6 +268,13 @@ export function getRecommendedActions(member: MemberLike, journey?: JourneyLike)
   const migrated = isMigratedFromPms(member, journey);
   const actions: RecommendedAction[] = [];
 
+  if (status === "pending" && migrated) {
+    actions.push(
+      { label: "Conferir ativação legado/PMS", description: "Legado/PMS reconhecido — conferir ativação no PMS/migração antes de tratar como checkout abandonado.", type: "manual", priority: "high" },
+      { label: "Validar status importado", description: "Cruzar gateway, migrated_from_pms e identificadores PMS sem ativar assinatura automaticamente.", type: "manual", priority: "medium" },
+    );
+  }
+
   if (!migrated && isPresent(stripeCustomer) && !isPresent(stripeSubscription)) {
     actions.push(
       { label: "Conferir assinatura no Stripe", description: "Abrir o customer no Stripe e confirmar se existe subscription válida e paga antes de qualquer ajuste manual.", type: "external", priority: "high" },
@@ -262,7 +283,7 @@ export function getRecommendedActions(member: MemberLike, journey?: JourneyLike)
     );
   }
 
-  if (status === "pending") {
+  if (status === "pending" && !migrated) {
     actions.push(
       { label: "Verificar último webhook", description: "Conferir eventos recentes do gateway para entender se houve atraso, falha ou ausência de processamento.", type: "manual", priority: "high" },
       { label: "Conferir se pagamento foi aprovado", description: "Validar a cobrança no provedor antes de alterar o status da assinatura.", type: "external", priority: "high" },
@@ -311,6 +332,21 @@ export function getMemberDiagnosis(member: MemberLike, journey?: JourneyLike): M
   const health = calculateMemberHealth(member, journey);
   const actions = getRecommendedActions(member, journey);
 
+  if (status === "pending" && migrated) {
+    return {
+      severity: "info",
+      title: "Legado/PMS reconhecido — conferir ativação",
+      cause: "A assinatura está pending, mas há evidência de gateway legado/migração/PMS; não deve ser tratada automaticamente como checkout abandonado Stripe.",
+      action: actions[0]?.description ?? "Conferir ativação no PMS/migração antes de intervir.",
+      confidence: "alta",
+      evidence: [
+        `Status atual: ${subscription?.status}`,
+        `Gateway: ${subscription?.gateway ?? "não registrado"}`,
+        `migrated_from_pms: ${Boolean((member.profile as any)?.migrated_from_pms || subscription?.migrated_from_pms)}`,
+      ],
+    };
+  }
+
   if (!migrated && isPresent(stripeCustomer) && !isPresent(stripeSubscription)) {
     return {
       severity: status === "pending" ? "critical" : "warning",
@@ -333,14 +369,18 @@ export function getMemberDiagnosis(member: MemberLike, journey?: JourneyLike): M
     };
   }
 
-  if (!hasLogin(profile)) {
+  if (!hasProfileLogin(profile)) {
     return {
-      severity: health.score < 40 ? "critical" : "info",
-      title: "Usuário ainda não realizou login",
-      cause: "O cadastro existe, mas não há registro de login nos campos disponíveis para o suporte.",
-      action: actions.find((action) => action.label === "Reenviar acesso")?.description ?? "Enviar instruções de primeiro acesso.",
+      severity: hasAuthLogin(profile) ? "info" : health.score < 40 ? "critical" : "info",
+      title: hasAuthLogin(profile) ? "Login existe no Auth, mas não foi registrado no profile" : "Usuário ainda não realizou login",
+      cause: hasAuthLogin(profile)
+        ? "Supabase Auth possui last_sign_in_at, mas o profile não tem last_login_at/last_seen_at sincronizado."
+        : "O cadastro existe, mas não há registro de login no profile nem no Auth disponível para o suporte.",
+      action: hasAuthLogin(profile)
+        ? "Conferir sincronização do profile antes de tratar como ausência real de acesso."
+        : actions.find((action) => action.label === "Reenviar acesso")?.description ?? "Enviar instruções de primeiro acesso.",
       confidence: "alta",
-      evidence: ["last_login_at/last_seen_at ausentes"],
+      evidence: [hasAuthLogin(profile) ? "last_login_at/last_seen_at ausentes; last_sign_in_at presente" : "last_login_at/last_seen_at/last_sign_in_at ausentes"],
     };
   }
 

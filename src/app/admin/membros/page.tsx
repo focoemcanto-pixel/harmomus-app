@@ -52,9 +52,18 @@ function isPaidPlan(member: Member) {
 function getJourney(member: Member): JourneyView {
   const status = normalize(member.subscription?.status);
   const gateway = normalize(member.subscription?.gateway);
+  const originalGateway = normalize((member.subscription as any)?.original_gateway);
   const stripeCustomer = member.subscription?.stripe_customer_id ?? (member.subscription as any)?.gateway_customer_id;
   const stripeSub = member.subscription?.stripe_subscription_id ?? (member.subscription as any)?.gateway_subscription_id;
-  const migrated = gateway === "legacy" || gateway === "migration" || gateway === "pms" || Boolean((member.subscription as any)?.migrated_from_pms);
+  const migrated =
+    gateway === "legacy" ||
+    gateway === "migration" ||
+    gateway === "pms" ||
+    originalGateway === "pms" ||
+    Boolean((member.profile as any)?.migrated_from_pms) ||
+    Boolean((member.profile as any)?.legacy_pms_member_id) ||
+    Boolean((member.subscription as any)?.migrated_from_pms) ||
+    Boolean((member.subscription as any)?.legacy_pms_subscription_id);
 
   if (!member.subscription) {
     return {
@@ -86,6 +95,17 @@ function getJourney(member: Member): JourneyView {
       health: "neutral",
       nextAction: "Campanha de upgrade",
       actionHref: `/admin/comunicacao/campaigns?segment=free&email=${encodeURIComponent(member.profile.email ?? "")}`,
+    };
+  }
+
+  if (status === "pending" && migrated) {
+    return {
+      stage: "at_risk",
+      label: "Legado/PMS reconhecido",
+      description: "Assinatura pending de migração/PMS: conferir ativação sem tratar como checkout abandonado.",
+      health: "warning",
+      nextAction: "Conferir ativação",
+      actionHref: `/admin/membros/${member.profile.id}`,
     };
   }
 
@@ -145,7 +165,8 @@ function healthSeverityClass(severity: "success" | "info" | "warning" | "critica
 function flagLabel(flag: string) {
   const labels: Record<string, string> = {
     pending: "Pending",
-    no_login: "Sem login",
+    no_login: "Sem login profile",
+    no_real_access: "Sem acesso real",
     no_stripe_subscription: "Sem sub Stripe",
     failed_communication: "Falha comunicação",
     no_kit_access: "Sem kit",
@@ -162,10 +183,11 @@ const operationalFilters = [
   { value: "healthy", label: "Saudáveis" },
   { value: "critical", label: "Críticos" },
   { value: "pending", label: "Pending" },
-  { value: "no_login", label: "Sem login" },
+  { value: "no_login", label: "Sem login no profile" },
+  { value: "no_real_access", label: "Sem acesso real" },
   { value: "no_stripe_subscription", label: "Sem subscription Stripe" },
   { value: "failed_communication", label: "Falha comunicação" },
-  { value: "no_access", label: "Sem acesso" },
+  { value: "no_content_access", label: "Sem kit/áudio" },
 ];
 
 function StatCard({ label, value, detail, icon: Icon }: { label: string; value: string; detail: string; icon: any }) {
@@ -200,7 +222,7 @@ export default async function AdminMembrosPage({ searchParams }: { searchParams:
     .filter((item) => {
       const filter = params.operational ?? "";
       if (!filter) return true;
-      if (filter === "no_access") return item.flags.includes("no_kit_access") || item.flags.includes("no_audio_access");
+      if (filter === "no_access" || filter === "no_content_access") return item.flags.includes("no_kit_access") || item.flags.includes("no_audio_access");
       return item.flags.includes(filter as any);
     });
   const total = members.length;
