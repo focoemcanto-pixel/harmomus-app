@@ -205,7 +205,7 @@ export function calculateMemberHealth(member: MemberLike, journey?: JourneyLike)
 
   if (hasLogin(profile)) {
     score += 15;
-    reasons.push("+15 primeiro login realizado");
+    reasons.push("+15 primeiro login detectado");
   }
 
   if (hasKitAccess) {
@@ -249,7 +249,7 @@ export function calculateMemberHealth(member: MemberLike, journey?: JourneyLike)
 
   if (!hasLogin(profile)) {
     score -= 15;
-    reasons.push("-15 sem login registrado");
+    reasons.push("-15 sem evidência de login registrada");
   }
 
   if (evaluateContentEngagement && (!hasKitAccess || !hasAudioAccess)) {
@@ -322,8 +322,8 @@ export function getRecommendedActions(member: MemberLike, journey?: JourneyLike)
 
   if (!hasLogin(profile)) {
     actions.push(
-      { label: "Reenviar acesso", description: "Enviar instruções de primeiro acesso por e-mail/WhatsApp usando os fluxos existentes de comunicação.", type: "manual", priority: "medium" },
-      { label: "Orientar usuário a verificar e-mail/spam", description: "Mensagem curta reduz atrito quando o link de acesso já foi enviado.", type: "manual", priority: "medium" },
+      { label: "Conferir evidências de acesso", description: "Verificar Auth/Profile antes de concluir que o usuário nunca acessou.", type: "manual", priority: "medium" },
+      { label: "Reenviar instruções de acesso", description: "Enviar instruções de primeiro acesso por e-mail/WhatsApp usando os fluxos existentes de comunicação, se necessário.", type: "manual", priority: "medium" },
       { label: "Confirmar se senha foi configurada", description: "Verificar evidências de configuração de senha antes de concluir que o usuário abandonou.", type: "manual", priority: "low" },
     );
   }
@@ -401,15 +401,15 @@ export function getMemberDiagnosis(member: MemberLike, journey?: JourneyLike): M
   if (!hasProfileLogin(profile)) {
     return {
       severity: hasAuthLogin(profile) ? "info" : health.score < 40 ? "critical" : "info",
-      title: hasAuthLogin(profile) ? "Login existe no Auth, mas não foi registrado no profile" : "Usuário ainda não realizou login",
+      title: hasAuthLogin(profile) ? "Login existe no Auth, mas não foi registrado no profile" : "Sem evidência de login registrada",
       cause: hasAuthLogin(profile)
         ? "Supabase Auth possui last_sign_in_at, mas o profile não tem last_login_at/last_seen_at sincronizado."
-        : "O cadastro existe, mas não há registro de login no profile nem no Auth disponível para o suporte.",
+        : "Não há last_sign_in_at no Auth nem last_login_at/last_seen_at no profile. Isso pode indicar ausência de login ou telemetria incompleta.",
       action: hasAuthLogin(profile)
         ? "Conferir sincronização do profile antes de tratar como ausência real de acesso."
-        : actions.find((action) => action.label === "Reenviar acesso")?.description ?? "Enviar instruções de primeiro acesso.",
-      confidence: "alta",
-      evidence: [hasAuthLogin(profile) ? "last_login_at/last_seen_at ausentes; last_sign_in_at presente" : "last_login_at/last_seen_at/last_sign_in_at ausentes"],
+        : actions.find((action) => action.label === "Conferir evidências de acesso")?.description ?? "Conferir Auth/Profile antes de concluir ausência real de acesso.",
+      confidence: hasAuthLogin(profile) ? "alta" : "média",
+      evidence: [hasAuthLogin(profile) ? "last_login_at/last_seen_at ausentes; last_sign_in_at presente" : "last_login_at/last_seen_at/last_sign_in_at ausentes nos dados disponíveis"],
     };
   }
 
