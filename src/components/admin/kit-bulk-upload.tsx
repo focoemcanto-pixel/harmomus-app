@@ -1,7 +1,6 @@
 "use client";
 
 import { type ChangeEvent, type DragEvent, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { FolderUp, Loader2, Music2, Sparkles, UploadCloud, Wand2, XCircle } from "lucide-react";
 
 type ImportStatus = "idle" | "ready" | "uploading" | "success" | "error";
@@ -184,7 +183,6 @@ async function extractDroppedFiles(event: DragEvent<HTMLDivElement>) {
 }
 
 export function KitBulkUpload() {
-  const router = useRouter();
   const folderInputRef = useRef<HTMLInputElement | null>(null);
   const filesInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -281,8 +279,9 @@ export function KitBulkUpload() {
       }
 
       setStatus("success");
-      router.replace(`/admin/kits/novo?importedKitId=${encodeURIComponent((data as UploadResult).kitId)}#kit-editor`);
-      router.refresh();
+      const result = data as UploadResult;
+      const url = `/admin/kits/novo?importedKitId=${encodeURIComponent(result.kitId)}&importedAt=${Date.now()}#kit-editor`;
+      window.location.assign(url);
     } catch (caught) {
       setStatus("error");
       setError(caught instanceof Error ? caught.message : "Erro inesperado ao importar kit.");
