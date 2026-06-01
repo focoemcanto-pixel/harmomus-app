@@ -4,6 +4,7 @@ import { ProfilePageClient } from "@/components/public/profile-page-client";
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 
 async function safeCount(query: PromiseLike<{ count: number | null; error?: unknown }>) {
   try {
@@ -20,7 +21,10 @@ export default async function PerfilPage() {
   if (context.isGuest) redirect("/login");
 
   const supabase = createSupabaseAdminClient() as any;
-  const userId = context.profile?.id ?? "";
+  const authClient = await createClient();
+  const { data: auth } = await authClient.auth.getUser();
+  const authUser = auth.user;
+  const userId = context.profile?.id ?? authUser?.id ?? "";
   const today = new Date();
   const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())).toISOString();
 
@@ -34,11 +38,12 @@ export default async function PerfilPage() {
   return <PublicAppShell><ProfilePageClient
     userId={userId}
     initialName={context.profile?.full_name ?? "Sem nome"}
-    email={context.profile?.email ?? "Sem e-mail"}
-    username={(context.profile?.email ?? "user").split("@")[0]}
+    email={context.profile?.email ?? authUser?.email ?? "Sem e-mail"}
+    username={(context.profile?.email ?? authUser?.email ?? "user").split("@")[0]}
     avatarUrl={context.profile?.avatar_url ?? null}
     planName={context.plan?.name ?? "Free"}
     subscriptionStatus={context.subscription?.status ?? "inactive"}
+    emailConfirmed={Boolean((authUser as any)?.email_confirmed_at ?? (authUser as any)?.confirmed_at)}
     stats={{ playlists, favorites, history, kitsToday }}
   /></PublicAppShell>;
 }
