@@ -1,14 +1,17 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
+import { KitAudioSyncCard } from "@/components/admin/kit-audio-sync-card";
 import { KitBulkUpload } from "@/components/admin/kit-bulk-upload";
 import { KitForm } from "@/components/admin/kit-form";
-import { createKit, ensureArtistCategory, getArtistCategories, getKitFormOptions } from "@/lib/data/kits";
+import { createKit, ensureArtistCategory, getArtistCategories, getKitById, getKitFormOptions, updateKit } from "@/lib/data/kits";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const DEFAULT_ALLOWED_PLANS = ["free", "plus", "premium"];
+
+type NovoKitSearchParams = Promise<Record<string, string | string[] | undefined>>;
 
 function parsePitchShiftLimit(value: FormDataEntryValue | null) {
   const parsed = Number(value ?? 2);
@@ -33,8 +36,19 @@ function resolveLegacyRequiredPlan(allowedPlanSlugs: string[]) {
   return null;
 }
 
-export default async function NovoKitPage() {
-  const [{ categories, plans }, artistCategories] = await Promise.all([getKitFormOptions(), getArtistCategories()]);
+function getSingleParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export default async function NovoKitPage({ searchParams }: { searchParams: NovoKitSearchParams }) {
+  const resolvedSearchParams = await searchParams;
+  const importedKitId = getSingleParam(resolvedSearchParams.importedKitId);
+
+  const [{ categories, plans }, artistCategories, importedKit] = await Promise.all([
+    getKitFormOptions(),
+    getArtistCategories(),
+    importedKitId ? getKitById(importedKitId) : Promise.resolve(null),
+  ]);
 
   async function createKitAction(formData: FormData) {
     "use server";
@@ -69,24 +83,80 @@ export default async function NovoKitPage() {
     });
 
     revalidatePath("/admin/kits", "page");
+    revalidatePath("/admin/kits/novo", "page");
     revalidatePath("/biblioteca", "page");
     revalidatePath("/todos-os-kits", "page");
     redirect("/admin/kits");
   }
 
+  async function updateImportedKitAction(formData: FormData) {
+    "use server";
+
+    if (!importedKit) throw new Error("Kit importado não encontrado para edição.");
+
+    const name = String(formData.get("name") ?? "").trim();
+    const slug = String(formData.get("slug") ?? "").trim();
+    const artist = String(formData.get("artist") ?? "").trim();
+    const originalTone = String(formData.get("original_tone") ?? "").trim();
+    const defaultTone = String(formData.get("default_tone") ?? "").trim();
+    const allowedPlanSlugs = parseAllowedPlanSlugs(formData, plans.map((plan) => plan.slug));
+
+    if (!name || !slug || !artist) throw new Error("Preencha nome, slug e artista para continuar.");
+
+    const artistCategory = await ensureArtistCategory(artist);
+
+    await updateKit(importedKit.id, {
+      name,
+      slug,
+      artist,
+      description: String(formData.get("description") ?? "").trim() || null,
+      lyrics: String(formData.get("lyrics") ?? "").trim() || null,
+      cover_url: String(formData.get("cover_url") ?? "").trim() || null,
+      r2_folder: String(formData.get("r2_folder") ?? "").trim() || null,
+      category_id: String(formData.get("category_id") ?? "") || artistCategory.id,
+      required_plan: resolveLegacyRequiredPlan(allowedPlanSlugs),
+      allowed_plan_slugs: allowedPlanSlugs,
+      original_tone: originalTone || null,
+      default_tone: defaultTone || originalTone || null,
+      allow_pitch_shift: formData.has("allow_pitch_shift"),
+      max_pitch_shift_semitones: parsePitchShiftLimit(formData.get("max_pitch_shift_semitones")),
+      published: formData.get("published") === "on",
+    });
+
+    revalidatePath("/admin/kits", "page");
+    revalidatePath("/admin/kits/novo", "page");
+    revalidatePath(`/admin/kits/novo?importedKitId=${importedKit.id}`, "page");
+    revalidatePath("/biblioteca", "page");
+    revalidatePath("/todos-os-kits", "page");
+    revalidatePath(`/biblioteca/${slug}`, "page");
+    redirect(`/admin/kits/novo?importedKitId=${importedKit.id}#kit-editor`);
+  }
+
+  const editorLabel = importedKit ? "Editor do kit importado" : "Cadastro manual";
+
   return (
     <div className="space-y-8">
       <KitBulkUpload />
 
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4" id="kit-editor">
         <div className="h-px flex-1 bg-border" />
         <span className="rounded-full border border-border bg-surface px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted">
-          Cadastro manual
+          {editorLabel}
         </span>
         <div className="h-px flex-1 bg-border" />
       </div>
 
-      <KitForm mode="create" categories={categories} artistCategories={artistCategories} plans={plans} action={createKitAction} />
+      {importedKit ? (
+        <div className="space-y-6">
+          <div className="rounded-3xl border border-emerald-400/20 bg-emerald-500/10 p-4 text-sm text-emerald-100">
+            Kit importado e carregado nesta página. Complete capa, letra, descrição, publicação e configurações vocais abaixo.
+          </div>
+          <KitForm mode="edit" categories={categories} artistCategories={artistCategories} plans={plans} initialData={importedKit} action={updateImportedKitAction} />
+          <KitAudioSyncCard kitId={importedKit.id} />
+        </div>
+      ) : (
+        <KitForm mode="create" categories={categories} artistCategories={artistCategories} plans={plans} action={createKitAction} />
+      )}
     </div>
   );
 }
