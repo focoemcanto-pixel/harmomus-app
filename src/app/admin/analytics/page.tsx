@@ -26,6 +26,8 @@ export const revalidate = 0;
 
 type ListItem = { label: string; value: number };
 type FunnelStep = { label: string; value: number; caption: string };
+type Opportunity = { label: string; value: number; usersHint?: string; kind: "high" | "medium" | "low" };
+type Insight = { title: string; body: string; tone: "emerald" | "cyan" | "violet" | "rose" | "amber" };
 
 function EmptyState({ label = "Ainda não há dados suficientes." }: { label?: string }) {
   return <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 text-sm text-zinc-400">{label}</div>;
@@ -45,6 +47,12 @@ function formatNumber(value: number | string) {
 function percent(value: number, base: number) {
   if (!base) return 0;
   return Math.round((value / base) * 100);
+}
+
+function potentialLabel(kind: Opportunity["kind"]) {
+  if (kind === "high") return "🔥 Alto";
+  if (kind === "medium") return "🟡 Médio";
+  return "Baixo";
 }
 
 function MetricCard({ title, value, caption, tone = "default" }: { title: string; value: number | string; caption: string; tone?: "default" | "good" | "warn" | "danger" }) {
@@ -162,6 +170,65 @@ function FunnelCard({ steps }: { steps: FunnelStep[] }) {
   );
 }
 
+function AutomatedInsights({ insights }: { insights: Insight[] }) {
+  const tones = {
+    emerald: "border-emerald-400/20 bg-emerald-500/10 text-emerald-100",
+    cyan: "border-cyan-400/20 bg-cyan-500/10 text-cyan-100",
+    violet: "border-violet-400/20 bg-violet-500/10 text-violet-100",
+    rose: "border-rose-400/20 bg-rose-500/10 text-rose-100",
+    amber: "border-amber-400/20 bg-amber-500/10 text-amber-100",
+  };
+  return (
+    <div className="rounded-3xl border border-white/10 bg-zinc-950/55 p-5 shadow-2xl shadow-black/20">
+      <div className="mb-4">
+        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-200/70">Intelligence</p>
+        <h3 className="mt-1 text-lg font-semibold text-white">Insights automáticos</h3>
+        <p className="mt-1 text-sm text-zinc-500">Leituras geradas a partir dos dados atuais, sem depender de eventos novos.</p>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {insights.map((insight) => (
+          <article key={insight.title} className={`rounded-3xl border p-4 ${tones[insight.tone]}`}>
+            <p className="text-sm font-semibold text-white">{insight.title}</p>
+            <p className="mt-2 text-xs leading-relaxed opacity-80">{insight.body}</p>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function OpportunityCenter({ opportunities }: { opportunities: Opportunity[] }) {
+  return (
+    <div className="rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(244,63,94,0.10),transparent_34%),rgba(9,9,11,0.72)] p-5 shadow-2xl shadow-black/20">
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-rose-200/70">Receita</p>
+          <h3 className="mt-1 text-lg font-semibold text-white">Centro de Oportunidades</h3>
+          <p className="mt-1 text-sm text-zinc-500">Kits que mais geram desejo travado. Priorize campanhas, novos tons e chamadas para upgrade.</p>
+        </div>
+      </div>
+      {opportunities.length === 0 ? <EmptyState label="Nenhuma oportunidade de bloqueio encontrada no período." /> : (
+        <div className="grid gap-3 lg:grid-cols-3">
+          {opportunities.map((item) => (
+            <article key={item.label} className="rounded-3xl border border-white/10 bg-black/25 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h4 className="truncate text-sm font-semibold text-white">{item.label}</h4>
+                  <p className="mt-1 text-xs text-zinc-500">{item.usersHint ?? "Usuários únicos ainda não disponíveis para este recorte."}</p>
+                </div>
+                <span className={`rounded-full px-2 py-1 text-[10px] ${item.kind === "high" ? "border border-rose-400/30 bg-rose-500/10 text-rose-100" : item.kind === "medium" ? "border border-amber-400/30 bg-amber-500/10 text-amber-100" : "border border-white/10 bg-white/[0.03] text-zinc-300"}`}>{potentialLabel(item.kind)}</span>
+              </div>
+              <p className="mt-5 text-3xl font-semibold text-white">{formatNumber(item.value)}</p>
+              <p className="mt-1 text-xs text-zinc-500">bloqueios no período</p>
+              <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.02] p-3 text-xs text-zinc-400">Ação sugerida: campanha de upgrade ou liberar prévia estratégica deste kit.</div>
+            </article>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function InsightCard({ label, value, tone = "cyan" }: { label: string; value: string; tone?: "cyan" | "emerald" | "violet" | "rose" }) {
   const tones = {
     cyan: "border-cyan-300/20 bg-cyan-500/5 text-cyan-100",
@@ -201,6 +268,33 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
     { label: "Bloqueios Premium", value: summary.gateViews || summary.denied, caption: "Desejo travado por plano/acesso." },
     { label: "Pedidos Premium", value: premiumRequests.open, caption: "Solicitações abertas para conversão." },
   ];
+  const opportunities: Opportunity[] = deniedKits.slice(0, 6).map((item) => ({
+    label: item.label,
+    value: item.value,
+    kind: item.value >= 20 ? "high" : item.value >= 8 ? "medium" : "low",
+  }));
+  const automaticInsights: Insight[] = [
+    {
+      title: summary.denyRate > 15 ? "Bloqueio alto" : "Bloqueio controlado",
+      body: summary.denyRate > 15 ? `${summary.denyRate}% das tentativas foram bloqueadas. Isso pode indicar desejo de upgrade, mas também fricção excessiva.` : `Taxa de bloqueio em ${summary.denyRate}%. Acompanhe se isso gera pedidos Premium ou abandono.`,
+      tone: summary.denyRate > 15 ? "rose" : "cyan",
+    },
+    {
+      title: "Conteúdo com maior tração",
+      body: topKit !== "não informado" ? `${topKit} lidera o consumo no período. Considere expandir tons, vozes ou criar campanha em cima dele.` : "Ainda não há kit líder suficiente para uma decisão de conteúdo.",
+      tone: "emerald",
+    },
+    {
+      title: "Plano dominante",
+      body: topPlan !== "não informado" ? `${topPlan} concentra mais consumo. Use isso para avaliar se o plano está atraente ou se há gargalo para upgrade.` : "Sem distribuição de plano suficiente no período.",
+      tone: "violet",
+    },
+    {
+      title: premiumRequests.open > 0 ? "Fila comercial aberta" : "Sem fila Premium aberta",
+      body: premiumRequests.open > 0 ? `${premiumRequests.open} solicitação(ões) Premium precisam de atenção. Priorize contato rápido para aumentar conversão.` : "Nenhuma solicitação Premium aberta agora. Foque em criar novos pontos de desejo no produto.",
+      tone: premiumRequests.open > 0 ? "amber" : "cyan",
+    },
+  ];
 
   return <section className="space-y-6 text-zinc-100">
     <PageHeader title="Analytics" description="Inteligência de consumo, retenção e oportunidades comerciais da plataforma Harmomus." />
@@ -223,7 +317,9 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
       <MetricCard title="Premium requests" value={premiumRequests.open} caption={`${premiumRequests.total} solicitações totais`} tone={premiumRequests.open > 0 ? "warn" : "default"} />
     </div>
 
+    <AutomatedInsights insights={automaticInsights} />
     <FunnelCard steps={funnelSteps} />
+    <OpportunityCenter opportunities={opportunities} />
 
     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
       <InsightCard label="Kit em alta" value={topKit} tone="emerald" />
