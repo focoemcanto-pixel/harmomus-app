@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { CalendarClock, Check, ImagePlus, Loader2, Mail, MessageCircle, Rocket, Send, ShieldCheck, Sparkles, Users } from "lucide-react";
 
 type Channel = "whatsapp" | "email";
@@ -13,23 +13,7 @@ const planLabels: Record<Plan, string> = {
   ministry: "Ministerial",
 };
 
-const audienceBase: Record<Plan, number> = {
-  free: 0,
-  plus: 0,
-  premium: 0,
-  ministry: 0,
-};
-
 const defaultMessage = `Olá {{nome}}!\n\nTem novidade no Harmomus 🎵\n\nAcabamos de liberar um novo conteúdo para ajudar você a estudar com mais organização e segurança vocal.\n\nAcesse agora: {{link}}`;
-
-function formatTime(seconds: number) {
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.ceil(seconds / 60);
-  if (minutes < 60) return `${minutes}min`;
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  return rest ? `${hours}h ${rest}min` : `${hours}h`;
-}
 
 export function CampaignBuilder() {
   const [name, setName] = useState("Lançamento de novo kit vocal");
@@ -53,16 +37,6 @@ export function CampaignBuilder() {
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [savedCampaignId, setSavedCampaignId] = useState<string | null>(null);
   const [isQueueing, setIsQueueing] = useState(false);
-
-  const audienceSize = useMemo(
-    () => plans.reduce((sum, plan) => sum + audienceBase[plan], 0),
-    [plans],
-  );
-
-  const averageDelay = Math.max(1, Math.round((minDelay + maxDelay) / 2));
-  const estimatedSeconds = audienceSize * averageDelay + Math.floor(audienceSize / Math.max(1, pauseEvery)) * pauseMinutes * 60;
-  const effectiveDailyLimit = Math.max(1, dailyLimit);
-  const dailyBatches = Math.ceil(audienceSize / effectiveDailyLimit);
 
   const previewMessage = message
     .replaceAll("{{nome}}", "Marcos")
@@ -222,7 +196,7 @@ export function CampaignBuilder() {
                 const active = plans.includes(plan);
                 return (
                   <button key={plan} type="button" onClick={() => togglePlan(plan)} className={`rounded-full border px-4 py-2 text-sm ${active ? "border-cyan-300/50 bg-cyan-500/15 text-cyan-100" : "border-white/10 bg-slate-900 text-slate-300"}`}>
-                    {active ? <Check size={13} className="mr-1 inline" /> : null}{planLabels[plan]} · {audienceBase[plan]}
+                    {active ? <Check size={13} className="mr-1 inline" /> : null}{planLabels[plan]}
                   </button>
                 );
               })}
