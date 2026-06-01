@@ -1,0 +1,389 @@
+"use client";
+
+import { type ChangeEvent, type DragEvent, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { CheckCircle2, FolderUp, Loader2, Music2, Sparkles, UploadCloud, Wand2, XCircle } from "lucide-react";
+
+type ImportStatus = "idle" | "ready" | "uploading" | "success" | "error";
+
+type UploadResult = {
+  kitId: string;
+  kitName: string;
+  slug: string;
+  r2Folder: string;
+  created: boolean;
+  uploadedFiles: number;
+  skippedFiles: number;
+  tones: string[];
+  voices: string[];
+  editUrl: string;
+};
+
+const AUDIO_EXTENSIONS = new Set(["mp3", "wav", "m4a", "aac", "ogg", "flac"]);
+const TONE_RE = /^(A|A#|Bb|B|C|C#|Db|D|D#|Eb|E|F|F#|Gb|G|G#|Ab)$/i;
+
+function normalizePath(value: string) {
+  return value.replace(/\\+/g, "/").split("/").filter(Boolean).join("/");
+}
+
+function cleanName(value: string) {
+  return decodeURIComponent(value)
+    .replace(/\.[a-z0-9]+$/i, "")
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getExtension(filename: string) {
+  return filename.split(".").pop()?.toLowerCase() ?? "";
+}
+
+function isAudioFile(file: File) {
+  return AUDIO_EXTENSIONS.has(getExtension(file.name));
+}
+
+function normalizeVoice(value: string) {
+  const normalized = value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+
+  if (normalized.includes("soprano")) return "soprano";
+  if (normalized.includes("contralto") || normalized.includes("alto")) return "contralto";
+  if (normalized.includes("tenor")) return "tenor";
+  if (normalized.includes("baritono") || normalized.includes("barítono")) return "baritono";
+  if (normalized.includes("baixo")) return "baixo";
+  if (normalized.includes("todos") || normalized.includes("all") || normalized.includes("guia") || normalized.includes("completo")) return "todos";
+  return "todos";
+}
+
+function inferToneAndVoice(file: File) {
+  const relativePath = normalizePath((file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name);
+  const parts = relativePath.split("/").filter(Boolean);
+  const filename = parts[parts.length - 1] || file.name;
+  const filenameWithoutExt = filename.replace(/\.[a-z0-9]+$/i, "");
+  const relativeParts = parts.length > 1 ? parts.slice(1, -1) : [];
+
+  let tone = "Original";
+  let voice = normalizeVoice(filenameWithoutExt);
+
+  const firstFolder = relativeParts[0]?.trim();
+  const secondFolder = relativeParts[1]?.trim();
+
+  if (firstFolder && TONE_RE.test(firstFolder)) tone = firstFolder;
+  if (secondFolder) voice = normalizeVoice(secondFolder);
+
+  const nameTone = filenameWithoutExt.match(/(?:^|\s|-|_)(A#|Bb|B|C#|Db|C|D#|Eb|D|E|F#|Gb|F|G#|Ab|G)(?:\s|-|_|$)/i);
+  if (tone === "Original" && nameTone?.[1]) tone = nameTone[1];
+
+  return { tone, voice };
+}
+
+function inferKitName(files: File[]) {
+  const firstFile = files[0];
+  if (!firstFile) return "";
+
+  const relativePath = normalizePath((firstFile as File & { webkitRelativePath?: string }).webkitRelativePath || firstFile.name);
+  const parts = relativePath.split("/").filter(Boolean);
+  if (parts.length > 1) return cleanName(parts[0]);
+  return cleanName(parts[0] || firstFile.name);
+}
+
+function formatBytes(value: number) {
+  if (!value) return "0 MB";
+  const mb = value / 1024 / 1024;
+  if (mb < 1024) return `${mb.toFixed(1)} MB`;
+  return `${(mb / 1024).toFixed(2)} GB`;
+}
+
+export function KitBulkUpload() {
+  const router = useRouter();
+  const folderInputRef = useRef<HTMLInputElement | null>(null);
+  const filesInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [files, setFiles] = useState<File[]>([]);
+  const [artist, setArtist] = useState("");
+  const [kitNameOverride, setKitNameOverride] = useState("");
+  const [published, setPublished] = useState(false);
+  const [status, setStatus] = useState<ImportStatus>("idle");
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<UploadResult | null>(null);
+
+  const audioFiles = useMemo(() => files.filter(isAudioFile), [files]);
+  const totalSize = useMemo(() => audioFiles.reduce((sum, file) => sum + file.size, 0), [audioFiles]);
+  const detectedKitName = useMemo(() => kitNameOverride.trim() || inferKitName(audioFiles), [kitNameOverride, audioFiles]);
+  const detected = useMemo(() => {
+    const tones = new Set<string>();
+    const voices = new Set<string>();
+
+    for (const file of audioFiles) {
+      const parsed = inferToneAndVoice(file);
+      tones.add(parsed.tone);
+      voices.add(parsed.voice);
+    }
+
+    return {
+      tones: Array.from(tones).sort((a, b) => a.localeCompare(b)),
+      voices: Array.from(voices).sort((a, b) => a.localeCompare(b)),
+    };
+  }, [audioFiles]);
+
+  const canImport = audioFiles.length > 0 && status !== "uploading";
+
+  function receiveFiles(fileList?: FileList | null) {
+    const nextFiles = Array.from(fileList ?? []);
+    setFiles(nextFiles);
+    setResult(null);
+    setError(null);
+    setStatus(nextFiles.length ? "ready" : "idle");
+  }
+
+  function onFolderChange(event: ChangeEvent<HTMLInputElement>) {
+    receiveFiles(event.target.files);
+    event.target.value = "";
+  }
+
+  function onFilesChange(event: ChangeEvent<HTMLInputElement>) {
+    receiveFiles(event.target.files);
+    event.target.value = "";
+  }
+
+  function onDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setIsDragOver(false);
+    receiveFiles(event.dataTransfer.files);
+  }
+
+  async function submitImport() {
+    if (!canImport) return;
+
+    setStatus("uploading");
+    setError(null);
+    setResult(null);
+
+    try {
+      const body = new FormData();
+      body.append("name", detectedKitName);
+      body.append("artist", artist.trim());
+      body.append("published", published ? "true" : "false");
+
+      for (const file of audioFiles) {
+        body.append("files", file);
+        body.append("relativePaths", (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name);
+      }
+
+      const response = await fetch("/api/admin/kits/upload", {
+        method: "POST",
+        body,
+      });
+      const data = await response.json();
+
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.error || "Não foi possível importar o kit.");
+      }
+
+      setResult(data as UploadResult);
+      setStatus("success");
+      router.refresh();
+    } catch (caught) {
+      setStatus("error");
+      setError(caught instanceof Error ? caught.message : "Erro inesperado ao importar kit.");
+    }
+  }
+
+  function resetImport() {
+    setFiles([]);
+    setResult(null);
+    setError(null);
+    setStatus("idle");
+    setKitNameOverride("");
+    setArtist("");
+    setPublished(false);
+  }
+
+  return (
+    <section className="overflow-hidden rounded-3xl border border-gold-500/20 bg-gradient-to-br from-gold-500/10 via-surface to-background p-5 shadow-premium sm:p-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="inline-flex items-center gap-2 rounded-full border border-gold-500/30 bg-gold-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-gold-200">
+            <Sparkles size={14} /> Importação premium
+          </div>
+          <h2 className="mt-4 text-2xl font-semibold tracking-tight text-white">Upload inteligente de kit completo</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">
+            Selecione uma pasta organizada por música, tom e voz. O Harmomus sobe os áudios para o R2, cria o kit, registra os arquivos no banco e entrega tudo pronto para revisão.
+          </p>
+        </div>
+
+        {result ? (
+          <a
+            href={result.editUrl}
+            className="inline-flex items-center justify-center rounded-2xl border border-emerald-400/40 bg-emerald-500/10 px-5 py-3 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-500/20"
+          >
+            Abrir kit importado
+          </a>
+        ) : null}
+      </div>
+
+      <div className="mt-6 grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
+        <div
+          onDragOver={(event) => {
+            event.preventDefault();
+            setIsDragOver(true);
+          }}
+          onDragLeave={() => setIsDragOver(false)}
+          onDrop={onDrop}
+          className={`rounded-3xl border border-dashed p-6 text-center transition ${
+            isDragOver ? "border-gold-300 bg-gold-500/10" : "border-border bg-background/50"
+          }`}
+        >
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl border border-gold-500/30 bg-gold-500/10 text-gold-200">
+            <UploadCloud size={28} />
+          </div>
+          <p className="mt-4 text-base font-semibold text-foreground">Arraste a pasta do kit ou selecione os arquivos</p>
+          <p className="mt-2 text-sm leading-6 text-muted">
+            Melhor formato: <span className="text-gold-200">Nome da música / Tom / voz.mp3</span>. Também aceitamos arquivos soltos com tom e voz no nome.
+          </p>
+
+          <div className="mt-5 flex flex-col justify-center gap-3 sm:flex-row">
+            <button
+              type="button"
+              onClick={() => folderInputRef.current?.click()}
+              disabled={status === "uploading"}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-gold-500/40 bg-gold-500/10 px-5 py-3 text-sm font-semibold text-gold-200 transition hover:bg-gold-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <FolderUp size={16} /> Selecionar pasta
+            </button>
+            <button
+              type="button"
+              onClick={() => filesInputRef.current?.click()}
+              disabled={status === "uploading"}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-border bg-surface-muted px-5 py-3 text-sm font-semibold text-foreground transition hover:border-gold-500/40 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Music2 size={16} /> Selecionar arquivos
+            </button>
+          </div>
+
+          <input
+            ref={folderInputRef}
+            type="file"
+            multiple
+            // @ts-expect-error webkitdirectory is supported by Chromium browsers and ignored elsewhere.
+            webkitdirectory="true"
+            directory="true"
+            className="hidden"
+            onChange={onFolderChange}
+          />
+          <input ref={filesInputRef} type="file" multiple accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac" className="hidden" onChange={onFilesChange} />
+        </div>
+
+        <div className="rounded-3xl border border-border bg-background/50 p-5">
+          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <Wand2 size={17} className="text-gold-300" /> Detecção automática
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-2xl border border-border bg-surface/70 p-4">
+              <p className="text-xs uppercase tracking-[0.18em] text-muted">Áudios válidos</p>
+              <p className="mt-2 text-2xl font-semibold text-white">{audioFiles.length}</p>
+              <p className="mt-1 text-xs text-muted">{formatBytes(totalSize)}</p>
+            </div>
+            <div className="rounded-2xl border border-border bg-surface/70 p-4">
+              <p className="text-xs uppercase tracking-[0.18em] text-muted">Ignorados</p>
+              <p className="mt-2 text-2xl font-semibold text-white">{Math.max(0, files.length - audioFiles.length)}</p>
+              <p className="mt-1 text-xs text-muted">Arquivos não-áudio</p>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            <label className="block text-sm">
+              <span className="text-muted">Nome detectado/editável</span>
+              <input
+                value={detectedKitName}
+                onChange={(event) => setKitNameOverride(event.target.value)}
+                placeholder="Ex: Grandioso És Tu"
+                className="mt-2 w-full rounded-2xl border border-border bg-surface-muted px-4 py-3 text-foreground outline-none ring-gold-400/40 focus:ring"
+              />
+            </label>
+
+            <label className="block text-sm">
+              <span className="text-muted">Artista</span>
+              <input
+                value={artist}
+                onChange={(event) => setArtist(event.target.value)}
+                placeholder="Ex: Harpa Cristã, Foco em Canto..."
+                className="mt-2 w-full rounded-2xl border border-border bg-surface-muted px-4 py-3 text-foreground outline-none ring-gold-400/40 focus:ring"
+              />
+            </label>
+
+            <label className="flex items-center gap-2 rounded-2xl border border-border bg-surface/70 p-4 text-sm text-muted">
+              <input type="checkbox" checked={published} onChange={(event) => setPublished(event.target.checked)} className="h-4 w-4 rounded border-border bg-surface-muted accent-gold-300" />
+              Publicar kit automaticamente após importar
+            </label>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-2xl border border-border bg-surface/70 p-4">
+              <p className="text-xs uppercase tracking-[0.18em] text-gold-300">Tons</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {detected.tones.length ? detected.tones.map((tone) => <span key={tone} className="rounded-full border border-gold-500/30 bg-gold-500/10 px-3 py-1 text-xs text-gold-100">{tone}</span>) : <span className="text-xs text-muted">Aguardando arquivos</span>}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-border bg-surface/70 p-4">
+              <p className="text-xs uppercase tracking-[0.18em] text-cyan-300">Vozes</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {detected.voices.length ? detected.voices.map((voice) => <span key={voice} className="rounded-full border border-cyan-400/30 bg-cyan-400/10 px-3 py-1 text-xs text-cyan-100">{voice}</span>) : <span className="text-xs text-muted">Aguardando arquivos</span>}
+              </div>
+            </div>
+          </div>
+
+          {status === "uploading" ? (
+            <div className="mt-5 rounded-2xl border border-gold-500/30 bg-gold-500/10 p-4">
+              <div className="flex items-center gap-3 text-sm font-semibold text-gold-100">
+                <Loader2 size={18} className="animate-spin" /> Importando kit. Não feche esta janela.
+              </div>
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-background">
+                <div className="h-full w-2/3 animate-pulse rounded-full bg-gold-400" />
+              </div>
+            </div>
+          ) : null}
+
+          {status === "success" && result ? (
+            <div className="mt-5 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">
+              <div className="flex items-center gap-2 font-semibold"><CheckCircle2 size={18} /> Kit importado com sucesso</div>
+              <p className="mt-2 text-xs leading-5 text-emerald-100/80">{result.uploadedFiles} áudio(s) enviados • {result.tones.length} tom(ns) • {result.voices.length} voz(es)</p>
+            </div>
+          ) : null}
+
+          {status === "error" && error ? (
+            <div className="mt-5 rounded-2xl border border-red-400/30 bg-red-500/10 p-4 text-sm text-red-100">
+              <div className="flex items-center gap-2 font-semibold"><XCircle size={18} /> Falha ao importar</div>
+              <p className="mt-2 text-xs leading-5 text-red-100/80">{error}</p>
+            </div>
+          ) : null}
+
+          <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+            <button
+              type="button"
+              onClick={() => void submitImport()}
+              disabled={!canImport}
+              className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl border border-gold-500/40 bg-gold-500/15 px-5 py-3 text-sm font-semibold text-gold-100 transition hover:bg-gold-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {status === "uploading" ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+              {status === "uploading" ? "Importando..." : "Importar kit"}
+            </button>
+            <button
+              type="button"
+              onClick={resetImport}
+              disabled={status === "uploading"}
+              className="inline-flex items-center justify-center rounded-2xl border border-border px-5 py-3 text-sm font-semibold text-muted transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Limpar
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
