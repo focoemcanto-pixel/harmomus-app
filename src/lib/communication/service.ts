@@ -70,7 +70,14 @@ export type CommunicationDashboardData = {
 };
 
 export type AudienceSummary = { total: number; whatsappOptIn: number; emailOptIn: number; withPhone: number; withEmail: number; active30d: number; commercialStatus: Record<string, number> };
-export type AudienceRow = AudienceContact & { current_plan: string | null; commercial_status: string; recent_plays: number; premium_blocks: number; last_activity_at: string | null };
+export type AudienceRow = AudienceContact & {
+  name: string | null;
+  current_plan: string | null;
+  commercial_status: string;
+  recent_plays: number;
+  premium_blocks: number;
+  last_activity_at: string | null;
+};
 
 const ACTIVE_CAMPAIGN_STATUSES = ["scheduled", "processing", "queued", "sending"];
 const PENDING_STATUSES = ["queued", "pending", "fila", "pendente", "processing"];
