@@ -22,6 +22,24 @@ function planName(planSlug?: string | null) {
   return `Harmomus ${String(planSlug || "subscription").replaceAll("_", " ")}`;
 }
 
+function readAttribution() {
+  if (typeof window === "undefined") return {};
+  try {
+    return JSON.parse(window.localStorage.getItem("harmomus_attribution") || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function recordFunnelEvent(eventName: string, payload: Record<string, unknown>, eventId: string) {
+  fetch("/api/meta-events/record", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ eventName, payload, eventId, url: window.location.href }),
+    keepalive: true,
+  }).catch(() => undefined);
+}
+
 export function MetaPurchaseEvent({ planSlug, sessionId, subscriptionStatus, enabled }: MetaPurchaseEventProps) {
   useEffect(() => {
     if (!enabled || !planSlug || typeof window === "undefined") return;
@@ -38,6 +56,7 @@ export function MetaPurchaseEvent({ planSlug, sessionId, subscriptionStatus, ena
       plan: planSlug,
       subscription_status: subscriptionStatus || null,
       event_id: sessionId || undefined,
+      ...readAttribution(),
     };
 
     const fbq = (window as any).fbq;
@@ -45,6 +64,7 @@ export function MetaPurchaseEvent({ planSlug, sessionId, subscriptionStatus, ena
 
     fbq("track", "Purchase", payload);
     fbq("trackCustom", `Purchase_${planSlug}`, payload);
+    if (planSlug === "premium") recordFunnelEvent("Purchase_premium", payload, sessionId || eventKey);
     sessionStorage.setItem(eventKey, "1");
   }, [enabled, planSlug, sessionId, subscriptionStatus]);
 

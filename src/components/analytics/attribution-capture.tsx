@@ -30,6 +30,15 @@ function buildCleanUrl(url: URL) {
   return `${clean.pathname}${query ? `?${query}` : ""}${clean.hash}`;
 }
 
+function recordFunnelEvent(eventName: string, payload: Record<string, unknown>, eventId: string) {
+  fetch("/api/meta-events/record", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ eventName, payload, eventId, url: window.location.href }),
+    keepalive: true,
+  }).catch(() => undefined);
+}
+
 function trackCompleteRegistration(searchParams: URLSearchParams) {
   if (searchParams.get("meta_complete_registration") !== "1") return;
 
@@ -49,6 +58,7 @@ function trackCompleteRegistration(searchParams: URLSearchParams) {
 
   fbq("track", "CompleteRegistration", payload);
   fbq("trackCustom", "CompleteRegistration_first_login", payload);
+  recordFunnelEvent("CompleteRegistration_first_login", payload, storageKey);
   window.localStorage.setItem(storageKey, new Date().toISOString());
 }
 

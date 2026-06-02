@@ -19,17 +19,36 @@ function planValue(planSlug: SubscribeButtonProps["planSlug"]) {
   return 0;
 }
 
+function readStoredAttribution() {
+  if (typeof window === "undefined") return {};
+  try {
+    return JSON.parse(window.localStorage.getItem("harmomus_attribution") || "{}");
+  } catch {
+    return {};
+  }
+}
+
 function readAttributionParams() {
   if (typeof window === "undefined") return new URLSearchParams();
   const params = new URLSearchParams(window.location.search);
+  const stored = readStoredAttribution() as Record<string, unknown>;
   const result = new URLSearchParams();
 
   for (const key of ATTRIBUTION_KEYS) {
-    const value = params.get(key);
+    const value = params.get(key) ?? (typeof stored[key] === "string" ? stored[key] : null);
     if (value) result.set(key, value);
   }
 
   return result;
+}
+
+function recordFunnelEvent(eventName: string, payload: Record<string, unknown>) {
+  fetch("/api/meta-events/record", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ eventName, payload, eventId: `${eventName}_${Date.now()}`, url: window.location.href }),
+    keepalive: true,
+  }).catch(() => undefined);
 }
 
 function trackInitiateCheckout(planSlug: SubscribeButtonProps["planSlug"]) {
@@ -44,10 +63,12 @@ function trackInitiateCheckout(planSlug: SubscribeButtonProps["planSlug"]) {
     currency: "BRL",
     value: planValue(planSlug),
     plan: planSlug,
+    ...(readStoredAttribution() as Record<string, unknown>),
   };
 
   fbq("track", "InitiateCheckout", payload);
   fbq("trackCustom", `InitiateCheckout_${planSlug}`, payload);
+  if (planSlug === "premium") recordFunnelEvent("InitiateCheckout_premium", payload);
 }
 
 export function SubscribeButton({ planSlug, label, className }: SubscribeButtonProps) {

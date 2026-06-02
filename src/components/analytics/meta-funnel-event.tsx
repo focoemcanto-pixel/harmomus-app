@@ -18,6 +18,15 @@ function readAttribution() {
   }
 }
 
+function recordFunnelEvent(eventName: string, payload: Record<string, unknown>, dedupeKey: string) {
+  fetch("/api/meta-events/record", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ eventName, payload, eventId: dedupeKey, url: window.location.href }),
+    keepalive: true,
+  }).catch(() => undefined);
+}
+
 export function MetaFunnelEvent({ eventName, dedupeKey, params, customEventName }: MetaFunnelEventProps) {
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -37,7 +46,10 @@ export function MetaFunnelEvent({ eventName, dedupeKey, params, customEventName 
     };
 
     fbq("track", eventName, payload);
-    if (customEventName) fbq("trackCustom", customEventName, payload);
+    if (customEventName) {
+      fbq("trackCustom", customEventName, payload);
+      recordFunnelEvent(customEventName, payload, `${eventName}_${dedupeKey}`);
+    }
     window.localStorage.setItem(storageKey, new Date().toISOString());
   }, [eventName, dedupeKey, params, customEventName]);
 
