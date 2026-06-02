@@ -1,4 +1,5 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { normalizeWebhookPhone } from "@/lib/webhooks/recipient";
 
 export type EnsureUserAccessInput = {
   id: string;
@@ -20,11 +21,7 @@ function normalizeName(input: EnsureUserAccessInput) {
 }
 
 function normalizePhone(value?: string | null) {
-  const digits = String(value ?? "").replace(/\D/g, "");
-  if (!digits) return null;
-  if (digits.startsWith("55") && (digits.length === 12 || digits.length === 13)) return digits;
-  if (digits.length === 10 || digits.length === 11) return `55${digits}`;
-  return digits;
+  return normalizeWebhookPhone(value);
 }
 
 function normalizeRole(existingRole?: string | null) {

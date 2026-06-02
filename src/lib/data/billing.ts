@@ -1,6 +1,7 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createCheckoutSession, createCustomerPortalSession, getOrCreateCustomer, updateSubscription } from "@/lib/stripe/client";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
+import { normalizeWebhookPhone, resolveWebhookRecipientForUser } from "@/lib/webhooks/recipient";
 
 type CheckoutMetadata = Record<string, string | null | undefined>;
 
@@ -277,6 +278,26 @@ async function savePendingStripeSubscription(supabase: any, input: { userId: str
   }
 }
 
+
+async function getCheckoutUserMetadata(supabase: any, userId: string, fallbackEmail: string, fallbackMetadata?: CheckoutMetadata | null) {
+  const recipient = await resolveWebhookRecipientForUser(supabase, userId, {
+    email: fallbackEmail,
+    metadata: fallbackMetadata ?? {},
+    phone: fallbackMetadata?.phone,
+    full_name: fallbackMetadata?.full_name,
+    username: fallbackMetadata?.username,
+  });
+
+  const fallbackFullName = String(fallbackMetadata?.full_name ?? "").trim() || undefined;
+  const fallbackUsername = String(fallbackMetadata?.username ?? "").trim() || undefined;
+
+  return {
+    fullName: recipient.name ?? fallbackFullName,
+    username: recipient.username ?? fallbackUsername,
+    phone: normalizeWebhookPhone(recipient.phone ?? fallbackMetadata?.phone),
+  };
+}
+
 async function createStripeCheckoutWithSupabase(
   supabase: any,
   userId: string,
@@ -290,7 +311,7 @@ async function createStripeCheckoutWithSupabase(
   const [{ data: existing }, plan, trialAlreadyUsed] = await Promise.all([
     supabase
       .from("subscriptions")
-      .select("*")
+      .select("*, plans(slug)")
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(1)
@@ -300,6 +321,8 @@ async function createStripeCheckoutWithSupabase(
   ]);
 
   const attribution = pickAttribution(metadata);
+  const userMetadata = await getCheckoutUserMetadata(supabase, userId, email, metadata);
+  const previousPlanSlug = existing?.plans?.slug ?? null;
   const customerId = await getOrCreateCustomer({
     email,
     userId,
@@ -318,11 +341,15 @@ async function createStripeCheckoutWithSupabase(
     cancelUrl: `${base}/checkout/cancelado`,
     trialDays,
     metadata: {
+      ...metadata,
       user_id: userId,
       email,
+      phone: userMetadata.phone,
+      full_name: userMetadata.fullName,
+      username: userMetadata.username,
       plan_slug: plan.slug,
+      previous_plan_slug: previousPlanSlug,
       trial_already_used: trialAlreadyUsed ? "true" : "false",
-      ...metadata,
     },
   });
 

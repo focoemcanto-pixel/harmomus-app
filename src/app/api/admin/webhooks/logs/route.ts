@@ -18,6 +18,7 @@ export async function GET(request: Request) {
   const success = searchParams.get("success");
   const event = String(searchParams.get("event") ?? "").trim();
   const endpoint = String(searchParams.get("endpoint") ?? "").trim();
+  const q = String(searchParams.get("q") ?? "").trim();
   const limit = clampLimit(searchParams.get("limit"));
 
   const admin = createSupabaseAdminClient() as any;
@@ -30,6 +31,20 @@ export async function GET(request: Request) {
   if (success === "true" || success === "false") query = query.eq("success", success === "true");
   if (event) query = query.eq("event", event);
   if (endpoint) query = query.eq("endpoint_id", endpoint);
+  if (q) {
+    const normalized = q.replace(/[%_,()]/g, "");
+    query = query.or([
+      `event.ilike.%${normalized}%`,
+      `delivery_id.ilike.%${normalized}%`,
+      `error_message.ilike.%${normalized}%`,
+      `request_body->>email.ilike.%${normalized}%`,
+      `request_body->>phone.ilike.%${normalized}%`,
+      `request_body->recipient->>email.ilike.%${normalized}%`,
+      `request_body->recipient->>phone.ilike.%${normalized}%`,
+      `request_body->customer->>email.ilike.%${normalized}%`,
+      `request_body->customer->>phone.ilike.%${normalized}%`,
+    ].join(","));
+  }
 
   const [{ data, error, count }, { data: endpoints, error: endpointError }] = await Promise.all([
     query,

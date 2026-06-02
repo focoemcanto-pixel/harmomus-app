@@ -153,6 +153,13 @@ async function dispatchWebhookEventUnsafe(input: DispatchWebhookInput) {
 
   for (const endpoint of matchedEndpoints) {
     const payload = buildLivePayload(input);
+    const missingPaidPhoneDiagnostic = !normalizePhone(input.recipient?.phone) && /^(plan\.|upgrade\.|downgrade\.|subscription\.(canceled|payment_failed))/.test(input.event)
+      ? "missing_phone_for_paid_webhook"
+      : null;
+    if (missingPaidPhoneDiagnostic) {
+      (payload.data as Record<string, unknown>).diagnostic = (payload.data as Record<string, unknown>).diagnostic ?? missingPaidPhoneDiagnostic;
+      (payload as Record<string, unknown>).diagnostic = missingPaidPhoneDiagnostic;
+    }
     const payloadString = JSON.stringify(payload);
     const timestamp = Math.floor(Date.now() / 1000);
     const signature = signWebhookPayload(payloadString, String(endpoint.secret), timestamp);
@@ -196,7 +203,7 @@ async function dispatchWebhookEventUnsafe(input: DispatchWebhookInput) {
           response_body: responseBody.slice(0, 5000),
           duration_ms: Date.now() - start,
           retry_attempt: retryAttempt,
-          error_message: null,
+          error_message: response.ok ? missingPaidPhoneDiagnostic : `Webhook retornou status ${response.status}${missingPaidPhoneDiagnostic ? `; ${missingPaidPhoneDiagnostic}` : ""}`,
         });
 
         await saveCommunicationLog(admin, {
@@ -204,7 +211,7 @@ async function dispatchWebhookEventUnsafe(input: DispatchWebhookInput) {
           status: response.ok ? "success" : "failed",
           payload,
           responsePayload: { status: response.status, body: responseBody.slice(0, 1000), endpoint_id: endpoint.id },
-          errorMessage: response.ok ? null : `Webhook retornou status ${response.status}`,
+          errorMessage: response.ok ? missingPaidPhoneDiagnostic : `Webhook retornou status ${response.status}${missingPaidPhoneDiagnostic ? `; ${missingPaidPhoneDiagnostic}` : ""}`,
         });
 
         if (response.ok) break;
@@ -226,7 +233,7 @@ async function dispatchWebhookEventUnsafe(input: DispatchWebhookInput) {
           response_body: null,
           duration_ms: Date.now() - start,
           retry_attempt: retryAttempt,
-          error_message: error instanceof Error ? error.message : "Falha desconhecida",
+          error_message: `${error instanceof Error ? error.message : "Falha desconhecida"}${missingPaidPhoneDiagnostic ? `; ${missingPaidPhoneDiagnostic}` : ""}`,
         });
 
         await saveCommunicationLog(admin, {
@@ -234,7 +241,7 @@ async function dispatchWebhookEventUnsafe(input: DispatchWebhookInput) {
           status: "failed",
           payload,
           responsePayload: null,
-          errorMessage: error instanceof Error ? error.message : "Falha desconhecida",
+          errorMessage: `${error instanceof Error ? error.message : "Falha desconhecida"}${missingPaidPhoneDiagnostic ? `; ${missingPaidPhoneDiagnostic}` : ""}`,
         });
       }
     }

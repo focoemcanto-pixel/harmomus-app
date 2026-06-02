@@ -219,7 +219,7 @@ async function createConfirmedMinistryMemberAccount(input: {
     throw new Error(message);
   }
 
-  await ensureUserAccess({ id: created.user.id, email: input.email, fullName: input.fullName, selectedPlanSlug: "free" });
+  await ensureUserAccess({ id: created.user.id, email: input.email, fullName: input.fullName, phone: input.phone, selectedPlanSlug: "free" });
 
   const { error: memberError } = await admin
     .from("ministry_members")
@@ -281,7 +281,7 @@ async function createPaidCheckoutAccount(input: {
       if (profileLookupError) throw new Error(profileLookupError.message);
 
       if (existingProfile?.id && String(existingProfile.onboarding_step ?? "") === "waiting_payment") {
-        await ensureUserAccess({ id: existingProfile.id, email: input.email, fullName: input.fullName, selectedPlanSlug: input.plan });
+        await ensureUserAccess({ id: existingProfile.id, email: input.email, fullName: input.fullName, phone: input.phone, selectedPlanSlug: input.plan });
 
         const { error: retryProfileError } = await admin
           .from("profiles")
@@ -302,7 +302,7 @@ async function createPaidCheckoutAccount(input: {
     throw new Error(message);
   }
 
-  await ensureUserAccess({ id: created.user.id, email: input.email, fullName: input.fullName, selectedPlanSlug: input.plan });
+  await ensureUserAccess({ id: created.user.id, email: input.email, fullName: input.fullName, phone: input.phone, selectedPlanSlug: input.plan });
 
   const { error: profileError } = await admin
     .from("profiles")
@@ -355,7 +355,7 @@ export async function POST(request: Request) {
   if (isPaidPlan(plan)) {
     try {
       const userId = await withTimeout(createPaidCheckoutAccount({ email, password: pass, fullName, username, phone, plan, origin }), 5000, "createPaidCheckoutAccount");
-      const session = await withTimeout(startStripeCheckoutForSignup(userId, email, plan, origin), 10000, "startStripeCheckoutForSignup");
+      const session = await withTimeout(startStripeCheckoutForSignup(userId, email, plan, origin, { phone, full_name: fullName, username }), 10000, "startStripeCheckoutForSignup");
       return NextResponse.redirect(session.url, 303);
     } catch (error) {
       const mapped = mapSupabaseError(error instanceof Error ? error.message : "Não foi possível iniciar o checkout agora.");
@@ -382,7 +382,7 @@ export async function POST(request: Request) {
   if (!userId) return fail("Sua conta foi criada, mas não conseguimos concluir o acesso automaticamente. Tente entrar novamente.", "form");
 
   try {
-    await withTimeout(ensureUserAccess({ id: userId, email, fullName, selectedPlanSlug: plan }), 5000, "ensureUserAccess");
+    await withTimeout(ensureUserAccess({ id: userId, email, fullName, phone, selectedPlanSlug: plan }), 5000, "ensureUserAccess");
   } catch (accessError) {
     console.error("[signup] Failed to prepare local user access", accessError);
     return fail(accessError instanceof Error ? accessError.message : "Não foi possível preparar sua conta agora.", "form");
