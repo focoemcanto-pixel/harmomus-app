@@ -30,11 +30,26 @@ function isWasenderApi(apiUrl: string) {
   }
 }
 
-function buildProviderPayload({ apiUrl, phone, text, instance, createdAt }: { apiUrl: string; phone: string; text: string; instance: string; createdAt: string }) {
+function buildProviderPayload({
+  apiUrl,
+  phone,
+  text,
+  mediaUrl,
+  instance,
+  createdAt,
+}: {
+  apiUrl: string;
+  phone: string;
+  text: string;
+  mediaUrl: string;
+  instance: string;
+  createdAt: string;
+}) {
   if (isWasenderApi(apiUrl)) {
     return {
       to: phone,
       text,
+      ...(mediaUrl ? { mediaUrl, imageUrl: mediaUrl, caption: text } : {}),
     };
   }
 
@@ -47,6 +62,15 @@ function buildProviderPayload({ apiUrl, phone, text, instance, createdAt }: { ap
     text,
     message: text,
     mensagem: text,
+    ...(mediaUrl
+      ? {
+          mediaUrl,
+          media_url: mediaUrl,
+          imageUrl: mediaUrl,
+          image: mediaUrl,
+          caption: text,
+        }
+      : {}),
     test: true,
     event: "communication.whatsapp.test",
     source: "harmomus.communication.settings",
@@ -59,36 +83,74 @@ export async function POST(request: Request) {
   if (response) return response;
 
   const body = await request.json().catch(() => null);
-  if (!body) return NextResponse.json({ error: "Payload inválido." }, { status: 400 });
+  if (!body)
+    return NextResponse.json({ error: "Payload inválido." }, { status: 400 });
 
-  const phone = normalizePhone(body.phone ?? body.to ?? body.number ?? body.whatsapp);
-  const text = sanitizeText(body.message ?? body.text ?? body.mensagem) || "Teste de WhatsApp Harmomus.";
+  const phone = normalizePhone(
+    body.phone ?? body.to ?? body.number ?? body.whatsapp,
+  );
+  const text =
+    sanitizeText(body.message ?? body.text ?? body.mensagem) ||
+    "Teste de WhatsApp Harmomus.";
+  const mediaUrl = sanitizeText(
+    body.mediaUrl ?? body.media_url ?? body.imageUrl ?? body.image,
+  );
 
   if (!validDdiDddPhone(phone)) {
-    return NextResponse.json({ error: "Informe um WhatsApp com DDI + DDD + número." }, { status: 400 });
+    return NextResponse.json(
+      { error: "Informe um WhatsApp com DDI + DDD + número." },
+      { status: 400 },
+    );
   }
 
-  const { data: channel, error: channelError } = await getActiveChannel(admin, "whatsapp");
+  const { data: channel, error: channelError } = await getActiveChannel(
+    admin,
+    "whatsapp",
+  );
   if (channelError) {
-    if (isMissingCommunicationTable(channelError)) return marketingTableErrorResponse();
+    if (isMissingCommunicationTable(channelError))
+      return marketingTableErrorResponse();
     return NextResponse.json({ error: channelError.message }, { status: 500 });
   }
-  if (!channel) return NextResponse.json({ error: "Canal WhatsApp ativo não configurado." }, { status: 400 });
+  if (!channel)
+    return NextResponse.json(
+      { error: "Canal WhatsApp ativo não configurado." },
+      { status: 400 },
+    );
 
   const config = channel.config ?? {};
   const apiUrl = sanitizeText(config.apiUrl);
   const apiToken = sanitizeText(config.apiToken);
   const instance = sanitizeText(config.instance);
 
-  if (!apiUrl) return NextResponse.json({ error: "URL do provedor WhatsApp ausente." }, { status: 400 });
+  if (!apiUrl)
+    return NextResponse.json(
+      { error: "URL do provedor WhatsApp ausente." },
+      { status: 400 },
+    );
   if (isWasenderApi(apiUrl) && !apiToken) {
-    return NextResponse.json({ error: "Token da Wasender ausente. Copie a API key da aba Credentials e salve nas configurações." }, { status: 400 });
+    return NextResponse.json(
+      {
+        error:
+          "Token da Wasender ausente. Copie a API key da aba Credentials e salve nas configurações.",
+      },
+      { status: 400 },
+    );
   }
 
   const createdAt = new Date().toISOString();
-  const payload = buildProviderPayload({ apiUrl, phone, text, instance, createdAt });
+  const payload = buildProviderPayload({
+    apiUrl,
+    phone,
+    text,
+    mediaUrl,
+    instance,
+    createdAt,
+  });
 
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
   if (apiToken) {
     headers.Authorization = `Bearer ${apiToken}`;
     headers["X-Api-Key"] = apiToken;
@@ -121,7 +183,13 @@ export async function POST(request: Request) {
         payload: logPayload,
         response: logResponse,
       });
-      return NextResponse.json({ error: `Provedor WhatsApp retornou HTTP ${providerResponse.status}.`, response: responseBody }, { status: 502 });
+      return NextResponse.json(
+        {
+          error: `Provedor WhatsApp retornou HTTP ${providerResponse.status}.`,
+          response: responseBody,
+        },
+        { status: 502 },
+      );
     }
 
     await writeMarketingLog({
@@ -134,9 +202,18 @@ export async function POST(request: Request) {
       response: logResponse,
     });
 
-    return NextResponse.json({ data: { ok: true, status: providerResponse.status, response: responseBody } });
+    return NextResponse.json({
+      data: {
+        ok: true,
+        status: providerResponse.status,
+        response: responseBody,
+      },
+    });
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "Falha ao chamar provedor WhatsApp.";
+    const errorMessage =
+      error instanceof Error
+        ? error.message
+        : "Falha ao chamar provedor WhatsApp.";
     await writeMarketingLog({
       admin,
       channel: "whatsapp",
