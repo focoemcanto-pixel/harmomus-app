@@ -28,7 +28,7 @@ function isEmailNotConfirmedError(error: unknown) {
   );
 }
 
-async function autoConfirmUserByEmail(email: string) {
+async function unlockLoginForPendingEmail(email: string) {
   const admin = createSupabaseAdminClient() as any;
   const { data: profile } = await admin
     .from("profiles")
@@ -43,9 +43,18 @@ async function autoConfirmUserByEmail(email: string) {
   });
 
   if (error) {
-    console.error("[auth.login] falha ao confirmar e-mail automaticamente", error);
+    console.error("[auth.login] falha ao destravar login de e-mail pendente", error);
     return false;
   }
+
+  await admin
+    .from("profiles")
+    .update({
+      onboarding_status: "pending_email_confirmation",
+      onboarding_step: "email_confirmation_reminder",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", profile.id);
 
   return true;
 }
@@ -104,8 +113,8 @@ export async function POST(request: Request) {
   let { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
 
   if (signInError && isEmailNotConfirmedError(signInError)) {
-    const confirmed = await autoConfirmUserByEmail(email);
-    if (confirmed) {
+    const unlocked = await unlockLoginForPendingEmail(email);
+    if (unlocked) {
       const retry = await supabase.auth.signInWithPassword({ email, password });
       data = retry.data;
       signInError = retry.error;
