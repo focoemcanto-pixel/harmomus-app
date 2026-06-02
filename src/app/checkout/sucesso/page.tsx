@@ -9,6 +9,7 @@ import { mapStripeStatus } from "@/lib/stripe/status";
 
 const WHATSAPP_PREMIUM_URL = "https://chat.whatsapp.com/FNU6Xl5t6qD0VfGA2EQ0IW?mode=gi_t";
 const ACCESS_READY_STATUSES = new Set(["active", "trialing"]);
+const ATTRIBUTION_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "fbclid", "gclid"] as const;
 
 type CheckoutSuccessProps = {
   searchParams?: Promise<{ session_id?: string }> | { session_id?: string };
@@ -31,6 +32,21 @@ function normalize(value: unknown) {
 
 function normalizeEmail(value: unknown) {
   return String(value ?? "").trim().toLowerCase() || null;
+}
+
+function cleanAttributionValue(value: unknown) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  return text.slice(0, 500);
+}
+
+function pickStripeAttribution(session: any, subscription: any) {
+  const attribution: Record<string, string> = {};
+  for (const key of ATTRIBUTION_KEYS) {
+    const value = cleanAttributionValue(session?.metadata?.[key] ?? subscription?.metadata?.[key]);
+    if (value) attribution[key] = value;
+  }
+  return attribution;
 }
 
 function getPlanSlugFromPrice(priceId: string | null) {
@@ -146,6 +162,7 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
     const metadataUserId = normalize(session?.metadata?.user_id) ?? normalize(subscription?.metadata?.user_id);
     const customerId = getStripeId(subscription?.customer) ?? getCustomerIdFromSession(session);
     const customerEmail = normalizeEmail(session?.metadata?.email) ?? getCustomerEmailFromSession(session);
+    const attribution = pickStripeAttribution(session, subscription);
     const supabase = await createClient();
     let confirmationEmailResent = false;
 
@@ -191,6 +208,7 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
       trial_ends_at: trialEndsAt,
       next_billing_at: currentPeriodEnd,
       auto_renew: !Boolean(subscription.cancel_at_period_end),
+      ...attribution,
       last_webhook_event: "checkout.success_page_sync",
       updated_at: now,
     };
