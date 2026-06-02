@@ -22,6 +22,38 @@ function responseSnapshot(status: number, body: unknown) {
   return { status, body };
 }
 
+function isWasenderApi(apiUrl: string) {
+  try {
+    return new URL(apiUrl).hostname.replace(/^www\./, "") === "wasenderapi.com";
+  } catch {
+    return false;
+  }
+}
+
+function buildProviderPayload({ apiUrl, phone, text, instance, createdAt }: { apiUrl: string; phone: string; text: string; instance: string; createdAt: string }) {
+  if (isWasenderApi(apiUrl)) {
+    return {
+      to: phone,
+      text,
+    };
+  }
+
+  return {
+    to: phone,
+    phone,
+    number: phone,
+    whatsapp: phone,
+    instance,
+    text,
+    message: text,
+    mensagem: text,
+    test: true,
+    event: "communication.whatsapp.test",
+    source: "harmomus.communication.settings",
+    created_at: createdAt,
+  };
+}
+
 export async function POST(request: Request) {
   const { admin, response } = await requireAdmin();
   if (response) return response;
@@ -49,22 +81,12 @@ export async function POST(request: Request) {
   const instance = sanitizeText(config.instance);
 
   if (!apiUrl) return NextResponse.json({ error: "URL do provedor WhatsApp ausente." }, { status: 400 });
+  if (isWasenderApi(apiUrl) && !apiToken) {
+    return NextResponse.json({ error: "Token da Wasender ausente. Copie a API key da aba Credentials e salve nas configurações." }, { status: 400 });
+  }
 
   const createdAt = new Date().toISOString();
-  const payload = {
-    to: phone,
-    phone,
-    number: phone,
-    whatsapp: phone,
-    instance,
-    text,
-    message: text,
-    mensagem: text,
-    test: true,
-    event: "communication.whatsapp.test",
-    source: "harmomus.communication.settings",
-    created_at: createdAt,
-  };
+  const payload = buildProviderPayload({ apiUrl, phone, text, instance, createdAt });
 
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (apiToken) {
