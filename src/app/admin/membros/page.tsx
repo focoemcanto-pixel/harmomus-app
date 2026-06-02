@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { revalidatePath } from "next/cache";
 import {
   AlertTriangle,
   ArrowRight,
@@ -8,15 +9,18 @@ import {
   Search,
   Sparkles,
   Target,
+  Trash2,
   TrendingUp,
   Users,
 } from "lucide-react";
 
+import { ConfirmSubmitButton } from "@/components/admin/confirm-submit-button";
 import { PageHeader } from "@/components/admin/page-header";
 import { getMemberOperationalSummaries, getMembers } from "@/lib/data/members";
 import { formatDateTimeBR } from "@/lib/format-date-time-br";
 import { getPlans } from "@/lib/data/plans";
-import { calculateMemberHealth, getMemberDiagnosis, getOperationalFlags } from "@/lib/member-health";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { getOperationalFlags } from "@/lib/member-health";
 
 type SearchParams = Promise<{ q?: string; plan?: string; status?: string; operational?: string }>;
 type Member = Awaited<ReturnType<typeof getMembers>>[number];
@@ -154,30 +158,6 @@ function stagePillClass(stage: JourneyStage) {
   return "bg-cyan-500/10 text-cyan-200 border-cyan-400/30";
 }
 
-function healthSeverityClass(severity: "success" | "info" | "warning" | "critical") {
-  if (severity === "success") return "border-emerald-400/40 bg-emerald-500/10 text-emerald-200";
-  if (severity === "info") return "border-sky-400/40 bg-sky-500/10 text-sky-200";
-  if (severity === "warning") return "border-amber-400/40 bg-amber-500/10 text-amber-200";
-  return "border-red-400/40 bg-red-500/10 text-red-200";
-}
-
-function flagLabel(flag: string) {
-  const labels: Record<string, string> = {
-    pending: "Pending",
-    profile_not_synced: "Profile não sincronizado",
-    no_login: "Sem login registrado",
-    no_real_access: "Sem acesso real",
-    no_stripe_subscription: "Sem sub Stripe",
-    failed_communication: "Falha comunicação",
-    no_kit_access: "Sem kit",
-    no_audio_access: "Sem áudio",
-    migrated_from_pms: "PMS",
-    healthy: "Saudável",
-    critical: "Crítico",
-  };
-  return labels[flag] ?? flag;
-}
-
 const operationalFilters = [
   { value: "", label: "Todos" },
   { value: "healthy", label: "Saudáveis" },
@@ -203,6 +183,15 @@ function StatCard({ label, value, detail, icon: Icon }: { label: string; value: 
   );
 }
 
+async function safeDelete(query: PromiseLike<{ error: any }>) {
+  try {
+    const { error } = await query;
+    if (error) console.warn("[admin.membros] limpeza auxiliar ignorada", error.message ?? error);
+  } catch (error) {
+    console.warn("[admin.membros] limpeza auxiliar ignorada", error);
+  }
+}
+
 export default async function AdminMembrosPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
   const [members, plans] = await Promise.all([
@@ -211,13 +200,36 @@ export default async function AdminMembrosPage({ searchParams }: { searchParams:
   ]);
   const operationalSummaries = await getMemberOperationalSummaries(members, { limit: 200 });
 
+  async function deleteMember(formData: FormData) {
+    "use server";
+    const userId = String(formData.get("userId") ?? "").trim();
+    if (!userId) return;
+
+    const supabase = createSupabaseAdminClient() as any;
+    const { data: playlists } = await supabase.from("playlists").select("id").eq("user_id", userId);
+    const playlistIds = (playlists ?? []).map((playlist: any) => playlist.id).filter(Boolean);
+
+    if (playlistIds.length) await safeDelete(supabase.from("playlist_items").delete().in("playlist_id", playlistIds));
+    await safeDelete(supabase.from("playlists").delete().eq("user_id", userId));
+    await safeDelete(supabase.from("kit_favorites").delete().eq("user_id", userId));
+    await safeDelete(supabase.from("premium_requests").delete().eq("user_id", userId));
+    await safeDelete(supabase.from("audio_access_logs").delete().eq("user_id", userId));
+    await safeDelete(supabase.from("kit_access_logs").delete().eq("user_id", userId));
+    await safeDelete(supabase.from("communication_logs").delete().eq("user_id", userId));
+    await safeDelete(supabase.from("subscriptions").delete().eq("user_id", userId));
+    await safeDelete(supabase.from("profiles").delete().eq("id", userId));
+
+    const { error: authError } = await supabase.auth.admin.deleteUser(userId);
+    if (authError) console.warn("[admin.membros] usuário não removido do Auth", authError.message ?? authError);
+
+    revalidatePath("/admin/membros");
+  }
+
   const journeys = members
     .map((member) => {
       const operationalJourney = operationalSummaries.get(member.profile.id) ?? null;
-      const health = calculateMemberHealth(member, operationalJourney);
       const flags = getOperationalFlags(member, operationalJourney);
-      const diagnosis = getMemberDiagnosis(member, operationalJourney);
-      return { member, journey: getJourney(member), operationalJourney, health, flags, diagnosis };
+      return { member, journey: getJourney(member), flags };
     })
     .filter((item) => {
       const filter = params.operational ?? "";
@@ -301,7 +313,7 @@ export default async function AdminMembrosPage({ searchParams }: { searchParams:
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-lg font-semibold text-white">Mapa dos membros</h2>
-              <p className="text-sm text-muted">Cada linha mostra onde o lead/cliente está parado e qual ação tomar.</p>
+              <p className="text-sm text-muted">A saúde operacional foi movida para dentro do diagnóstico para deixar a lista mais limpa.</p>
             </div>
             <span className="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-500/10 px-3 py-1 text-xs text-cyan-100">
               <Sparkles className="h-3.5 w-3.5" /> Jornada enriquecida
@@ -310,14 +322,13 @@ export default async function AdminMembrosPage({ searchParams }: { searchParams:
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1450px] text-sm">
+          <table className="w-full min-w-[1220px] text-sm">
             <thead className="text-left text-xs uppercase tracking-wide text-muted">
               <tr className="border-b border-border/70">
                 <th className="p-4 font-medium">Membro</th>
                 <th className="font-medium">Plano</th>
                 <th className="font-medium">Etapa da jornada</th>
                 <th className="font-medium">Diagnóstico</th>
-                <th className="font-medium">Saúde operacional</th>
                 <th className="font-medium">Gateway</th>
                 <th className="font-medium">Stripe</th>
                 <th className="font-medium">Próxima cobrança</th>
@@ -325,7 +336,7 @@ export default async function AdminMembrosPage({ searchParams }: { searchParams:
               </tr>
             </thead>
             <tbody>
-              {journeys.map(({ member, journey, health, flags, diagnosis }) => {
+              {journeys.map(({ member, journey }) => {
                 const stripeCustomer = member.subscription?.stripe_customer_id ?? (member.subscription as any)?.gateway_customer_id;
                 const stripeSub = member.subscription?.stripe_subscription_id ?? (member.subscription as any)?.gateway_subscription_id;
                 return (
@@ -349,22 +360,8 @@ export default async function AdminMembrosPage({ searchParams }: { searchParams:
                           {journey.health === "success" ? <BadgeCheck className="mt-0.5 h-4 w-4" /> : <AlertTriangle className="mt-0.5 h-4 w-4" />}
                           <div>
                             <p className="text-xs font-semibold">{journey.nextAction}</p>
-                            <p className="mt-1 text-[11px] opacity-80">Abra detalhes para ver timeline, logs e evidências.</p>
+                            <p className="mt-1 text-[11px] opacity-80">Abra o diagnóstico para ver saúde operacional, timeline, logs e evidências.</p>
                           </div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="align-top">
-                      <div className={`max-w-[260px] rounded-2xl border p-3 ${healthSeverityClass(health.severity)}`}>
-                        <div className="flex items-start gap-2">
-                          {health.severity === "success" ? <BadgeCheck className="mt-0.5 h-4 w-4" /> : <AlertTriangle className="mt-0.5 h-4 w-4" />}
-                          <div>
-                            <p className="text-xs font-semibold">{health.score}/100 · {health.label}</p>
-                            <p className="mt-1 text-[11px] opacity-80">{diagnosis.title}</p>
-                          </div>
-                        </div>
-                        <div className="mt-3 flex flex-wrap gap-1.5">
-                          {flags.slice(0, 3).map((flag) => <span key={flag} className="rounded-full border border-white/10 bg-black/20 px-2 py-0.5 text-[10px] text-zinc-200">{flagLabel(flag)}</span>)}
                         </div>
                       </div>
                     </td>
@@ -382,6 +379,12 @@ export default async function AdminMembrosPage({ searchParams }: { searchParams:
                         <Link href={journey.actionHref} className="inline-flex items-center justify-center rounded-xl border border-gold-400/30 bg-gold-500/10 px-3 py-2 text-xs font-medium text-gold-200 transition hover:bg-gold-500/20">
                           {journey.nextAction}
                         </Link>
+                        <form action={deleteMember}>
+                          <input type="hidden" name="userId" value={member.profile.id} />
+                          <ConfirmSubmitButton message={`Excluir definitivamente o membro ${member.profile.email ?? member.profile.full_name ?? member.profile.id}? Esta ação remove perfil, assinatura, favoritos, playlists e o login do Auth.`} className="inline-flex w-full items-center justify-center gap-1 rounded-xl border border-red-400/35 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-200 transition hover:bg-red-500/20">
+                            <Trash2 className="h-3.5 w-3.5" /> Excluir
+                          </ConfirmSubmitButton>
+                        </form>
                       </div>
                     </td>
                   </tr>
@@ -389,7 +392,7 @@ export default async function AdminMembrosPage({ searchParams }: { searchParams:
               })}
               {!journeys.length ? (
                 <tr>
-                  <td colSpan={9} className="p-8 text-center text-muted">Nenhum membro encontrado para os filtros atuais.</td>
+                  <td colSpan={8} className="p-8 text-center text-muted">Nenhum membro encontrado para os filtros atuais.</td>
                 </tr>
               ) : null}
             </tbody>
