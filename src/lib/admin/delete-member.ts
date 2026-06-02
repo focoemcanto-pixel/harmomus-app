@@ -36,7 +36,6 @@ export async function deleteAdminMember(userId: string) {
   await safeDelete(supabase.from("premium_requests").delete().eq("user_id", normalizedUserId), "premium_requests");
   await safeDelete(supabase.from("audio_access_logs").delete().eq("user_id", normalizedUserId), "audio_access_logs");
   await safeDelete(supabase.from("kit_access_logs").delete().eq("user_id", normalizedUserId), "kit_access_logs");
-  await safeDelete(supabase.from("communication_logs").delete().eq("user_id", normalizedUserId), "communication_logs");
   await safeDelete(supabase.from("subscriptions").delete().eq("user_id", normalizedUserId), "subscriptions");
 
   const { error: authError } = await supabase.auth.admin.deleteUser(normalizedUserId);

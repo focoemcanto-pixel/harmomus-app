@@ -27,11 +27,11 @@ export async function POST(request: Request) {
 
   const { error } = await supabase.from("communication_logs").insert({
     channel: body.channel,
-    provider: body.provider ?? "simulation",
-    status: "simulated",
-    payload: body,
-    response_payload: payload,
-    error_message: null,
+    event: "communication.test.simulated",
+    level: "info",
+    message: "Teste de comunicação registrado como simulação.",
+    payload: { ...body, provider: body.provider ?? "simulation" },
+    response: payload,
   });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

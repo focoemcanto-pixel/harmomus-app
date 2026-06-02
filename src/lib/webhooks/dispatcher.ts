@@ -42,8 +42,7 @@ async function saveCommunicationLog(admin: any, input: {
     await admin.from("communication_logs").insert({
       level: input.status === "success" ? "info" : "error",
       event: input.event,
-      provider: "webhook_dispatcher",
-      request: input.payload,
+      payload: { ...input.payload, provider: "webhook_dispatcher" },
       response: input.responsePayload ?? null,
       message: input.errorMessage ?? (input.status === "success" ? "Webhook entregue com sucesso" : "Falha na entrega do webhook"),
     });

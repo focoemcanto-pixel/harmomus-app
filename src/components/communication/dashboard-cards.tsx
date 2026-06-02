@@ -71,11 +71,12 @@ export async function DashboardCards() {
       ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <MetricCard title="Contatos totais" value={data.contacts} caption="Base real em profiles" icon={Users} />
-        <MetricCard title="Campanhas ativas" value={data.activeCampaigns} caption="Agendadas, em fila ou enviando" icon={Send} tone="violet" />
-        <MetricCard title="Mensagens enviadas" value={data.sent} caption={`${whatsappSent} WhatsApp · ${emailSent} e-mail/logs`} icon={MessageCircle} tone="emerald" />
-        <MetricCard title="Fila pendente" value={data.pending} caption="Jobs/logs aguardando processamento" icon={Clock3} tone={data.pending ? "amber" : "emerald"} />
-        <MetricCard title="Falhas" value={data.failed} caption="Eventos/logs com erro" icon={AlertTriangle} tone={data.failed ? "rose" : "emerald"} />
+        <MetricCard title="Campanhas criadas" value={data.campaignsCreated} caption="Total em communication_campaigns" icon={Send} tone="violet" />
+        <MetricCard title="Campanhas em fila" value={data.campaignsQueued} caption="Agendadas, em fila ou enviando" icon={Clock3} tone={data.campaignsQueued ? "amber" : "emerald"} />
+        <MetricCard title="Campanhas concluídas" value={data.campaignsCompleted} caption="Campanhas finalizadas no banco" icon={CheckCircle2} tone="emerald" />
+        <MetricCard title="Mensagens pendentes" value={data.pending} caption="Registros pending/queued/processing" icon={Clock3} tone={data.pending ? "amber" : "emerald"} />
+        <MetricCard title="Mensagens enviadas" value={data.sent} caption={`${whatsappSent} WhatsApp · ${emailSent} e-mail`} icon={MessageCircle} tone="emerald" />
+        <MetricCard title="Falhas" value={data.failed} caption="communication_queue failed + logs error" icon={AlertTriangle} tone={data.failed ? "rose" : "emerald"} />
         <MetricCard title="Open rate" value={formatPercent(data.openRate)} caption="Somente quando há eventos de abertura" icon={Mail} />
         <MetricCard title="CTR" value={formatPercent(data.ctr)} caption="Cliques rastreados em logs/eventos" icon={MousePointerClick} tone="amber" />
         <MetricCard title="Conversão" value={formatPercent(data.conversion)} caption="Eventos reais de conversão/assinatura" icon={TrendingUp} tone="emerald" />

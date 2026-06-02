@@ -1,4 +1,5 @@
 import { CampaignBuilder } from "@/components/admin/communications/campaign-builder";
+import { CampaignManagement } from "@/components/admin/communications/campaign-management";
 import { CommunicationShell } from "@/components/admin/communications/communication-shell";
 
 type CampaignsPageParams = Record<string, string | string[] | undefined>;
@@ -24,7 +25,7 @@ export default async function Page({
       subtitle="Crie campanhas com segmentação por plano, mídia, preview, envio teste e limites anti-bloqueio."
       hideNavigation={Boolean(campaignId)}
     >
-      <CampaignBuilder campaignId={campaignId} />
+      {campaignId ? <CampaignBuilder campaignId={campaignId} /> : <div className="space-y-6"><CampaignManagement /><CampaignBuilder /></div>}
     </CommunicationShell>
   );
 }

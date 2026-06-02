@@ -82,14 +82,11 @@ export async function writeMarketingLog(input: {
 }) {
   const { error } = await input.admin.from("communication_logs").insert({
     channel: input.channel ?? null,
-    status: input.level === "error" ? "failed" : input.level === "warning" ? "queued" : "sent",
-    details: {
-      event: input.event,
-      level: input.level,
-      message: input.message,
-      payload: safeJson(input.payload),
-      response: safeJson(input.response),
-    },
+    event: input.event,
+    level: input.level,
+    message: input.message,
+    payload: safeJson(input.payload) ?? {},
+    response: safeJson(input.response),
   });
 
   return error;

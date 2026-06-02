@@ -9,10 +9,6 @@ function baseUrlFromRequest(request: Request) {
   return `${url.protocol}//${url.host}`;
 }
 
-function slugify(value: string) {
-  return value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)+/g, "");
-}
-
 export async function POST(request: Request) {
   const { admin, current, response } = await requireAdmin();
   if (response) return response;
@@ -30,30 +26,21 @@ export async function POST(request: Request) {
   const title = `Novo kit disponivel: ${kit.name}`;
   const text = "Ola {{nome}}!\n\nTem novidade no Harmomus.\n\nAcabamos de liberar um novo kit vocal para ajudar voce a estudar com mais organizacao e seguranca vocal.\n\nAcesse agora: {{link}}";
   const channels = ["whatsapp"];
-  const content = {
-    title,
-    kit_id: kit.id,
-    link_url: linkUrl,
-    media_url: kit.cover_url || null,
-    channels,
-    schedule_mode: "now",
-    rate_limits: { minDelay: 8, maxDelay: 25, hourlyLimit: 120, dailyLimit: 600, pauseEvery: 80, pauseMinutes: 10 },
-    audience_filters: { plans: ["premium", "plus"], segment: "premium,plus", note: "Campanha automatica criada a partir de um kit." },
-  };
+  const audienceFilters = { plans: ["premium", "plus"], segment: "premium,plus", note: "Campanha automatica criada a partir de um kit." };
 
   const { data, error } = await admin.from("communication_campaigns").insert({
     name: `Lancamento de kit vocal - ${kit.name}`,
-    slug: slugify(`novo-kit-${kit.slug}-${Date.now()}`),
     status: "draft",
-    channel: "whatsapp",
-    audience_type: "premium,plus",
-    subject: title,
-    preview_text: text.slice(0, 180),
-    text_content: text,
-    content,
+    title,
+    message: text,
+    link_url: linkUrl,
+    channels,
+    audience_filters: audienceFilters,
+    schedule_mode: "now",
+    stats: { queued: 0, sent: 0, failed: 0 },
     created_by: getCreatedBy(current.profile?.id),
     updated_at: new Date().toISOString(),
-  }).select("id,name,status,channel,subject,text_content,content,created_at,updated_at").single();
+  }).select("id,name,status,title,message,link_url,channels,audience_filters,schedule_mode,scheduled_at,stats,created_at,updated_at").single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ data }, { status: 201 });

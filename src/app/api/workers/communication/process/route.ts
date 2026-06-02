@@ -3,8 +3,8 @@ import { NextResponse } from "next/server";
 import { processCommunicationQueue } from "@/lib/communication/marketing-queue";
 
 function validateWorkerToken(request: Request) {
-  const expectedToken = process.env.HARMOMUS_WORKER_TOKEN;
-  const receivedToken = request.headers.get("x-harmomus-worker-token");
+  const expectedToken = process.env.HARMOMUS_WORKER_TOKEN || process.env.CRON_SECRET;
+  const receivedToken = request.headers.get("x-harmomus-worker-token") || request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
 
   if (!expectedToken) {
     return NextResponse.json({ success: false, error: "Worker token não configurado." }, { status: 503 });
@@ -27,4 +27,8 @@ export async function POST(request: Request) {
     success: true,
     ...result,
   });
+}
+
+export async function GET(request: Request) {
+  return POST(request);
 }
