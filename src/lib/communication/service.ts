@@ -1,21 +1,23 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import type { AudienceContact, Channel, CommunicationCampaign, CommunicationQueueItem } from "@/types/communication";
+import type { AudienceContact, Channel, CommunicationCampaign } from "@/types/communication";
 
 type SupabaseAdmin = ReturnType<typeof createSupabaseAdminClient>;
 type QueryResult<T> = { data: T | null; error: { message?: string; code?: string } | null; count?: number | null };
 
 type LogLite = { id?: string; status?: string | null; channel?: string | null; created_at?: string | null; event?: string | null; level?: string | null };
-type EventLite = { event_type?: string | null; event_key?: string | null; event_label?: string | null; created_at?: string | null };
+type EventLite = { event_key?: string | null; event_label?: string | null; channel?: string | null; source?: string | null; created_at?: string | null };
 type DeliveryLite = { id?: string; status?: string | null; channel?: string | null; opened_at?: string | null; clicked_at?: string | null; converted_at?: string | null; created_at?: string | null };
-type ProfileLite = { id: string; name?: string | null; full_name?: string | null; email?: string | null; phone?: string | null; whatsapp_opt_in?: boolean | null; email_opt_in?: boolean | null; last_seen_at?: string | null; created_at?: string | null; origin?: string | null };
-type SubscriptionLite = { id?: string; user_id: string; status?: string | null; plan_id?: string | null; plans?: { name?: string | null; slug?: string | null; hierarchy_level?: number | null } | null; updated_at?: string | null; canceled_at?: string | null; current_period_end?: string | null };
+type ProfileLite = { id: string; full_name?: string | null; email?: string | null; phone?: string | null; whatsapp_opt_in?: boolean | null; email_opt_in?: boolean | null; last_seen_at?: string | null; created_at?: string | null; origin?: string | null };
+type SubscriptionLite = { id?: string; user_id: string; status?: string | null; plan_id?: string | null; plans?: { name?: string | null; slug?: string | null; hierarchy_level?: number | null } | null; updated_at?: string | null; current_period_end?: string | null; cancel_at_period_end?: boolean | null };
 type AccessLite = { user_id?: string | null; status?: string | null; reason?: string | null; accessed_at?: string | null; created_at?: string | null; kits?: { name?: string | null; slug?: string | null } | null };
 type InvoiceLite = { user_id?: string | null; status?: string | null; amount_due_cents?: number | null; created_at?: string | null; customer_email?: string | null; profiles?: { id?: string | null; email?: string | null } | null };
 type HistoryLite = { id?: string; change_type?: string | null; from_plan_slug?: string | null; to_plan_slug?: string | null; created_at?: string | null };
+type LegacyContactLite = { id?: string | null; display_name?: string | null; email?: string | null; phone?: string | null; legacy_plan_slug?: string | null; legacy_status?: string | null };
 
-type LegacyContactLite = { id?: string | null; user_id?: string | null; name?: string | null; full_name?: string | null; display_name?: string | null; email?: string | null; phone?: string | null; legacy_plan_slug?: string | null };
 type CampaignAudienceContact = { source: "current" | "legacy"; user_id: string | null; legacy_id: string | null; name: string | null; email: string | null; phone: string; normalizedPhone: string; plan: string };
 export type CampaignAudiencePreview = { total: number; totalByPlan: Record<string, number>; current: number; legacy: number; duplicatesRemoved: number; selectedPlans: string[]; warnings: CommunicationWarning[] };
+export type CommunicationWarning = { source: string; message: string };
+export type CommercialFunnelItem = { label: string; count: number; hint: string };
 
 export type CommunicationLogRow = {
   id: string;
@@ -53,9 +55,6 @@ export type RecommendedCampaign = {
   count: number;
 };
 
-export type CommercialFunnelItem = { label: string; count: number; hint: string };
-export type CommunicationWarning = { source: string; message: string };
-
 export type CommunicationDashboardData = {
   contacts: number;
   activeCampaigns: number;
@@ -74,14 +73,7 @@ export type CommunicationDashboardData = {
 };
 
 export type AudienceSummary = { total: number; whatsappOptIn: number; emailOptIn: number; withPhone: number; withEmail: number; active30d: number; commercialStatus: Record<string, number> };
-export type AudienceRow = AudienceContact & {
-  name: string | null;
-  current_plan: string | null;
-  commercial_status: string;
-  recent_plays: number;
-  premium_blocks: number;
-  last_activity_at: string | null;
-};
+export type AudienceRow = AudienceContact & { name: string | null; current_plan: string | null; commercial_status: string; recent_plays: number; premium_blocks: number; last_activity_at: string | null };
 
 const ACTIVE_CAMPAIGN_STATUSES = ["scheduled", "processing", "queued", "sending"];
 const PENDING_STATUSES = ["queued", "pending", "fila", "pendente", "processing"];
@@ -121,13 +113,6 @@ async function safeQuery<T>(source: string, query: PromiseLike<QueryResult<T>>, 
   return { data: result.data, count: result.count ?? 0, error: null };
 }
 
-function dedupe<T extends { id?: string | null }>(rows: T[]) {
-  const map = new Map<string, T>();
-  for (const row of rows) if (row.id && !map.has(row.id)) map.set(row.id, row);
-  return Array.from(map.values());
-}
-
-
 function normalizePhone(value?: string | null) {
   return String(value ?? "").replace(/\D/g, "");
 }
@@ -139,27 +124,23 @@ function selectedPlanSlugs(value: unknown) {
 }
 
 function profileDisplayName(profile: ProfileLite) {
-  return profile.name ?? profile.full_name ?? profile.email ?? null;
+  return profile.full_name ?? profile.email ?? null;
 }
 
 function legacyDisplayName(contact: LegacyContactLite) {
-  return contact.name ?? contact.full_name ?? contact.display_name ?? contact.email ?? null;
+  return contact.display_name ?? contact.email ?? null;
 }
 
 async function selectProfilesByIds(supabase: SupabaseAdmin & any, ids: string[]) {
-  const withName = await supabase.from("profiles").select("id,name,full_name,email,phone").in("id", ids);
-  if (!withName.error) return withName as QueryResult<ProfileLite[]>;
   return supabase.from("profiles").select("id,full_name,email,phone").in("id", ids) as PromiseLike<QueryResult<ProfileLite[]>>;
 }
 
 async function selectLegacyContacts(supabase: SupabaseAdmin & any, plans: string[]) {
-  const withName = await supabase.from("vw_legacy_contacts_enriched").select("id,user_id,name,full_name,email,phone,legacy_plan_slug").in("legacy_plan_slug", plans);
-  if (!withName.error) return withName as QueryResult<LegacyContactLite[]>;
-
-  const fallback = await supabase.from("vw_legacy_contacts_enriched").select("id,user_id,full_name,email,phone,legacy_plan_slug").in("legacy_plan_slug", plans);
-  if (!fallback.error) return fallback as QueryResult<LegacyContactLite[]>;
-
-  return supabase.from("vw_legacy_contacts_enriched").select("id,user_id,email,phone,legacy_plan_slug").in("legacy_plan_slug", plans) as PromiseLike<QueryResult<LegacyContactLite[]>>;
+  return supabase
+    .from("vw_legacy_contacts_enriched")
+    .select("id,display_name,email,phone,legacy_plan_slug,legacy_status")
+    .in("legacy_plan_slug", plans)
+    .eq("legacy_status", "active") as PromiseLike<QueryResult<LegacyContactLite[]>>;
 }
 
 function summarizeCampaignAudience(contacts: CampaignAudienceContact[], selectedPlans: string[], warnings: CommunicationWarning[], duplicatesRemoved: number): CampaignAudiencePreview {
@@ -192,7 +173,6 @@ export async function resolveCampaignAudienceByPlans(plansInput: unknown) {
   const profileIds = Array.from(new Set(activeSubscriptions.map((sub) => sub.user_id).filter(Boolean)));
   const profilesResult = profileIds.length ? await safeQuery<ProfileLite[]>("profiles", selectProfilesByIds(supabase, profileIds), warnings) : { data: [] as ProfileLite[], count: 0, error: null };
   const profilesById = new Map((profilesResult.data ?? []).map((profile) => [profile.id, profile]));
-
   const byPhone = new Map<string, CampaignAudienceContact>();
   let duplicatesRemoved = 0;
 
@@ -217,7 +197,7 @@ export async function resolveCampaignAudienceByPlans(plansInput: unknown) {
       duplicatesRemoved += 1;
       continue;
     }
-    byPhone.set(normalizedPhone, { source: "legacy", user_id: null, legacy_id: contact.id ?? contact.user_id ?? null, name: legacyDisplayName(contact), email: contact.email ?? null, phone: normalizedPhone, normalizedPhone, plan });
+    byPhone.set(normalizedPhone, { source: "legacy", user_id: null, legacy_id: contact.id ?? null, name: legacyDisplayName(contact), email: contact.email ?? null, phone: normalizedPhone, normalizedPhone, plan });
   }
 
   const contacts = Array.from(byPhone.values());
@@ -226,10 +206,6 @@ export async function resolveCampaignAudienceByPlans(plansInput: unknown) {
 
 export async function getCampaignAudiencePreview(plansInput: unknown) {
   return (await resolveCampaignAudienceByPlans(plansInput)).preview;
-}
-
-function isActiveSubscription(row?: SubscriptionLite) {
-  return ACTIVE_SUBSCRIPTION_STATUSES.includes(normalize(row?.status));
 }
 
 function planSlug(row?: SubscriptionLite | null) {
@@ -259,22 +235,24 @@ function makeSegment(slug: string, title: string, category: SmartSegment["catego
   return { slug, title, category, count: ids.size, description, rule, sources, quality, href };
 }
 
+function eventName(row: EventLite) {
+  return normalize(row.event_key ?? row.event_label ?? row.channel ?? row.source);
+}
+
 async function getBaseData() {
   const supabase = createSupabaseAdminClient() as SupabaseAdmin & any;
   const warnings: CommunicationWarning[] = [];
-  const since7 = daysAgo(7);
-  const since30 = daysAgo(30);
   const since45 = daysAgo(45);
 
-  const [profilesResult, subscriptionsResult, accessResult, invoicesResult, commLogsResult, marketingEventsResult, commCampaignsCount, historyResult, queueCount] = await Promise.all([
+  const [profilesResult, legacyCountResult, subscriptionsResult, accessResult, invoicesResult, commLogsResult, marketingEventsResult, commCampaignsCount, queueCount] = await Promise.all([
     safeQuery<ProfileLite[]>("profiles", supabase.from("profiles").select("id,full_name,email,phone,whatsapp_opt_in,email_opt_in,last_seen_at,origin,created_at").order("created_at", { ascending: false }).limit(1000), warnings),
-    safeQuery<SubscriptionLite[]>("subscriptions", supabase.from("subscriptions").select("id,user_id,status,updated_at,canceled_at,current_period_end,plans(name,slug,hierarchy_level)").order("updated_at", { ascending: false }).limit(1000), warnings),
+    safeQuery<null>("vw_legacy_contacts_enriched", supabase.from("vw_legacy_contacts_enriched").select("id", { count: "exact", head: true }), warnings),
+    safeQuery<SubscriptionLite[]>("subscriptions", supabase.from("subscriptions").select("id,user_id,status,updated_at,current_period_end,cancel_at_period_end,plans(name,slug,hierarchy_level)").order("updated_at", { ascending: false }).limit(1000), warnings),
     safeQuery<AccessLite[]>("audio_access_logs", supabase.from("audio_access_logs").select("user_id,status,reason,accessed_at,created_at,kits(name,slug)").gte("accessed_at", since45).order("accessed_at", { ascending: false }).limit(5000), warnings),
     safeQuery<InvoiceLite[]>("billing_invoices", supabase.from("billing_invoices").select("user_id,status,amount_due_cents,created_at,customer_email,profiles(id,email)").order("created_at", { ascending: false }).limit(1000), warnings),
     safeQuery<LogLite[]>("communication_logs", supabase.from("communication_logs").select("id,status,channel,created_at").order("created_at", { ascending: false }).limit(5000), warnings),
-    safeQuery<EventLite[]>("marketing_events", supabase.from("marketing_events").select("event_type,created_at").order("created_at", { ascending: false }).limit(5000), warnings),
+    safeQuery<EventLite[]>("marketing_events", supabase.from("marketing_events").select("event_key,event_label,channel,source,created_at").order("created_at", { ascending: false }).limit(5000), warnings),
     safeQuery<null>("communication_campaigns", supabase.from("communication_campaigns").select("id", { count: "exact", head: true }).in("status", ACTIVE_CAMPAIGN_STATUSES), warnings),
-    safeQuery<HistoryLite[]>("subscription_history", supabase.from("subscription_history").select("id,change_type,from_plan_slug,to_plan_slug,created_at").gte("created_at", since30).order("created_at", { ascending: false }).limit(2000), warnings),
     safeQuery<null>("communication_queue", supabase.from("communication_queue").select("id", { count: "exact", head: true }).in("status", ["pending", "processing", "queued"]), warnings),
   ]);
 
@@ -284,9 +262,10 @@ async function getBaseData() {
   const invoices = invoicesResult.data ?? [];
   const communicationLogs = commLogsResult.data ?? [];
   const events = marketingEventsResult.data ?? [];
-  const history = historyResult.data ?? [];
+  const history: HistoryLite[] = [];
+  const contactsTotal = profiles.length + Number(legacyCountResult.count ?? 0);
 
-  return { supabase, warnings, since7, since30, profiles, subscriptions, accessLogs, invoices, communicationLogs, events, history, activeCampaigns: commCampaignsCount.count ?? 0, pendingJobs: queueCount.count ?? 0 };
+  return { supabase, warnings, profiles, subscriptions, accessLogs, invoices, communicationLogs, events, history, contactsTotal, activeCampaigns: commCampaignsCount.count ?? 0, pendingJobs: queueCount.count ?? 0 };
 }
 
 function buildSegments(data: Awaited<ReturnType<typeof getBaseData>>) {
@@ -317,7 +296,6 @@ function buildSegments(data: Awaited<ReturnType<typeof getBaseData>>) {
     if (failed && id) failedPaymentUsers.add(id);
   }
 
-  const allProfileIds = new Set(data.profiles.map((profile) => profile.id));
   const hotUpgrade = new Set<string>();
   const canceled = new Set<string>();
   const recovery = new Set<string>();
@@ -402,15 +380,15 @@ export async function getCommunicationDashboard(): Promise<CommunicationDashboar
   const sent = logs.filter((d) => ["sent", "opened", "clicked", "replied"].includes(normalizeStatus(d.status ?? d.event))).length;
   const pending = data.pendingJobs + logs.filter((d) => normalizeStatus(d.status ?? d.event) === "queued").length;
   const failed = logs.filter((d) => normalizeStatus(d.status ?? d.level) === "failed" || normalize(d.level) === "error").length;
-  const opened = logs.filter((d) => normalizeStatus(d.status ?? d.event) === "opened" || ["email_open", "email_opened"].includes(normalize(d.event))).length + data.events.filter((e) => ["open", "email_open", "email_opened"].includes(normalize(e.event_type))).length;
-  const clicked = logs.filter((d) => normalizeStatus(d.status ?? d.event) === "clicked" || ["whatsapp_click", "link_clicked"].includes(normalize(d.event))).length + data.events.filter((e) => ["click", "whatsapp_click", "link_clicked"].includes(normalize(e.event_type))).length;
-  const converted = data.events.filter((e) => ["subscription_created", "conversion", "checkout_completed"].includes(normalize(e.event_type))).length;
+  const opened = logs.filter((d) => normalizeStatus(d.status ?? d.event) === "opened" || ["email_open", "email_opened"].includes(normalize(d.event))).length + data.events.filter((e) => ["open", "email_open", "email_opened"].includes(eventName(e))).length;
+  const clicked = logs.filter((d) => normalizeStatus(d.status ?? d.event) === "clicked" || ["whatsapp_click", "link_clicked"].includes(normalize(d.event))).length + data.events.filter((e) => ["click", "whatsapp_click", "link_clicked"].includes(eventName(e))).length;
+  const converted = data.events.filter((e) => ["subscription_created", "conversion", "checkout_completed"].includes(eventName(e))).length;
   const failureRate = safeRate(failed, Math.max(1, sent + pending + failed)) ?? 0;
   const healthScore = Math.max(0, Math.round(100 - failureRate - Math.min(25, pending / 20)));
   const healthTone = healthScore >= 85 ? "emerald" : healthScore >= 65 ? "amber" : "rose";
 
   return {
-    contacts: data.profiles.length,
+    contacts: data.contactsTotal,
     activeCampaigns: data.activeCampaigns,
     sent,
     pending,
