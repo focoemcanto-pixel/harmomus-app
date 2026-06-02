@@ -21,9 +21,10 @@ export function KitLaunchCampaignCard({ kitId, published }: { kitId: string; pub
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error(data?.error ?? "Falha ao criar campanha.");
 
+      const campaignId = data?.data?.id ? String(data.data.id) : "";
       setMessage("Campanha de lançamento criada como rascunho. Redirecionando para revisão...");
       window.setTimeout(() => {
-        window.location.href = "/admin/comunicacao/campaigns";
+        window.location.href = campaignId ? `/admin/comunicacao/campaigns?campaignId=${encodeURIComponent(campaignId)}` : "/admin/comunicacao/campaigns";
       }, 800);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha ao criar campanha.");
