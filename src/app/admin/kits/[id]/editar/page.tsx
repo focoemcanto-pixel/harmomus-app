@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 
 import { KitAudioSyncCard } from "@/components/admin/kit-audio-sync-card";
 import { KitForm } from "@/components/admin/kit-form";
+import { KitLaunchCampaignCard } from "@/components/admin/kit-launch-campaign-card";
 import { ensureArtistCategory, getArtistCategories, getKitById, getKitFormOptions, updateKit } from "@/lib/data/kits";
 
 export const dynamic = "force-dynamic";
@@ -75,6 +76,7 @@ export default async function EditarKitPage({ params }: { params: Promise<{ id: 
     <div className="space-y-6">
       <KitForm mode="edit" categories={categories} artistCategories={artistCategories} plans={plans} initialData={kit} action={updateKitAction} />
       <KitAudioSyncCard kitId={kit.id} />
+      <KitLaunchCampaignCard kitId={kit.id} published={Boolean(kit.published)} />
     </div>
   );
 }
