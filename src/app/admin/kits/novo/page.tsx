@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { KitAudioSyncCard } from "@/components/admin/kit-audio-sync-card";
 import { KitBulkUpload } from "@/components/admin/kit-bulk-upload";
 import { KitForm } from "@/components/admin/kit-form";
-import { createKit, ensureArtistCategory, getArtistCategories, getKitFormOptions, type Kit, updateKit } from "@/lib/data/kits";
+import { createKit, ensureArtistCategory, getArtistCategories, getKitFormOptions, type Kit } from "@/lib/data/kits";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
@@ -39,6 +39,31 @@ function resolveLegacyRequiredPlan(allowedPlanSlugs: string[]) {
 
 function getSingleParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function slugify(value: string) {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)+/g, "");
+}
+
+async function ensureArtistCategoryAdmin(artistName: string) {
+  const name = artistName.trim();
+  if (!name) throw new Error("Artista é obrigatório.");
+
+  const slug = slugify(name);
+  const supabase = createSupabaseAdminClient() as any;
+
+  const { data: existing, error: existingError } = await supabase.from("categories").select("*").eq("slug", slug).maybeSingle();
+  if (existingError) throw new Error(`Falha ao buscar categoria automática: ${existingError.message}`);
+  if (existing) return existing;
+
+  const { data, error } = await supabase.from("categories").insert({ name, slug }).select("*").single();
+  if (error) throw new Error(`Falha ao criar categoria automática: ${error.message}`);
+  return data;
 }
 
 async function getImportedKitById(id?: string | null): Promise<Kit | null> {
@@ -114,9 +139,9 @@ export default async function NovoKitPage({ searchParams }: { searchParams: Novo
 
     if (!name || !slug || !artist) throw new Error("Preencha nome, slug e artista para continuar.");
 
-    const artistCategory = await ensureArtistCategory(artist);
-
-    await updateKit(importedKit.id, {
+    const artistCategory = await ensureArtistCategoryAdmin(artist);
+    const supabase = createSupabaseAdminClient() as any;
+    const payload = {
       name,
       slug,
       artist,
@@ -132,11 +157,13 @@ export default async function NovoKitPage({ searchParams }: { searchParams: Novo
       allow_pitch_shift: formData.has("allow_pitch_shift"),
       max_pitch_shift_semitones: parsePitchShiftLimit(formData.get("max_pitch_shift_semitones")),
       published: formData.get("published") === "on",
-    });
+    };
+
+    const { error } = await supabase.from("kits").update(payload).eq("id", importedKit.id);
+    if (error) throw new Error(`Falha ao salvar kit importado: ${error.message}`);
 
     revalidatePath("/admin/kits", "page");
     revalidatePath("/admin/kits/novo", "page");
-    revalidatePath(`/admin/kits/novo?importedKitId=${importedKit.id}`, "page");
     revalidatePath("/biblioteca", "page");
     revalidatePath("/todos-os-kits", "page");
     revalidatePath(`/biblioteca/${slug}`, "page");
