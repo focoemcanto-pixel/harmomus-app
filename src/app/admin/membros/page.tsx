@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { revalidatePath } from "next/cache";
 import {
   AlertTriangle,
   ArrowRight,
@@ -9,17 +8,15 @@ import {
   Search,
   Sparkles,
   Target,
-  Trash2,
   TrendingUp,
   Users,
 } from "lucide-react";
 
-import { ConfirmSubmitButton } from "@/components/admin/confirm-submit-button";
+import { DeleteMemberButton } from "@/components/admin/delete-member-button";
 import { PageHeader } from "@/components/admin/page-header";
 import { getMemberOperationalSummaries, getMembers } from "@/lib/data/members";
 import { formatDateTimeBR } from "@/lib/format-date-time-br";
 import { getPlans } from "@/lib/data/plans";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getOperationalFlags } from "@/lib/member-health";
 
 type SearchParams = Promise<{ q?: string; plan?: string; status?: string; operational?: string }>;
@@ -183,15 +180,6 @@ function StatCard({ label, value, detail, icon: Icon }: { label: string; value: 
   );
 }
 
-async function safeDelete(query: PromiseLike<{ error: any }>) {
-  try {
-    const { error } = await query;
-    if (error) console.warn("[admin.membros] limpeza auxiliar ignorada", error.message ?? error);
-  } catch (error) {
-    console.warn("[admin.membros] limpeza auxiliar ignorada", error);
-  }
-}
-
 export default async function AdminMembrosPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
   const [members, plans] = await Promise.all([
@@ -199,31 +187,6 @@ export default async function AdminMembrosPage({ searchParams }: { searchParams:
     getPlans(),
   ]);
   const operationalSummaries = await getMemberOperationalSummaries(members, { limit: 200 });
-
-  async function deleteMember(formData: FormData) {
-    "use server";
-    const userId = String(formData.get("userId") ?? "").trim();
-    if (!userId) return;
-
-    const supabase = createSupabaseAdminClient() as any;
-    const { data: playlists } = await supabase.from("playlists").select("id").eq("user_id", userId);
-    const playlistIds = (playlists ?? []).map((playlist: any) => playlist.id).filter(Boolean);
-
-    if (playlistIds.length) await safeDelete(supabase.from("playlist_items").delete().in("playlist_id", playlistIds));
-    await safeDelete(supabase.from("playlists").delete().eq("user_id", userId));
-    await safeDelete(supabase.from("kit_favorites").delete().eq("user_id", userId));
-    await safeDelete(supabase.from("premium_requests").delete().eq("user_id", userId));
-    await safeDelete(supabase.from("audio_access_logs").delete().eq("user_id", userId));
-    await safeDelete(supabase.from("kit_access_logs").delete().eq("user_id", userId));
-    await safeDelete(supabase.from("communication_logs").delete().eq("user_id", userId));
-    await safeDelete(supabase.from("subscriptions").delete().eq("user_id", userId));
-    await safeDelete(supabase.from("profiles").delete().eq("id", userId));
-
-    const { error: authError } = await supabase.auth.admin.deleteUser(userId);
-    if (authError) console.warn("[admin.membros] usuário não removido do Auth", authError.message ?? authError);
-
-    revalidatePath("/admin/membros");
-  }
 
   const journeys = members
     .map((member) => {
@@ -379,12 +342,11 @@ export default async function AdminMembrosPage({ searchParams }: { searchParams:
                         <Link href={journey.actionHref} className="inline-flex items-center justify-center rounded-xl border border-gold-400/30 bg-gold-500/10 px-3 py-2 text-xs font-medium text-gold-200 transition hover:bg-gold-500/20">
                           {journey.nextAction}
                         </Link>
-                        <form action={deleteMember}>
-                          <input type="hidden" name="userId" value={member.profile.id} />
-                          <ConfirmSubmitButton message={`Excluir definitivamente o membro ${member.profile.email ?? member.profile.full_name ?? member.profile.id}? Esta ação remove perfil, assinatura, favoritos, playlists e o login do Auth.`} className="inline-flex w-full items-center justify-center gap-1 rounded-xl border border-red-400/35 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-200 transition hover:bg-red-500/20">
-                            <Trash2 className="h-3.5 w-3.5" /> Excluir
-                          </ConfirmSubmitButton>
-                        </form>
+                        <DeleteMemberButton
+                          memberId={member.profile.id}
+                          memberLabel={member.profile.email ?? member.profile.full_name ?? member.profile.id}
+                          className="inline-flex w-full items-center justify-center gap-1 rounded-xl border border-red-400/35 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-200 transition hover:bg-red-500/20"
+                        />
                       </div>
                     </td>
                   </tr>
