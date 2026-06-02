@@ -1,14 +1,42 @@
 import { NextResponse } from "next/server";
 
-import {
-  getCreatedBy,
-  requireAdmin,
-  sanitizeObject,
-  sanitizeStringArray,
-  sanitizeText,
-} from "../_lib/marketing-api";
+import { getCreatedBy, requireAdmin, sanitizeObject, sanitizeStringArray, sanitizeText } from "../_lib/marketing-api";
 
 const CHANNELS = new Set(["whatsapp", "email"]);
+
+function readContent(value: unknown) {
+  return sanitizeObject(value);
+}
+
+function readChannels(content: Record<string, unknown>, channel?: string | null) {
+  const fromContent = sanitizeStringArray(content.channels, CHANNELS);
+  if (fromContent.length) return fromContent;
+  return channel ? [channel] : [];
+}
+
+function buildResponse(campaign: Record<string, unknown>) {
+  const content = readContent(campaign.content);
+  const audienceFilters = sanitizeObject(content.audience_filters);
+  const title = sanitizeText(content.title) || sanitizeText(campaign.subject) || sanitizeText(campaign.name);
+  const textContent = sanitizeText(campaign.text_content);
+
+  return {
+    ...campaign,
+    content,
+    message: textContent,
+    channels: readChannels(content, sanitizeText(campaign.channel)),
+    audience_filters: {
+      ...audienceFilters,
+      audience_type: sanitizeText(campaign.audience_type),
+    },
+    title,
+    link_url: sanitizeText(content.link_url) || null,
+    media_url: sanitizeText(content.media_url ?? content.mediaUrl) || null,
+    kit_id: sanitizeText(content.kit_id ?? content.kitId) || null,
+    schedule_mode: campaign.scheduled_at ? "scheduled" : sanitizeText(content.schedule_mode) || "now",
+    stats: sanitizeObject(content.stats) || content,
+  };
+}
 
 export async function GET() {
   const { admin, response } = await requireAdmin();
@@ -16,39 +44,12 @@ export async function GET() {
 
   const { data, error } = await admin
     .from("communication_campaigns")
-    .select(
-      "id,created_at,updated_at,name,status,channel,audience_type,segment_slug,message,scheduled_at,preview_payload",
-    )
+    .select("id,created_at,updated_at,name,status,channel,audience_type,subject,text_content,scheduled_at,content")
     .order("created_at", { ascending: false });
 
-  if (error)
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  return NextResponse.json({
-    data: (data ?? []).map((campaign) => ({
-      ...campaign,
-      channels: campaign.channel ? [campaign.channel] : [],
-      audience_filters: {
-        segment: campaign.segment_slug,
-        audience_type: campaign.audience_type,
-        ...(campaign.preview_payload ?? {}),
-      },
-      title:
-        (campaign.preview_payload as Record<string, unknown> | null)?.title ??
-        campaign.name,
-      link_url:
-        (campaign.preview_payload as Record<string, unknown> | null)
-          ?.link_url ?? null,
-      media_url:
-        (campaign.preview_payload as Record<string, unknown> | null)
-          ?.media_url ?? null,
-      kit_id:
-        (campaign.preview_payload as Record<string, unknown> | null)?.kit_id ??
-        null,
-      schedule_mode: campaign.scheduled_at ? "scheduled" : "now",
-      stats: campaign.preview_payload ?? {},
-    })),
-  });
+  return NextResponse.json({ data: (data ?? []).map((campaign) => buildResponse(campaign as Record<string, unknown>)) });
 }
 
 export async function POST(request: Request) {
@@ -56,96 +57,50 @@ export async function POST(request: Request) {
   if (response) return response;
 
   const body = await request.json().catch(() => null);
-  if (!body)
-    return NextResponse.json({ error: "Payload inválido." }, { status: 400 });
+  if (!body) return NextResponse.json({ error: "Payload inválido." }, { status: 400 });
 
   const name = sanitizeText(body.name);
-  const message = sanitizeText(body.message);
+  const message = sanitizeText(body.message ?? body.text_content ?? body.text);
   const channels = sanitizeStringArray(body.channels, CHANNELS);
-  const scheduleMode =
-    sanitizeText(body.schedule_mode) === "scheduled" ? "scheduled" : "now";
-  const scheduledAt =
-    scheduleMode === "scheduled" ? sanitizeText(body.scheduled_at) : "";
+  const audienceFilters = sanitizeObject(body.audience_filters);
+  const scheduleMode = sanitizeText(body.schedule_mode) === "scheduled" ? "scheduled" : "now";
+  const scheduledAt = scheduleMode === "scheduled" ? sanitizeText(body.scheduled_at) : "";
+  const title = sanitizeText(body.title) || name;
 
-  if (!name)
-    return NextResponse.json(
-      { error: "Nome da campanha é obrigatório." },
-      { status: 400 },
-    );
-  if (!message)
-    return NextResponse.json(
-      { error: "Mensagem da campanha é obrigatória." },
-      { status: 400 },
-    );
-  if (!channels.length)
-    return NextResponse.json(
-      { error: "Selecione pelo menos um canal." },
-      { status: 400 },
-    );
+  if (!name) return NextResponse.json({ error: "Nome da campanha é obrigatório." }, { status: 400 });
+  if (!message) return NextResponse.json({ error: "Mensagem da campanha é obrigatória." }, { status: 400 });
+  if (!channels.length) return NextResponse.json({ error: "Selecione pelo menos um canal." }, { status: 400 });
 
-  const record = {
-    name,
-    status: "draft",
-    channel: (channels[0] ?? "whatsapp") as "whatsapp" | "email",
-    audience_type:
-      sanitizeText(sanitizeObject(body.audience_filters).segment) || "custom",
-    segment_slug:
-      sanitizeText(sanitizeObject(body.audience_filters).segment) || null,
-    message,
-    preview_payload: {
-      ...sanitizeObject(body.audience_filters),
-      channels,
-      title: sanitizeText(body.title) || null,
-      link_url: sanitizeText(body.link_url) || null,
-      media_url: sanitizeText(body.media_url ?? body.mediaUrl) || null,
-      kit_id: sanitizeText(body.kit_id ?? body.kitId) || null,
-      schedule_mode: scheduleMode,
-      rate_limits: sanitizeObject(body.rate_limits),
-    },
-    scheduled_at: scheduledAt || null,
-    created_by: getCreatedBy(current.profile?.id),
-    updated_at: new Date().toISOString(),
+  const content = {
+    title,
+    link_url: sanitizeText(body.link_url) || null,
+    media_url: sanitizeText(body.media_url ?? body.mediaUrl) || null,
+    kit_id: sanitizeText(body.kit_id ?? body.kitId) || null,
+    channels,
+    schedule_mode: scheduleMode,
+    rate_limits: sanitizeObject(body.rate_limits),
+    audience_filters: audienceFilters,
   };
 
   const { data, error } = await admin
     .from("communication_campaigns")
-    .insert(record)
-    .select(
-      "id,created_at,updated_at,name,status,channel,audience_type,segment_slug,message,scheduled_at,preview_payload",
-    )
+    .insert({
+      name,
+      status: "draft",
+      channel: channels[0] ?? "whatsapp",
+      audience_type: sanitizeText(audienceFilters.segment ?? audienceFilters.audience_type) || "custom",
+      subject: title,
+      preview_text: message.slice(0, 180),
+      text_content: message,
+      content,
+      scheduled_at: scheduledAt || null,
+      created_by: getCreatedBy(current.profile?.id),
+      updated_at: new Date().toISOString(),
+    })
+    .select("id,created_at,updated_at,name,status,channel,audience_type,subject,text_content,scheduled_at,content")
     .single();
 
-  if (error)
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  return NextResponse.json(
-    {
-      data: data
-        ? {
-            ...data,
-            channels: data.channel ? [data.channel] : [],
-            audience_filters: {
-              segment: data.segment_slug,
-              audience_type: data.audience_type,
-              ...(data.preview_payload ?? {}),
-            },
-            title:
-              (data.preview_payload as Record<string, unknown> | null)?.title ??
-              data.name,
-            link_url:
-              (data.preview_payload as Record<string, unknown> | null)
-                ?.link_url ?? null,
-            media_url:
-              (data.preview_payload as Record<string, unknown> | null)
-                ?.media_url ?? null,
-            kit_id:
-              (data.preview_payload as Record<string, unknown> | null)
-                ?.kit_id ?? null,
-            schedule_mode: data.scheduled_at ? "scheduled" : "now",
-            stats: data.preview_payload ?? {},
-          }
-        : data,
-    },
-    { status: 201 },
-  );
+  return NextResponse.json({ data: data ? buildResponse(data as Record<string, unknown>) : data }, { status: 201 });
 }
