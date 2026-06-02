@@ -23,6 +23,8 @@ function flagLabel(flag: string) {
   const labels: Record<string, string> = {
     pending: "Pending",
     no_login: "Sem login",
+    no_real_access: "Sem acesso real",
+    profile_not_synced: "Auth sem profile",
     no_stripe_subscription: "Sem sub Stripe",
     failed_communication: "Falha comunicação",
     no_kit_access: "Sem kit",
@@ -52,7 +54,7 @@ export default async function AdminIncidentesPage() {
         health.score < 70 ||
         normalize(member.subscription?.status) === "pending" ||
         flags.includes("no_stripe_subscription") ||
-        flags.includes("no_login") ||
+        flags.includes("no_real_access") ||
         flags.includes("failed_communication") ||
         (isActive && flags.includes("no_kit_access"));
 
