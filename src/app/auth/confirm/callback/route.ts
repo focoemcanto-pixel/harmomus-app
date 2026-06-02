@@ -13,7 +13,10 @@ function confirmationErrorUrl(request: Request, reason = "callback") {
 }
 
 function normalizeNext(raw: string | null, type?: string) {
-  if (!raw || !raw.startsWith("/")) return type === "recovery" ? "/redefinir-senha" : "/login?confirmed=1";
+  if (type === "recovery") return "/redefinir-senha";
+  if (!raw || !raw.startsWith("/")) return "/login?confirmed=1";
+  if (raw.startsWith("//")) return "/login?confirmed=1";
+  if (/^\/https?:/i.test(raw)) return "/login?confirmed=1";
   return raw;
 }
 
