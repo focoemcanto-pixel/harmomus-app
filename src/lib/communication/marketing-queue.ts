@@ -109,34 +109,20 @@ async function writeCommunicationLog(
   },
 ) {
   const now = new Date().toISOString();
+  const payload = safeJson(input.payload);
   await admin.from("communication_logs").insert({
     campaign_id: input.job.campaign_id,
-    user_id: input.job.user_id,
+    job_id: input.job.id,
     channel: input.job.channel,
-    status: input.event.endsWith("sent")
-      ? "sent"
-      : input.event.endsWith("failed")
-        ? "failed"
-        : input.event.endsWith("processing")
-          ? "processing"
-          : input.job.status,
-    provider_message_id:
-      typeof (safeJson(input.response) as Record<string, unknown> | null)
-        ?.provider_message_id === "string"
-        ? String(
-            (safeJson(input.response) as Record<string, unknown>)
-              .provider_message_id,
-          )
-        : null,
-    details: {
-      event: input.event,
-      level: input.level,
-      message: input.message,
-      job_id: input.job.id,
-      payload: safeJson(input.payload) ?? {},
-      response: safeJson(input.response),
+    event: input.event,
+    level: input.level,
+    message: input.message,
+    payload: {
+      ...((payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>),
+      user_id: input.job.user_id,
       updated_at: now,
     },
+    response: safeJson(input.response),
   });
 }
 
@@ -294,6 +280,39 @@ async function markJobProcessing(admin: any, job: CommunicationQueueJob) {
   return true;
 }
 
+async function refreshCampaignStatus(admin: any, campaignId: string | null) {
+  if (!campaignId) return;
+
+  const { data: jobs } = await admin
+    .from("communication_queue")
+    .select("status")
+    .eq("campaign_id", campaignId);
+
+  const statuses = Array.isArray(jobs) ? jobs.map((job: any) => sanitizeText(job.status)) : [];
+  const queued = statuses.filter((status) => ["pending", "queued", "processing"].includes(status)).length;
+  const sent = statuses.filter((status) => status === "sent").length;
+  const failed = statuses.filter((status) => status === "failed").length;
+  const total = statuses.length;
+  const nextStatus = queued > 0
+    ? statuses.includes("processing")
+      ? "sending"
+      : "queued"
+    : total > 0 && failed > 0 && sent === 0
+      ? "failed"
+      : total > 0
+        ? "sent"
+        : "draft";
+
+  await admin
+    .from("communication_campaigns")
+    .update({
+      status: nextStatus,
+      stats: { queued, sent, failed, total },
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", campaignId);
+}
+
 async function finalizeJob(
   admin: any,
   job: CommunicationQueueJob,
@@ -312,6 +331,8 @@ async function finalizeJob(
       error_message: result.errorMessage ?? null,
     })
     .eq("id", job.id);
+
+  await refreshCampaignStatus(admin, job.campaign_id);
 
   await writeCommunicationLog(admin, {
     job: { ...job, status },

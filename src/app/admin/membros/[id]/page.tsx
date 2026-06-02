@@ -284,7 +284,7 @@ function buildTimeline(profile: any, subscription: any, journey: Awaited<ReturnT
 
   for (const log of journey.webhookLogs) addTimelineEvent(events, { at: log.created_at, type: "Webhook", description: log.event ?? log.delivery_id ?? "Webhook recebido", source: "webhook_logs", status: log.success === false ? "erro" : "concluído", details: log });
   for (const event of journey.webhookProcessedEvents) addTimelineEvent(events, { at: event.processed_at ?? event.created_at, type: "Webhook processado", description: event.event_type ?? event.event_id ?? "Evento processado", source: "webhook_processed_events", status: "concluído", details: event });
-  for (const log of journey.communicationLogs) addTimelineEvent(events, { at: log.created_at, type: "Comunicação", description: `${log.channel ?? "canal"} ${log.status ?? "registrado"}`, source: "communication_logs", status: log.status ?? "informação", details: log });
+  for (const log of journey.communicationLogs) addTimelineEvent(events, { at: log.created_at, type: "Comunicação", description: `${log.channel ?? "canal"} ${log.event ?? "registrado"}`, source: "communication_logs", status: log.level ?? "informação", details: log });
   for (const log of journey.kitAccessLogs) addTimelineEvent(events, { at: log.accessed_at ?? log.created_at, type: "Acesso a kit", description: `Kit ${log.kit_id ?? "acessado"}`, source: "kit_access_logs", status: log.status ?? "concluído", details: log });
   for (const log of journey.audioAccessLogs) addTimelineEvent(events, { at: log.accessed_at ?? log.created_at, type: "Áudio", description: `Áudio ${log.audio_file_id ?? "reproduzido"}`, source: "audio_access_logs", status: log.status ?? "concluído", details: log });
 

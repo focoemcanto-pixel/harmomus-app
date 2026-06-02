@@ -9,7 +9,6 @@ type TemplateItem = {
   name: string;
   channel: "whatsapp" | "email" | "both";
   category: string | null;
-  subject: string | null;
   body: string;
   media_url: string | null;
   active: boolean;
@@ -20,7 +19,6 @@ export function TemplateManager() {
   const [name, setName] = useState("Você tentou acessar um kit Premium");
   const [channel, setChannel] = useState<"whatsapp" | "email" | "both">("both");
   const [category, setCategory] = useState("Upgrade");
-  const [subject, setSubject] = useState("Seu kit Premium está pronto");
   const [body, setBody] = useState("Olá {{nome}}, vimos seu interesse em um kit Premium. Ative seu acesso hoje e continue seus estudos: {{link}}");
   const [mediaUrl, setMediaUrl] = useState("");
   const [status, setStatus] = useState<string | null>(null);
@@ -55,7 +53,7 @@ export function TemplateManager() {
       const response = await fetch("/api/admin/comunicacao/templates", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, channel, category, subject, body, media_url: mediaUrl }),
+        body: JSON.stringify({ name, channel, category, body, media_url: mediaUrl }),
       });
       const json = await response.json().catch(() => null);
       if (!response.ok) throw new Error(json?.error ?? "Falha ao salvar template.");
@@ -81,7 +79,6 @@ export function TemplateManager() {
             <label className="text-sm text-slate-300">Canal<select value={channel} onChange={(e) => setChannel(e.target.value as "whatsapp" | "email" | "both")} className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white"><option value="whatsapp">WhatsApp</option><option value="email">E-mail</option><option value="both">Ambos</option></select></label>
             <label className="text-sm text-slate-300">Categoria<select value={category} onChange={(e) => setCategory(e.target.value)} className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white"><option>Upgrade</option><option>Recuperação</option><option>Engajamento</option><option>Novos kits</option><option>Avisos</option><option>Retenção</option></select></label>
           </div>
-          <label className="block text-sm text-slate-300">Assunto<input value={subject} onChange={(e) => setSubject(e.target.value)} className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white" /></label>
           <label className="block text-sm text-slate-300">Corpo<textarea value={body} onChange={(e) => setBody(e.target.value)} rows={8} className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white" /></label>
           
           <div className="rounded-2xl border border-cyan-400/20 bg-cyan-500/10 p-4">
@@ -109,7 +106,6 @@ export function TemplateManager() {
                 <div><p className="font-semibold text-white">{item.name}</p><p className="text-xs text-slate-400">{item.channel} · {item.category || "sem categoria"}</p></div>
                 <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-100">{item.active ? "ativo" : "inativo"}</span>
               </div>
-              {item.subject ? <p className="mt-3 text-sm font-medium text-cyan-100">{item.subject}</p> : null}
               <pre className="mt-2 whitespace-pre-wrap rounded-xl bg-black/30 p-3 text-sm leading-6 text-slate-200">{item.body}</pre>
               {item.media_url ? <a className="mt-2 block truncate text-sm text-cyan-200" href={item.media_url} target="_blank" rel="noreferrer">{item.media_url}</a> : null}
             </article>

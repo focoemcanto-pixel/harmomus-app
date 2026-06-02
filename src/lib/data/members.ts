@@ -239,7 +239,7 @@ export async function getSubscriberJourneyData(member: MemberListItem): Promise<
     legacyStripeImportRaw,
   ] = await Promise.all([
     userId
-      ? safeTableQuery(supabase.from("communication_logs").select("*").eq("user_id", userId).order("created_at", { ascending: false }).limit(100))
+      ? safeTableQuery(supabase.from("communication_logs").select("*").contains("payload", { user_id: userId }).order("created_at", { ascending: false }).limit(100))
       : Promise.resolve([]),
     safeTableQuery(supabase.from("communication_logs").select("*").order("created_at", { ascending: false }).limit(1000)),
     userId
@@ -317,7 +317,7 @@ export async function getMemberOperationalSummaries(
   const webhookLimit = Math.max(userIds.length * 20, 500);
 
   const [communicationLogs, kitAccessLogs, audioAccessLogs, webhookLogsRaw, webhookProcessedEventsRaw] = await Promise.all([
-    safeTableQuery(supabase.from("communication_logs").select("*").in("user_id", userIds).order("created_at", { ascending: false }).limit(lightweightLimit)),
+    Promise.resolve([]),
     safeTableQuery(supabase.from("kit_access_logs").select("*").in("user_id", userIds).order("accessed_at", { ascending: false }).limit(lightweightLimit)),
     safeTableQuery(supabase.from("audio_access_logs").select("*").in("user_id", userIds).order("accessed_at", { ascending: false }).limit(lightweightLimit)),
     safeTableQuery(supabase.from("webhook_logs").select("*").order("created_at", { ascending: false }).limit(webhookLimit)),
@@ -409,7 +409,6 @@ export async function deleteMember(userId: string): Promise<void> {
     deleteIfIds(supabase, "kit_access_logs", "user_id", userIds),
     deleteIfIds(supabase, "audio_access_logs", "user_id", userIds),
     deleteIfIds(supabase, "marketing_events", "user_id", userIds),
-    deleteIfIds(supabase, "communication_logs", "user_id", userIds),
     deleteIfIds(supabase, "communication_campaigns", "created_by", userIds),
     deleteIfIds(supabase, "ministry_members", "user_id", userIds),
     deleteIfIds(supabase, "ministry_activity_logs", "actor_user_id", userIds),

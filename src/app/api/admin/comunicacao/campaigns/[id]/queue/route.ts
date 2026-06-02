@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { processCommunicationQueue } from "@/lib/communication/marketing-queue";
 import {
   enqueueCampaignAudience,
   enqueueCampaignAudienceFromPlans,
@@ -34,22 +35,21 @@ export async function POST(
 
   const { data: campaign, error: campaignError } = await admin
     .from("communication_campaigns")
-    .select("text_content,content")
+    .select("message,audience_filters,scheduled_at,schedule_mode")
     .eq("id", id)
     .maybeSingle();
 
   if (campaignError)
     return NextResponse.json({ error: campaignError.message }, { status: 500 });
 
-  const campaignContent = sanitizeObject(campaign?.content);
-  const audienceFilters = sanitizeObject(campaignContent.audience_filters);
+  const audienceFilters = sanitizeObject(campaign?.audience_filters);
   const message =
     sanitizeText(body?.message ?? body?.text ?? body?.mensagem) ||
-    sanitizeText(campaign?.text_content);
+    sanitizeText(campaign?.message);
   const mediaUrl =
     sanitizeText(
       body?.mediaUrl ?? body?.media_url ?? body?.imageUrl ?? body?.image,
-    ) || sanitizeText(campaignContent.media_url ?? campaignContent.mediaUrl);
+    );
 
   if (!CHANNELS.has(channel))
     return NextResponse.json({ error: "Canal inválido." }, { status: 400 });
@@ -68,6 +68,7 @@ export async function POST(
           channel as Channel,
           message,
           payload,
+          campaign?.scheduled_at ?? null,
         )
       : await enqueueCampaignAudienceFromPlans(
           id,
@@ -75,14 +76,29 @@ export async function POST(
           channel as Channel,
           message,
           payload,
+          campaign?.scheduled_at ?? null,
         );
+    const nextStatus = campaign?.schedule_mode === "scheduled" || campaign?.scheduled_at ? "scheduled" : "queued";
+
+    await admin
+      .from("communication_campaigns")
+      .update({
+        status: nextStatus,
+        stats: { queued: result.queued, sent: 0, failed: 0 },
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id);
+
+    const processingResult = nextStatus === "queued" ? await processCommunicationQueue(25) : null;
+
     return NextResponse.json({
       data: {
         campaign_id: id,
         channel,
         queued: result.queued,
-        status: "queued",
+        status: nextStatus,
         audience_preview: "preview" in result ? result.preview : null,
+        worker: processingResult,
       },
     });
   } catch (error) {

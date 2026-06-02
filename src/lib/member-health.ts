@@ -159,13 +159,13 @@ function shouldEvaluateContentEngagement(member: MemberLike) {
 
 function communicationFailed(journey: JourneyLike) {
   return rows(journey, "communicationLogs").some((log: any) => {
-    const status = normalize(log?.status);
-    return FAILED_COMMUNICATION_STATUSES.has(status) || Boolean(log?.error || log?.error_message || log?.details?.error);
+    const status = normalize(log?.status ?? log?.event ?? log?.level);
+    return FAILED_COMMUNICATION_STATUSES.has(status) || normalize(log?.level) === "error" || Boolean(log?.error || log?.error_message || log?.details?.error);
   });
 }
 
 function communicationSucceeded(journey: JourneyLike) {
-  return rows(journey, "communicationLogs").some((log: any) => POSITIVE_COMMUNICATION_STATUSES.has(normalize(log?.status)));
+  return rows(journey, "communicationLogs").some((log: any) => POSITIVE_COMMUNICATION_STATUSES.has(normalize(log?.status ?? log?.event ?? log?.level)));
 }
 
 function getBand(score: number): Pick<MemberHealthResult, "label" | "severity"> {

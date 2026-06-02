@@ -2,24 +2,11 @@ import { NextResponse } from "next/server";
 
 import { requireAdmin, sanitizeText } from "../_lib/marketing-api";
 
-const LEVEL_BY_STATUS: Record<string, "debug" | "info" | "warning" | "error"> = {
-  sent: "info",
-  delivered: "info",
-  enviado: "info",
-  entregue: "info",
-  queued: "warning",
-  pending: "warning",
-  processing: "warning",
-  failed: "error",
-  error: "error",
-  falhou: "error",
-};
-
 function normalizeLog(row: any) {
-  const details = row.details && typeof row.details === "object" ? row.details : {};
-  const event = sanitizeText(details.event) || sanitizeText(row.event_type) || `communication.${sanitizeText(row.status) || "log"}`;
-  const level = sanitizeText(details.level) || LEVEL_BY_STATUS[sanitizeText(row.status)] || "info";
-  const message = sanitizeText(details.message) || sanitizeText(row.error_message) || `Registro ${sanitizeText(row.status) || "communication"}`;
+  const payload = row.payload && typeof row.payload === "object" ? row.payload : {};
+  const event = sanitizeText(row.event) || "communication.log";
+  const level = sanitizeText(row.level) || "info";
+  const message = sanitizeText(row.message) || `Registro ${event}`;
   return {
     id: row.id,
     created_at: row.created_at,
@@ -28,8 +15,8 @@ function normalizeLog(row: any) {
     event,
     level,
     message,
-    payload: details.payload ?? details,
-    response: details.response ?? null,
+    payload,
+    response: row.response ?? null,
   };
 }
 
@@ -44,7 +31,7 @@ export async function GET(request: Request) {
 
   let query = admin
     .from("communication_logs")
-    .select("id,created_at,campaign_id,user_id,channel,status,event_type,provider_message_id,error_message,details")
+    .select("id,created_at,campaign_id,job_id,channel,event,level,message,payload,response")
     .order("created_at", { ascending: false })
     .limit(100);
 

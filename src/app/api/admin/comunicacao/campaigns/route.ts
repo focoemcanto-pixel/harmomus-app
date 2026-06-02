@@ -15,23 +15,22 @@ function readContent(value: unknown) {
   return sanitizeObject(value);
 }
 
-function readChannels(
-  content: Record<string, unknown>,
-  channel?: string | null,
-) {
+function readChannels(campaign: Record<string, unknown>, content: Record<string, unknown>) {
+  const fromCampaign = sanitizeStringArray(campaign.channels, CHANNELS);
+  if (fromCampaign.length) return fromCampaign;
   const fromContent = sanitizeStringArray(content.channels, CHANNELS);
   if (fromContent.length) return fromContent;
-  return channel ? [channel] : [];
+  return [];
 }
 
 async function buildResponse(campaign: Record<string, unknown>) {
   const content = readContent(campaign.content);
-  const audienceFilters = sanitizeObject(content.audience_filters);
+  const audienceFilters = sanitizeObject(campaign.audience_filters ?? content.audience_filters);
   const title =
+    sanitizeText(campaign.title) ||
     sanitizeText(content.title) ||
-    sanitizeText(campaign.subject) ||
     sanitizeText(campaign.name);
-  const textContent = sanitizeText(campaign.text_content);
+  const textContent = sanitizeText(campaign.message ?? content.message ?? content.text_content);
 
   const audiencePreview = await getCampaignAudiencePreview(
     audienceFilters.plans,
@@ -41,19 +40,18 @@ async function buildResponse(campaign: Record<string, unknown>) {
     ...campaign,
     content,
     message: textContent,
-    channels: readChannels(content, sanitizeText(campaign.channel)),
+    text_content: textContent,
+    channels: readChannels(campaign, content),
     audience_filters: {
       ...audienceFilters,
-      audience_type: sanitizeText(campaign.audience_type),
+      audience_type: sanitizeText(campaign.audience_type ?? audienceFilters.audience_type),
     },
     title,
-    link_url: sanitizeText(content.link_url) || null,
+    link_url: sanitizeText(campaign.link_url ?? content.link_url) || null,
     media_url: sanitizeText(content.media_url ?? content.mediaUrl) || null,
     kit_id: sanitizeText(content.kit_id ?? content.kitId) || null,
-    schedule_mode: campaign.scheduled_at
-      ? "scheduled"
-      : sanitizeText(content.schedule_mode) || "now",
-    stats: sanitizeObject(content.stats) || content,
+    schedule_mode: sanitizeText(campaign.schedule_mode) || (campaign.scheduled_at ? "scheduled" : "now"),
+    stats: sanitizeObject(campaign.stats ?? content.stats),
     audience_preview: audiencePreview,
   };
 }
@@ -77,7 +75,7 @@ export async function GET(request: Request) {
   const { data, error } = await admin
     .from("communication_campaigns")
     .select(
-      "id,created_at,updated_at,name,status,channel,audience_type,subject,text_content,scheduled_at,content",
+      "id,created_at,updated_at,name,status,title,message,link_url,channels,audience_filters,schedule_mode,scheduled_at,stats",
     )
     .order("created_at", { ascending: false });
 
@@ -143,21 +141,19 @@ export async function POST(request: Request) {
     .insert({
       name,
       status: "draft",
-      channel: channels[0] ?? "whatsapp",
-      audience_type:
-        sanitizeText(
-          audienceFilters.segment ?? audienceFilters.audience_type,
-        ) || "custom",
-      subject: title,
-      preview_text: message.slice(0, 180),
-      text_content: message,
-      content,
+      title,
+      message,
+      link_url: sanitizeText(body.link_url) || null,
+      channels,
+      audience_filters: audienceFilters,
+      schedule_mode: scheduleMode,
       scheduled_at: scheduledAt || null,
+      stats: { queued: 0, sent: 0, failed: 0 },
       created_by: getCreatedBy(current.profile?.id),
       updated_at: new Date().toISOString(),
     })
     .select(
-      "id,created_at,updated_at,name,status,channel,audience_type,subject,text_content,scheduled_at,content",
+      "id,created_at,updated_at,name,status,title,message,link_url,channels,audience_filters,schedule_mode,scheduled_at,stats",
     )
     .single();
 
