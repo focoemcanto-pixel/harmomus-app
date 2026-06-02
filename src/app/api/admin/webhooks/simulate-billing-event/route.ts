@@ -16,8 +16,19 @@ const BILLING_EVENTS = new Set<WebhookEvent>([
   "subscription.payment_failed",
 ]);
 
+const ATTRIBUTION_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "fbclid", "gclid"] as const;
+
 function clean(value: unknown) {
   return String(value ?? "").trim() || null;
+}
+
+function pickAttribution(body: any) {
+  const attribution: Record<string, string> = {};
+  for (const key of ATTRIBUTION_KEYS) {
+    const value = clean(body?.[key] ?? body?.metadata?.[key] ?? body?.attribution?.[key]);
+    if (value) attribution[key] = value.slice(0, 500);
+  }
+  return attribution;
 }
 
 function inferPlanFromEvent(event: WebhookEvent, currentPlan?: string | null) {
@@ -57,6 +68,19 @@ export async function POST(request: Request) {
 
   if (subscriptionError) return NextResponse.json({ error: subscriptionError.message }, { status: 500 });
 
+  const attribution = pickAttribution(body);
+  let attributionUpdate: Record<string, unknown> | null = null;
+
+  if (subscription?.id && Object.keys(attribution).length) {
+    attributionUpdate = { ...attribution, updated_at: new Date().toISOString() };
+    const { error: attributionError } = await admin
+      .from("subscriptions")
+      .update(attributionUpdate)
+      .eq("id", subscription.id);
+
+    if (attributionError) return NextResponse.json({ error: attributionError.message }, { status: 500 });
+  }
+
   const currentPlan = subscription?.plans?.slug ?? null;
   const recipient = await resolveWebhookRecipientForUser(admin, userId, { metadata: body?.metadata ?? {} });
   const stripeEventId = `evt_sim_${crypto.randomUUID()}`;
@@ -81,6 +105,8 @@ export async function POST(request: Request) {
     phone: recipient.phone,
     phone_source: recipient.phone_source,
     diagnostic: missingPhoneDiagnostic,
+    attribution,
+    attribution_updated: Boolean(attributionUpdate),
     simulated: true,
     simulated_by: current.profile?.id ?? null,
     simulated_at: simulatedAt,
