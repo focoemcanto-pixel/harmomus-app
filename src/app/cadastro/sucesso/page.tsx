@@ -1,16 +1,20 @@
 import Link from "next/link";
 import { EmailConfirmationState } from "@/components/auth/email-confirmation-state";
+import { MetaFunnelEvent } from "@/components/analytics/meta-funnel-event";
 import { createClient } from "@/lib/supabase/server";
 
-type Props = { searchParams?: Promise<{ email?: string }> | { email?: string } };
+type Props = { searchParams?: Promise<{ email?: string; plan?: string }> | { email?: string; plan?: string } };
 
 export default async function CadastroSucessoPage({ searchParams }: Props) {
   const params = await searchParams;
   const supabase = await createClient();
   const { data } = await supabase.auth.getUser();
   const email = String(data.user?.email ?? params?.email ?? "").trim().toLowerCase();
+  const dedupeKey = email || "free-signup";
+
   return (
     <main className="min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,#17213a_0%,#07080f_42%,#020207_100%)] px-4 py-8 text-white">
+      <MetaFunnelEvent eventName="Lead" customEventName="Lead_free_signup" dedupeKey={dedupeKey} params={{ plan: "free", content_name: "Harmomus Free Signup" }} />
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_80%_20%,rgba(139,92,246,0.22),transparent_35%),radial-gradient(circle_at_20%_70%,rgba(34,211,238,0.14),transparent_32%)]" />
 
       <section className="relative mx-auto flex min-h-[calc(100vh-4rem)] max-w-5xl items-center justify-center">
