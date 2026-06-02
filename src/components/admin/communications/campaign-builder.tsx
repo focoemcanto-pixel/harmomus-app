@@ -29,6 +29,15 @@ type CommunicationKit = {
   url: string;
 };
 
+type AudiencePreview = {
+  total: number;
+  totalByPlan?: Record<string, number>;
+  current: number;
+  legacy: number;
+  duplicatesRemoved: number;
+  selectedPlans?: string[];
+};
+
 type LoadedCampaign = {
   id: string;
   name?: string | null;
@@ -44,6 +53,7 @@ type LoadedCampaign = {
   content?: Record<string, unknown> | null;
   audience_filters?: Record<string, unknown> | null;
   rate_limits?: Record<string, unknown> | null;
+  audience_preview?: AudiencePreview | null;
 };
 
 const planLabels: Record<Plan, string> = {
@@ -74,6 +84,39 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+function formatAudienceNumber(value: number | null | undefined) {
+  return typeof value === "number" ? value.toLocaleString("pt-BR") : "—";
+}
+
+function asAudiencePreview(value: unknown): AudiencePreview | null {
+  const record = asRecord(value);
+  const total = asNumber(record.total);
+  const current = asNumber(record.current);
+  const legacy = asNumber(record.legacy);
+  const duplicatesRemoved = asNumber(
+    record.duplicatesRemoved ?? record.duplicates_removed,
+  );
+  if (
+    total === null ||
+    current === null ||
+    legacy === null ||
+    duplicatesRemoved === null
+  )
+    return null;
+  return {
+    total,
+    current,
+    legacy,
+    duplicatesRemoved,
+    totalByPlan: Object.fromEntries(
+      Object.entries(asRecord(record.totalByPlan ?? record.total_by_plan)).map(
+        ([plan, count]) => [plan, asNumber(count) ?? 0],
+      ),
+    ),
+    selectedPlans: safePlanList(record.selectedPlans ?? record.selected_plans),
+  };
 }
 
 function asNumber(value: unknown) {
@@ -112,6 +155,10 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [savedCampaignId, setSavedCampaignId] = useState<string | null>(null);
   const [isQueueing, setIsQueueing] = useState(false);
+  const [audiencePreview, setAudiencePreview] =
+    useState<AudiencePreview | null>(null);
+  const [isLoadingAudiencePreview, setIsLoadingAudiencePreview] =
+    useState(false);
 
   const previewMessage = message
     .replaceAll("{{nome}}", "Marcos")
@@ -205,6 +252,7 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
         );
 
         setSavedCampaignId(campaign.id);
+        setAudiencePreview(asAudiencePreview(campaign.audience_preview));
         setName((current) => String(campaign.name ?? current));
         if (nextTitle) setTitle(nextTitle);
         if (nextMessage) setMessage(nextMessage);
@@ -266,6 +314,45 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
       cancelled = true;
     };
   }, [campaignId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!plans.length) {
+      setAudiencePreview(null);
+      return;
+    }
+
+    async function loadAudiencePreview() {
+      setIsLoadingAudiencePreview(true);
+      try {
+        const response = await fetch(
+          `/api/admin/comunicacao/campaigns?plans=${encodeURIComponent(plans.join(","))}`,
+          { cache: "no-store" },
+        );
+        const json = await response.json().catch(() => null);
+        if (!response.ok)
+          throw new Error(json?.error ?? "Falha ao estimar audiência.");
+        if (!cancelled)
+          setAudiencePreview(asAudiencePreview(json?.data?.audience_preview));
+      } catch (error) {
+        if (!cancelled) {
+          setAudiencePreview(null);
+          setStatus(
+            error instanceof Error
+              ? error.message
+              : "Falha ao estimar audiência.",
+          );
+        }
+      } finally {
+        if (!cancelled) setIsLoadingAudiencePreview(false);
+      }
+    }
+
+    loadAudiencePreview();
+    return () => {
+      cancelled = true;
+    };
+  }, [plans]);
 
   function toggleChannel(channel: Channel) {
     setChannels((current) =>
@@ -443,6 +530,7 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
       if (!response.ok)
         throw new Error(json?.error ?? "Falha ao salvar rascunho.");
       setSavedCampaignId(json?.data?.id ?? null);
+      setAudiencePreview(asAudiencePreview(json?.data?.audience_preview));
       setStatus(
         `Rascunho salvo no Supabase: ${json?.data?.name ?? name}. Revise e coloque em fila quando estiver pronto.`,
       );
@@ -479,6 +567,7 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
           const json = await response.json().catch(() => null);
           if (!response.ok)
             throw new Error(json?.error ?? `Falha ao enfileirar ${channel}.`);
+          setAudiencePreview(asAudiencePreview(json?.data?.audience_preview));
           return `${channel}: ${json?.data?.queued ?? 0}`;
         }),
       );
@@ -687,18 +776,41 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
             </div>
             <div className="mt-4 grid gap-3 text-sm">
               <div className="rounded-2xl bg-slate-900/70 p-4">
-                <p className="text-slate-400">Público selecionado</p>
+                <p className="text-slate-400">Total estimado de contatos</p>
                 <p className="text-2xl font-bold text-white">
-                  calculado na fila
+                  {isLoadingAudiencePreview
+                    ? "calculando..."
+                    : formatAudienceNumber(audiencePreview?.total)}
                 </p>
               </div>
               <div className="rounded-2xl bg-slate-900/70 p-4">
-                <p className="text-slate-400">Tempo estimado</p>
-                <p className="text-2xl font-bold text-white">após enfileirar</p>
+                <p className="text-slate-400">Atuais / legados</p>
+                <p className="text-2xl font-bold text-white">
+                  {formatAudienceNumber(audiencePreview?.current)} /{" "}
+                  {formatAudienceNumber(audiencePreview?.legacy)}
+                </p>
               </div>
               <div className="rounded-2xl bg-slate-900/70 p-4">
-                <p className="text-slate-400">Lotes diários</p>
-                <p className="text-2xl font-bold text-white">limite seguro</p>
+                <p className="text-slate-400">Removidos por duplicidade</p>
+                <p className="text-2xl font-bold text-white">
+                  {formatAudienceNumber(audiencePreview?.duplicatesRemoved)}
+                </p>
+              </div>
+              <div className="rounded-2xl bg-slate-900/70 p-4">
+                <p className="text-slate-400">Total por plano</p>
+                <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-slate-300">
+                  {(["free", "plus", "premium"] as Plan[]).map((plan) => (
+                    <span
+                      key={plan}
+                      className="rounded-xl border border-white/10 bg-slate-950 px-2 py-1"
+                    >
+                      {planLabels[plan]}:{" "}
+                      {formatAudienceNumber(
+                        Number(audiencePreview?.totalByPlan?.[plan] ?? 0),
+                      )}
+                    </span>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
