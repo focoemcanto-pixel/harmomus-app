@@ -31,6 +31,30 @@ type CommunicationKit = {
   url: string;
 };
 
+type CampaignAudienceContact = {
+  id: string;
+  user_id: string | null;
+  source: "current" | "legacy";
+  plan: string;
+  name: string | null;
+  email: string | null;
+  phone: string;
+  phone_normalized: string;
+};
+
+type CampaignAudienceResult = {
+  contacts: CampaignAudienceContact[];
+  summary: {
+    total: number;
+    selectedPlans: string[];
+    byPlan: Record<string, number>;
+    bySource: Record<string, number>;
+    currentRaw: number;
+    legacyRaw: number;
+    duplicated: number;
+  };
+};
+
 type AudiencePreview = {
   total: number;
   totalByPlan?: Record<string, number>;
@@ -90,6 +114,23 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function formatAudienceNumber(value: number | null | undefined) {
   return typeof value === "number" ? value.toLocaleString("pt-BR") : "—";
+}
+
+function formatCount(value: number | null | undefined) {
+  return typeof value === "number" ? value.toLocaleString("pt-BR") : "0";
+}
+
+function maskPhone(value: string | null | undefined) {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  if (digits.length < 10) return value || "—";
+  const country =
+    digits.length > 11 ? `+${digits.slice(0, digits.length - 11)} ` : "";
+  const local = digits.slice(-11);
+  return `${country}(${local.slice(0, 2)}) ${local.slice(2, 7)}-${local.slice(7)}`;
+}
+
+function sourceLabel(source: string | null | undefined) {
+  return source === "current" ? "Atual" : source === "legacy" ? "Legado" : "—";
 }
 
 function asAudiencePreview(value: unknown): AudiencePreview | null {
@@ -159,8 +200,12 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
   const [isQueueing, setIsQueueing] = useState(false);
   const [audiencePreview, setAudiencePreview] =
     useState<AudiencePreview | null>(null);
+  const [resolvedAudience, setResolvedAudience] =
+    useState<CampaignAudienceResult | null>(null);
   const [isLoadingAudiencePreview, setIsLoadingAudiencePreview] =
     useState(false);
+  const [isResolvingAudience, setIsResolvingAudience] = useState(false);
+  const [isContactsModalOpen, setIsContactsModalOpen] = useState(false);
 
   const previewMessage = message
     .replaceAll("{{nome}}", "Marcos")
@@ -321,6 +366,7 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
     let cancelled = false;
     if (!plans.length) {
       setAudiencePreview(null);
+      setResolvedAudience(null);
       return;
     }
 
@@ -370,7 +416,8 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
         ? current.filter((item) => item !== plan)
         : [...current, plan],
     );
-    setAudience(null);
+    setAudiencePreview(null);
+    setResolvedAudience(null);
   }
 
   function handleKitSelect(kitId: string) {
@@ -451,7 +498,7 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
       if (!response.ok)
         throw new Error(json?.error ?? "Falha ao atualizar audiência.");
       const nextAudience = json?.data as CampaignAudienceResult;
-      setAudience(nextAudience);
+      setResolvedAudience(nextAudience);
       if (!options?.silent) {
         setStatus(
           `Audiência atualizada: ${formatCount(nextAudience.summary.total)} contatos únicos (${formatCount(nextAudience.summary.duplicated)} duplicados removidos).`,
@@ -594,9 +641,12 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
     setIsQueueing(true);
     setStatus(null);
     try {
-      const resolvedAudience = audience ?? (await refreshAudience({ silent: true }));
-      if (!resolvedAudience?.contacts.length)
-        throw new Error("Atualize a audiência antes de colocar mensagens em fila.");
+      const currentAudience =
+        resolvedAudience ?? (await refreshAudience({ silent: true }));
+      if (!currentAudience?.contacts.length)
+        throw new Error(
+          "Atualize a audiência antes de colocar mensagens em fila.",
+        );
 
       const results = await Promise.all(
         channels.map(async (channel) => {
@@ -608,7 +658,7 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
               body: JSON.stringify({
                 channel,
                 message: previewMessage,
-                contacts: resolvedAudience.contacts,
+                contacts: currentAudience.contacts,
                 ...(mediaUrl ? { mediaUrl } : {}),
               }),
             },
@@ -746,7 +796,7 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
                 <button
                   type="button"
                   onClick={() => setIsContactsModalOpen(true)}
-                  disabled={!audience?.contacts.length}
+                  disabled={!resolvedAudience?.contacts.length}
                   className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Eye size={15} />
@@ -759,31 +809,31 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
               <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Total</p>
                 <p className="mt-1 text-2xl font-semibold text-white">
-                  {formatCount(audience?.summary.total)}
+                  {formatCount(resolvedAudience?.summary.total)}
                 </p>
               </div>
               <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Atuais</p>
                 <p className="mt-1 text-2xl font-semibold text-emerald-100">
-                  {formatCount(audience?.summary.bySource.current)}
+                  {formatCount(resolvedAudience?.summary.bySource.current)}
                 </p>
                 <p className="text-xs text-slate-500">
-                  Brutos: {formatCount(audience?.summary.currentRaw)}
+                  Brutos: {formatCount(resolvedAudience?.summary.currentRaw)}
                 </p>
               </div>
               <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Legado</p>
                 <p className="mt-1 text-2xl font-semibold text-amber-100">
-                  {formatCount(audience?.summary.bySource.legacy)}
+                  {formatCount(resolvedAudience?.summary.bySource.legacy)}
                 </p>
                 <p className="text-xs text-slate-500">
-                  Brutos: {formatCount(audience?.summary.legacyRaw)}
+                  Brutos: {formatCount(resolvedAudience?.summary.legacyRaw)}
                 </p>
               </div>
               <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Duplicados removidos</p>
                 <p className="mt-1 text-2xl font-semibold text-violet-100">
-                  {formatCount(audience?.summary.duplicated)}
+                  {formatCount(resolvedAudience?.summary.duplicated)}
                 </p>
               </div>
             </div>
@@ -796,7 +846,7 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
                     key={plan}
                     className="rounded-full border border-white/10 bg-slate-900 px-3 py-1.5 text-xs text-slate-200"
                   >
-                    {planLabels[plan]}: {formatCount(audience?.summary.byPlan[plan])}
+                    {planLabels[plan]}: {formatCount(resolvedAudience?.summary.byPlan[plan])}
                   </span>
                 ))}
               </div>
@@ -1137,7 +1187,7 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
               <div>
                 <h3 className="text-lg font-semibold text-white">Contatos da audiência</h3>
                 <p className="text-sm text-slate-400">
-                  Mostrando até 100 registros de {formatCount(audience?.summary.total)} contatos únicos.
+                  Mostrando até 100 registros de {formatCount(resolvedAudience?.summary.total)} contatos únicos.
                 </p>
               </div>
               <button
@@ -1160,7 +1210,7 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/10 text-slate-200">
-                  {(audience?.contacts ?? []).slice(0, 100).map((contact) => (
+                  {(resolvedAudience?.contacts ?? []).slice(0, 100).map((contact) => (
                     <tr key={contact.id}>
                       <td className="py-3 pr-4">{contact.name || "Sem nome"}</td>
                       <td className="py-3 pr-4 font-mono text-xs">
