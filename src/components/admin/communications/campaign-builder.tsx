@@ -85,7 +85,7 @@ function asNumber(value: unknown) {
   return null;
 }
 
-export function CampaignBuilder() {
+export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
   const [name, setName] = useState("Lançamento de novo kit vocal");
   const [channels, setChannels] = useState<Channel[]>(["whatsapp"]);
   const [plans, setPlans] = useState<Plan[]>(["premium", "plus"]);
@@ -149,9 +149,6 @@ export function CampaignBuilder() {
 
   useEffect(() => {
     let cancelled = false;
-    const campaignId = new URLSearchParams(window.location.search).get(
-      "campaignId",
-    );
     if (!campaignId) return;
 
     async function loadCampaign() {
@@ -268,7 +265,7 @@ export function CampaignBuilder() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [campaignId]);
 
   function toggleChannel(channel: Channel) {
     setChannels((current) =>
