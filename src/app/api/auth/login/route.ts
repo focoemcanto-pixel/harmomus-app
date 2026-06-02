@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { trackMarketingEvent } from "@/lib/communications/events";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { syncProfileOnboardingAfterAuth } from "@/lib/auth/onboarding";
 import { createClient } from "@/lib/supabase/server";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
 
@@ -73,6 +74,7 @@ export async function POST(request: Request) {
     isFirstLogin = !profile?.last_login_at;
 
     await admin.from('profiles').update({ last_login_at: new Date().toISOString() }).eq('id', user.id);
+    await syncProfileOnboardingAfterAuth({ userId: user.id, successfulLogin: true, authUser: user as any });
 
     await dispatchWebhookEvent({
       event: 'user.login',
