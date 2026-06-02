@@ -28,6 +28,28 @@ function isEmailNotConfirmedError(error: unknown) {
   );
 }
 
+async function autoConfirmUserByEmail(email: string) {
+  const admin = createSupabaseAdminClient() as any;
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("id")
+    .ilike("email", email)
+    .maybeSingle();
+
+  if (!profile?.id) return false;
+
+  const { error } = await admin.auth.admin.updateUserById(profile.id, {
+    email_confirm: true,
+  });
+
+  if (error) {
+    console.error("[auth.login] falha ao confirmar e-mail automaticamente", error);
+    return false;
+  }
+
+  return true;
+}
+
 export async function POST(request: Request) {
   const formData = await request.formData();
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
@@ -79,15 +101,20 @@ export async function POST(request: Request) {
     }
   }
 
-  const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+  let { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+
+  if (signInError && isEmailNotConfirmedError(signInError)) {
+    const confirmed = await autoConfirmUserByEmail(email);
+    if (confirmed) {
+      const retry = await supabase.auth.signInWithPassword({ email, password });
+      data = retry.data;
+      signInError = retry.error;
+    }
+  }
 
   if (signInError) {
     const url = new URL("/login", request.url);
-    const errorMessage = isEmailNotConfirmedError(signInError)
-      ? "Você ainda não confirmou seu e-mail. Acesse sua caixa de entrada e clique no link de confirmação para ativar sua conta. Verifique também Spam, Promoções ou Lixo Eletrônico."
-      : "E-mail ou senha inválidos.";
-
-    url.searchParams.set("error", errorMessage);
+    url.searchParams.set("error", "E-mail ou senha inválidos.");
     url.searchParams.set("redirect", redirectPath);
     return NextResponse.redirect(url, 303);
   }
