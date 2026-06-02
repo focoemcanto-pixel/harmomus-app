@@ -20,6 +20,13 @@ function cleanPayload(payload: unknown) {
   );
 }
 
+function buildAttribution(payload: Record<string, unknown>) {
+  return ATTRIBUTION_KEYS.reduce<Record<(typeof ATTRIBUTION_KEYS)[number], string | null>>((acc, key) => {
+    acc[key] = clean(payload[key]);
+    return acc;
+  }, {} as Record<(typeof ATTRIBUTION_KEYS)[number], string | null>);
+}
+
 function sheetRow(input: {
   eventName: string;
   eventId: string | null;
@@ -48,20 +55,48 @@ function sheetRow(input: {
 
 async function syncToSheets(row: Record<string, unknown>) {
   const webhookUrl = process.env.META_FUNNEL_SHEETS_WEBHOOK_URL;
-  if (!webhookUrl) return { skipped: true };
+  const configured = Boolean(webhookUrl);
+  console.log("[META SHEETS] webhook configured:", configured);
+
+  if (!webhookUrl) return { skipped: true, configured: false };
 
   try {
+    console.log("[META SHEETS] sending event:", row.event_name);
     const response = await fetch(webhookUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(row),
     });
+    const responseText = await response.text().catch(() => "");
+    console.log("[META SHEETS] response:", response.status, responseText.slice(0, 300));
 
-    return { skipped: false, ok: response.ok, status: response.status };
+    return { skipped: false, configured: true, ok: response.ok, status: response.status, body: responseText.slice(0, 500) };
   } catch (error) {
-    console.error("[meta-events/record] Failed to sync event to Sheets", error);
-    return { skipped: false, ok: false, error: error instanceof Error ? error.message : "Erro desconhecido" };
+    console.error("[META SHEETS] failed:", error);
+    return { skipped: false, configured: true, ok: false, error: error instanceof Error ? error.message : "Erro desconhecido" };
   }
+}
+
+export async function GET() {
+  const testEventName = "Lead_free_signup";
+  const payload = {
+    utm_source: "MetaAds",
+    utm_medium: "DiagnosticoWebhook",
+    utm_campaign: "TESTE_SHEETS_GET",
+    utm_term: "manual_get",
+    utm_content: "diagnostico",
+    event_id: `sheets-get-${Date.now()}`,
+  };
+  const attribution = buildAttribution(payload);
+  const eventId = clean(payload.event_id, 180);
+  const sheets = await syncToSheets(sheetRow({ eventName: testEventName, eventId, attribution, url: "manual-diagnostic-get", userAgent: "manual-diagnostic", payload }));
+
+  return NextResponse.json({
+    ok: true,
+    diagnostic: true,
+    webhookConfigured: Boolean(process.env.META_FUNNEL_SHEETS_WEBHOOK_URL),
+    sheets,
+  });
 }
 
 export async function POST(request: Request) {
@@ -73,10 +108,7 @@ export async function POST(request: Request) {
     }
 
     const payload = cleanPayload(body.payload);
-    const attribution = ATTRIBUTION_KEYS.reduce<Record<(typeof ATTRIBUTION_KEYS)[number], string | null>>((acc, key) => {
-      acc[key] = clean((payload as Record<string, unknown>)[key]);
-      return acc;
-    }, {} as Record<(typeof ATTRIBUTION_KEYS)[number], string | null>);
+    const attribution = buildAttribution(payload);
 
     const eventId = clean(body.eventId ?? (payload as Record<string, unknown>).event_id, 180);
     const eventSourceUrl = clean(body.url, 1000) ?? request.headers.get("referer");
@@ -96,8 +128,9 @@ export async function POST(request: Request) {
     if (error && error.code === "23505") return NextResponse.json({ ok: true, eventName, duplicated: true });
     if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
 
-    const sheets = await syncToSheets(sheetRow({ eventName, eventId, attribution, url: eventSourceUrl, userAgent, payload }));
-    return NextResponse.json({ ok: true, eventName, sheets });
+    const row = sheetRow({ eventName, eventId, attribution, url: eventSourceUrl, userAgent, payload });
+    const sheets = await syncToSheets(row);
+    return NextResponse.json({ ok: true, eventName, sheets, webhookConfigured: Boolean(process.env.META_FUNNEL_SHEETS_WEBHOOK_URL) });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Falha ao registrar evento." }, { status: 500 });
   }
