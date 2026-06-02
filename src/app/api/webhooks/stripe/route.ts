@@ -6,6 +6,8 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getStripeSubscription } from "@/lib/stripe/client";
 import { mapStripeStatus } from "@/lib/stripe/status";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
+import { resolveWebhookRecipientForUser } from "@/lib/webhooks/recipient";
+import type { WebhookEvent } from "@/types/webhooks";
 
 export const runtime = "nodejs";
 
@@ -31,6 +33,7 @@ type SyncedSubscriptionContext = {
   customerEmail: string | null;
   currentPeriodEnd: string | null;
   trialEndsAt: string | null;
+  metadata: Record<string, unknown>;
 } | null;
 
 const ACCEPTED_EVENTS = new Set([
@@ -150,17 +153,6 @@ async function ensureUserIdByCustomerOrEmail(supabase: any, customerId: string |
   return byEmail?.id ?? null;
 }
 
-async function getProfileForWebhook(supabase: any, userId: string) {
-  const { data, error } = await supabase
-    .from("profiles")
-    .select("id,full_name,email,phone")
-    .eq("id", userId)
-    .maybeSingle();
-
-  if (error) console.error("[stripe.webhook] Falha ao buscar profile", error);
-  return data ?? null;
-}
-
 async function getCurrentSubscriptionForHistory(supabase: any, userId: string): Promise<PreviousSubscriptionContext> {
   const { data, error } = await supabase
     .from("subscriptions")
@@ -239,7 +231,7 @@ function mapStripeEventToWebhookEvent(eventType: string, status: string) {
   if (eventType === "invoice.payment_failed") return "subscription.payment_failed";
   if (eventType === "charge.refunded") return "payment.refunded";
   if (eventType === "charge.dispute.created") return "payment.chargeback";
-  if (eventType === "customer.subscription.updated" && status === "active") return "subscription.renewed";
+  if (eventType === "customer.subscription.updated" && ["active", "trialing"].includes(status)) return "subscription.renewed";
   return null;
 }
 
@@ -270,7 +262,8 @@ function getCheckoutCompletedEvent(planSlug?: string | null) {
 
 function shouldDispatchPlanActivated(eventType: string, context: NonNullable<SyncedSubscriptionContext>) {
   if (!["active", "trialing"].includes(context.status)) return false;
-  return eventType === "checkout.session.completed" || eventType === "customer.subscription.created";
+  if (["checkout.session.completed", "customer.subscription.created"].includes(eventType)) return true;
+  return eventType === "customer.subscription.updated" && normalizePlanFamily(context.planSlug) !== normalizePlanFamily(context.previousPlanSlug);
 }
 
 function planRank(slug?: string | null) {
@@ -280,6 +273,18 @@ function planRank(slug?: string | null) {
   if (family === "premium") return 2;
   if (family === "ministry") return 3;
   return -1;
+}
+
+function getSpecificPlanTransitionEvent(fromSlug?: string | null, toSlug?: string | null) {
+  const from = normalizePlanFamily(fromSlug);
+  const to = normalizePlanFamily(toSlug);
+  if (!from || !to || from === to) return null;
+
+  const direction = planRank(to) > planRank(from) ? "upgrade" : "downgrade";
+  const key = `${from}_to_${to}`;
+  const allowed = new Set(["free_to_plus", "free_to_premium", "plus_to_premium", "premium_to_plus", "premium_to_free", "plus_to_free"]);
+  if (!allowed.has(key)) return null;
+  return `${direction}.${key}` as WebhookEvent;
 }
 
 function getHistoryChangeType(eventType: string, context: NonNullable<SyncedSubscriptionContext>) {
@@ -378,6 +383,13 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
     normalizeLower(object.metadata?.plan_slug) ??
     normalizeLower(object.subscription_details?.metadata?.plan_slug);
 
+  const stripeMetadata = {
+    ...(object.subscription_details?.metadata ?? {}),
+    ...(object.metadata ?? {}),
+    ...(fullSubscription?.metadata ?? {}),
+  } as Record<string, unknown>;
+  const metadataPreviousPlanSlug = normalizeLower(stripeMetadata.previous_plan_slug);
+
   const userId = metadataUserId ?? (await ensureUserIdByCustomerOrEmail(supabase, customerId, customerEmail));
   if (!userId) {
     console.error("[stripe.webhook] Usuário não localizado para evento Stripe", { eventId: event.id, eventType: event.type, customerId });
@@ -424,7 +436,7 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
       planId: downgraded?.freePlanId ?? null,
       planSlug: "free",
       previousPlanId: downgraded?.previous.planId ?? previous.planId,
-      previousPlanSlug: downgraded?.previous.planSlug ?? previous.planSlug,
+      previousPlanSlug: metadataPreviousPlanSlug ?? downgraded?.previous.planSlug ?? previous.planSlug,
       status: "canceled",
       customerId,
       subscriptionId: syncedSubscriptionId,
@@ -433,6 +445,7 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
       customerEmail,
       currentPeriodEnd,
       trialEndsAt,
+      metadata: stripeMetadata,
     };
   }
 
@@ -484,7 +497,7 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
     planId: plan.id ?? null,
     planSlug: plan.slug ?? null,
     previousPlanId: previous.planId,
-    previousPlanSlug: previous.planSlug,
+    previousPlanSlug: metadataPreviousPlanSlug ?? previous.planSlug,
     status,
     customerId,
     subscriptionId: syncedSubscriptionId,
@@ -493,6 +506,7 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
     customerEmail,
     currentPeriodEnd,
     trialEndsAt,
+    metadata: stripeMetadata,
   };
 }
 
@@ -558,12 +572,18 @@ async function dispatchStripeWebhookEvent(supabase: any, event: StripeEvent, con
   const webhookEvent = mapStripeEventToWebhookEvent(event.type, context.status);
   if (!webhookEvent) return;
 
-  const profile = await getProfileForWebhook(supabase, context.userId);
-  const recipient = {
-    name: profile?.full_name ?? null,
-    email: profile?.email ?? context.customerEmail,
-    phone: profile?.phone ?? null,
-  };
+  const recipient = await resolveWebhookRecipientForUser(supabase, context.userId, {
+    email: context.customerEmail,
+    metadata: context.metadata,
+    phone: context.metadata?.phone as string | null | undefined,
+    full_name: context.metadata?.full_name as string | null | undefined,
+    username: context.metadata?.username as string | null | undefined,
+  });
+  const missingPhoneDiagnostic = recipient.phone ? null : "missing_phone_for_paid_webhook";
+  if (missingPhoneDiagnostic) {
+    console.warn("[stripe.webhook] missing_phone_for_paid_webhook", { eventId: event.id, eventType: event.type, userId: context.userId });
+  }
+
   const data = {
     stripe_event_id: event.id,
     stripe_event_type: event.type,
@@ -576,19 +596,24 @@ async function dispatchStripeWebhookEvent(supabase: any, event: StripeEvent, con
     stripe_price_id: context.stripePriceId,
     current_period_end: context.currentPeriodEnd,
     trial_ends_at: context.trialEndsAt,
+    email: recipient.email,
+    phone: recipient.phone,
+    phone_source: recipient.phone_source,
+    diagnostic: missingPhoneDiagnostic,
   };
 
   const extraEvents = [
     event.type === "checkout.session.completed" ? getCheckoutCompletedEvent(context.planSlug) : null,
+    getSpecificPlanTransitionEvent(context.previousPlanSlug, context.planSlug),
     shouldDispatchPlanActivated(event.type, context) ? getPlanActivatedEvent(context.planSlug) : null,
-  ].filter(Boolean) as string[];
+  ].filter(Boolean) as WebhookEvent[];
 
-  const events = Array.from(new Set([webhookEvent, ...extraEvents]));
+  const events = Array.from(new Set([webhookEvent as WebhookEvent, ...extraEvents]));
 
   await Promise.allSettled(
     events.map((eventName) =>
       dispatchWebhookEvent({
-        event: eventName as any,
+        event: eventName,
         source: "stripe",
         recipient,
         data,
