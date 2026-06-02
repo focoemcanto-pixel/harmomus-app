@@ -7,11 +7,15 @@ type QueryResult<T> = { data: T | null; error: { message?: string; code?: string
 type LogLite = { id?: string; status?: string | null; channel?: string | null; created_at?: string | null; event?: string | null; level?: string | null };
 type EventLite = { event_type?: string | null; event_key?: string | null; event_label?: string | null; created_at?: string | null };
 type DeliveryLite = { id?: string; status?: string | null; channel?: string | null; opened_at?: string | null; clicked_at?: string | null; converted_at?: string | null; created_at?: string | null };
-type ProfileLite = { id: string; full_name?: string | null; email?: string | null; phone?: string | null; whatsapp_opt_in?: boolean | null; email_opt_in?: boolean | null; last_seen_at?: string | null; created_at?: string | null; origin?: string | null };
-type SubscriptionLite = { id?: string; user_id: string; status?: string | null; plans?: { name?: string | null; slug?: string | null; hierarchy_level?: number | null } | null; updated_at?: string | null; canceled_at?: string | null; current_period_end?: string | null };
+type ProfileLite = { id: string; name?: string | null; full_name?: string | null; email?: string | null; phone?: string | null; whatsapp_opt_in?: boolean | null; email_opt_in?: boolean | null; last_seen_at?: string | null; created_at?: string | null; origin?: string | null };
+type SubscriptionLite = { id?: string; user_id: string; status?: string | null; plan_id?: string | null; plans?: { name?: string | null; slug?: string | null; hierarchy_level?: number | null } | null; updated_at?: string | null; canceled_at?: string | null; current_period_end?: string | null };
 type AccessLite = { user_id?: string | null; status?: string | null; reason?: string | null; accessed_at?: string | null; created_at?: string | null; kits?: { name?: string | null; slug?: string | null } | null };
 type InvoiceLite = { user_id?: string | null; status?: string | null; amount_due_cents?: number | null; created_at?: string | null; customer_email?: string | null; profiles?: { id?: string | null; email?: string | null } | null };
 type HistoryLite = { id?: string; change_type?: string | null; from_plan_slug?: string | null; to_plan_slug?: string | null; created_at?: string | null };
+
+type LegacyContactLite = { id?: string | null; user_id?: string | null; name?: string | null; full_name?: string | null; display_name?: string | null; email?: string | null; phone?: string | null; legacy_plan_slug?: string | null };
+type CampaignAudienceContact = { source: "current" | "legacy"; user_id: string | null; legacy_id: string | null; name: string | null; email: string | null; phone: string; normalizedPhone: string; plan: string };
+export type CampaignAudiencePreview = { total: number; totalByPlan: Record<string, number>; current: number; legacy: number; duplicatesRemoved: number; selectedPlans: string[]; warnings: CommunicationWarning[] };
 
 export type CommunicationLogRow = {
   id: string;
@@ -121,6 +125,107 @@ function dedupe<T extends { id?: string | null }>(rows: T[]) {
   const map = new Map<string, T>();
   for (const row of rows) if (row.id && !map.has(row.id)) map.set(row.id, row);
   return Array.from(map.values());
+}
+
+
+function normalizePhone(value?: string | null) {
+  return String(value ?? "").replace(/\D/g, "");
+}
+
+function selectedPlanSlugs(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  const allowed = new Set(["free", "plus", "premium"]);
+  return Array.from(new Set(value.map((item) => normalize(String(item))).filter((item) => allowed.has(item))));
+}
+
+function profileDisplayName(profile: ProfileLite) {
+  return profile.name ?? profile.full_name ?? profile.email ?? null;
+}
+
+function legacyDisplayName(contact: LegacyContactLite) {
+  return contact.name ?? contact.full_name ?? contact.display_name ?? contact.email ?? null;
+}
+
+async function selectProfilesByIds(supabase: SupabaseAdmin & any, ids: string[]) {
+  const withName = await supabase.from("profiles").select("id,name,full_name,email,phone").in("id", ids);
+  if (!withName.error) return withName as QueryResult<ProfileLite[]>;
+  return supabase.from("profiles").select("id,full_name,email,phone").in("id", ids) as PromiseLike<QueryResult<ProfileLite[]>>;
+}
+
+async function selectLegacyContacts(supabase: SupabaseAdmin & any, plans: string[]) {
+  const withName = await supabase.from("vw_legacy_contacts_enriched").select("id,user_id,name,full_name,email,phone,legacy_plan_slug").in("legacy_plan_slug", plans);
+  if (!withName.error) return withName as QueryResult<LegacyContactLite[]>;
+
+  const fallback = await supabase.from("vw_legacy_contacts_enriched").select("id,user_id,full_name,email,phone,legacy_plan_slug").in("legacy_plan_slug", plans);
+  if (!fallback.error) return fallback as QueryResult<LegacyContactLite[]>;
+
+  return supabase.from("vw_legacy_contacts_enriched").select("id,user_id,email,phone,legacy_plan_slug").in("legacy_plan_slug", plans) as PromiseLike<QueryResult<LegacyContactLite[]>>;
+}
+
+function summarizeCampaignAudience(contacts: CampaignAudienceContact[], selectedPlans: string[], warnings: CommunicationWarning[], duplicatesRemoved: number): CampaignAudiencePreview {
+  return {
+    total: contacts.length,
+    totalByPlan: contacts.reduce<Record<string, number>>((acc, contact) => {
+      acc[contact.plan] = (acc[contact.plan] ?? 0) + 1;
+      return acc;
+    }, Object.fromEntries(selectedPlans.map((plan) => [plan, 0]))),
+    current: contacts.filter((contact) => contact.source === "current").length,
+    legacy: contacts.filter((contact) => contact.source === "legacy").length,
+    duplicatesRemoved,
+    selectedPlans,
+    warnings,
+  };
+}
+
+export async function resolveCampaignAudienceByPlans(plansInput: unknown) {
+  const supabase = createSupabaseAdminClient() as SupabaseAdmin & any;
+  const warnings: CommunicationWarning[] = [];
+  const selectedPlans = selectedPlanSlugs(plansInput);
+  if (!selectedPlans.length) return { contacts: [] as CampaignAudienceContact[], preview: summarizeCampaignAudience([], [], warnings, 0) };
+
+  const [subscriptionsResult, legacyResult] = await Promise.all([
+    safeQuery<SubscriptionLite[]>("subscriptions + plans + profiles", supabase.from("subscriptions").select("id,user_id,plan_id,status,updated_at,plans!inner(id,name,slug,hierarchy_level)").in("status", ACTIVE_SUBSCRIPTION_STATUSES).in("plans.slug", selectedPlans).order("updated_at", { ascending: false }).limit(10000), warnings),
+    safeQuery<LegacyContactLite[]>("vw_legacy_contacts_enriched", selectLegacyContacts(supabase, selectedPlans), warnings),
+  ]);
+
+  const activeSubscriptions = (subscriptionsResult.data ?? []).filter((sub) => selectedPlans.includes(planSlug(sub)));
+  const profileIds = Array.from(new Set(activeSubscriptions.map((sub) => sub.user_id).filter(Boolean)));
+  const profilesResult = profileIds.length ? await safeQuery<ProfileLite[]>("profiles", selectProfilesByIds(supabase, profileIds), warnings) : { data: [] as ProfileLite[], count: 0, error: null };
+  const profilesById = new Map((profilesResult.data ?? []).map((profile) => [profile.id, profile]));
+
+  const byPhone = new Map<string, CampaignAudienceContact>();
+  let duplicatesRemoved = 0;
+
+  for (const sub of activeSubscriptions) {
+    const profile = profilesById.get(sub.user_id);
+    if (!profile) continue;
+    const normalizedPhone = normalizePhone(profile.phone);
+    if (normalizedPhone.length < 10) continue;
+    if (byPhone.has(normalizedPhone)) {
+      duplicatesRemoved += 1;
+      continue;
+    }
+    byPhone.set(normalizedPhone, { source: "current", user_id: profile.id, legacy_id: null, name: profileDisplayName(profile), email: profile.email ?? null, phone: normalizedPhone, normalizedPhone, plan: planSlug(sub) });
+  }
+
+  for (const contact of legacyResult.data ?? []) {
+    const plan = normalize(contact.legacy_plan_slug);
+    if (!selectedPlans.includes(plan)) continue;
+    const normalizedPhone = normalizePhone(contact.phone);
+    if (normalizedPhone.length < 10) continue;
+    if (byPhone.has(normalizedPhone)) {
+      duplicatesRemoved += 1;
+      continue;
+    }
+    byPhone.set(normalizedPhone, { source: "legacy", user_id: null, legacy_id: contact.id ?? contact.user_id ?? null, name: legacyDisplayName(contact), email: contact.email ?? null, phone: normalizedPhone, normalizedPhone, plan });
+  }
+
+  const contacts = Array.from(byPhone.values());
+  return { contacts, preview: summarizeCampaignAudience(contacts, selectedPlans, warnings, duplicatesRemoved) };
+}
+
+export async function getCampaignAudiencePreview(plansInput: unknown) {
+  return (await resolveCampaignAudienceByPlans(plansInput)).preview;
 }
 
 function isActiveSubscription(row?: SubscriptionLite) {
@@ -419,21 +524,45 @@ export async function enqueueCampaignAudience(campaignId: string, audienceIds: s
   const supabase = createSupabaseAdminClient() as SupabaseAdmin & any;
   if (!audienceIds.length) return { queued: 0 };
 
-  const { data: profiles, error: profilesError } = await supabase.from("profiles").select("id,full_name,email,phone").in("id", audienceIds);
+  const { data: profiles, error: profilesError } = await selectProfilesByIds(supabase, audienceIds);
   if (profilesError) throw new Error(profilesError.message);
 
-  const rows = (profiles ?? []).map((profile: ProfileLite) => ({
-    campaign_id: campaignId,
-    user_id: profile.id,
-    recipient_name: profile.full_name ?? null,
-    recipient_email: profile.email ?? null,
-    recipient_phone: profile.phone ?? null,
-    channel,
-    status: "pending",
-    payload: { ...payload, message },
-  }));
+  const rows = (profiles ?? [])
+    .map((profile: ProfileLite) => ({ profile, normalizedPhone: normalizePhone(profile.phone) }))
+    .filter(({ normalizedPhone }) => normalizedPhone.length >= 10)
+    .map(({ profile, normalizedPhone }) => ({
+      campaign_id: campaignId,
+      user_id: profile.id,
+      recipient_name: profileDisplayName(profile),
+      recipient_email: profile.email ?? null,
+      recipient_phone: normalizedPhone,
+      channel,
+      status: "pending",
+      payload: { ...payload, message, normalized_phone: normalizedPhone, audience_source: "current" },
+    }));
 
   const { error } = await supabase.from("communication_queue").insert(rows);
   if (error) throw new Error(error.message);
   return { queued: rows.length };
+}
+
+export async function enqueueCampaignAudienceFromPlans(campaignId: string, plansInput: unknown, channel: Channel, message: string, payload: Record<string, unknown> = {}) {
+  const supabase = createSupabaseAdminClient() as SupabaseAdmin & any;
+  const { contacts, preview } = await resolveCampaignAudienceByPlans(plansInput);
+  if (!contacts.length) return { queued: 0, preview };
+
+  const rows = contacts.map((contact) => ({
+    campaign_id: campaignId,
+    user_id: contact.user_id,
+    recipient_name: contact.name,
+    recipient_email: contact.email,
+    recipient_phone: contact.normalizedPhone,
+    channel,
+    status: "pending",
+    payload: { ...payload, message, normalized_phone: contact.normalizedPhone, audience_source: contact.source, plan_slug: contact.plan, legacy_contact_id: contact.legacy_id },
+  }));
+
+  const { error } = await supabase.from("communication_queue").insert(rows);
+  if (error) throw new Error(error.message);
+  return { queued: rows.length, preview };
 }
