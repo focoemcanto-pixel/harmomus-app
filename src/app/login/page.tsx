@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { MetaFunnelEvent } from "@/components/analytics/meta-funnel-event";
 import { getAdminSettings } from "@/lib/data/admin-settings";
 import { LoginFlow } from "./login-flow";
 
@@ -24,9 +25,10 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const settings = await getAdminSettings();
   const redirectTo = normalizeRedirect(String(params.redirect ?? ""));
   const error = params.error ? decodeURIComponent(String(params.error)) : "";
+  const confirmed = params.confirmed === "1";
   const successMessage = params.migration === "success"
     ? "Seu e-mail foi confirmado e sua senha foi criada com sucesso. Faça login para acessar sua conta."
-    : params.confirmed === "1"
+    : confirmed
       ? "E-mail validado com sucesso. Faça seu primeiro login para acessar o Harmomus."
       : params.reset === "success"
         ? "Senha redefinida com sucesso. Faça login para acessar sua conta."
@@ -40,6 +42,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
 
   return (
     <main className="min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,#17213a_0%,#07080f_42%,#020207_100%)] px-4 py-8 text-white">
+      {confirmed ? <MetaFunnelEvent eventName="CompleteRegistration" customEventName="CompleteRegistration_email_confirmed" dedupeKey="email-confirmed" params={{ plan: "free", content_name: "Harmomus Email Confirmed" }} /> : null}
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_80%_20%,rgba(139,92,246,0.22),transparent_35%),radial-gradient(circle_at_20%_70%,rgba(34,211,238,0.14),transparent_32%)]" />
       <div className="relative mx-auto flex min-h-[calc(100vh-4rem)] max-w-6xl items-center justify-center">
         <section className="grid w-full overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.04] shadow-[0_0_100px_rgba(76,100,255,0.22)] backdrop-blur-2xl lg:grid-cols-[1fr_0.9fr]">
