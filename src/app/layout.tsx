@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { AttributionCapture } from "@/components/analytics/attribution-capture";
 import { MetaPixel } from "@/components/analytics/meta-pixel";
 import { FlashToastProvider } from "@/components/feedback/flash-toast-provider";
 import { getAdminSettings } from "@/lib/data/admin-settings";
@@ -17,5 +18,5 @@ return { title: { default: appName, template: `%s • ${appName}` }, description
 }
 export const viewport: Viewport = { themeColor: "#07080f" };
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-return (<html lang="pt-BR"><body><MetaPixel />{children}<FlashToastProvider /></body></html>);
+return (<html lang="pt-BR"><body><AttributionCapture /><MetaPixel />{children}<FlashToastProvider /></body></html>);
 }
