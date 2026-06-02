@@ -10,6 +10,7 @@ const OWNER_EMAILS = new Set(["markuezemarquinhos@hotmail.com", "markuezemarquin
 const ACTIVE_STATUSES = new Set(["active", "trialing", "past_due", "overdue"]);
 const UNKNOWN = "Não identificado";
 const FUNNEL_EVENTS = ["Lead_free_signup", "CompleteRegistration_first_login", "InitiateCheckout_premium", "Purchase_premium"] as const;
+const TEST_PATTERNS = ["teste", "test_", "diagnostico", "diagnostic"];
 
 const FALLBACK_PRICES: Record<string, number> = {
   free: 0,
@@ -92,6 +93,16 @@ function normalize(value: unknown) {
 function cleanLabel(value?: string | null, fallback = UNKNOWN) {
   const text = String(value ?? "").trim();
   return text || fallback;
+}
+
+function isTestCampaign(value?: string | null) {
+  const v = String(value || "").toLowerCase().trim();
+
+  if (!v) return true;
+  if (v === "não identificado") return true;
+  if (v.includes("{{")) return true;
+
+  return TEST_PATTERNS.some((p) => v.includes(p));
 }
 
 function profileOf(row: SubscriptionRow): ProfileInfo | null {
@@ -248,6 +259,7 @@ function aggregateConversionFunnel(events: MetaFunnelEventRow[]) {
   for (const row of events) {
     const eventName = row.event_name;
     if (!FUNNEL_EVENTS.includes(eventName as (typeof FUNNEL_EVENTS)[number])) continue;
+    if (isTestCampaign(row.utm_campaign)) continue;
 
     const campaign = funnelCampaign(row);
     const key = normalize(campaign);
@@ -412,7 +424,8 @@ function RankingTable({ rows, labelTitle, emptyMessage }: { rows: RankedGroup[];
 
 export default async function CampanhasMetaPage() {
   const [{ rows: fetchedRows, errorMessage, fallbackMessage }, { rows: funnelEvents, errorMessage: funnelErrorMessage }] = await Promise.all([fetchSubscriptions(), fetchMetaFunnelEvents()]);
-  const rows = fetchedRows.filter((row) => !isExcludedOwner(row));
+  const rows = fetchedRows.filter((row) => !isExcludedOwner(row) && !isTestCampaign(row.utm_campaign));
+  const productionFunnelEvents = funnelEvents.filter((event) => !isTestCampaign(event.utm_campaign));
   const attributedRows = rows.filter(hasUtm);
   const metaRows = attributedRows.filter(isMetaAttributed);
   const rankingRows = metaRows.length ? metaRows : attributedRows;
@@ -428,13 +441,13 @@ export default async function CampanhasMetaPage() {
   const activePremiumAttributed = premiumAttributed.filter(isActive);
   const lastTrackedConversion = attributedRows[0]?.created_at ?? null;
   const freeTracked = attributedRows.filter((row) => normalize(planOf(row)?.slug) === "free");
-  const conversionFunnel = aggregateConversionFunnel(funnelEvents).slice(0, 20);
-  const totalFunnelLeads = funnelEvents.filter((row) => row.event_name === "Lead_free_signup").length;
-  const totalFunnelLogins = funnelEvents.filter((row) => row.event_name === "CompleteRegistration_first_login").length;
-  const totalFunnelCheckouts = funnelEvents.filter((row) => row.event_name === "InitiateCheckout_premium").length;
-  const totalFunnelPurchases = funnelEvents.filter((row) => row.event_name === "Purchase_premium").length;
+  const conversionFunnel = aggregateConversionFunnel(productionFunnelEvents).slice(0, 20);
+  const totalFunnelLeads = productionFunnelEvents.filter((row) => row.event_name === "Lead_free_signup").length;
+  const totalFunnelLogins = productionFunnelEvents.filter((row) => row.event_name === "CompleteRegistration_first_login").length;
+  const totalFunnelCheckouts = productionFunnelEvents.filter((row) => row.event_name === "InitiateCheckout_premium").length;
+  const totalFunnelPurchases = productionFunnelEvents.filter((row) => row.event_name === "Purchase_premium").length;
   const averageLeadToPremium = ratioPercent(totalFunnelPurchases, totalFunnelLeads);
-  const lastFunnelEvent = funnelEvents[0]?.created_at ?? null;
+  const lastFunnelEvent = productionFunnelEvents[0]?.created_at ?? null;
 
   return (
     <div className="space-y-8">
