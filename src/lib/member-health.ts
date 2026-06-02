@@ -109,12 +109,15 @@ function isMigratedFromPms(member: MemberLike, journey: JourneyLike) {
   );
 }
 
+function hasEmailConfirmed(profile: any) {
+  return Boolean(profile?.email_confirmed_at || profile?.confirmed_at);
+}
+
 function hasPasswordConfigured(profile: any) {
   return Boolean(
     profile?.password_setup_completed_at ||
       profile?.password_configured_at ||
-      profile?.confirmed_at ||
-      profile?.email_confirmed_at ||
+      hasEmailConfirmed(profile) ||
       profile?.requires_password_setup === false,
   );
 }
@@ -260,7 +263,16 @@ export function calculateMemberHealth(member: MemberLike, journey?: JourneyLike)
   }
 
   const clamped = Math.max(0, Math.min(100, score));
-  return { score: clamped, ...getBand(clamped), reasons };
+  const band = getBand(clamped);
+
+  if (!hasLogin(profile) && hasEmailConfirmed(profile) && band.severity === "critical") {
+    const hasCriticalPaymentIssue = !migrated && isPresent(stripeCustomer) && !isPresent(stripeSubscription) && status === "pending";
+    if (!hasCriticalPaymentIssue) {
+      return { score: clamped, label: "Risco", severity: "warning", reasons };
+    }
+  }
+
+  return { score: clamped, ...band, reasons };
 }
 
 export function getOperationalFlags(member: MemberLike, journey?: JourneyLike): OperationalFlag[] {
@@ -283,7 +295,7 @@ export function getOperationalFlags(member: MemberLike, journey?: JourneyLike): 
   if (evaluateContentEngagement && !rows(journey, "audioAccessLogs").length) flags.push("no_audio_access");
   if (migrated) flags.push("migrated_from_pms");
   if (health.score >= 90 && !flags.some((flag) => flag !== "migrated_from_pms")) flags.push("healthy");
-  if (health.score < 40) flags.push("critical");
+  if (health.severity === "critical") flags.push("critical");
 
   return flags;
 }
@@ -321,11 +333,18 @@ export function getRecommendedActions(member: MemberLike, journey?: JourneyLike)
   }
 
   if (!hasLogin(profile)) {
-    actions.push(
-      { label: "Conferir evidências de acesso", description: "Verificar Auth/Profile antes de concluir que o usuário nunca acessou.", type: "manual", priority: "medium" },
-      { label: "Reenviar instruções de acesso", description: "Enviar instruções de primeiro acesso por e-mail/WhatsApp usando os fluxos existentes de comunicação, se necessário.", type: "manual", priority: "medium" },
-      { label: "Confirmar se senha foi configurada", description: "Verificar evidências de configuração de senha antes de concluir que o usuário abandonou.", type: "manual", priority: "low" },
-    );
+    if (hasEmailConfirmed(profile)) {
+      actions.push(
+        { label: "Orientar primeiro login", description: "E-mail já confirmado, mas sem last_sign_in_at/last_login_at/last_seen_at; enviar instruções de acesso sem tratar como incidente crítico por padrão.", type: "manual", priority: "medium" },
+        { label: "Conferir evidências de acesso", description: "Verificar Auth/Profile antes de concluir que o usuário nunca acessou.", type: "manual", priority: "medium" },
+      );
+    } else {
+      actions.push(
+        { label: "Reenviar confirmação de e-mail", description: "Cadastro sem confirmação de e-mail e sem login registrado; orientar confirmação antes de investigar ausência de acesso.", type: "manual", priority: "medium" },
+        { label: "Conferir evidências de acesso", description: "Verificar Auth/Profile antes de concluir que o usuário nunca acessou.", type: "manual", priority: "medium" },
+        { label: "Confirmar se senha foi configurada", description: "Verificar evidências de configuração de senha antes de concluir que o usuário abandonou.", type: "manual", priority: "low" },
+      );
+    }
   }
 
   if (communicationFailed(journey)) {
@@ -398,18 +417,25 @@ export function getMemberDiagnosis(member: MemberLike, journey?: JourneyLike): M
     };
   }
 
-  if (!hasProfileLogin(profile)) {
+  if (!hasLogin(profile)) {
+    if (hasEmailConfirmed(profile)) {
+      return {
+        severity: ACTIVE_STATUSES.has(status) || isPaidPlan(member) ? "warning" : "info",
+        title: "E-mail confirmado, mas sem login registrado",
+        cause: "O e-mail foi confirmado no Auth, porém ainda não há last_sign_in_at no Auth nem last_login_at/last_seen_at no profile.",
+        action: actions.find((action) => action.label === "Orientar primeiro login")?.description ?? "Orientar primeiro login sem classificar como crítico por padrão.",
+        confidence: "alta",
+        evidence: ["email_confirmed_at/confirmed_at presente", "last_sign_in_at ausente", "last_login_at/last_seen_at ausentes"],
+      };
+    }
+
     return {
-      severity: hasAuthLogin(profile) ? "info" : health.score < 40 ? "critical" : "info",
-      title: hasAuthLogin(profile) ? "Login existe no Auth, mas não foi registrado no profile" : "Sem evidência de login registrada",
-      cause: hasAuthLogin(profile)
-        ? "Supabase Auth possui last_sign_in_at, mas o profile não tem last_login_at/last_seen_at sincronizado."
-        : "Não há last_sign_in_at no Auth nem last_login_at/last_seen_at no profile. Isso pode indicar ausência de login ou telemetria incompleta.",
-      action: hasAuthLogin(profile)
-        ? "Conferir sincronização do profile antes de tratar como ausência real de acesso."
-        : actions.find((action) => action.label === "Conferir evidências de acesso")?.description ?? "Conferir Auth/Profile antes de concluir ausência real de acesso.",
-      confidence: hasAuthLogin(profile) ? "alta" : "média",
-      evidence: [hasAuthLogin(profile) ? "last_login_at/last_seen_at ausentes; last_sign_in_at presente" : "last_login_at/last_seen_at/last_sign_in_at ausentes nos dados disponíveis"],
+      severity: "warning",
+      title: "Cadastro sem confirmação de e-mail",
+      cause: "Não há confirmação de e-mail nem last_sign_in_at no Auth; last_login_at/last_seen_at também estão ausentes no profile.",
+      action: actions.find((action) => action.label === "Reenviar confirmação de e-mail")?.description ?? "Orientar confirmação de e-mail antes de concluir ausência real de acesso.",
+      confidence: "alta",
+      evidence: ["email_confirmed_at/confirmed_at ausentes", "last_sign_in_at ausente", "last_login_at/last_seen_at ausentes"],
     };
   }
 
