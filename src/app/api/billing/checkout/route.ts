@@ -46,6 +46,27 @@ function attributionFromForm(form: FormData) {
   return metadata;
 }
 
+function attributionFromReferrer(req: Request) {
+  const referrer = req.headers.get("referer") || req.headers.get("referrer");
+  if (!referrer) return {};
+
+  try {
+    return attributionFromUrl(new URL(referrer));
+  } catch {
+    return {};
+  }
+}
+
+function mergeAttribution(...sources: Array<Record<string, string>>) {
+  const merged: Record<string, string> = {};
+  for (const source of sources) {
+    for (const [key, value] of Object.entries(source)) {
+      if (value) merged[key] = value;
+    }
+  }
+  return merged;
+}
+
 function loginRedirectUrl(req: Request, planSlug: string, attribution: Record<string, string> = {}) {
   const slug = planSlug || "premium";
   const redirect = new URL("/assinar", req.url);
@@ -63,7 +84,7 @@ export async function POST(req: Request) {
     const planId = await resolvePlanId(planParam);
     if (!planId) return NextResponse.json({ error: "Plano inválido." }, { status: 400 });
 
-    const attribution = attributionFromForm(form);
+    const attribution = mergeAttribution(attributionFromReferrer(req), attributionFromForm(form));
     const user = await getCurrentUser();
     if (!user?.email) return NextResponse.redirect(loginRedirectUrl(req, planParam, attribution), { status: 303 });
 
@@ -87,7 +108,7 @@ export async function GET(req: Request) {
       return NextResponse.redirect(redirect, { status: 303 });
     }
 
-    const attribution = attributionFromUrl(url);
+    const attribution = mergeAttribution(attributionFromReferrer(req), attributionFromUrl(url));
     const user = await getCurrentUser();
     if (!user?.email) return NextResponse.redirect(loginRedirectUrl(req, planParam, attribution), { status: 303 });
 
