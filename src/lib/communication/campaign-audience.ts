@@ -6,7 +6,7 @@ const ALLOWED_PLANS = new Set(["free", "plus", "premium", "ministry"]);
 
 type SupabaseAdmin = ReturnType<typeof createSupabaseAdminClient>;
 
-type AudienceContact = {
+export type AudienceContact = {
   id: string;
   user_id: string | null;
   source: "current" | "legacy";

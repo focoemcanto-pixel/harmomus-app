@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   CalendarClock,
   Check,
+  Eye,
   ImagePlus,
   Loader2,
   Mail,
@@ -13,6 +14,7 @@ import {
   ShieldCheck,
   Sparkles,
   Users,
+  X,
 } from "lucide-react";
 
 type Channel = "whatsapp" | "email";
@@ -27,6 +29,33 @@ type CommunicationKit = {
   created_at: string | null;
   updated_at: string | null;
   url: string;
+};
+
+
+type CampaignAudienceContact = {
+  id: string;
+  user_id: string | null;
+  source: "current" | "legacy";
+  plan: string;
+  name: string | null;
+  email: string | null;
+  phone: string;
+  phone_normalized: string;
+};
+
+type CampaignAudienceSummary = {
+  total: number;
+  selectedPlans: string[];
+  byPlan: Record<string, number>;
+  bySource: Record<string, number>;
+  currentRaw: number;
+  legacyRaw: number;
+  duplicated: number;
+};
+
+type CampaignAudienceResult = {
+  contacts: CampaignAudienceContact[];
+  summary: CampaignAudienceSummary;
 };
 
 type LoadedCampaign = {
@@ -76,6 +105,24 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function formatCount(value: number | undefined) {
+  return new Intl.NumberFormat("pt-BR").format(value ?? 0);
+}
+
+function maskPhone(value: string) {
+  const digits = value.replace(/\D/g, "");
+  if (digits.length < 8) return "••••";
+  const country = digits.startsWith("55") ? "+55 " : "";
+  const local = digits.startsWith("55") ? digits.slice(2) : digits;
+  const area = local.length > 9 ? `(${local.slice(0, 2)}) ` : "";
+  const suffix = local.slice(-4);
+  return `${country}${area}•••••-${suffix}`;
+}
+
+function sourceLabel(source: CampaignAudienceContact["source"]) {
+  return source === "legacy" ? "Legado" : "Atual";
+}
+
 function asNumber(value: unknown) {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim()) {
@@ -112,6 +159,9 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [savedCampaignId, setSavedCampaignId] = useState<string | null>(null);
   const [isQueueing, setIsQueueing] = useState(false);
+  const [audience, setAudience] = useState<CampaignAudienceResult | null>(null);
+  const [isResolvingAudience, setIsResolvingAudience] = useState(false);
+  const [isContactsModalOpen, setIsContactsModalOpen] = useState(false);
 
   const previewMessage = message
     .replaceAll("{{nome}}", "Marcos")
@@ -281,6 +331,7 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
         ? current.filter((item) => item !== plan)
         : [...current, plan],
     );
+    setAudience(null);
   }
 
   function handleKitSelect(kitId: string) {
@@ -336,6 +387,47 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
       );
     } finally {
       setIsUploadingMedia(false);
+    }
+  }
+
+  async function refreshAudience(options?: { silent?: boolean }) {
+    if (!plans.length) {
+      setStatus("Selecione pelo menos um plano para montar a audiência.");
+      return null;
+    }
+
+    setIsResolvingAudience(true);
+    if (!options?.silent) setStatus("Calculando audiência estimada...");
+    try {
+      const response = await fetch("/api/admin/comunicacao/audience", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plans,
+          includeCurrent: true,
+          includeLegacy: true,
+        }),
+      });
+      const json = await response.json().catch(() => null);
+      if (!response.ok)
+        throw new Error(json?.error ?? "Falha ao atualizar audiência.");
+      const nextAudience = json?.data as CampaignAudienceResult;
+      setAudience(nextAudience);
+      if (!options?.silent) {
+        setStatus(
+          `Audiência atualizada: ${formatCount(nextAudience.summary.total)} contatos únicos (${formatCount(nextAudience.summary.duplicated)} duplicados removidos).`,
+        );
+      }
+      return nextAudience;
+    } catch (error) {
+      setStatus(
+        error instanceof Error
+          ? error.message
+          : "Falha ao atualizar audiência.",
+      );
+      return null;
+    } finally {
+      setIsResolvingAudience(false);
     }
   }
 
@@ -462,6 +554,10 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
     setIsQueueing(true);
     setStatus(null);
     try {
+      const resolvedAudience = audience ?? (await refreshAudience({ silent: true }));
+      if (!resolvedAudience?.contacts.length)
+        throw new Error("Atualize a audiência antes de colocar mensagens em fila.");
+
       const results = await Promise.all(
         channels.map(async (channel) => {
           const response = await fetch(
@@ -472,6 +568,7 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
               body: JSON.stringify({
                 channel,
                 message: previewMessage,
+                contacts: resolvedAudience.contacts,
                 ...(mediaUrl ? { mediaUrl } : {}),
               }),
             },
@@ -573,6 +670,95 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
                   </button>
                 );
               })}
+            </div>
+          </div>
+
+
+
+          <div className="rounded-3xl border border-cyan-400/20 bg-cyan-500/5 p-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-500/10 text-cyan-100">
+                  <Users size={18} />
+                </span>
+                <div>
+                  <h4 className="font-semibold text-white">Audiência estimada</h4>
+                  <p className="text-xs text-slate-400">
+                    Usuários atuais e legados deduplicados por telefone.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => refreshAudience()}
+                  disabled={isResolvingAudience || !plans.length}
+                  className="inline-flex items-center gap-2 rounded-xl border border-cyan-300/30 bg-cyan-500/10 px-3 py-2 text-sm font-semibold text-cyan-50 hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isResolvingAudience ? (
+                    <Loader2 size={15} className="animate-spin" />
+                  ) : (
+                    <Users size={15} />
+                  )}
+                  {isResolvingAudience ? "Atualizando..." : "Atualizar audiência"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsContactsModalOpen(true)}
+                  disabled={!audience?.contacts.length}
+                  className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Eye size={15} />
+                  Ver contatos
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Total</p>
+                <p className="mt-1 text-2xl font-semibold text-white">
+                  {formatCount(audience?.summary.total)}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Atuais</p>
+                <p className="mt-1 text-2xl font-semibold text-emerald-100">
+                  {formatCount(audience?.summary.bySource.current)}
+                </p>
+                <p className="text-xs text-slate-500">
+                  Brutos: {formatCount(audience?.summary.currentRaw)}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Legado</p>
+                <p className="mt-1 text-2xl font-semibold text-amber-100">
+                  {formatCount(audience?.summary.bySource.legacy)}
+                </p>
+                <p className="text-xs text-slate-500">
+                  Brutos: {formatCount(audience?.summary.legacyRaw)}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Duplicados removidos</p>
+                <p className="mt-1 text-2xl font-semibold text-violet-100">
+                  {formatCount(audience?.summary.duplicated)}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/70 p-4">
+              <p className="text-sm font-semibold text-white">Por plano</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(Object.keys(planLabels) as Plan[]).map((plan) => (
+                  <span
+                    key={plan}
+                    className="rounded-full border border-white/10 bg-slate-900 px-3 py-1.5 text-xs text-slate-200"
+                  >
+                    {planLabels[plan]}: {formatCount(audience?.summary.byPlan[plan])}
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -879,6 +1065,60 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
           ) : null}
         </div>
       </div>
+
+      {isContactsModalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div className="max-h-[85vh] w-full max-w-4xl overflow-hidden rounded-3xl border border-white/10 bg-slate-950 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-white/10 p-5">
+              <div>
+                <h3 className="text-lg font-semibold text-white">Contatos da audiência</h3>
+                <p className="text-sm text-slate-400">
+                  Mostrando até 100 registros de {formatCount(audience?.summary.total)} contatos únicos.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsContactsModalOpen(false)}
+                className="rounded-xl border border-white/10 p-2 text-slate-300 hover:bg-white/10 hover:text-white"
+                aria-label="Fechar modal de contatos"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="max-h-[65vh] overflow-auto p-5">
+              <table className="w-full min-w-[680px] text-left text-sm">
+                <thead className="text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="pb-3 font-medium">Nome</th>
+                    <th className="pb-3 font-medium">Telefone</th>
+                    <th className="pb-3 font-medium">Plano</th>
+                    <th className="pb-3 font-medium">Origem</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/10 text-slate-200">
+                  {(audience?.contacts ?? []).slice(0, 100).map((contact) => (
+                    <tr key={contact.id}>
+                      <td className="py-3 pr-4">{contact.name || "Sem nome"}</td>
+                      <td className="py-3 pr-4 font-mono text-xs">
+                        {maskPhone(contact.phone_normalized || contact.phone)}
+                      </td>
+                      <td className="py-3 pr-4">
+                        {planLabels[contact.plan as Plan] ?? contact.plan}
+                      </td>
+                      <td className="py-3 pr-4">
+                        <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-xs">
+                          {sourceLabel(contact.source)}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
     </div>
   );
 }
