@@ -13,7 +13,7 @@ export async function GET() {
 
   const { data, error } = await admin
     .from("communication_assets")
-    .select("id,created_at,updated_at,file_name,file_type,file_size,public_url,purpose,metadata")
+    .select("id,created_at,file_name,file_type,file_size,public_url,purpose,metadata")
     .order("created_at", { ascending: false });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -42,9 +42,8 @@ export async function POST(request: Request) {
       public_url: publicUrl,
       purpose: sanitizeText(body.purpose) || "campaign",
       metadata: sanitizeObject(body.metadata),
-      updated_at: new Date().toISOString(),
     })
-    .select("id,created_at,updated_at,file_name,file_type,file_size,public_url,purpose,metadata")
+    .select("id,created_at,file_name,file_type,file_size,public_url,purpose,metadata")
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
