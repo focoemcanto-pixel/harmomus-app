@@ -16,7 +16,19 @@ const tabs = [
   { label: "Logs", href: "/admin/comunicacao/logs", icon: ScrollText, description: "Histórico" },
 ] as const;
 
-export function CommunicationShell({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) {
+type CommunicationShellProps = {
+  title: string;
+  subtitle: string;
+  children: ReactNode;
+  hideNavigation?: boolean;
+};
+
+export function CommunicationShell({
+  title,
+  subtitle,
+  children,
+  hideNavigation = false,
+}: CommunicationShellProps) {
   return (
     <div className="space-y-6">
       <div className="overflow-hidden rounded-3xl border border-cyan-400/20 bg-gradient-to-br from-slate-950 via-slate-900 to-background shadow-premium">
@@ -27,28 +39,32 @@ export function CommunicationShell({ title, subtitle, children }: { title: strin
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {tabs.map((tab) => {
-          const Icon = tab.icon;
-          return (
-            <Link
-              key={tab.href}
-              href={tab.href}
-              className="group rounded-2xl border border-white/10 bg-slate-900/70 p-4 transition hover:border-cyan-400/40 hover:bg-cyan-500/10"
-            >
-              <div className="flex items-center gap-3">
-                <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-400/20 bg-cyan-500/10 text-cyan-200 transition group-hover:border-cyan-300/50">
-                  <Icon size={18} />
-                </span>
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-white">{tab.label}</p>
-                  <p className="truncate text-xs text-slate-400">{tab.description}</p>
+      {hideNavigation ? null : (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            return (
+              <Link
+                key={tab.href}
+                href={tab.href}
+                className="group rounded-2xl border border-white/10 bg-slate-900/70 p-4 transition hover:border-cyan-400/40 hover:bg-cyan-500/10"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-400/20 bg-cyan-500/10 text-cyan-200 transition group-hover:border-cyan-300/50">
+                    <Icon size={18} />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-white">{tab.label}</p>
+                    <p className="truncate text-xs text-slate-400">
+                      {tab.description}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            </Link>
-          );
-        })}
-      </div>
+              </Link>
+            );
+          })}
+        </div>
+      )}
 
       {children}
     </div>
