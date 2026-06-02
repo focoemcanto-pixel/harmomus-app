@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { ensureUserAccess } from "@/lib/auth/ensure-user-access";
+import { syncProfileOnboardingAfterAuth } from "@/lib/auth/onboarding";
 import { createClient } from "@/lib/supabase/server";
 
 // Supabase pode enviar type=recovery para redefinição de senha e type=signup para confirmação de cadastro.
@@ -58,25 +59,7 @@ export async function GET(request: Request) {
       fullName: String(user.user_metadata?.full_name ?? "").trim() || user.email || "",
     });
 
-    const { data: profile } = await (supabase as any)
-      .from("profiles")
-      .select("onboarding_status")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    const onboardingStatus = String(profile?.onboarding_status ?? "");
-    const now = new Date().toISOString();
-
-    if (["pending_email_confirmation", "email_confirmed"].includes(onboardingStatus)) {
-      await (supabase as any)
-        .from("profiles")
-        .update({
-          onboarding_status: "onboarding_completed",
-          onboarding_step: "completed",
-          updated_at: now,
-        })
-        .eq("id", user.id);
-    }
+    await syncProfileOnboardingAfterAuth({ userId: user.id, authUser: user as any });
   }
 
   return NextResponse.redirect(new URL(next, request.url), 303);

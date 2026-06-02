@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { EmailOtpType } from "@supabase/supabase-js";
 
 import { ensureUserAccess } from "@/lib/auth/ensure-user-access";
+import { syncProfileOnboardingAfterAuth } from "@/lib/auth/onboarding";
 import { createClient } from "@/lib/supabase/server";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
 
@@ -63,18 +64,7 @@ export async function GET(request: Request) {
       selectedPlanSlug: planSlug,
     });
 
-    const profileUpdate = await (supabase as any)
-      .from("profiles")
-      .update({
-        onboarding_status: "email_confirmed",
-        onboarding_step: "waiting_first_login",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", user.id);
-
-    if (profileUpdate.error) {
-      console.error("[auth.confirm.callback] falha ao atualizar onboarding", profileUpdate.error);
-    }
+    await syncProfileOnboardingAfterAuth({ userId: user.id, authUser: user as any });
 
     try {
       await dispatchWebhookEvent({
