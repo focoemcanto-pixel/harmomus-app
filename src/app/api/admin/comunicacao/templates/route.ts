@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
 
-import { requireAdmin, sanitizeStringArray, sanitizeText } from "../_lib/marketing-api";
+import { requireAdmin, sanitizeText } from "../_lib/marketing-api";
 
-const CHANNELS = new Set(["whatsapp", "email"]);
+const CHANNELS = new Set(["whatsapp", "email", "both"]);
 
 function normalizeTemplate(template: any) {
+  const body = template.content ?? template.text_content ?? template.html_content ?? "";
   return {
     ...template,
-    body: template.content,
-    media_url: template.media_url ?? null,
+    body,
+    media_url: template.thumbnail_url ?? null,
+    active: !template.is_system,
   };
 }
 
@@ -18,7 +20,7 @@ export async function GET() {
 
   const { data, error } = await admin
     .from("communication_templates")
-    .select("id,created_at,updated_at,name,channel,category,subject,content,variables,active")
+    .select("id,created_at,name,channel,category,thumbnail_url,content,html_content,text_content,is_premium,is_system")
     .order("created_at", { ascending: false });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -34,13 +36,12 @@ export async function POST(request: Request) {
   if (!body) return NextResponse.json({ error: "Payload inválido." }, { status: 400 });
 
   const name = sanitizeText(body.name);
-  const channel = CHANNELS.has(sanitizeText(body.channel)) ? sanitizeText(body.channel) : "whatsapp";
-  const templateBody = sanitizeText(body.body);
+  const channelInput = sanitizeText(body.channel);
+  const channel = CHANNELS.has(channelInput) ? channelInput : "whatsapp";
+  const templateBody = sanitizeText(body.body ?? body.content ?? body.text_content);
 
   if (!name) return NextResponse.json({ error: "Nome do template é obrigatório." }, { status: 400 });
   if (!templateBody) return NextResponse.json({ error: "Corpo do template é obrigatório." }, { status: 400 });
-
-  const variables = sanitizeStringArray(body.variables).length ? sanitizeStringArray(body.variables) : ["nome", "email", "plano", "link"];
 
   const { data, error } = await admin
     .from("communication_templates")
@@ -48,13 +49,14 @@ export async function POST(request: Request) {
       name,
       channel,
       category: sanitizeText(body.category) || "promocao",
-      subject: sanitizeText(body.subject) || null,
+      thumbnail_url: sanitizeText(body.media_url ?? body.thumbnail_url) || null,
       content: templateBody,
-      variables,
-      active: Boolean(body.active ?? true),
-      updated_at: new Date().toISOString(),
+      html_content: sanitizeText(body.html_content) || null,
+      text_content: sanitizeText(body.text_content) || templateBody,
+      is_premium: Boolean(body.is_premium ?? false),
+      is_system: Boolean(body.is_system ?? false),
     })
-    .select("id,created_at,updated_at,name,channel,category,subject,content,variables,active")
+    .select("id,created_at,name,channel,category,thumbnail_url,content,html_content,text_content,is_premium,is_system")
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
