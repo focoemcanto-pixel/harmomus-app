@@ -415,7 +415,7 @@ export async function createCommunicationCampaign(input: Partial<CommunicationCa
   return data as CommunicationCampaign;
 }
 
-export async function enqueueCampaignAudience(campaignId: string, audienceIds: string[], channel: Channel, message: string) {
+export async function enqueueCampaignAudience(campaignId: string, audienceIds: string[], channel: Channel, message: string, payload: Record<string, unknown> = {}) {
   const supabase = createSupabaseAdminClient() as SupabaseAdmin & any;
   if (!audienceIds.length) return { queued: 0 };
 
@@ -430,7 +430,7 @@ export async function enqueueCampaignAudience(campaignId: string, audienceIds: s
     recipient_phone: profile.phone ?? null,
     channel,
     status: "pending",
-    payload: { message },
+    payload: { ...payload, message },
   }));
 
   const { error } = await supabase.from("communication_queue").insert(rows);

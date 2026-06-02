@@ -60,13 +60,33 @@ function buildRecipient(job: CommunicationQueueJob) {
 
 function buildMessage(job: CommunicationQueueJob) {
   const payload = job.payload ?? {};
-  return sanitizeText(payload.message) || sanitizeText(payload.text) || sanitizeText(payload.mensagem);
+  return (
+    sanitizeText(payload.message) ||
+    sanitizeText(payload.text) ||
+    sanitizeText(payload.mensagem)
+  );
+}
+
+function buildMediaUrl(job: CommunicationQueueJob) {
+  const payload = job.payload ?? {};
+  return (
+    sanitizeText(payload.mediaUrl) ||
+    sanitizeText(payload.media_url) ||
+    sanitizeText(payload.imageUrl) ||
+    sanitizeText(payload.image)
+  );
 }
 
 function getProviderMessageId(value: unknown): string | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
-  return sanitizeText(record.id) || sanitizeText(record.message_id) || sanitizeText(record.messageId) || sanitizeText(record.delivery_id) || null;
+  return (
+    sanitizeText(record.id) ||
+    sanitizeText(record.message_id) ||
+    sanitizeText(record.messageId) ||
+    sanitizeText(record.delivery_id) ||
+    null
+  );
 }
 
 function safeJson(value: unknown) {
@@ -77,21 +97,37 @@ function safeJson(value: unknown) {
   }
 }
 
-async function writeCommunicationLog(admin: any, input: {
-  job: CommunicationQueueJob;
-  event: string;
-  level: "info" | "warning" | "error";
-  message: string;
-  payload?: unknown;
-  response?: unknown;
-}) {
+async function writeCommunicationLog(
+  admin: any,
+  input: {
+    job: CommunicationQueueJob;
+    event: string;
+    level: "info" | "warning" | "error";
+    message: string;
+    payload?: unknown;
+    response?: unknown;
+  },
+) {
   const now = new Date().toISOString();
   await admin.from("communication_logs").insert({
     campaign_id: input.job.campaign_id,
     user_id: input.job.user_id,
     channel: input.job.channel,
-    status: input.event.endsWith("sent") ? "sent" : input.event.endsWith("failed") ? "failed" : input.event.endsWith("processing") ? "processing" : input.job.status,
-    provider_message_id: typeof (safeJson(input.response) as Record<string, unknown> | null)?.provider_message_id === "string" ? String((safeJson(input.response) as Record<string, unknown>).provider_message_id) : null,
+    status: input.event.endsWith("sent")
+      ? "sent"
+      : input.event.endsWith("failed")
+        ? "failed"
+        : input.event.endsWith("processing")
+          ? "processing"
+          : input.job.status,
+    provider_message_id:
+      typeof (safeJson(input.response) as Record<string, unknown> | null)
+        ?.provider_message_id === "string"
+        ? String(
+            (safeJson(input.response) as Record<string, unknown>)
+              .provider_message_id,
+          )
+        : null,
     details: {
       event: input.event,
       level: input.level,
@@ -105,7 +141,10 @@ async function writeCommunicationLog(admin: any, input: {
 }
 
 async function getActiveChannel(admin: any, channel: Channel) {
-  const table = channel === "whatsapp" ? "communication_whatsapp_integrations" : "communication_email_integrations";
+  const table =
+    channel === "whatsapp"
+      ? "communication_whatsapp_integrations"
+      : "communication_email_integrations";
   const { data, error } = await admin
     .from(table)
     .select("id,provider,config")
@@ -115,25 +154,44 @@ async function getActiveChannel(admin: any, channel: Channel) {
     .maybeSingle();
 
   if (error) return { data: null, error };
-  return { data: data ? ({ ...data, type: channel } as CommunicationChannelRow) : null, error: null };
+  return {
+    data: data ? ({ ...data, type: channel } as CommunicationChannelRow) : null,
+    error: null,
+  };
 }
 
-async function sendViaWebhook(job: CommunicationQueueJob, channel: CommunicationChannelRow): Promise<ProviderResult> {
+async function sendViaWebhook(
+  job: CommunicationQueueJob,
+  channel: CommunicationChannelRow,
+): Promise<ProviderResult> {
   const config = channel.config ?? {};
   const apiUrl = sanitizeText(config.apiUrl);
   const apiToken = sanitizeText(config.apiToken);
   const instance = sanitizeText(config.instance);
   const recipient = buildRecipient(job);
   const message = buildMessage(job);
+  const mediaUrl = job.channel === "whatsapp" ? buildMediaUrl(job) : "";
 
   if (!apiUrl) {
-    return { ok: false, provider: channel.provider, errorMessage: "Canal ativo sem URL do provedor configurada." };
+    return {
+      ok: false,
+      provider: channel.provider,
+      errorMessage: "Canal ativo sem URL do provedor configurada.",
+    };
   }
   if (!recipient) {
-    return { ok: false, provider: channel.provider, errorMessage: "Job sem destinatário válido." };
+    return {
+      ok: false,
+      provider: channel.provider,
+      errorMessage: "Job sem destinatário válido.",
+    };
   }
   if (!message) {
-    return { ok: false, provider: channel.provider, errorMessage: "Job sem mensagem." };
+    return {
+      ok: false,
+      provider: channel.provider,
+      errorMessage: "Job sem mensagem.",
+    };
   }
 
   const payload = {
@@ -153,11 +211,22 @@ async function sendViaWebhook(job: CommunicationQueueJob, channel: Communication
     text: message,
     message,
     mensagem: message,
+    ...(mediaUrl
+      ? {
+          mediaUrl,
+          media_url: mediaUrl,
+          imageUrl: mediaUrl,
+          image: mediaUrl,
+          caption: message,
+        }
+      : {}),
     source: "harmomus.communication_queue",
     created_at: new Date().toISOString(),
   };
 
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
   if (apiToken) {
     headers.Authorization = `Bearer ${apiToken}`;
     headers["X-Api-Key"] = apiToken;
@@ -187,13 +256,16 @@ async function sendViaWebhook(job: CommunicationQueueJob, channel: Communication
       providerMessageId: getProviderMessageId(responseBody),
       status: response.status,
       response: responseBody,
-      errorMessage: response.ok ? null : `Provedor retornou HTTP ${response.status}.`,
+      errorMessage: response.ok
+        ? null
+        : `Provedor retornou HTTP ${response.status}.`,
     };
   } catch (error) {
     return {
       ok: false,
       provider: channel.provider,
-      errorMessage: error instanceof Error ? error.message : "Falha ao chamar provedor.",
+      errorMessage:
+        error instanceof Error ? error.message : "Falha ao chamar provedor.",
     };
   }
 }
@@ -222,7 +294,11 @@ async function markJobProcessing(admin: any, job: CommunicationQueueJob) {
   return true;
 }
 
-async function finalizeJob(admin: any, job: CommunicationQueueJob, result: ProviderResult) {
+async function finalizeJob(
+  admin: any,
+  job: CommunicationQueueJob,
+  result: ProviderResult,
+) {
   const now = new Date().toISOString();
   const status = result.ok ? "sent" : "failed";
   await admin
@@ -239,26 +315,44 @@ async function finalizeJob(admin: any, job: CommunicationQueueJob, result: Provi
 
   await writeCommunicationLog(admin, {
     job: { ...job, status },
-    event: result.ok ? "communication.queue.sent" : "communication.queue.failed",
+    event: result.ok
+      ? "communication.queue.sent"
+      : "communication.queue.failed",
     level: result.ok ? "info" : "error",
-    message: result.ok ? "Mensagem enviada pelo provedor configurado." : result.errorMessage ?? "Falha ao enviar mensagem.",
-    payload: { job_id: job.id, provider: result.provider, status, provider_message_id: result.providerMessageId ?? null },
-    response: { status: result.status ?? 0, body: result.response ?? null, error: result.errorMessage ?? null },
+    message: result.ok
+      ? "Mensagem enviada pelo provedor configurado."
+      : (result.errorMessage ?? "Falha ao enviar mensagem."),
+    payload: {
+      job_id: job.id,
+      provider: result.provider,
+      status,
+      provider_message_id: result.providerMessageId ?? null,
+    },
+    response: {
+      status: result.status ?? 0,
+      body: result.response ?? null,
+      error: result.errorMessage ?? null,
+    },
   });
 }
 
-export async function processCommunicationQueue(limit = 50): Promise<ProcessCommunicationQueueResult> {
+export async function processCommunicationQueue(
+  limit = 50,
+): Promise<ProcessCommunicationQueueResult> {
   const admin = createSupabaseAdminClient() as any;
   const now = new Date().toISOString();
   const { data: jobs, error } = await admin
     .from("communication_queue")
-    .select("id,campaign_id,user_id,recipient_name,recipient_email,recipient_phone,channel,status,attempts,scheduled_at,payload")
+    .select(
+      "id,campaign_id,user_id,recipient_name,recipient_email,recipient_phone,channel,status,attempts,scheduled_at,payload",
+    )
     .in("status", ["pending", "processing"])
     .or(`scheduled_at.is.null,scheduled_at.lte.${now}`)
     .order("created_at", { ascending: true })
     .limit(limit);
 
-  if (error || !jobs?.length) return { processed: 0, sent: 0, failed: 0, skipped: 0 };
+  if (error || !jobs?.length)
+    return { processed: 0, sent: 0, failed: 0, skipped: 0 };
 
   let sent = 0;
   let failed = 0;
@@ -280,7 +374,11 @@ export async function processCommunicationQueue(limit = 50): Promise<ProcessComm
     const channel = channels.get(job.channel);
     const result = channel
       ? await sendViaWebhook(job, channel)
-      : { ok: false, provider: "not_configured", errorMessage: `Canal ${job.channel} ativo não configurado.` };
+      : {
+          ok: false,
+          provider: "not_configured",
+          errorMessage: `Canal ${job.channel} ativo não configurado.`,
+        };
 
     await finalizeJob(admin, job, result);
     if (result.ok) sent += 1;
