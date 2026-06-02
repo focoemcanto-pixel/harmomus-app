@@ -63,11 +63,29 @@ async function getPlanIdBySlug(admin: any, slug: string) {
   return plan.id as string;
 }
 
+async function getAuthUserMetadata(admin: any, userId: string) {
+  try {
+    const { data, error } = await admin.auth.admin.getUserById(userId);
+    if (error) {
+      console.warn("[ensureUserAccess] Falha ao buscar metadata do usuário", error);
+      return {} as Record<string, unknown>;
+    }
+    return (data?.user?.user_metadata ?? {}) as Record<string, unknown>;
+  } catch (error) {
+    console.warn("[ensureUserAccess] Erro inesperado ao buscar metadata do usuário", error);
+    return {} as Record<string, unknown>;
+  }
+}
+
 async function ensureProfile(admin: any, input: EnsureUserAccessInput) {
+  const metadata = await getAuthUserMetadata(admin, input.id);
+  const metadataPhone = typeof metadata.phone === "string" ? metadata.phone : null;
+  const metadataName = typeof metadata.full_name === "string" ? metadata.full_name : null;
+  const metadataAvatar = typeof metadata.avatar_url === "string" ? metadata.avatar_url : null;
   const email = normalizeEmail(input.email);
-  const fullName = normalizeName(input);
-  const phone = normalizePhone(input.phone);
-  const avatarUrl = String(input.avatarUrl ?? "").trim() || null;
+  const fullName = normalizeName(input) ?? (metadataName?.trim() || null);
+  const phone = normalizePhone(input.phone) ?? normalizePhone(metadataPhone);
+  const avatarUrl = String(input.avatarUrl ?? metadataAvatar ?? "").trim() || null;
   const now = new Date().toISOString();
 
   const { data: existingProfile, error: existingError } = await admin
