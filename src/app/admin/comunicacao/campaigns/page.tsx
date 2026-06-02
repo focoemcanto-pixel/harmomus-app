@@ -1,4 +1,5 @@
 import { CampaignBuilder } from "@/components/admin/communications/campaign-builder";
+import { CampaignManager } from "@/components/admin/communications/campaign-manager";
 import { CommunicationShell } from "@/components/admin/communications/communication-shell";
 
 type CampaignsPageParams = Record<string, string | string[] | undefined>;
@@ -17,14 +18,16 @@ export default async function Page({
     searchParams ?? Promise.resolve({} as CampaignsPageParams)
   );
   const campaignId = getFirstSearchParam(params.campaignId);
+  const mode = getFirstSearchParam(params.mode);
+  const isBuilder = Boolean(campaignId) || mode === "new" || mode === "create";
 
   return (
     <CommunicationShell
       title="Campanhas"
-      subtitle="Crie campanhas com segmentação por plano, mídia, preview, envio teste e limites anti-bloqueio."
+      subtitle="Crie campanhas, acompanhe filas, edite mensagens e controle pausas ou cancelamentos de disparos."
       hideNavigation={Boolean(campaignId)}
     >
-      <CampaignBuilder campaignId={campaignId} />
+      {isBuilder ? <CampaignBuilder campaignId={campaignId} /> : <CampaignManager />}
     </CommunicationShell>
   );
 }
