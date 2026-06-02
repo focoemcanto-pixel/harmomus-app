@@ -17,12 +17,6 @@ async function resolvePlanId(planIdOrSlug: string) {
   return "";
 }
 
-function loginRedirectUrl(req: Request, planSlug: string) {
-  const slug = planSlug || "premium";
-  const redirectPath = `/assinar?plan=${encodeURIComponent(slug)}`;
-  return new URL(`/login?redirect=${encodeURIComponent(redirectPath)}`, req.url);
-}
-
 function toErrorMessage(error: unknown) {
   if (error instanceof Error) return error.message;
   return "Não foi possível iniciar o checkout agora. Tente novamente.";
@@ -52,6 +46,16 @@ function attributionFromForm(form: FormData) {
   return metadata;
 }
 
+function loginRedirectUrl(req: Request, planSlug: string, attribution: Record<string, string> = {}) {
+  const slug = planSlug || "premium";
+  const redirect = new URL("/assinar", req.url);
+  redirect.searchParams.set("plan", slug);
+  for (const [key, value] of Object.entries(attribution)) {
+    if (value) redirect.searchParams.set(key, value);
+  }
+  return new URL(`/login?redirect=${encodeURIComponent(`${redirect.pathname}${redirect.search}`)}`, req.url);
+}
+
 export async function POST(req: Request) {
   try {
     const form = await req.formData();
@@ -59,11 +63,12 @@ export async function POST(req: Request) {
     const planId = await resolvePlanId(planParam);
     if (!planId) return NextResponse.json({ error: "Plano inválido." }, { status: 400 });
 
+    const attribution = attributionFromForm(form);
     const user = await getCurrentUser();
-    if (!user?.email) return NextResponse.redirect(loginRedirectUrl(req, planParam), { status: 303 });
+    if (!user?.email) return NextResponse.redirect(loginRedirectUrl(req, planParam, attribution), { status: 303 });
 
     const requestUrl = new URL(req.url);
-    const session = await startStripeCheckout(user.id, user.email, planId, requestUrl.origin, attributionFromForm(form));
+    const session = await startStripeCheckout(user.id, user.email, planId, requestUrl.origin, attribution);
     return NextResponse.redirect(session.url, { status: 303 });
   } catch (error) {
     return NextResponse.json({ error: toErrorMessage(error) }, { status: 400 });
@@ -82,10 +87,11 @@ export async function GET(req: Request) {
       return NextResponse.redirect(redirect, { status: 303 });
     }
 
+    const attribution = attributionFromUrl(url);
     const user = await getCurrentUser();
-    if (!user?.email) return NextResponse.redirect(loginRedirectUrl(req, planParam), { status: 303 });
+    if (!user?.email) return NextResponse.redirect(loginRedirectUrl(req, planParam, attribution), { status: 303 });
 
-    const session = await startStripeCheckout(user.id, user.email, planId, url.origin, attributionFromUrl(url));
+    const session = await startStripeCheckout(user.id, user.email, planId, url.origin, attribution);
     return NextResponse.redirect(session.url, { status: 303 });
   } catch (error) {
     url.pathname = "/assinar";
