@@ -1,0 +1,286 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import { Copy, Eye, Loader2, Pause, Play, RefreshCcw, XCircle } from "lucide-react";
+
+type QueueRow = {
+  id: string;
+  status: string | null;
+  channel: string | null;
+  recipient_name?: string | null;
+  recipient_phone?: string | null;
+  recipient_email?: string | null;
+  payload?: Record<string, unknown> | null;
+};
+
+type CampaignRow = {
+  id: string;
+  name: string;
+  status: string | null;
+  created_at: string;
+  updated_at?: string | null;
+  title?: string | null;
+  text_content?: string | null;
+  message?: string | null;
+  link_url?: string | null;
+  media_url?: string | null;
+  kit_id?: string | null;
+  content?: Record<string, unknown> | null;
+  audience_preview?: {
+    total?: number;
+    current?: number;
+    legacy?: number;
+    duplicatesRemoved?: number;
+    totalByPlan?: Record<string, number>;
+  } | null;
+};
+
+type CampaignWithQueue = CampaignRow & {
+  queue?: QueueRow[];
+};
+
+type QueueSummary = {
+  total: number;
+  pending: number;
+  processing: number;
+  paused: number;
+  sent: number;
+  failed: number;
+  canceled: number;
+};
+
+function countQueue(queue: QueueRow[] = []): QueueSummary {
+  const summary: QueueSummary = {
+    total: queue.length,
+    pending: 0,
+    processing: 0,
+    paused: 0,
+    sent: 0,
+    failed: 0,
+    canceled: 0,
+  };
+  for (const item of queue) {
+    const status = String(item.status ?? "pending").toLowerCase();
+    if (status in summary) summary[status as keyof QueueSummary] += 1;
+    else summary.pending += 1;
+  }
+  return summary;
+}
+
+function statusLabel(status?: string | null) {
+  const value = String(status ?? "draft").toLowerCase();
+  const labels: Record<string, string> = {
+    draft: "Rascunho",
+    queued: "Na fila",
+    sending: "Enviando",
+    processing: "Processando",
+    sent: "Concluída",
+    paused: "Pausada",
+    canceled: "Cancelada",
+    failed: "Falhou",
+    scheduled: "Agendada",
+  };
+  return labels[value] ?? value;
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function contentText(campaign: CampaignRow, key: string) {
+  const value = campaign.content?.[key];
+  return typeof value === "string" ? value : "";
+}
+
+export function CampaignManager() {
+  const [campaigns, setCampaigns] = useState<CampaignWithQueue[]>([]);
+  const [selected, setSelected] = useState<CampaignWithQueue | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [actionId, setActionId] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+
+  async function loadCampaigns() {
+    setIsRefreshing(true);
+    try {
+      const response = await fetch("/api/admin/comunicacao/campaigns", { cache: "no-store" });
+      const json = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(json?.error ?? "Falha ao carregar campanhas.");
+      const baseCampaigns = (Array.isArray(json?.data) ? json.data : []) as CampaignRow[];
+      const hydrated = await Promise.all(
+        baseCampaigns.slice(0, 25).map(async (campaign) => {
+          try {
+            const detailResponse = await fetch(`/api/admin/comunicacao/campaigns/${campaign.id}`, { cache: "no-store" });
+            const detailJson = await detailResponse.json().catch(() => null);
+            if (!detailResponse.ok) return campaign;
+            return { ...campaign, queue: Array.isArray(detailJson?.data?.queue) ? detailJson.data.queue : [] };
+          } catch {
+            return campaign;
+          }
+        }),
+      );
+      setCampaigns(hydrated);
+      setSelected((current) => {
+        if (!current) return hydrated[0] ?? null;
+        return hydrated.find((item) => item.id === current.id) ?? hydrated[0] ?? null;
+      });
+      setStatus(null);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Falha ao carregar campanhas.");
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadCampaigns();
+  }, []);
+
+  async function runAction(campaignId: string, action: "pause" | "resume" | "cancel" | "duplicate") {
+    setActionId(`${campaignId}:${action}`);
+    setStatus(null);
+    try {
+      const response = await fetch(`/api/admin/comunicacao/campaigns/${campaignId}`, {
+        method: action === "duplicate" ? "POST" : "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const json = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(json?.error ?? "Falha ao executar ação.");
+      if (action === "duplicate" && json?.data?.id) {
+        window.location.href = `/admin/comunicacao/campaigns?campaignId=${json.data.id}`;
+        return;
+      }
+      await loadCampaigns();
+      setStatus("Ação executada com sucesso.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Falha ao executar ação.");
+    } finally {
+      setActionId(null);
+    }
+  }
+
+  const totals = useMemo(() => {
+    return campaigns.reduce(
+      (acc, campaign) => {
+        const queue = countQueue(campaign.queue);
+        acc.total += 1;
+        acc.pending += queue.pending + queue.processing;
+        acc.sent += queue.sent;
+        acc.failed += queue.failed;
+        return acc;
+      },
+      { total: 0, pending: 0, sent: 0, failed: 0 },
+    );
+  }, [campaigns]);
+
+  const selectedSummary = countQueue(selected?.queue);
+
+  return (
+    <section className="rounded-3xl border border-white/10 bg-slate-950/70 p-5 shadow-premium">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <p className="text-xs uppercase tracking-[0.25em] text-cyan-300">Gestão de campanhas</p>
+          <h3 className="mt-1 text-2xl font-semibold text-white">Histórico e controle</h3>
+          <p className="mt-1 text-sm text-slate-400">Veja as campanhas criadas, acompanhe a fila e pause ou cancele disparos pendentes.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void loadCampaigns()}
+            disabled={isRefreshing}
+            className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10 disabled:opacity-60"
+          >
+            {isRefreshing ? <Loader2 size={15} className="animate-spin" /> : <RefreshCcw size={15} />}
+            Atualizar
+          </button>
+          <Link href="/admin/comunicacao/campaigns" className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-500">
+            Nova campanha
+          </Link>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-4">
+        <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4"><p className="text-xs text-slate-400">Campanhas</p><p className="mt-1 text-2xl font-semibold text-white">{totals.total}</p></div>
+        <div className="rounded-2xl border border-amber-400/20 bg-amber-500/10 p-4"><p className="text-xs text-amber-100/80">Pendentes</p><p className="mt-1 text-2xl font-semibold text-amber-50">{totals.pending}</p></div>
+        <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/10 p-4"><p className="text-xs text-emerald-100/80">Enviados</p><p className="mt-1 text-2xl font-semibold text-emerald-50">{totals.sent}</p></div>
+        <div className="rounded-2xl border border-rose-400/20 bg-rose-500/10 p-4"><p className="text-xs text-rose-100/80">Falhas</p><p className="mt-1 text-2xl font-semibold text-rose-50">{totals.failed}</p></div>
+      </div>
+
+      {status ? <p className="mt-4 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-sm text-cyan-100">{status}</p> : null}
+
+      <div className="mt-5 grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
+        <div className="overflow-hidden rounded-2xl border border-white/10">
+          <div className="grid grid-cols-[1.2fr_0.7fr_0.8fr_0.9fr] gap-3 border-b border-white/10 bg-slate-900 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+            <span>Campanha</span><span>Status</span><span>Fila</span><span>Ações</span>
+          </div>
+          {isLoading ? <p className="p-4 text-sm text-slate-400">Carregando campanhas...</p> : null}
+          {!isLoading && !campaigns.length ? <p className="p-4 text-sm text-slate-400">Nenhuma campanha criada ainda.</p> : null}
+          {campaigns.map((campaign) => {
+            const queue = countQueue(campaign.queue);
+            const audienceTotal = campaign.audience_preview?.total ?? queue.total;
+            return (
+              <button
+                key={campaign.id}
+                type="button"
+                onClick={() => setSelected(campaign)}
+                className={`grid w-full grid-cols-[1.2fr_0.7fr_0.8fr_0.9fr] gap-3 border-b border-white/5 px-4 py-4 text-left transition hover:bg-white/5 ${selected?.id === campaign.id ? "bg-cyan-500/10" : "bg-slate-950/40"}`}
+              >
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-semibold text-white">{campaign.name}</span>
+                  <span className="mt-1 block text-xs text-slate-500">Criada em {formatDate(campaign.created_at)}</span>
+                </span>
+                <span className="text-sm text-slate-200">{statusLabel(campaign.status)}</span>
+                <span className="text-sm text-slate-300">{queue.total || audienceTotal} total · {queue.pending} pend.</span>
+                <span className="flex flex-wrap gap-1">
+                  <Link href={`/admin/comunicacao/campaigns?campaignId=${campaign.id}`} className="rounded-lg border border-white/10 px-2 py-1 text-xs text-cyan-100 hover:bg-cyan-500/10" onClick={(event) => event.stopPropagation()}>Editar</Link>
+                  <span className="rounded-lg border border-white/10 px-2 py-1 text-xs text-slate-300">Ver</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <aside className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
+          {!selected ? <p className="text-sm text-slate-400">Selecione uma campanha para ver detalhes.</p> : (
+            <div>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.2em] text-cyan-300">Detalhes</p>
+                  <h4 className="mt-1 text-lg font-semibold text-white">{selected.name}</h4>
+                  <p className="mt-1 text-xs text-slate-500">{selected.id}</p>
+                </div>
+                <Link href={`/admin/comunicacao/campaigns?campaignId=${selected.id}`} className="rounded-xl border border-cyan-400/30 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/10"><Eye size={14} className="mr-1 inline" />Editar</Link>
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+                <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Total</p><p className="font-semibold text-white">{selectedSummary.total || selected.audience_preview?.total || 0}</p></div>
+                <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Pendentes</p><p className="font-semibold text-white">{selectedSummary.pending}</p></div>
+                <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Enviados</p><p className="font-semibold text-white">{selectedSummary.sent}</p></div>
+                <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Falhas</p><p className="font-semibold text-white">{selectedSummary.failed}</p></div>
+              </div>
+
+              {selected.media_url || contentText(selected, "media_url") ? <img src={selected.media_url || contentText(selected, "media_url")} alt="Mídia da campanha" className="mt-4 max-h-44 w-full rounded-xl object-cover" /> : null}
+              <p className="mt-4 line-clamp-5 whitespace-pre-wrap rounded-xl bg-slate-950/70 p-3 text-sm leading-6 text-slate-300">{selected.message || selected.text_content || contentText(selected, "message") || "Sem mensagem."}</p>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button type="button" onClick={() => void runAction(selected.id, "duplicate")} disabled={Boolean(actionId)} className="inline-flex items-center gap-1 rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/10 disabled:opacity-60"><Copy size={14} />Duplicar</button>
+                <button type="button" onClick={() => void runAction(selected.id, "pause")} disabled={Boolean(actionId)} className="inline-flex items-center gap-1 rounded-xl border border-amber-400/30 px-3 py-2 text-xs font-semibold text-amber-100 hover:bg-amber-500/10 disabled:opacity-60"><Pause size={14} />Pausar</button>
+                <button type="button" onClick={() => void runAction(selected.id, "resume")} disabled={Boolean(actionId)} className="inline-flex items-center gap-1 rounded-xl border border-emerald-400/30 px-3 py-2 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/10 disabled:opacity-60"><Play size={14} />Retomar</button>
+                <button type="button" onClick={() => void runAction(selected.id, "cancel")} disabled={Boolean(actionId)} className="inline-flex items-center gap-1 rounded-xl border border-rose-400/30 px-3 py-2 text-xs font-semibold text-rose-100 hover:bg-rose-500/10 disabled:opacity-60"><XCircle size={14} />Cancelar</button>
+              </div>
+            </div>
+          )}
+        </aside>
+      </div>
+    </section>
+  );
+}
