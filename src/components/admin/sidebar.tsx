@@ -2,6 +2,7 @@ import Link from "next/link";
 import {
   BarChart3,
   CreditCard,
+  Megaphone,
   Database,
   Home,
   LayoutDashboard,
@@ -71,6 +72,7 @@ const navGroups: AdminNavGroup[] = [
     description: "Métricas e comunicação",
     items: [
       { label: "Analytics", href: "/admin/analytics", icon: BarChart3 },
+      { label: "Campanhas Meta", href: "/admin/campanhas-meta", icon: Megaphone },
       { label: "Central de Comunicação", href: "/admin/comunicacao", icon: Send },
     ],
   },
