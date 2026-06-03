@@ -4,7 +4,7 @@ import { BarChart3, ExternalLink, Eye, MessageSquareText, Music2, Trash2, Wand2 
 
 import { ConfirmSubmitButton } from "@/components/admin/confirm-submit-button";
 import { formatDateTimeBR } from "@/lib/format-date-time-br";
-import { deletePremiumRequest, getPremiumRequests, getPremiumRequestStats, updatePremiumRequestStatus, type PremiumRequestStatus } from "@/lib/data/premium-analytics";
+import { getPremiumRequests, getPremiumRequestStats, updatePremiumRequestStatus, type PremiumRequestStatus } from "@/lib/data/premium-analytics";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -50,6 +50,7 @@ export default async function PremiumRequestsAdminPage({ searchParams }: { searc
     if (params.type && row.type !== params.type) return false;
     if (params.status && row.status !== params.status) return false;
     if (params.urgency && row.urgency !== params.urgency) return false;
+    if (!params.status && row.status === "archived") return false;
     return true;
   });
 
@@ -57,7 +58,12 @@ export default async function PremiumRequestsAdminPage({ searchParams }: { searc
     "use server";
     const id = String(formData.get("id") ?? "");
     const status = String(formData.get("status") ?? "in_review") as PremiumRequestStatus;
-    await updatePremiumRequestStatus(id, status);
+    if (!id) return;
+    try {
+      await updatePremiumRequestStatus(id, status);
+    } catch (error) {
+      console.error("[premium-requests.admin] status update failed", error);
+    }
     revalidatePath("/admin/harmomus-premium/solicitacoes");
     revalidatePath(`/admin/harmomus-premium/solicitacoes/${id}`);
     revalidatePath("/admin/harmomus-premium");
@@ -66,8 +72,14 @@ export default async function PremiumRequestsAdminPage({ searchParams }: { searc
   async function remove(formData: FormData) {
     "use server";
     const id = String(formData.get("id") ?? "");
-    await deletePremiumRequest(id);
+    if (!id) return;
+    try {
+      await updatePremiumRequestStatus(id, "archived");
+    } catch (error) {
+      console.error("[premium-requests.admin] archive failed", error);
+    }
     revalidatePath("/admin/harmomus-premium/solicitacoes");
+    revalidatePath(`/admin/harmomus-premium/solicitacoes/${id}`);
     revalidatePath("/admin/harmomus-premium");
   }
 
@@ -97,11 +109,11 @@ export default async function PremiumRequestsAdminPage({ searchParams }: { searc
         </label>
         <label className="text-xs font-bold uppercase tracking-[0.18em] text-muted">Status
           <select name="status" defaultValue={params.status ?? ""} className="mt-2 h-12 w-full rounded-xl border border-border bg-background px-4 text-white">
-            <option value="">Todos</option>
+            <option value="">Ativas</option>
             <option value="new">Novo</option>
             <option value="in_review">Em análise</option>
             <option value="done">Concluído</option>
-            <option value="archived">Arquivado</option>
+            <option value="archived">Arquivadas</option>
           </select>
         </label>
         <label className="text-xs font-bold uppercase tracking-[0.18em] text-muted">Urgência
@@ -181,10 +193,12 @@ export default async function PremiumRequestsAdminPage({ searchParams }: { searc
                           <button className="rounded-lg border border-emerald-400/40 bg-emerald-500/15 px-3 py-2 text-xs font-bold text-emerald-200">Concluir</button>
                         </form>
                       ) : null}
-                      <form action={remove}>
-                        <input type="hidden" name="id" value={row.id} />
-                        <ConfirmSubmitButton message={`Tem certeza que deseja deletar esta solicitação premium? ${summarizeRequest(row)}`} className="inline-flex items-center gap-1 rounded-lg border border-red-400/40 bg-red-500/15 px-3 py-2 text-xs font-bold text-red-200 transition hover:bg-red-500/25"><Trash2 size={13} />Deletar</ConfirmSubmitButton>
-                      </form>
+                      {row.status !== "archived" ? (
+                        <form action={remove}>
+                          <input type="hidden" name="id" value={row.id} />
+                          <ConfirmSubmitButton message={`Tem certeza que deseja arquivar esta solicitação premium? ${summarizeRequest(row)}`} className="inline-flex items-center gap-1 rounded-lg border border-red-400/40 bg-red-500/15 px-3 py-2 text-xs font-bold text-red-200 transition hover:bg-red-500/25" confirmLabel="Arquivar solicitação"><Trash2 size={13} />Arquivar</ConfirmSubmitButton>
+                        </form>
+                      ) : null}
                     </div>
                   </td>
                 </tr>
