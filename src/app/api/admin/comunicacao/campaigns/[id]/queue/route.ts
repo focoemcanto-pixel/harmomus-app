@@ -34,15 +34,22 @@ export async function POST(
 
   const { data: campaign, error: campaignError } = await admin
     .from("communication_campaigns")
-    .select("text_content,content")
+    .select("text_content,content,scheduled_at")
     .eq("id", id)
     .maybeSingle();
 
   if (campaignError)
     return NextResponse.json({ error: campaignError.message }, { status: 500 });
+  if (!campaign)
+    return NextResponse.json(
+      { error: "Campanha não encontrada." },
+      { status: 404 },
+    );
 
-  const campaignContent = sanitizeObject(campaign?.content);
+  const campaignContent = sanitizeObject(campaign.content);
   const audienceFilters = sanitizeObject(campaignContent.audience_filters);
+  const rateLimits = sanitizeObject(campaignContent.rate_limits);
+  const baseScheduledAt = sanitizeText(campaign.scheduled_at);
   const hasMessageOverride =
     Boolean(body) &&
     (Object.prototype.hasOwnProperty.call(body, "message") ||
@@ -83,6 +90,7 @@ export async function POST(
           channel as Channel,
           message,
           payload,
+          { rateLimits, baseScheduledAt },
         )
       : await enqueueCampaignAudienceFromPlans(
           id,
@@ -90,6 +98,7 @@ export async function POST(
           channel as Channel,
           message,
           payload,
+          { rateLimits, baseScheduledAt },
         );
     return NextResponse.json({
       data: {

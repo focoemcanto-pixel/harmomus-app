@@ -1,4 +1,9 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import {
+  buildScheduledAtList,
+  type QueueRateLimits,
+  sortQueueContacts,
+} from "./queue-scheduler";
 import type { Channel } from "@/types/communication";
 
 const ACTIVE_STATUSES = new Set(["active", "trialing"]);
@@ -173,10 +178,28 @@ export async function resolveCampaignAudience(input: { plans?: unknown; includeC
   };
 }
 
-export async function enqueueCampaignContacts(input: { campaignId: string; channel: Channel; message: string; payload?: Record<string, unknown>; contacts: AudienceContact[] }) {
+export async function enqueueCampaignContacts(input: {
+  campaignId: string;
+  channel: Channel;
+  message: string;
+  payload?: Record<string, unknown>;
+  contacts: AudienceContact[];
+  rateLimits?: QueueRateLimits;
+  baseScheduledAt?: string | null;
+}) {
   const supabase = createSupabaseAdminClient() as SupabaseAdmin & any;
   if (!input.contacts.length) return { queued: 0 };
-  const rows = input.contacts.map((contact) => ({
+  const contacts = sortQueueContacts(
+    input.contacts,
+    (contact) =>
+      `${cleanRecipientName(contact.name)}|${contact.email ?? ""}|${contact.phone_normalized}`,
+  );
+  const scheduledAtList = buildScheduledAtList(
+    contacts.length,
+    input.rateLimits,
+    input.baseScheduledAt,
+  );
+  const rows = contacts.map((contact, index) => ({
     campaign_id: input.campaignId,
     user_id: contact.user_id,
     recipient_name: cleanRecipientName(contact.name),
@@ -184,6 +207,7 @@ export async function enqueueCampaignContacts(input: { campaignId: string; chann
     recipient_phone: contact.phone_normalized,
     channel: input.channel,
     status: "pending",
+    scheduled_at: scheduledAtList[index],
     payload: {
       ...(input.payload ?? {}),
       message: input.message,
