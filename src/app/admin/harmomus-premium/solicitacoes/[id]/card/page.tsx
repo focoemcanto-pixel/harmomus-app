@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Camera, Download, Star } from "lucide-react";
+import { Camera, Star } from "lucide-react";
 
+import { TestimonialCardDownloadButton } from "@/components/admin/testimonial-card-download-button";
 import { getPremiumRequestById } from "@/lib/data/premium-analytics";
 
 export const dynamic = "force-dynamic";
@@ -28,6 +29,16 @@ function initials(name: string) {
     .toUpperCase() || "HM";
 }
 
+function slugify(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48) || "depoimento";
+}
+
 function styleClasses(style?: string | null) {
   if (style === "gold_ministry") {
     return {
@@ -36,7 +47,6 @@ function styleClasses(style?: string | null) {
       glowB: "bg-yellow-600/20",
       accent: "text-amber-200",
       badge: "border-amber-200/45 bg-amber-300/15 text-amber-100",
-      button: "from-amber-200 to-yellow-500 text-black",
     };
   }
 
@@ -47,7 +57,6 @@ function styleClasses(style?: string | null) {
       glowB: "bg-blue-600/20",
       accent: "text-cyan-100",
       badge: "border-cyan-200/45 bg-cyan-300/15 text-cyan-100",
-      button: "from-cyan-200 to-blue-400 text-slate-950",
     };
   }
 
@@ -57,7 +66,6 @@ function styleClasses(style?: string | null) {
     glowB: "bg-fuchsia-500/20",
     accent: "text-cyan-100",
     badge: "border-fuchsia-200/40 bg-fuchsia-300/12 text-fuchsia-100",
-    button: "from-cyan-300 to-fuchsia-300 text-slate-950",
   };
 }
 
@@ -74,6 +82,7 @@ export default async function TestimonialCardPage({ params, searchParams }: Page
   const text = clampText(request.message || request.notes || "Feedback recebido pelo Harmomus.", isFeed ? 390 : 520);
   const classes = styleClasses(request.testimonial_card_style);
   const widthClass = isFeed ? "w-[720px] h-[720px]" : "w-[540px] h-[960px]";
+  const filename = `harmomus-${format}-${slugify(userName)}.png`;
 
   return (
     <section className="min-h-screen bg-[#030712] px-4 py-8 text-white print:bg-transparent print:p-0">
@@ -81,15 +90,13 @@ export default async function TestimonialCardPage({ params, searchParams }: Page
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.24em] text-cyan-200">Gerador de card</p>
           <h1 className="mt-1 text-3xl font-black">Depoimento Harmomus</h1>
-          <p className="mt-1 text-sm text-zinc-400">Abra em tela cheia e use o botão de baixar/salvar imagem do navegador ou capture o card.</p>
+          <p className="mt-1 text-sm text-zinc-400">Gere a versão Story ou Feed e baixe em PNG para postar no Instagram.</p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-start gap-2">
           <Link href={`/admin/harmomus-premium/solicitacoes/${id}`} className="rounded-xl border border-white/15 px-4 py-2 text-sm font-bold text-zinc-100 hover:bg-white/10">Voltar</Link>
           <Link href={`?format=story`} className={`rounded-xl px-4 py-2 text-sm font-bold ${!isFeed ? "bg-white text-slate-950" : "border border-white/15 text-zinc-100 hover:bg-white/10"}`}>Story 9:16</Link>
           <Link href={`?format=feed`} className={`rounded-xl px-4 py-2 text-sm font-bold ${isFeed ? "bg-white text-slate-950" : "border border-white/15 text-zinc-100 hover:bg-white/10"}`}>Feed 1:1</Link>
-          <button onClick={undefined as never} className={`hidden rounded-xl bg-gradient-to-r ${classes.button} px-4 py-2 text-sm font-black`}>
-            <Download size={15} /> Baixar PNG
-          </button>
+          <TestimonialCardDownloadButton filename={filename} />
         </div>
       </div>
 
@@ -144,7 +151,7 @@ export default async function TestimonialCardPage({ params, searchParams }: Page
       </div>
 
       <div className="mx-auto mt-5 max-w-5xl rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-sm leading-6 text-zinc-300 print:hidden">
-        Para baixar agora: use o print/captura do navegador na área do card. Na próxima etapa dá para adicionar download PNG automático com renderização client-side.
+        Dica: use Story para bastidores e Feed para prova social permanente no perfil.
       </div>
     </section>
   );
