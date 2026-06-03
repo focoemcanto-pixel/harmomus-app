@@ -8,12 +8,12 @@ export type QueueRateLimits = {
 };
 
 const DEFAULT_RATE_LIMITS = {
-  minDelay: 8,
-  maxDelay: 25,
-  hourlyLimit: 120,
-  dailyLimit: 600,
-  pauseEvery: 80,
-  pauseMinutes: 10,
+  minDelay: 180,
+  maxDelay: 300,
+  hourlyLimit: 20,
+  dailyLimit: 120,
+  pauseEvery: 10,
+  pauseMinutes: 15,
 };
 
 type NormalizedRateLimits = {

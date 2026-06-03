@@ -139,12 +139,12 @@ function validateConfig(whatsapp: WhatsAppConfig, email: EmailConfig) {
 function buildLimits(input: Record<string, unknown>): MarketingLimits {
   return {
     perMinute: sanitizeNumber(input.perMinute, 12),
-    perHour: sanitizeNumber(input.perHour, 120),
-    perDay: sanitizeNumber(input.perDay, 600),
-    delayMin: sanitizeNumber(input.delayMin, 8),
-    delayMax: sanitizeNumber(input.delayMax, 25),
-    pauseEvery: sanitizeNumber(input.pauseEvery, 80),
-    pauseMinutes: sanitizeNumber(input.pauseMinutes, 10),
+    perHour: sanitizeNumber(input.perHour, 20),
+    perDay: sanitizeNumber(input.perDay, 120),
+    delayMin: sanitizeNumber(input.delayMin, 180),
+    delayMax: sanitizeNumber(input.delayMax, 300),
+    pauseEvery: sanitizeNumber(input.pauseEvery, 10),
+    pauseMinutes: sanitizeNumber(input.pauseMinutes, 15),
   };
 }
 

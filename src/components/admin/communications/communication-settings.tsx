@@ -49,12 +49,12 @@ export function CommunicationSettings() {
   const [smtpPass, setSmtpPass] = useState("");
   const [smtpPassConfigured, setSmtpPassConfigured] = useState(false);
   const [perMinute, setPerMinute] = useState(12);
-  const [perHour, setPerHour] = useState(120);
-  const [perDay, setPerDay] = useState(600);
-  const [delayMin, setDelayMin] = useState(8);
-  const [delayMax, setDelayMax] = useState(25);
-  const [pauseEvery, setPauseEvery] = useState(80);
-  const [pauseMinutes, setPauseMinutes] = useState(10);
+  const [perHour, setPerHour] = useState(20);
+  const [perDay, setPerDay] = useState(120);
+  const [delayMin, setDelayMin] = useState(180);
+  const [delayMax, setDelayMax] = useState(300);
+  const [pauseEvery, setPauseEvery] = useState(10);
+  const [pauseMinutes, setPauseMinutes] = useState(15);
   const [testPhone, setTestPhone] = useState("5571993392294");
   const [testEmail, setTestEmail] = useState("focoemcanto@gmail.com");
   const [status, setStatus] = useState<string | null>(null);
@@ -99,12 +99,12 @@ export function CommunicationSettings() {
         setTestEmail(String(emailConfig.testEmail ?? "focoemcanto@gmail.com"));
 
         setPerMinute(readNumber(limits.perMinute, 12));
-        setPerHour(readNumber(limits.perHour, 120));
-        setPerDay(readNumber(limits.perDay, 600));
-        setDelayMin(readNumber(limits.delayMin, 8));
-        setDelayMax(readNumber(limits.delayMax, 25));
-        setPauseEvery(readNumber(limits.pauseEvery, 80));
-        setPauseMinutes(readNumber(limits.pauseMinutes, 10));
+        setPerHour(readNumber(limits.perHour, 20));
+        setPerDay(readNumber(limits.perDay, 120));
+        setDelayMin(readNumber(limits.delayMin, 180));
+        setDelayMax(readNumber(limits.delayMax, 300));
+        setPauseEvery(readNumber(limits.pauseEvery, 10));
+        setPauseMinutes(readNumber(limits.pauseMinutes, 15));
       } catch (error) {
         if (!cancelled) setStatus(error instanceof Error ? error.message : "Falha ao carregar configurações.");
       } finally {

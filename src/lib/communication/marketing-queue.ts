@@ -40,6 +40,16 @@ type ProcessCommunicationQueueResult = {
   scheduledLater: number;
 };
 
+const DEFAULT_PROCESS_LIMIT = 2;
+const MAX_PROCESS_LIMIT = 5;
+const MAX_WHATSAPP_PER_EXECUTION = 2;
+
+function normalizeProcessLimit(limit: unknown) {
+  const parsed = Math.floor(Number(limit));
+  if (!Number.isFinite(parsed) || parsed < 1) return DEFAULT_PROCESS_LIMIT;
+  return Math.min(parsed, MAX_PROCESS_LIMIT);
+}
+
 function sanitizeText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -354,9 +364,10 @@ async function finalizeJob(
 }
 
 export async function processCommunicationQueue(
-  limit = 50,
+  limit = DEFAULT_PROCESS_LIMIT,
 ): Promise<ProcessCommunicationQueueResult> {
   const admin = createSupabaseAdminClient() as any;
+  const safeLimit = normalizeProcessLimit(limit);
   const now = new Date().toISOString();
   const { count: eligibleNow } = await admin
     .from("communication_queue")
@@ -377,7 +388,7 @@ export async function processCommunicationQueue(
     .in("status", ["pending", "processing"])
     .or(`scheduled_at.is.null,scheduled_at.lte.${now}`)
     .order("created_at", { ascending: true })
-    .limit(limit);
+    .limit(safeLimit);
 
   if (error || !jobs?.length)
     return {
@@ -392,9 +403,15 @@ export async function processCommunicationQueue(
   let sent = 0;
   let failed = 0;
   let skipped = 0;
+  let whatsappProcessed = 0;
   const channels = new Map<Channel, CommunicationChannelRow | null>();
 
   for (const job of jobs as CommunicationQueueJob[]) {
+    if (job.channel === "whatsapp" && whatsappProcessed >= MAX_WHATSAPP_PER_EXECUTION) {
+      skipped += 1;
+      continue;
+    }
+
     const locked = await markJobProcessing(admin, job);
     if (!locked) {
       skipped += 1;
@@ -416,6 +433,7 @@ export async function processCommunicationQueue(
         };
 
     await finalizeJob(admin, job, result);
+    if (job.channel === "whatsapp") whatsappProcessed += 1;
     if (result.ok) sent += 1;
     else failed += 1;
   }

@@ -21,7 +21,9 @@ export async function POST(request: Request) {
   const authError = validateWorkerToken(request);
   if (authError) return authError;
 
-  const result = await processCommunicationQueue(50);
+  const body = await request.json().catch(() => ({}));
+  const limit = Math.max(1, Math.min(Number(body?.limit ?? 2) || 2, 5));
+  const result = await processCommunicationQueue(limit);
 
   return NextResponse.json({
     success: true,

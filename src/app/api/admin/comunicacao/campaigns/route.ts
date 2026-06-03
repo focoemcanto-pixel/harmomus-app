@@ -11,6 +11,51 @@ import {
 
 const CHANNELS = new Set(["whatsapp", "email"]);
 
+type QueueStats = {
+  total: number;
+  pending: number;
+  sent: number;
+  failed: number;
+  processing: number;
+  paused: number;
+  canceled: number;
+};
+
+const QUEUE_STATUSES = ["pending", "sent", "failed", "processing", "paused", "canceled"] as const;
+
+async function getQueueStats(admin: any, campaignId: string): Promise<QueueStats> {
+  const stats: QueueStats = {
+    total: 0,
+    pending: 0,
+    sent: 0,
+    failed: 0,
+    processing: 0,
+    paused: 0,
+    canceled: 0,
+  };
+
+  const { count: total, error: totalError } = await admin
+    .from("communication_queue")
+    .select("id", { count: "exact", head: true })
+    .eq("campaign_id", campaignId);
+  if (totalError) throw new Error(totalError.message);
+  stats.total = total ?? 0;
+
+  await Promise.all(
+    QUEUE_STATUSES.map(async (status) => {
+      const { count, error } = await admin
+        .from("communication_queue")
+        .select("id", { count: "exact", head: true })
+        .eq("campaign_id", campaignId)
+        .eq("status", status);
+      if (error) throw new Error(error.message);
+      stats[status] = count ?? 0;
+    }),
+  );
+
+  return stats;
+}
+
 function readContent(value: unknown) {
   return sanitizeObject(value);
 }
@@ -24,7 +69,7 @@ function readChannels(
   return channel ? [channel] : [];
 }
 
-async function buildResponse(campaign: Record<string, unknown>) {
+async function buildResponse(admin: any, campaign: Record<string, unknown>) {
   const content = readContent(campaign.content);
   const audienceFilters = sanitizeObject(content.audience_filters);
   const title =
@@ -54,6 +99,7 @@ async function buildResponse(campaign: Record<string, unknown>) {
       ? "scheduled"
       : sanitizeText(content.schedule_mode) || "now",
     stats: sanitizeObject(content.stats) || content,
+    queue_stats: await getQueueStats(admin, String(campaign.id ?? "")),
     audience_preview: audiencePreview,
   };
 }
@@ -87,7 +133,7 @@ export async function GET(request: Request) {
   return NextResponse.json({
     data: await Promise.all(
       (data ?? []).map((campaign) =>
-        buildResponse(campaign as Record<string, unknown>),
+        buildResponse(admin, campaign as Record<string, unknown>),
       ),
     ),
   });
@@ -166,7 +212,7 @@ export async function POST(request: Request) {
 
   return NextResponse.json(
     {
-      data: data ? await buildResponse(data as Record<string, unknown>) : data,
+      data: data ? await buildResponse(admin, data as Record<string, unknown>) : data,
     },
     { status: 201 },
   );

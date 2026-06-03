@@ -27,6 +27,7 @@ type CampaignRow = {
   media_url?: string | null;
   kit_id?: string | null;
   content?: Record<string, unknown> | null;
+  queue_stats?: QueueSummary;
   audience_preview?: {
     total?: number;
     current?: number;
@@ -38,6 +39,7 @@ type CampaignRow = {
 
 type CampaignWithQueue = CampaignRow & {
   queue?: QueueRow[];
+  queue_stats?: QueueSummary;
 };
 
 type QueueSummary = {
@@ -49,6 +51,22 @@ type QueueSummary = {
   failed: number;
   canceled: number;
 };
+
+function normalizeQueueStats(stats?: Partial<QueueSummary> | null, queue: QueueRow[] = []): QueueSummary {
+  if (stats) {
+    return {
+      total: Number(stats.total ?? 0),
+      pending: Number(stats.pending ?? 0),
+      processing: Number(stats.processing ?? 0),
+      paused: Number(stats.paused ?? 0),
+      sent: Number(stats.sent ?? 0),
+      failed: Number(stats.failed ?? 0),
+      canceled: Number(stats.canceled ?? 0),
+    };
+  }
+
+  return countQueue(queue);
+}
 
 function countQueue(queue: QueueRow[] = []): QueueSummary {
   const summary: QueueSummary = {
@@ -69,7 +87,7 @@ function countQueue(queue: QueueRow[] = []): QueueSummary {
 }
 
 function computedStatus(campaign: CampaignWithQueue) {
-  const queue = countQueue(campaign.queue);
+  const queue = normalizeQueueStats(campaign.queue_stats, campaign.queue);
   const stored = String(campaign.status ?? "draft").toLowerCase();
   if (stored === "paused" || queue.paused > 0) return "paused";
   if (stored === "canceled" || (queue.total > 0 && queue.canceled === queue.total)) return "canceled";
@@ -138,7 +156,11 @@ export function CampaignManager() {
             const detailResponse = await fetch(`/api/admin/comunicacao/campaigns/${campaign.id}`, { cache: "no-store" });
             const detailJson = await detailResponse.json().catch(() => null);
             if (!detailResponse.ok) return campaign;
-            return { ...campaign, queue: Array.isArray(detailJson?.data?.queue) ? detailJson.data.queue : [] };
+            return {
+              ...campaign,
+              queue: Array.isArray(detailJson?.data?.queue) ? detailJson.data.queue : [],
+              queue_stats: detailJson?.data?.queue_stats,
+            };
           } catch {
             return campaign;
           }
@@ -212,14 +234,14 @@ export function CampaignManager() {
       const response = await fetch("/api/admin/comunicacao/queue/process", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ limit: 50 }),
+        body: JSON.stringify({ limit: 2 }),
       });
       const json = await response.json().catch(() => null);
       if (!response.ok) throw new Error(json?.error ?? "Falha ao processar fila.");
       const result = json?.data ?? {};
       await loadCampaigns();
       setStatus(
-        `Fila processada: ${result.processed ?? 0} processados, ${result.sent ?? 0} enviados, ${result.failed ?? 0} falhas. Elegíveis agora: ${result.eligibleNow ?? 0}. Agendados para depois: ${result.scheduledLater ?? 0}.`,
+        `Fila processada: ${result.eligibleNow ?? 0} elegíveis agora, ${result.processed ?? 0} processados, ${result.sent ?? 0} enviados, ${result.failed ?? 0} falhas, ${result.scheduledLater ?? 0} agendados para depois.`,
       );
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Falha ao processar fila.");
@@ -231,9 +253,9 @@ export function CampaignManager() {
   const totals = useMemo(() => {
     return campaigns.reduce(
       (acc, campaign) => {
-        const queue = countQueue(campaign.queue);
-        acc.total += 1;
-        acc.pending += queue.pending + queue.processing;
+        const queue = normalizeQueueStats(campaign.queue_stats, campaign.queue);
+        acc.total += queue.total;
+        acc.pending += queue.pending;
         acc.sent += queue.sent;
         acc.failed += queue.failed;
         return acc;
@@ -242,7 +264,7 @@ export function CampaignManager() {
     );
   }, [campaigns]);
 
-  const selectedSummary = countQueue(selected?.queue);
+  const selectedSummary = normalizeQueueStats(selected?.queue_stats, selected?.queue);
   const selectedPreview = selected?.audience_preview;
   const selectedPlans = selectedPreview?.totalByPlan ?? {};
 
@@ -280,7 +302,7 @@ export function CampaignManager() {
       </div>
 
       <div className="mt-5 grid gap-3 sm:grid-cols-4">
-        <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4"><p className="text-xs text-slate-400">Campanhas</p><p className="mt-1 text-2xl font-semibold text-white">{totals.total}</p></div>
+        <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4"><p className="text-xs text-slate-400">Total na fila</p><p className="mt-1 text-2xl font-semibold text-white">{totals.total}</p></div>
         <div className="rounded-2xl border border-amber-400/20 bg-amber-500/10 p-4"><p className="text-xs text-amber-100/80">Pendentes</p><p className="mt-1 text-2xl font-semibold text-amber-50">{totals.pending}</p></div>
         <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/10 p-4"><p className="text-xs text-emerald-100/80">Enviados</p><p className="mt-1 text-2xl font-semibold text-emerald-50">{totals.sent}</p></div>
         <div className="rounded-2xl border border-rose-400/20 bg-rose-500/10 p-4"><p className="text-xs text-rose-100/80">Falhas</p><p className="mt-1 text-2xl font-semibold text-rose-50">{totals.failed}</p></div>
@@ -296,7 +318,7 @@ export function CampaignManager() {
           {isLoading ? <p className="p-4 text-sm text-slate-400">Carregando campanhas...</p> : null}
           {!isLoading && !campaigns.length ? <p className="p-4 text-sm text-slate-400">Nenhuma campanha criada ainda.</p> : null}
           {campaigns.map((campaign) => {
-            const queue = countQueue(campaign.queue);
+            const queue = normalizeQueueStats(campaign.queue_stats, campaign.queue);
             const audienceTotal = campaign.audience_preview?.total ?? queue.total;
             const displayStatus = computedStatus(campaign);
             return (
@@ -315,7 +337,7 @@ export function CampaignManager() {
                   <span className="mt-1 block text-xs text-slate-500">Criada em {formatDate(campaign.created_at)}</span>
                 </span>
                 <span className="text-sm text-slate-200">{statusLabel(displayStatus)}</span>
-                <span className="text-sm text-slate-300">{queue.total || audienceTotal} total · {queue.pending} pend.</span>
+                <span className="text-sm text-slate-300">{queue.total || audienceTotal} total · {queue.pending} pend. · {queue.sent} env. · {queue.failed} falhas</span>
                 <span className="flex flex-wrap gap-1">
                   <Link href={`/admin/comunicacao/campaigns?campaignId=${campaign.id}`} className="rounded-lg border border-white/10 px-2 py-1 text-xs text-cyan-100 hover:bg-cyan-500/10" onClick={(event) => event.stopPropagation()}>Editar</Link>
                   <span className="rounded-lg border border-white/10 px-2 py-1 text-xs text-slate-300">Ver</span>
@@ -342,6 +364,9 @@ export function CampaignManager() {
                 <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Pendentes</p><p className="font-semibold text-white">{selectedSummary.pending}</p></div>
                 <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Enviados</p><p className="font-semibold text-white">{selectedSummary.sent}</p></div>
                 <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Falhas</p><p className="font-semibold text-white">{selectedSummary.failed}</p></div>
+                <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Processando</p><p className="font-semibold text-white">{selectedSummary.processing}</p></div>
+                <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Pausados</p><p className="font-semibold text-white">{selectedSummary.paused}</p></div>
+                <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Cancelados</p><p className="font-semibold text-white">{selectedSummary.canceled}</p></div>
               </div>
 
               {selectedPreview ? (
