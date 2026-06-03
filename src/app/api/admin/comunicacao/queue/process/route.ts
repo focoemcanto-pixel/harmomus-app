@@ -8,7 +8,7 @@ export async function POST(request: Request) {
   if (response) return response;
 
   const body = await request.json().catch(() => ({}));
-  const limit = Math.max(1, Math.min(Number(body?.limit ?? 50) || 50, 100));
+  const limit = Math.max(1, Math.min(Number(body?.limit ?? 2) || 2, 5));
 
   try {
     const result = await processCommunicationQueue(limit);

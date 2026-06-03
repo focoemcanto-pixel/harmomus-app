@@ -5,6 +5,51 @@ import { requireAdmin, sanitizeObject, sanitizeStringArray, sanitizeText } from 
 const MANAGED_QUEUE_STATUSES = ["pending", "processing", "paused"];
 const CHANNELS = new Set(["whatsapp", "email"]);
 
+type QueueStats = {
+  total: number;
+  pending: number;
+  sent: number;
+  failed: number;
+  processing: number;
+  paused: number;
+  canceled: number;
+};
+
+const QUEUE_STATUSES = ["pending", "sent", "failed", "processing", "paused", "canceled"] as const;
+
+async function getQueueStats(admin: any, campaignId: string): Promise<QueueStats> {
+  const stats: QueueStats = {
+    total: 0,
+    pending: 0,
+    sent: 0,
+    failed: 0,
+    processing: 0,
+    paused: 0,
+    canceled: 0,
+  };
+
+  const { count: total, error: totalError } = await admin
+    .from("communication_queue")
+    .select("id", { count: "exact", head: true })
+    .eq("campaign_id", campaignId);
+  if (totalError) throw new Error(totalError.message);
+  stats.total = total ?? 0;
+
+  await Promise.all(
+    QUEUE_STATUSES.map(async (status) => {
+      const { count, error } = await admin
+        .from("communication_queue")
+        .select("id", { count: "exact", head: true })
+        .eq("campaign_id", campaignId)
+        .eq("status", status);
+      if (error) throw new Error(error.message);
+      stats[status] = count ?? 0;
+    }),
+  );
+
+  return stats;
+}
+
 async function getCampaign(admin: any, id: string) {
   const { data, error } = await admin
     .from("communication_campaigns")
@@ -46,7 +91,9 @@ export async function GET(
       .limit(200);
     if (queueError) throw new Error(queueError.message);
 
-    return NextResponse.json({ data: { campaign, queue: queue ?? [] } });
+    const queueStats = await getQueueStats(admin, id);
+
+    return NextResponse.json({ data: { campaign, queue: queue ?? [], queue_stats: queueStats } });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Falha ao carregar campanha." },

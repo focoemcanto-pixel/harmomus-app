@@ -37,7 +37,7 @@ export async function POST(request: Request) {
     media_url: kit.cover_url || null,
     channels,
     schedule_mode: "now",
-    rate_limits: { minDelay: 8, maxDelay: 25, hourlyLimit: 120, dailyLimit: 600, pauseEvery: 80, pauseMinutes: 10 },
+    rate_limits: { minDelay: 180, maxDelay: 300, hourlyLimit: 20, dailyLimit: 120, pauseEvery: 10, pauseMinutes: 15 },
     audience_filters: { plans: ["premium", "plus"], segment: "premium,plus", note: "Campanha automatica criada a partir de um kit." },
   };
 
