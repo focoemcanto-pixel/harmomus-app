@@ -589,34 +589,40 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
     setIsSavingDraft(true);
     setStatus(null);
     try {
-      const response = await fetch("/api/admin/comunicacao/campaigns", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name,
-          channels,
-          audience_filters: {
-            plans,
-            segment: plans.join(","),
-            note: "Audiência real calculada no servidor ao enfileirar.",
-          },
-          title,
-          message,
-          link_url: link,
-          media_url: mediaUrl || null,
-          kit_id: selectedKitId || null,
-          schedule_mode: scheduleMode,
-          scheduled_at: scheduledAt,
-          rate_limits: {
-            minDelay,
-            maxDelay,
-            dailyLimit,
-            hourlyLimit,
-            pauseEvery,
-            pauseMinutes,
-          },
-        }),
-      });
+      const editingId = savedCampaignId || campaignId;
+      const response = await fetch(
+        editingId
+          ? `/api/admin/comunicacao/campaigns/${editingId}`
+          : "/api/admin/comunicacao/campaigns",
+        {
+          method: editingId ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name,
+            channels,
+            audience_filters: {
+              plans,
+              segment: plans.join(","),
+              note: "Audiência real calculada no servidor ao enfileirar.",
+            },
+            title,
+            message,
+            link_url: link,
+            media_url: mediaUrl || null,
+            kit_id: selectedKitId || null,
+            schedule_mode: scheduleMode,
+            scheduled_at: scheduledAt,
+            rate_limits: {
+              minDelay,
+              maxDelay,
+              dailyLimit,
+              hourlyLimit,
+              pauseEvery,
+              pauseMinutes,
+            },
+          }),
+        },
+      );
       const json = await response.json().catch(() => null);
       if (!response.ok)
         throw new Error(json?.error ?? "Falha ao salvar rascunho.");
@@ -657,8 +663,11 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 channel,
-                message: previewMessage,
+                message,
                 contacts: currentAudience.contacts,
+                link,
+                link_url: link,
+                plano: plans.map((p) => planLabels[p]).join(", "),
                 ...(mediaUrl ? { mediaUrl } : {}),
               }),
             },

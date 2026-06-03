@@ -60,7 +60,17 @@ export async function POST(
     );
 
   try {
-    const payload = mediaUrl ? { mediaUrl, media_url: mediaUrl } : {};
+    const linkUrl =
+      sanitizeText(body?.link ?? body?.link_url) ||
+      sanitizeText(campaignContent.link_url ?? campaignContent.linkUrl);
+    const plan =
+      sanitizeText(body?.plano ?? body?.plan) ||
+      asStringArray(audienceFilters.plans).join(", ");
+    const payload = {
+      ...(mediaUrl ? { mediaUrl, media_url: mediaUrl } : {}),
+      ...(linkUrl ? { link: linkUrl, link_url: linkUrl } : {}),
+      ...(plan ? { plano: plan, plan } : {}),
+    };
     const result = audienceIds.length
       ? await enqueueCampaignAudience(
           id,
