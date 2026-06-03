@@ -146,3 +146,36 @@ export async function PATCH(
     );
   }
 }
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { admin, response } = await requireAdmin();
+  if (response) return response;
+  const { id } = await params;
+
+  try {
+    const campaign = await getCampaign(admin, id);
+    if (!campaign) return NextResponse.json({ error: "Campanha não encontrada." }, { status: 404 });
+
+    const tables = ["communication_queue", "communication_deliveries", "communication_logs"];
+    for (const table of tables) {
+      const { error } = await admin.from(table).delete().eq("campaign_id", id);
+      if (error) throw new Error(error.message);
+    }
+
+    const { error: campaignError } = await admin
+      .from("communication_campaigns")
+      .delete()
+      .eq("id", id);
+    if (campaignError) throw new Error(campaignError.message);
+
+    return NextResponse.json({ data: { id, deleted: true } });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Falha ao excluir campanha." },
+      { status: 500 },
+    );
+  }
+}
