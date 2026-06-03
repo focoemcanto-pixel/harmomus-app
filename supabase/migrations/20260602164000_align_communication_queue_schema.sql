@@ -4,9 +4,11 @@ add column if not exists recipient_name text,
 add column if not exists recipient_email text,
 add column if not exists recipient_phone text,
 add column if not exists scheduled_at timestamptz,
+add column if not exists scheduled_for timestamptz,
 add column if not exists updated_at timestamptz default now(),
 add column if not exists provider_message_id text,
-add column if not exists error_message text;
+add column if not exists error_message text,
+add column if not exists last_error text;
 
 update public.communication_queue
 set scheduled_at = coalesce(scheduled_at, scheduled_for),

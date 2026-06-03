@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Download, Instagram, Star } from "lucide-react";
+import { Camera, Download, Star } from "lucide-react";
 
 import { getPremiumRequestById } from "@/lib/data/premium-analytics";
 
@@ -135,7 +135,7 @@ export default async function TestimonialCardPage({ params, searchParams }: Page
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-2 text-white/60">
-                <Instagram size={20} />
+                <Camera size={20} />
                 <span className="text-sm font-bold">harmomus.com</span>
               </div>
             </footer>
