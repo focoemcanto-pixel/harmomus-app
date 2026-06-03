@@ -150,7 +150,6 @@ export async function PATCH(
     const title = sanitizeText(body?.title) || name;
 
     if (!name) return NextResponse.json({ error: "Nome da campanha é obrigatório." }, { status: 400 });
-    if (!message) return NextResponse.json({ error: "Mensagem da campanha é obrigatória." }, { status: 400 });
     if (!channels.length) return NextResponse.json({ error: "Selecione pelo menos um canal." }, { status: 400 });
 
     const content = {

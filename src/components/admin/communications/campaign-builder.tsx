@@ -302,7 +302,7 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
         setAudiencePreview(asAudiencePreview(campaign.audience_preview));
         setName((current) => String(campaign.name ?? current));
         if (nextTitle) setTitle(nextTitle);
-        if (nextMessage) setMessage(nextMessage);
+        setMessage(nextMessage);
         if (nextLink) setLink(nextLink);
         if (nextMediaUrl) {
           setMediaUrl(nextMediaUrl);
@@ -581,13 +581,18 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
     }
   }
 
-  async function saveDraft() {
-    if (!name.trim()) return setStatus("Informe o nome da campanha.");
-    if (!channels.length) return setStatus("Selecione pelo menos um canal.");
-    if (!message.trim()) return setStatus("Informe a mensagem da campanha.");
+  async function saveDraft(options?: { silent?: boolean }) {
+    if (!name.trim()) {
+      setStatus("Informe o nome da campanha.");
+      return null;
+    }
+    if (!channels.length) {
+      setStatus("Selecione pelo menos um canal.");
+      return null;
+    }
 
     setIsSavingDraft(true);
-    setStatus(null);
+    if (!options?.silent) setStatus(null);
     try {
       const editingId = savedCampaignId || campaignId;
       const response = await fetch(
@@ -626,27 +631,38 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
       const json = await response.json().catch(() => null);
       if (!response.ok)
         throw new Error(json?.error ?? "Falha ao salvar rascunho.");
-      setSavedCampaignId(json?.data?.id ?? null);
+      const nextCampaignId = json?.data?.id ?? editingId ?? null;
+      setSavedCampaignId(nextCampaignId);
       setAudiencePreview(asAudiencePreview(json?.data?.audience_preview));
-      setStatus(
-        `Rascunho salvo no Supabase: ${json?.data?.name ?? name}. Revise e coloque em fila quando estiver pronto.`,
-      );
+      if (!options?.silent) {
+        setStatus(
+          `${editingId ? "Edição" : "Rascunho"} salva no Supabase: ${json?.data?.name ?? name}. Revise e coloque em fila quando estiver pronto.`,
+        );
+      }
+      return nextCampaignId;
     } catch (error) {
       setStatus(
         error instanceof Error ? error.message : "Falha ao salvar rascunho.",
       );
+      return null;
     } finally {
       setIsSavingDraft(false);
     }
   }
 
   async function queueCampaign() {
-    if (!savedCampaignId)
-      return setStatus("Salve a campanha antes de colocar mensagens em fila.");
     if (!channels.length) return setStatus("Selecione pelo menos um canal.");
     setIsQueueing(true);
-    setStatus(null);
+    setStatus("Salvando edição antes de colocar em fila...");
     try {
+      const queueCampaignId = await saveDraft({ silent: true });
+      if (!queueCampaignId) {
+        throw new Error("Salve a edição antes de colocar em fila.");
+      }
+      if (!message.trim()) {
+        throw new Error("Informe a mensagem da campanha.");
+      }
+
       const currentAudience =
         resolvedAudience ?? (await refreshAudience({ silent: true }));
       if (!currentAudience?.contacts.length)
@@ -657,7 +673,7 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
       const results = await Promise.all(
         channels.map(async (channel) => {
           const response = await fetch(
-            `/api/admin/comunicacao/campaigns/${savedCampaignId}/queue`,
+            `/api/admin/comunicacao/campaigns/${queueCampaignId}/queue`,
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -1129,18 +1145,18 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
               Enviar teste seguro
             </button>
             <button
-              onClick={saveDraft}
+              onClick={() => saveDraft()}
               disabled={isSavingDraft}
               className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isSavingDraft ? (
                 <Loader2 size={15} className="animate-spin" />
               ) : null}
-              {isSavingDraft ? "Salvando..." : "Salvar rascunho"}
+              {isSavingDraft ? "Salvando..." : savedCampaignId || campaignId ? "Salvar edição" : "Salvar rascunho"}
             </button>
             <button
               onClick={queueCampaign}
-              disabled={!savedCampaignId || isQueueing}
+              disabled={isQueueing || isSavingDraft}
               className="inline-flex items-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-2 text-sm font-semibold text-emerald-50 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isQueueing ? (

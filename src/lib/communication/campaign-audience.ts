@@ -54,6 +54,11 @@ function pickText(row: Record<string, unknown>, keys: string[]) {
   return null;
 }
 
+function cleanRecipientName(name: string | null | undefined) {
+  const value = String(name ?? "").trim();
+  return !value || value.includes("@") ? "Aluno" : value;
+}
+
 function addContact(map: Map<string, AudienceContact>, contact: AudienceContact) {
   if (!contact.phone_normalized || contact.phone_normalized.length < 12) return false;
   const existing = map.get(contact.phone_normalized);
@@ -125,12 +130,17 @@ export async function resolveCampaignAudience(input: { plans?: unknown; includeC
       const phone = normalizePhone(row.phone);
       if (!phone) continue;
       legacyRaw += 1;
+      const rawName =
+        (typeof row.display_name === "string" && row.display_name.trim()) ||
+        (typeof row.username === "string" && row.username.trim()) ||
+        "";
+      const cleanName = cleanRecipientName(rawName);
       const added = addContact(contactsByPhone, {
-        id: `legacy:${String(row.id ?? row.legacy_member_id ?? phone)}`,
+        id: `legacy:${String(row.id ?? phone)}`,
         user_id: null,
         source: "legacy",
         plan: norm(row.legacy_plan_slug) || "free",
-        name: pickText(row, ["full_name", "name", "display_name", "customer_name"]),
+        name: cleanName,
         email: pickText(row, ["email", "customer_email"]),
         phone: String(row.phone ?? phone),
         phone_normalized: phone,
@@ -169,7 +179,7 @@ export async function enqueueCampaignContacts(input: { campaignId: string; chann
   const rows = input.contacts.map((contact) => ({
     campaign_id: input.campaignId,
     user_id: contact.user_id,
-    recipient_name: contact.name,
+    recipient_name: cleanRecipientName(contact.name),
     recipient_email: contact.email,
     recipient_phone: contact.phone_normalized,
     channel: input.channel,

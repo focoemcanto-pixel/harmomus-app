@@ -43,9 +43,14 @@ export async function POST(
 
   const campaignContent = sanitizeObject(campaign?.content);
   const audienceFilters = sanitizeObject(campaignContent.audience_filters);
-  const message =
-    sanitizeText(body?.message ?? body?.text ?? body?.mensagem) ||
-    sanitizeText(campaign?.text_content);
+  const hasMessageOverride =
+    Boolean(body) &&
+    (Object.prototype.hasOwnProperty.call(body, "message") ||
+      Object.prototype.hasOwnProperty.call(body, "text") ||
+      Object.prototype.hasOwnProperty.call(body, "mensagem"));
+  const message = hasMessageOverride
+    ? sanitizeText(body?.message ?? body?.text ?? body?.mensagem)
+    : sanitizeText(campaign?.text_content);
   const mediaUrl =
     sanitizeText(
       body?.mediaUrl ?? body?.media_url ?? body?.imageUrl ?? body?.image,
