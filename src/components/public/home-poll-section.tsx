@@ -49,14 +49,22 @@ export function HomePollSection({ initialPoll }: HomePollSectionProps) {
 
       <div className="relative grid gap-7 lg:grid-cols-[0.95fr_1.05fr] lg:items-start">
         <div>
-          <span className="inline-flex rounded-full border border-cyan-300/35 bg-cyan-300/10 px-3 py-1 text-[11px] font-black uppercase tracking-[0.22em] text-cyan-100">
-            {poll.eyebrow || "Enquete Premium"}
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex rounded-full border border-cyan-300/35 bg-cyan-300/10 px-3 py-1 text-[11px] font-black uppercase tracking-[0.22em] text-cyan-100">
+              {poll.eyebrow || "Enquete Premium"}
+            </span>
+            <span className="inline-flex rounded-full border border-fuchsia-300/40 bg-fuchsia-300/10 px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] text-fuchsia-100">
+              🔥 A mais votada vira prioridade
+            </span>
+          </div>
           <h2 className="mt-4 max-w-2xl text-3xl font-semibold leading-tight text-white md:text-5xl">
             {poll.title || poll.question}
           </h2>
           {poll.title ? <p className="mt-3 text-lg font-medium text-cyan-100">{poll.question}</p> : null}
           {poll.subtitle ? <p className="mt-4 max-w-xl text-sm leading-6 text-zinc-200 md:text-base">{poll.subtitle}</p> : null}
+          <p className="mt-4 max-w-xl rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm font-semibold leading-6 text-white">
+            Vote na música que você quer estudar no Harmomus. O resultado ajuda a definir qual kit vocal entra primeiro na fila de produção.
+          </p>
 
           <div className="mt-6 grid gap-3 sm:grid-cols-2">
             <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
