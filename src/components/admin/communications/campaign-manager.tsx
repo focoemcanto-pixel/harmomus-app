@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Copy, Eye, Loader2, Pause, Play, RefreshCcw, XCircle } from "lucide-react";
+import { Copy, Eye, Loader2, Pause, Play, RefreshCcw, Send, Trash2, XCircle } from "lucide-react";
 
 type QueueRow = {
   id: string;
@@ -68,6 +68,18 @@ function countQueue(queue: QueueRow[] = []): QueueSummary {
   return summary;
 }
 
+function computedStatus(campaign: CampaignWithQueue) {
+  const queue = countQueue(campaign.queue);
+  const stored = String(campaign.status ?? "draft").toLowerCase();
+  if (stored === "paused" || queue.paused > 0) return "paused";
+  if (stored === "canceled" || (queue.total > 0 && queue.canceled === queue.total)) return "canceled";
+  if (queue.processing > 0) return "processing";
+  if (queue.pending > 0) return "queued";
+  if (queue.total > 0 && queue.failed === queue.total) return "failed";
+  if (queue.total > 0 && queue.sent + queue.failed + queue.canceled === queue.total) return queue.failed > 0 ? "failed" : "sent";
+  return stored || "draft";
+}
+
 function statusLabel(status?: string | null) {
   const value = String(status ?? "draft").toLowerCase();
   const labels: Record<string, string> = {
@@ -97,6 +109,12 @@ function formatDate(value?: string | null) {
 function contentText(campaign: CampaignRow, key: string) {
   const value = campaign.content?.[key];
   return typeof value === "string" ? value : "";
+}
+
+function maskPhone(value?: string | null) {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  if (digits.length < 6) return value ?? "—";
+  return `${digits.slice(0, 4)}••••${digits.slice(-4)}`;
 }
 
 export function CampaignManager() {
@@ -168,6 +186,46 @@ export function CampaignManager() {
     }
   }
 
+  async function deleteCampaign(campaignId: string) {
+    const ok = window.confirm("Tem certeza que deseja excluir esta campanha? Esta ação removerá a campanha, a fila e os logs relacionados.");
+    if (!ok) return;
+    setActionId(`${campaignId}:delete`);
+    setStatus(null);
+    try {
+      const response = await fetch(`/api/admin/comunicacao/campaigns/${campaignId}`, { method: "DELETE" });
+      const json = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(json?.error ?? "Falha ao excluir campanha.");
+      setSelected(null);
+      await loadCampaigns();
+      setStatus("Campanha excluída com sucesso.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Falha ao excluir campanha.");
+    } finally {
+      setActionId(null);
+    }
+  }
+
+  async function processQueue() {
+    setActionId("process-queue");
+    setStatus(null);
+    try {
+      const response = await fetch("/api/admin/comunicacao/queue/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ limit: 50 }),
+      });
+      const json = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(json?.error ?? "Falha ao processar fila.");
+      const result = json?.data ?? {};
+      await loadCampaigns();
+      setStatus(`Fila processada: ${result.processed ?? 0} processados, ${result.sent ?? 0} enviados, ${result.failed ?? 0} falhas.`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Falha ao processar fila.");
+    } finally {
+      setActionId(null);
+    }
+  }
+
   const totals = useMemo(() => {
     return campaigns.reduce(
       (acc, campaign) => {
@@ -183,6 +241,8 @@ export function CampaignManager() {
   }, [campaigns]);
 
   const selectedSummary = countQueue(selected?.queue);
+  const selectedPreview = selected?.audience_preview;
+  const selectedPlans = selectedPreview?.totalByPlan ?? {};
 
   return (
     <section className="rounded-3xl border border-white/10 bg-slate-950/70 p-5 shadow-premium">
@@ -195,6 +255,15 @@ export function CampaignManager() {
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
+            onClick={() => void processQueue()}
+            disabled={Boolean(actionId)}
+            className="inline-flex items-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-2 text-sm font-semibold text-emerald-100 hover:bg-emerald-500/20 disabled:opacity-60"
+          >
+            {actionId === "process-queue" ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
+            Processar fila agora
+          </button>
+          <button
+            type="button"
             onClick={() => void loadCampaigns()}
             disabled={isRefreshing}
             className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10 disabled:opacity-60"
@@ -202,7 +271,7 @@ export function CampaignManager() {
             {isRefreshing ? <Loader2 size={15} className="animate-spin" /> : <RefreshCcw size={15} />}
             Atualizar
           </button>
-          <Link href="/admin/comunicacao/campaigns" className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-500">
+          <Link href="/admin/comunicacao/campaigns?mode=new" className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-500">
             Nova campanha
           </Link>
         </div>
@@ -227,24 +296,29 @@ export function CampaignManager() {
           {campaigns.map((campaign) => {
             const queue = countQueue(campaign.queue);
             const audienceTotal = campaign.audience_preview?.total ?? queue.total;
+            const displayStatus = computedStatus(campaign);
             return (
-              <button
+              <div
                 key={campaign.id}
-                type="button"
+                role="button"
+                tabIndex={0}
                 onClick={() => setSelected(campaign)}
-                className={`grid w-full grid-cols-[1.2fr_0.7fr_0.8fr_0.9fr] gap-3 border-b border-white/5 px-4 py-4 text-left transition hover:bg-white/5 ${selected?.id === campaign.id ? "bg-cyan-500/10" : "bg-slate-950/40"}`}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") setSelected(campaign);
+                }}
+                className={`grid w-full cursor-pointer grid-cols-[1.2fr_0.7fr_0.8fr_0.9fr] gap-3 border-b border-white/5 px-4 py-4 text-left transition hover:bg-white/5 ${selected?.id === campaign.id ? "bg-cyan-500/10" : "bg-slate-950/40"}`}
               >
                 <span className="min-w-0">
                   <span className="block truncate text-sm font-semibold text-white">{campaign.name}</span>
                   <span className="mt-1 block text-xs text-slate-500">Criada em {formatDate(campaign.created_at)}</span>
                 </span>
-                <span className="text-sm text-slate-200">{statusLabel(campaign.status)}</span>
+                <span className="text-sm text-slate-200">{statusLabel(displayStatus)}</span>
                 <span className="text-sm text-slate-300">{queue.total || audienceTotal} total · {queue.pending} pend.</span>
                 <span className="flex flex-wrap gap-1">
                   <Link href={`/admin/comunicacao/campaigns?campaignId=${campaign.id}`} className="rounded-lg border border-white/10 px-2 py-1 text-xs text-cyan-100 hover:bg-cyan-500/10" onClick={(event) => event.stopPropagation()}>Editar</Link>
                   <span className="rounded-lg border border-white/10 px-2 py-1 text-xs text-slate-300">Ver</span>
                 </span>
-              </button>
+              </div>
             );
           })}
         </div>
@@ -262,11 +336,26 @@ export function CampaignManager() {
               </div>
 
               <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-                <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Total</p><p className="font-semibold text-white">{selectedSummary.total || selected.audience_preview?.total || 0}</p></div>
+                <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Total</p><p className="font-semibold text-white">{selectedSummary.total || selectedPreview?.total || 0}</p></div>
                 <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Pendentes</p><p className="font-semibold text-white">{selectedSummary.pending}</p></div>
                 <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Enviados</p><p className="font-semibold text-white">{selectedSummary.sent}</p></div>
                 <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Falhas</p><p className="font-semibold text-white">{selectedSummary.failed}</p></div>
               </div>
+
+              {selectedPreview ? (
+                <div className="mt-4 rounded-xl border border-white/10 bg-slate-950/70 p-3 text-sm text-slate-300">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Audiência</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <span>Atuais: <strong className="text-white">{selectedPreview.current ?? 0}</strong></span>
+                    <span>Legado: <strong className="text-white">{selectedPreview.legacy ?? 0}</strong></span>
+                    <span>Duplicados: <strong className="text-white">{selectedPreview.duplicatesRemoved ?? 0}</strong></span>
+                    <span>Total: <strong className="text-white">{selectedPreview.total ?? 0}</strong></span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                    {Object.entries(selectedPlans).map(([plan, total]) => <span key={plan} className="rounded-full bg-white/10 px-2 py-1 text-slate-200">{plan}: {total}</span>)}
+                  </div>
+                </div>
+              ) : null}
 
               {selected.media_url || contentText(selected, "media_url") ? <img src={selected.media_url || contentText(selected, "media_url")} alt="Mídia da campanha" className="mt-4 max-h-44 w-full rounded-xl object-cover" /> : null}
               <p className="mt-4 line-clamp-5 whitespace-pre-wrap rounded-xl bg-slate-950/70 p-3 text-sm leading-6 text-slate-300">{selected.message || selected.text_content || contentText(selected, "message") || "Sem mensagem."}</p>
@@ -276,7 +365,25 @@ export function CampaignManager() {
                 <button type="button" onClick={() => void runAction(selected.id, "pause")} disabled={Boolean(actionId)} className="inline-flex items-center gap-1 rounded-xl border border-amber-400/30 px-3 py-2 text-xs font-semibold text-amber-100 hover:bg-amber-500/10 disabled:opacity-60"><Pause size={14} />Pausar</button>
                 <button type="button" onClick={() => void runAction(selected.id, "resume")} disabled={Boolean(actionId)} className="inline-flex items-center gap-1 rounded-xl border border-emerald-400/30 px-3 py-2 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/10 disabled:opacity-60"><Play size={14} />Retomar</button>
                 <button type="button" onClick={() => void runAction(selected.id, "cancel")} disabled={Boolean(actionId)} className="inline-flex items-center gap-1 rounded-xl border border-rose-400/30 px-3 py-2 text-xs font-semibold text-rose-100 hover:bg-rose-500/10 disabled:opacity-60"><XCircle size={14} />Cancelar</button>
+                <button type="button" onClick={() => void deleteCampaign(selected.id)} disabled={Boolean(actionId)} className="inline-flex items-center gap-1 rounded-xl border border-red-400/30 px-3 py-2 text-xs font-semibold text-red-100 hover:bg-red-500/10 disabled:opacity-60"><Trash2 size={14} />Excluir</button>
               </div>
+
+              {selected.queue?.length ? (
+                <div className="mt-5 rounded-xl border border-white/10 bg-slate-950/70 p-3">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Envios recentes</p>
+                  <div className="max-h-64 space-y-2 overflow-auto pr-1">
+                    {selected.queue.slice(0, 50).map((item) => (
+                      <div key={item.id} className="rounded-lg bg-white/[0.03] p-2 text-xs text-slate-300">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate font-semibold text-white">{item.recipient_name || String(item.payload?.recipient_name ?? item.payload?.name ?? "Contato")}</span>
+                          <span className="rounded-full bg-white/10 px-2 py-0.5">{item.status ?? "pending"}</span>
+                        </div>
+                        <p className="mt-1 text-slate-500">{maskPhone(item.recipient_phone || String(item.payload?.normalized_phone ?? ""))}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
           )}
         </aside>
