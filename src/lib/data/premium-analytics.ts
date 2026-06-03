@@ -22,7 +22,8 @@ export type FeedbackResponseTone = "positive" | "negative" | "neutral";
 
 type AudioLog = { id: string; kit_id: string | null; accessed_at?: string | null; kits?: { category_id?: string | null } | null };
 
-const PREMIUM_REQUEST_SELECT = "id,user_id,ministry_id,request_type,song_name,artist_name,reference_link,kit_slug,desired_tone,voice_part,notes,status,created_at,updated_at,delivered_kit_slug,delivered_at,admin_response,admin_response_tone,admin_response_at,testimonial_public,testimonial_card_title,testimonial_card_style,profile:profiles(full_name,email,avatar_url)";
+const PREMIUM_REQUEST_SELECT = "id,user_id,ministry_id,request_type,song_name,artist_name,reference_link,kit_slug,desired_tone,voice_part,notes,status,created_at,updated_at,delivered_kit_slug,delivered_at,profile:profiles(full_name,email,avatar_url)";
+const PREMIUM_REQUEST_SELECT_WITH_FEEDBACK = `${PREMIUM_REQUEST_SELECT},admin_response,admin_response_tone,admin_response_at,testimonial_public,testimonial_card_title,testimonial_card_style`;
 
 function sinceDate(days = 90) {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
@@ -76,6 +77,12 @@ function normalizePremiumRequest(row: any) {
     reference_url: row.reference_link ?? null,
     message: row.notes ?? null,
     profiles: row.profile ?? row.profiles ?? null,
+    admin_response: row.admin_response ?? null,
+    admin_response_tone: row.admin_response_tone ?? null,
+    admin_response_at: row.admin_response_at ?? null,
+    testimonial_public: Boolean(row.testimonial_public),
+    testimonial_card_title: row.testimonial_card_title ?? null,
+    testimonial_card_style: row.testimonial_card_style ?? "premium_dark",
   };
 }
 
@@ -271,15 +278,23 @@ export async function getPremiumRequests() {
 
 export async function getPremiumRequestById(id: string) {
   const supabase = createSupabaseAdminClient() as any;
-  const { data, error } = await supabase
+  let result = await supabase
     .from("premium_requests")
-    .select(PREMIUM_REQUEST_SELECT)
+    .select(PREMIUM_REQUEST_SELECT_WITH_FEEDBACK)
     .eq("id", id)
     .maybeSingle();
 
-  if (error) throw new Error(error.message);
-  if (!data) return null;
-  return normalizePremiumRequest(data);
+  if (result.error) {
+    result = await supabase
+      .from("premium_requests")
+      .select(PREMIUM_REQUEST_SELECT)
+      .eq("id", id)
+      .maybeSingle();
+  }
+
+  if (result.error) throw new Error(result.error.message);
+  if (!result.data) return null;
+  return normalizePremiumRequest(result.data);
 }
 
 export async function createPremiumRequest(input: {
