@@ -18,10 +18,11 @@ export type RecentActivity = {
 
 export type PremiumRequestType = "song" | "tone" | "feedback";
 export type PremiumRequestStatus = "pending" | "reviewing" | "approved" | "done" | "rejected" | "new" | "in_review" | "archived";
+export type FeedbackResponseTone = "positive" | "negative" | "neutral";
 
 type AudioLog = { id: string; kit_id: string | null; accessed_at?: string | null; kits?: { category_id?: string | null } | null };
 
-const PREMIUM_REQUEST_SELECT = "id,user_id,ministry_id,request_type,song_name,artist_name,reference_link,kit_slug,desired_tone,voice_part,notes,status,created_at,updated_at,delivered_kit_slug,delivered_at,profile:profiles(full_name,email,avatar_url)";
+const PREMIUM_REQUEST_SELECT = "id,user_id,ministry_id,request_type,song_name,artist_name,reference_link,kit_slug,desired_tone,voice_part,notes,status,created_at,updated_at,delivered_kit_slug,delivered_at,admin_response,admin_response_tone,admin_response_at,testimonial_public,testimonial_card_title,testimonial_card_style,profile:profiles(full_name,email,avatar_url)";
 
 function sinceDate(days = 90) {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
@@ -76,6 +77,20 @@ function normalizePremiumRequest(row: any) {
     message: row.notes ?? null,
     profiles: row.profile ?? row.profiles ?? null,
   };
+}
+
+export function buildFeedbackResponseTemplate(tone: FeedbackResponseTone, name?: string | null) {
+  const firstName = String(name ?? "").trim().split(" ")[0] || "Olá";
+
+  if (tone === "negative") {
+    return `${firstName}, obrigado pela sinceridade.\n\nLamentamos que sua experiência não tenha sido a ideal. Estamos analisando cuidadosamente sua observação e vamos trabalhar para evoluir esse ponto nas próximas atualizações.\n\nSua opinião é muito importante para nós.\n\nEquipe Harmomus 🎵`;
+  }
+
+  if (tone === "neutral") {
+    return `${firstName}, obrigado por compartilhar seu feedback conosco.\n\nRecebemos sua mensagem e vamos considerar sua observação para continuar melhorando a experiência dentro do Harmomus.\n\nConte sempre conosco.\n\nEquipe Harmomus 🎵`;
+  }
+
+  return `${firstName}, muito obrigado por compartilhar isso conosco!\n\nFicamos felizes em saber que o Harmomus tem contribuído para sua caminhada no ministério de louvor.\n\nSeu feedback nos inspira a continuar produzindo conteúdos, kits vocais e ferramentas que ajudem outros ministros a servirem com excelência.\n\nConte sempre conosco.\n\nEquipe Harmomus 🎵`;
 }
 
 async function fetchAllowedAudioLogs(input?: { userId?: string; days?: number; limit?: number; withCategory?: boolean }) {
@@ -301,6 +316,39 @@ export async function updatePremiumRequestStatus(id: string, status: PremiumRequ
     .from("premium_requests")
     .update({ status: toDbRequestStatus(status), updated_at: new Date().toISOString() })
     .eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function respondToPremiumFeedback(id: string, input: { response: string; tone: FeedbackResponseTone }) {
+  const supabase = createSupabaseAdminClient() as any;
+  const response = input.response.trim();
+  if (!response) throw new Error("Escreva uma resposta antes de salvar.");
+
+  const { error } = await supabase
+    .from("premium_requests")
+    .update({
+      admin_response: response,
+      admin_response_tone: input.tone,
+      admin_response_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id);
+
+  if (error) throw new Error(error.message);
+}
+
+export async function updatePremiumFeedbackTestimonial(id: string, input: { public: boolean; cardTitle?: string | null; cardStyle?: string | null }) {
+  const supabase = createSupabaseAdminClient() as any;
+  const { error } = await supabase
+    .from("premium_requests")
+    .update({
+      testimonial_public: input.public,
+      testimonial_card_title: input.cardTitle?.trim() || null,
+      testimonial_card_style: input.cardStyle?.trim() || "premium_dark",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id);
+
   if (error) throw new Error(error.message);
 }
 
