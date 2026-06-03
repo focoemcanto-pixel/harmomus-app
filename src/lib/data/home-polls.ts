@@ -93,17 +93,17 @@ function mapAdminPoll(poll: any, options: any[], votes: any[]): AdminHomePoll {
   };
 }
 
-async function resolveCurrentVoteOptionId(supabase: any, pollId: string, visitorId?: string | null) {
-  const { data: auth } = await supabase.auth.getUser();
+async function resolveCurrentVoteOptionId(authClient: any, dataClient: any, pollId: string, visitorId?: string | null) {
+  const { data: auth } = await authClient.auth.getUser();
   const userId = auth.user?.id ?? null;
 
   if (userId) {
-    const { data } = await supabase.from("home_poll_votes").select("option_id").eq("poll_id", pollId).eq("user_id", userId).maybeSingle();
+    const { data } = await dataClient.from("home_poll_votes").select("option_id").eq("poll_id", pollId).eq("user_id", userId).maybeSingle();
     if (data?.option_id) return data.option_id as string;
   }
 
   if (visitorId) {
-    const { data } = await supabase.from("home_poll_votes").select("option_id").eq("poll_id", pollId).eq("visitor_id", visitorId).maybeSingle();
+    const { data } = await dataClient.from("home_poll_votes").select("option_id").eq("poll_id", pollId).eq("visitor_id", visitorId).maybeSingle();
     if (data?.option_id) return data.option_id as string;
   }
 
@@ -111,7 +111,8 @@ async function resolveCurrentVoteOptionId(supabase: any, pollId: string, visitor
 }
 
 export async function getActiveHomePoll(visitorId?: string | null): Promise<HomePollResult | null> {
-  const supabase = (await createClient()) as any;
+  const authClient = (await createClient()) as any;
+  const supabase = createSupabaseAdminClient() as any;
   const now = new Date().toISOString();
 
   const { data: poll, error } = await supabase
@@ -134,7 +135,7 @@ export async function getActiveHomePoll(visitorId?: string | null): Promise<Home
   const [{ data: options, error: optionsError }, { data: votes, error: votesError }, userVoteOptionId] = await Promise.all([
     supabase.from("home_poll_options").select("*").eq("poll_id", poll.id).order("order_index", { ascending: true }),
     supabase.from("home_poll_votes").select("option_id").eq("poll_id", poll.id),
-    resolveCurrentVoteOptionId(supabase, poll.id, visitorId),
+    resolveCurrentVoteOptionId(authClient, supabase, poll.id, visitorId),
   ]);
 
   if (optionsError) throw new Error(`Falha ao buscar opções da enquete: ${optionsError.message}`);
