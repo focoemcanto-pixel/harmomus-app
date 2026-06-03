@@ -1,8 +1,28 @@
+import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { ensureArtistCategory, updateKit } from "@/lib/data/kits";
+
 const DEFAULT_ALLOWED_PLANS = ["free", "plus", "premium"];
+
+function text(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function parsePitchShiftLimit(value: unknown) {
+  const parsed = Number(value ?? 2);
+  if (!Number.isFinite(parsed)) return 2;
+  return Math.max(1, Math.min(3, Math.round(parsed)));
+}
+
+function parseAllowedPlanSlugs(value: unknown) {
+  if (!Array.isArray(value)) return DEFAULT_ALLOWED_PLANS;
+  const selected = value
+    .map((item) => String(item).trim().toLowerCase())
+    .filter(Boolean);
+  return Array.from(new Set(selected.length ? selected : DEFAULT_ALLOWED_PLANS));
+}
 
 function resolveLegacyRequiredPlan(allowedPlanSlugs: string[]) {
   if (allowedPlanSlugs.includes("free")) return null;
@@ -11,7 +31,7 @@ function resolveLegacyRequiredPlan(allowedPlanSlugs: string[]) {
   return null;
 }
 
-export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
+async function handleUpdate(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const current = await getCurrentUserAccessContext();
 
@@ -20,43 +40,59 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     }
 
     const { id } = await params;
-    const body = await request.json();
+    const body = await request.json().catch(() => null) as Record<string, unknown> | null;
 
-    const name = String(body.name ?? "").trim();
-    const slug = String(body.slug ?? "").trim();
-    const artist = String(body.artist ?? "").trim();
+    if (!id) return NextResponse.json({ error: "ID do kit é obrigatório." }, { status: 400 });
+    if (!body) return NextResponse.json({ error: "Payload inválido." }, { status: 400 });
+
+    const name = text(body.name);
+    const slug = text(body.slug);
+    const artist = text(body.artist);
+    const originalTone = text(body.original_tone);
+    const defaultTone = text(body.default_tone);
+    const allowedPlanSlugs = parseAllowedPlanSlugs(body.allowed_plan_slugs);
 
     if (!name || !slug || !artist) {
       return NextResponse.json({ error: "Preencha nome, slug e artista para continuar." }, { status: 400 });
     }
 
     const artistCategory = await ensureArtistCategory(artist);
-    const maxPitchShift = Number(body.max_pitch_shift_semitones ?? 2);
-    const allowedPlanSlugs: string[] = Array.isArray(body.allowed_plan_slugs) && body.allowed_plan_slugs.length
-      ? Array.from(new Set((body.allowed_plan_slugs as unknown[]).map((value: unknown) => String(value).trim().toLowerCase())))
-      : DEFAULT_ALLOWED_PLANS;
 
     const updated = await updateKit(id, {
       name,
       slug,
       artist,
-      description: String(body.description ?? "").trim() || null,
-      lyrics: String(body.lyrics ?? "").trim() || null,
-      cover_url: String(body.cover_url ?? "").trim() || null,
-      r2_folder: String(body.r2_folder ?? "").trim() || null,
-      category_id: String(body.category_id ?? "") || artistCategory.id,
+      description: text(body.description) || null,
+      lyrics: text(body.lyrics) || null,
+      cover_url: text(body.cover_url) || null,
+      r2_folder: text(body.r2_folder) || null,
+      category_id: text(body.category_id) || artistCategory.id,
       required_plan: resolveLegacyRequiredPlan(allowedPlanSlugs),
       allowed_plan_slugs: allowedPlanSlugs,
-      original_tone: String(body.original_tone ?? "").trim() || null,
-      default_tone: String(body.default_tone ?? "").trim() || null,
+      original_tone: originalTone || null,
+      default_tone: defaultTone || originalTone || null,
       allow_pitch_shift: Boolean(body.allow_pitch_shift),
-      max_pitch_shift_semitones: Number.isFinite(maxPitchShift) ? maxPitchShift : 2,
+      max_pitch_shift_semitones: parsePitchShiftLimit(body.max_pitch_shift_semitones),
       published: Boolean(body.published),
     } as any);
 
-    return NextResponse.json({ success: true, kit: updated });
+    revalidatePath("/admin/kits", "page");
+    revalidatePath("/admin/kits/novo", "page");
+    revalidatePath("/biblioteca", "page");
+    revalidatePath("/todos-os-kits", "page");
+    revalidatePath(`/biblioteca/${slug}`, "page");
+
+    return NextResponse.json({
+      success: true,
+      kit: updated,
+      redirectTo: `/admin/kits/novo?importedKitId=${id}&savedAt=${Date.now()}#kit-editor`,
+    });
   } catch (error) {
+    console.error("[admin-kit-update] failed", error);
     const message = error instanceof Error ? error.message : "Erro inesperado ao salvar kit.";
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }
+
+export const PUT = handleUpdate;
+export const PATCH = handleUpdate;
