@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Globe2, Star } from "lucide-react";
+import { Globe2, Search, Star } from "lucide-react";
 
 import { TestimonialCardDownloadButton } from "@/components/admin/testimonial-card-download-button";
 import { getAdminSettings } from "@/lib/data/admin-settings";
@@ -13,6 +13,8 @@ interface PageProps {
   params: Promise<{ id: string }>;
   searchParams: Promise<{ format?: string }>;
 }
+
+type MockupDensity = "normal" | "compact" | "mini";
 
 function sanitizeFeedback(value: string) {
   return value
@@ -79,41 +81,130 @@ function getTextClass(length: number, feed: boolean) {
   return "text-[36px] leading-[1.38]";
 }
 
-function LaptopMockup({ feed = false, density = "normal" }: { feed?: boolean; density?: "normal" | "compact" | "mini" }) {
-  const size = feed
-    ? density === "mini" ? "h-[92px] w-[225px]" : density === "compact" ? "h-[112px] w-[270px]" : "h-[135px] w-[315px]"
-    : density === "mini" ? "h-[120px] w-[280px]" : density === "compact" ? "h-[150px] w-[350px]" : "h-[190px] w-[440px]";
+function KitCover({ title, variant = "blue" }: { title: string; variant?: "blue" | "gold" | "orange" | "rose" }) {
+  const gradient = {
+    blue: "from-[#07132c] via-[#11246a] to-[#070914]",
+    gold: "from-[#2b1604] via-[#8b5a16] to-[#110803]",
+    orange: "from-[#2e1608] via-[#c05f27] to-[#170807]",
+    rose: "from-[#311022] via-[#9a2e5d] to-[#100510]",
+  }[variant];
 
   return (
-    <div className={`relative overflow-hidden rounded-[1.2rem] border border-white/20 bg-[#050812] shadow-[0_34px_80px_rgba(0,0,0,0.62)] ${size}`}>
-      <div className={`${feed || density !== "normal" ? "h-5 px-3" : "h-6 px-4"} flex items-center gap-1.5 border-b border-white/10 bg-white/[0.06]`}>
-        <span className="h-1.5 w-1.5 rounded-full bg-red-300/70" />
-        <span className="h-1.5 w-1.5 rounded-full bg-amber-300/70" />
-        <span className="h-1.5 w-1.5 rounded-full bg-emerald-300/70" />
-        <span className="ml-2 h-2 w-20 rounded-full bg-white/12" />
+    <div className={`relative overflow-hidden rounded-xl border border-white/10 bg-gradient-to-br ${gradient}`}>
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_20%,rgba(255,255,255,0.38),transparent_18%),radial-gradient(circle_at_50%_70%,rgba(0,0,0,0.45),transparent_42%)]" />
+      <div className="relative flex h-full min-h-[62px] items-center justify-center px-2 text-center">
+        <p className="text-[13px] font-black uppercase leading-[0.95] tracking-tight text-white drop-shadow-md">{title}</p>
       </div>
-      <img src="/testimonials/harmomus-home-mobile.svg" alt="Harmomus aberto no desktop" className="h-full w-full object-cover object-top opacity-95" />
-      <div className="absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-transparent" />
     </div>
   );
 }
 
-function PhoneMockup({ variant = "home", feed = false, density = "normal" }: { variant?: "home" | "player"; feed?: boolean; density?: "normal" | "compact" | "mini" }) {
-  const size = feed
-    ? density === "mini" ? "h-[110px] w-[54px]" : density === "compact" ? "h-[132px] w-[64px]" : "h-[165px] w-[80px]"
-    : density === "mini" ? "h-[150px] w-[72px]" : density === "compact" ? "h-[190px] w-[90px]" : "h-[235px] w-[112px]";
+function HarmomusDesktopMockup({ density = "normal" }: { density?: MockupDensity }) {
+  const size = density === "mini" ? "h-[120px] w-[300px]" : density === "compact" ? "h-[150px] w-[370px]" : "h-[195px] w-[470px]";
 
   return (
-    <div className={`relative overflow-hidden rounded-[1.4rem] border border-white/25 bg-[#050812] p-1.5 shadow-[0_28px_70px_rgba(0,0,0,0.65)] ${size}`}>
+    <div className={`relative overflow-hidden rounded-[1.25rem] border border-white/20 bg-[#060a14] shadow-[0_34px_80px_rgba(0,0,0,0.62)] ${size}`}>
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(56,189,248,0.12),transparent_30%),radial-gradient(circle_at_80%_0%,rgba(168,85,247,0.18),transparent_34%)]" />
+      <div className="relative flex h-5 items-center gap-1.5 border-b border-white/10 bg-white/[0.045] px-3">
+        <span className="h-1.5 w-1.5 rounded-full bg-red-300/75" />
+        <span className="h-1.5 w-1.5 rounded-full bg-amber-300/75" />
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-300/75" />
+        <span className="ml-3 h-2 w-24 rounded-full bg-white/12" />
+      </div>
+
+      <div className="relative px-6 py-4">
+        <div className="mb-4 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <div className="h-5 w-5 rounded-md bg-gradient-to-br from-slate-100 to-violet-500" />
+            <span className="text-sm font-black text-white">Harmo<span className="text-violet-400">mus</span></span>
+          </div>
+          <div className="flex h-6 flex-1 max-w-[180px] items-center gap-2 rounded-full border border-white/10 bg-white/[0.055] px-3 text-[7px] text-white/45">
+            <Search size={9} /> Buscar kits, artista ou categoria
+          </div>
+          <div className="h-7 w-7 rounded-full bg-[url('https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=80&h=80&fit=crop&crop=face')] bg-cover" />
+        </div>
+
+        <div className="rounded-[1rem] border border-white/10 bg-gradient-to-br from-[#081a38] via-[#0b1024] to-[#281044] p-5">
+          <div className="grid grid-cols-[1.05fr_0.95fr] gap-5">
+            <div>
+              <p className="text-[22px] font-black leading-[1.05] text-white">Prepare sua voz.<br />Honre seu chamado.</p>
+              <p className="mt-2 max-w-[170px] text-[7px] leading-snug text-white/70">Kits vocais completos em todos os tons e vozes para preparar seu ministério.</p>
+              <div className="mt-3 h-5 w-20 rounded-full bg-cyan-300" />
+            </div>
+            <div className="rounded-xl bg-black/20 p-2">
+              <p className="mb-2 text-[6px] font-black uppercase tracking-[0.25em] text-cyan-100">Últimos lançamentos</p>
+              <div className="grid grid-cols-4 gap-1.5">
+                <KitCover title="Ah, Jesus" variant="gold" />
+                <KitCover title="Harpa" variant="orange" />
+                <KitCover title="1000 Graus" variant="rose" />
+                <KitCover title="Tudo" variant="blue" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-5 gap-2">
+          <KitCover title="Armando" variant="blue" />
+          <KitCover title="Ah, Jesus" variant="gold" />
+          <KitCover title="Harpa" variant="orange" />
+          <KitCover title="Praise" variant="rose" />
+          <KitCover title="Tudo" variant="blue" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HarmomusHomePhoneMockup({ density = "normal" }: { density?: MockupDensity }) {
+  const size = density === "mini" ? "h-[150px] w-[72px]" : density === "compact" ? "h-[190px] w-[90px]" : "h-[235px] w-[112px]";
+
+  return (
+    <div className={`relative overflow-hidden rounded-[1.45rem] border border-white/25 bg-[#050812] p-1.5 shadow-[0_28px_70px_rgba(0,0,0,0.65)] ${size}`}>
       <div className="mx-auto mb-1.5 h-1.5 w-7 rounded-full bg-white/25" />
-      <div className="h-full overflow-hidden rounded-[0.95rem] bg-black">
-        <img src="/testimonials/harmomus-home-mobile.svg" alt={variant === "player" ? "Player Harmomus no celular" : "Home Harmomus no celular"} className={`h-full w-full object-cover ${variant === "player" ? "object-center" : "object-top"}`} />
+      <div className="h-full overflow-hidden rounded-[1rem] bg-[#070b15] p-2">
+        <div className="mb-3 flex items-center justify-between">
+          <div className="h-3 w-16 rounded-full bg-gradient-to-r from-white/80 to-violet-400/80" />
+          <div className="h-4 w-4 rounded-full bg-amber-200/80" />
+        </div>
+        <div className="rounded-xl bg-gradient-to-br from-[#0b2445] to-[#321557] p-3">
+          <p className="text-[12px] font-black leading-tight text-white">Prepare sua voz. Honre seu chamado.</p>
+          <div className="mt-3 h-4 w-16 rounded-full bg-cyan-300" />
+        </div>
+        <div className="mt-3 rounded-xl bg-black/25 p-2">
+          <KitCover title="Ah, Jesus" variant="gold" />
+          <p className="mt-2 text-[10px] font-black text-white">Ah, Jesus</p>
+          <p className="text-[7px] text-white/55">Julliany Souza</p>
+        </div>
       </div>
     </div>
   );
 }
 
-function MockupShowcase({ feed, density }: { feed: boolean; density: "normal" | "compact" | "mini" }) {
+function HarmomusPlayerPhoneMockup({ density = "normal" }: { density?: MockupDensity }) {
+  const size = density === "mini" ? "h-[150px] w-[72px]" : density === "compact" ? "h-[190px] w-[90px]" : "h-[235px] w-[112px]";
+
+  return (
+    <div className={`relative overflow-hidden rounded-[1.45rem] border border-white/25 bg-[#050812] p-1.5 shadow-[0_28px_70px_rgba(0,0,0,0.65)] ${size}`}>
+      <div className="mx-auto mb-1.5 h-1.5 w-7 rounded-full bg-white/25" />
+      <div className="h-full overflow-hidden rounded-[1rem] bg-[#070b15] p-2">
+        <KitCover title="Ah, Jesus" variant="gold" />
+        <p className="mt-2 text-[14px] font-black text-white">Ah, Jesus</p>
+        <div className="mt-2 rounded-xl border border-amber-200/40 bg-amber-200/10 px-2 py-1 text-center text-[10px] font-black text-white">G (Sol)</div>
+        <div className="mt-2 grid grid-cols-3 gap-1 text-[6px] text-white/80">
+          <span className="rounded bg-cyan-300/25 px-1 py-1 text-center">Todos</span>
+          <span className="rounded bg-white/10 px-1 py-1 text-center">Tenor</span>
+          <span className="rounded bg-white/10 px-1 py-1 text-center">Soprano</span>
+        </div>
+        <div className="mt-3 rounded-xl bg-black/35 p-2">
+          <div className="mx-auto grid h-8 w-8 place-items-center rounded-full bg-violet-500 text-[12px] font-black text-white">▶</div>
+          <div className="mt-2 h-1 rounded-full bg-white/15"><div className="h-1 w-2/5 rounded-full bg-cyan-300" /></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MockupShowcase({ feed, density }: { feed: boolean; density: MockupDensity }) {
   const frame = feed
     ? density === "mini" ? "mt-4 h-[108px] w-[520px]" : density === "compact" ? "mt-4 h-[125px] w-[590px]" : "mt-5 h-[160px] w-[660px]"
     : density === "mini" ? "mt-6 h-[165px] w-[560px]" : density === "compact" ? "mt-8 h-[215px] w-[640px]" : "mt-10 h-[260px] w-[760px]";
@@ -121,13 +212,13 @@ function MockupShowcase({ feed, density }: { feed: boolean; density: "normal" | 
   return (
     <section className={`relative mx-auto ${frame}`}>
       <div className="absolute left-1/2 top-0 -translate-x-1/2">
-        <LaptopMockup feed={feed} density={density} />
+        <HarmomusDesktopMockup density={density} />
       </div>
       <div className={`absolute ${feed ? "left-[16%] top-5" : density === "mini" ? "left-[14%] top-5" : density === "compact" ? "left-[10%] top-8" : "left-[7%] top-10"} -rotate-[4deg]`}>
-        <PhoneMockup variant="player" feed={feed} density={density} />
+        <HarmomusPlayerPhoneMockup density={density} />
       </div>
       <div className={`absolute ${feed ? "right-[16%] top-5" : density === "mini" ? "right-[14%] top-5" : density === "compact" ? "right-[10%] top-8" : "right-[7%] top-10"} rotate-[4deg]`}>
-        <PhoneMockup variant="home" feed={feed} density={density} />
+        <HarmomusHomePhoneMockup density={density} />
       </div>
     </section>
   );
@@ -145,7 +236,7 @@ export default async function TestimonialCardPage({ params, searchParams }: Page
   const text = sanitizeFeedback(request.message || request.notes || "Feedback recebido pelo Harmomus.");
   const isLongText = isFeed ? text.length > 380 : text.length > 520;
   const isVeryLongText = isFeed ? text.length > 560 : text.length > 700;
-  const mockupDensity: "normal" | "compact" | "mini" = isVeryLongText ? "mini" : isLongText ? "compact" : "normal";
+  const mockupDensity: MockupDensity = isVeryLongText ? "mini" : isLongText ? "compact" : "normal";
   const classes = styleClasses(request.testimonial_card_style);
   const sizeClass = isFeed ? "h-[1080px] w-[1080px]" : "h-[1920px] w-[1080px]";
   const scaleClass = isFeed ? "scale-[0.62] origin-top" : "scale-[0.36] origin-top";
@@ -159,7 +250,7 @@ export default async function TestimonialCardPage({ params, searchParams }: Page
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.24em] text-cyan-200">Gerador de card</p>
           <h1 className="mt-1 text-3xl font-black">Depoimento Harmomus</h1>
-          <p className="mt-1 text-sm text-zinc-400">Mockup proporcional ao depoimento: discreto no topo, sem roubar a cena.</p>
+          <p className="mt-1 text-sm text-zinc-400">Mockups Harmomus em HTML/CSS: nítidos, leves e sem placeholder borrado.</p>
         </div>
         <div className="flex flex-wrap items-start gap-2">
           <Link href={`/admin/harmomus-premium/solicitacoes/${id}`} className="rounded-xl border border-white/15 px-4 py-2 text-sm font-bold text-zinc-100 hover:bg-white/10">Voltar</Link>
@@ -214,7 +305,7 @@ export default async function TestimonialCardPage({ params, searchParams }: Page
         </article>
       </div>
 
-      <div className="mx-auto mt-5 max-w-5xl rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-sm leading-6 text-zinc-300 print:hidden">Correção aplicada: o mockup permanece no topo, mas agora é proporcional ao tamanho do depoimento e não ocupa a maior parte do card.</div>
+      <div className="mx-auto mt-5 max-w-5xl rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-sm leading-6 text-zinc-300 print:hidden">Correção aplicada: os mockups agora são componentes visuais inspirados nas telas reais do Harmomus, sem depender de PNG ou SVG borrado.</div>
     </section>
   );
 }
