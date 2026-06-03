@@ -81,6 +81,18 @@ function mapResults({ poll, options, votes, userVoteOptionId }: { poll: any; opt
   };
 }
 
+function mapAdminPoll(poll: any, options: any[], votes: any[]): AdminHomePoll {
+  return {
+    ...mapResults({ poll, options, votes }),
+    allow_guests: Boolean(poll.allow_guests),
+    order_index: poll.order_index ?? 0,
+    starts_at: poll.starts_at ?? null,
+    ends_at: poll.ends_at ?? null,
+    created_at: poll.created_at,
+    updated_at: poll.updated_at,
+  };
+}
+
 async function resolveCurrentVoteOptionId(supabase: any, pollId: string, visitorId?: string | null) {
   const { data: auth } = await supabase.auth.getUser();
   const userId = auth.user?.id ?? null;
@@ -152,19 +164,32 @@ export async function getAdminHomePolls(): Promise<AdminHomePoll[]> {
   if (optionsError) throw new Error(`Falha ao buscar opções: ${optionsError.message}`);
   if (votesError) throw new Error(`Falha ao buscar votos: ${votesError.message}`);
 
-  return polls.map((poll: any) => ({
-    ...mapResults({
-      poll,
-      options: (options ?? []).filter((option: any) => option.poll_id === poll.id),
-      votes: (votes ?? []).filter((vote: any) => vote.poll_id === poll.id),
-    }),
-    allow_guests: Boolean(poll.allow_guests),
-    order_index: poll.order_index ?? 0,
-    starts_at: poll.starts_at ?? null,
-    ends_at: poll.ends_at ?? null,
-    created_at: poll.created_at,
-    updated_at: poll.updated_at,
-  }));
+  return polls.map((poll: any) => mapAdminPoll(
+    poll,
+    (options ?? []).filter((option: any) => option.poll_id === poll.id),
+    (votes ?? []).filter((vote: any) => vote.poll_id === poll.id),
+  ));
+}
+
+export async function getAdminHomePoll(id: string): Promise<AdminHomePoll | null> {
+  const supabase = (await createClient()) as any;
+  const { data: poll, error } = await supabase.from("home_polls").select("*").eq("id", id).maybeSingle();
+
+  if (error) {
+    if (isMissingTableError(error)) return null;
+    throw new Error(`Falha ao buscar enquete: ${error.message}`);
+  }
+  if (!poll?.id) return null;
+
+  const [{ data: options, error: optionsError }, { data: votes, error: votesError }] = await Promise.all([
+    supabase.from("home_poll_options").select("*").eq("poll_id", poll.id).order("order_index", { ascending: true }),
+    supabase.from("home_poll_votes").select("option_id").eq("poll_id", poll.id),
+  ]);
+
+  if (optionsError) throw new Error(`Falha ao buscar opções da enquete: ${optionsError.message}`);
+  if (votesError) throw new Error(`Falha ao buscar votos da enquete: ${votesError.message}`);
+
+  return mapAdminPoll(poll, options ?? [], votes ?? []);
 }
 
 export async function createHomePoll(payload: {
