@@ -86,22 +86,12 @@ async function resolveCurrentVoteOptionId(supabase: any, pollId: string, visitor
   const userId = auth.user?.id ?? null;
 
   if (userId) {
-    const { data } = await supabase
-      .from("home_poll_votes")
-      .select("option_id")
-      .eq("poll_id", pollId)
-      .eq("user_id", userId)
-      .maybeSingle();
+    const { data } = await supabase.from("home_poll_votes").select("option_id").eq("poll_id", pollId).eq("user_id", userId).maybeSingle();
     if (data?.option_id) return data.option_id as string;
   }
 
   if (visitorId) {
-    const { data } = await supabase
-      .from("home_poll_votes")
-      .select("option_id")
-      .eq("poll_id", pollId)
-      .eq("visitor_id", visitorId)
-      .maybeSingle();
+    const { data } = await supabase.from("home_poll_votes").select("option_id").eq("poll_id", pollId).eq("visitor_id", visitorId).maybeSingle();
     if (data?.option_id) return data.option_id as string;
   }
 
@@ -144,10 +134,7 @@ export async function getActiveHomePoll(visitorId?: string | null): Promise<Home
 
 export async function getAdminHomePolls(): Promise<AdminHomePoll[]> {
   const supabase = (await createClient()) as any;
-  const { data: polls, error } = await supabase
-    .from("home_polls")
-    .select("*")
-    .order("created_at", { ascending: false });
+  const { data: polls, error } = await supabase.from("home_polls").select("*").order("created_at", { ascending: false });
 
   if (error) {
     if (isMissingTableError(error)) return [];
@@ -194,6 +181,8 @@ export async function createHomePoll(payload: {
   const options = payload.options.filter((option) => option.label.trim());
   if (!payload.question.trim()) throw new Error("Pergunta obrigatória.");
   if (options.length < 2) throw new Error("Cadastre pelo menos 2 músicas para a enquete.");
+
+  if (payload.active) await supabase.from("home_polls").update({ active: false }).eq("active", true);
 
   const { data: poll, error } = await supabase
     .from("home_polls")
@@ -243,6 +232,8 @@ export async function updateHomePoll(payload: {
   if (!payload.question.trim()) throw new Error("Pergunta obrigatória.");
   if (options.length < 2) throw new Error("Mantenha pelo menos 2 músicas na enquete.");
 
+  if (payload.active) await supabase.from("home_polls").update({ active: false }).neq("id", payload.id);
+
   const { error } = await supabase
     .from("home_polls")
     .update({
@@ -270,6 +261,13 @@ export async function updateHomePoll(payload: {
 
   const { error: optionsError } = await supabase.from("home_poll_options").insert(rows);
   if (optionsError) throw new Error(`Falha ao salvar opções da enquete: ${optionsError.message}`);
+}
+
+export async function setHomePollActive(id: string, active: boolean) {
+  const supabase = createSupabaseAdminClient() as any;
+  if (active) await supabase.from("home_polls").update({ active: false }).neq("id", id);
+  const { error } = await supabase.from("home_polls").update({ active }).eq("id", id);
+  if (error) throw new Error(`Falha ao alterar status da enquete: ${error.message}`);
 }
 
 export async function deleteHomePoll(id: string) {
