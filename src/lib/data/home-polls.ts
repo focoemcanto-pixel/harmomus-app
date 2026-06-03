@@ -145,7 +145,7 @@ export async function getActiveHomePoll(visitorId?: string | null): Promise<Home
 }
 
 export async function getAdminHomePolls(): Promise<AdminHomePoll[]> {
-  const supabase = (await createClient()) as any;
+  const supabase = createSupabaseAdminClient() as any;
   const { data: polls, error } = await supabase.from("home_polls").select("*").order("created_at", { ascending: false });
 
   if (error) {
@@ -172,7 +172,7 @@ export async function getAdminHomePolls(): Promise<AdminHomePoll[]> {
 }
 
 export async function getAdminHomePoll(id: string): Promise<AdminHomePoll | null> {
-  const supabase = (await createClient()) as any;
+  const supabase = createSupabaseAdminClient() as any;
   const { data: poll, error } = await supabase.from("home_polls").select("*").eq("id", id).maybeSingle();
 
   if (error) {
