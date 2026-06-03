@@ -218,7 +218,9 @@ export function CampaignManager() {
       if (!response.ok) throw new Error(json?.error ?? "Falha ao processar fila.");
       const result = json?.data ?? {};
       await loadCampaigns();
-      setStatus(`Fila processada: ${result.processed ?? 0} processados, ${result.sent ?? 0} enviados, ${result.failed ?? 0} falhas.`);
+      setStatus(
+        `Fila processada: ${result.processed ?? 0} processados, ${result.sent ?? 0} enviados, ${result.failed ?? 0} falhas. Elegíveis agora: ${result.eligibleNow ?? 0}. Agendados para depois: ${result.scheduledLater ?? 0}.`,
+      );
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Falha ao processar fila.");
     } finally {

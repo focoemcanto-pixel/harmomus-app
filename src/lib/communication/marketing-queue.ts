@@ -36,6 +36,8 @@ type ProcessCommunicationQueueResult = {
   sent: number;
   failed: number;
   skipped: number;
+  eligibleNow: number;
+  scheduledLater: number;
 };
 
 function sanitizeText(value: unknown) {
@@ -292,6 +294,7 @@ async function markJobProcessing(admin: any, job: CommunicationQueueJob) {
     .update({ status: "processing", attempts, updated_at: now })
     .eq("id", job.id)
     .in("status", ["pending", "processing"])
+    .or(`scheduled_at.is.null,scheduled_at.lte.${now}`)
     .select("id,status,attempts")
     .maybeSingle();
 
@@ -355,6 +358,17 @@ export async function processCommunicationQueue(
 ): Promise<ProcessCommunicationQueueResult> {
   const admin = createSupabaseAdminClient() as any;
   const now = new Date().toISOString();
+  const { count: eligibleNow } = await admin
+    .from("communication_queue")
+    .select("id", { count: "exact", head: true })
+    .in("status", ["pending", "processing"])
+    .or(`scheduled_at.is.null,scheduled_at.lte.${now}`);
+  const { count: scheduledLater } = await admin
+    .from("communication_queue")
+    .select("id", { count: "exact", head: true })
+    .in("status", ["pending", "processing"])
+    .gt("scheduled_at", now);
+
   const { data: jobs, error } = await admin
     .from("communication_queue")
     .select(
@@ -366,7 +380,14 @@ export async function processCommunicationQueue(
     .limit(limit);
 
   if (error || !jobs?.length)
-    return { processed: 0, sent: 0, failed: 0, skipped: 0 };
+    return {
+      processed: 0,
+      sent: 0,
+      failed: 0,
+      skipped: 0,
+      eligibleNow: eligibleNow ?? 0,
+      scheduledLater: scheduledLater ?? 0,
+    };
 
   let sent = 0;
   let failed = 0;
@@ -399,7 +420,14 @@ export async function processCommunicationQueue(
     else failed += 1;
   }
 
-  return { processed: sent + failed, sent, failed, skipped };
+  return {
+    processed: sent + failed,
+    sent,
+    failed,
+    skipped,
+    eligibleNow: eligibleNow ?? 0,
+    scheduledLater: scheduledLater ?? 0,
+  };
 }
 
 export function scrubProviderConfig(config: Record<string, unknown> | null) {

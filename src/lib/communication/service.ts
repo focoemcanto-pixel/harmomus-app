@@ -1,4 +1,9 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import {
+  buildScheduledAtList,
+  type QueueRateLimits,
+  sortQueueContacts,
+} from "./queue-scheduler";
 import type { AudienceContact, Channel, CommunicationCampaign } from "@/types/communication";
 
 type SupabaseAdmin = ReturnType<typeof createSupabaseAdminClient>;
@@ -503,38 +508,72 @@ export async function createCommunicationCampaign(input: Partial<CommunicationCa
   return data as CommunicationCampaign;
 }
 
-export async function enqueueCampaignAudience(campaignId: string, audienceIds: string[], channel: Channel, message: string, payload: Record<string, unknown> = {}) {
+export async function enqueueCampaignAudience(
+  campaignId: string,
+  audienceIds: string[],
+  channel: Channel,
+  message: string,
+  payload: Record<string, unknown> = {},
+  scheduling: { rateLimits?: QueueRateLimits; baseScheduledAt?: string | null } = {},
+) {
   const supabase = createSupabaseAdminClient() as SupabaseAdmin & any;
   if (!audienceIds.length) return { queued: 0 };
 
   const { data: profiles, error: profilesError } = await selectProfilesByIds(supabase, audienceIds);
   if (profilesError) throw new Error(profilesError.message);
 
-  const rows = (profiles ?? [])
-    .map((profile: ProfileLite) => ({ profile, normalizedPhone: normalizePhone(profile.phone) }))
-    .filter(({ normalizedPhone }) => normalizedPhone.length >= 10)
-    .map(({ profile, normalizedPhone }) => ({
-      campaign_id: campaignId,
-      user_id: profile.id,
-      recipient_name: cleanRecipientName(profileDisplayName(profile)),
-      recipient_email: profile.email ?? null,
-      recipient_phone: normalizedPhone,
-      channel,
-      status: "pending",
-      payload: { ...payload, message, normalized_phone: normalizedPhone, audience_source: "current" },
-    }));
+  const contacts = sortQueueContacts(
+    (profiles ?? [])
+      .map((profile: ProfileLite) => ({ profile, normalizedPhone: normalizePhone(profile.phone) }))
+      .filter(({ normalizedPhone }) => normalizedPhone.length >= 10),
+    ({ profile, normalizedPhone }) =>
+      `${cleanRecipientName(profileDisplayName(profile))}|${profile.email ?? ""}|${normalizedPhone}`,
+  );
+  const scheduledAtList = buildScheduledAtList(
+    contacts.length,
+    scheduling.rateLimits,
+    scheduling.baseScheduledAt,
+  );
+  const rows = contacts.map(({ profile, normalizedPhone }, index) => ({
+    campaign_id: campaignId,
+    user_id: profile.id,
+    recipient_name: cleanRecipientName(profileDisplayName(profile)),
+    recipient_email: profile.email ?? null,
+    recipient_phone: normalizedPhone,
+    channel,
+    status: "pending",
+    scheduled_at: scheduledAtList[index],
+    payload: { ...payload, message, normalized_phone: normalizedPhone, audience_source: "current" },
+  }));
 
   const { error } = await supabase.from("communication_queue").insert(rows);
   if (error) throw new Error(error.message);
   return { queued: rows.length };
 }
 
-export async function enqueueCampaignAudienceFromPlans(campaignId: string, plansInput: unknown, channel: Channel, message: string, payload: Record<string, unknown> = {}) {
+export async function enqueueCampaignAudienceFromPlans(
+  campaignId: string,
+  plansInput: unknown,
+  channel: Channel,
+  message: string,
+  payload: Record<string, unknown> = {},
+  scheduling: { rateLimits?: QueueRateLimits; baseScheduledAt?: string | null } = {},
+) {
   const supabase = createSupabaseAdminClient() as SupabaseAdmin & any;
   const { contacts, preview } = await resolveCampaignAudienceByPlans(plansInput);
   if (!contacts.length) return { queued: 0, preview };
 
-  const rows = contacts.map((contact) => ({
+  const orderedContacts = sortQueueContacts(
+    contacts,
+    (contact) =>
+      `${cleanRecipientName(contact.name)}|${contact.email ?? ""}|${contact.normalizedPhone}`,
+  );
+  const scheduledAtList = buildScheduledAtList(
+    orderedContacts.length,
+    scheduling.rateLimits,
+    scheduling.baseScheduledAt,
+  );
+  const rows = orderedContacts.map((contact, index) => ({
     campaign_id: campaignId,
     user_id: contact.user_id,
     recipient_name: cleanRecipientName(contact.name),
@@ -542,6 +581,7 @@ export async function enqueueCampaignAudienceFromPlans(campaignId: string, plans
     recipient_phone: contact.normalizedPhone,
     channel,
     status: "pending",
+    scheduled_at: scheduledAtList[index],
     payload: { ...payload, message, normalized_phone: contact.normalizedPhone, audience_source: contact.source, plan_slug: contact.plan, legacy_contact_id: contact.legacy_id },
   }));
 
