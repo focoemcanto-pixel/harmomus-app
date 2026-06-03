@@ -60,11 +60,25 @@ function buildRecipient(job: CommunicationQueueJob) {
 
 function buildMessage(job: CommunicationQueueJob) {
   const payload = job.payload ?? {};
-  return (
+  const template =
     sanitizeText(payload.message) ||
     sanitizeText(payload.text) ||
-    sanitizeText(payload.mensagem)
-  );
+    sanitizeText(payload.mensagem);
+  const recipientName =
+    sanitizeText(job.recipient_name) ||
+    sanitizeText(payload.recipient_name) ||
+    sanitizeText(payload.name) ||
+    "Aluno";
+  const link = sanitizeText(payload.link) || sanitizeText(payload.link_url);
+  const plan =
+    sanitizeText(payload.plano) ||
+    sanitizeText(payload.plan) ||
+    sanitizeText(payload.plan_slug);
+
+  return template
+    .replaceAll("{{nome}}", recipientName)
+    .replaceAll("{{link}}", link)
+    .replaceAll("{{plano}}", plan);
 }
 
 function buildMediaUrl(job: CommunicationQueueJob) {
