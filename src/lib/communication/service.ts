@@ -12,7 +12,7 @@ type SubscriptionLite = { id?: string; user_id: string; status?: string | null; 
 type AccessLite = { user_id?: string | null; status?: string | null; reason?: string | null; accessed_at?: string | null; created_at?: string | null; kits?: { name?: string | null; slug?: string | null } | null };
 type InvoiceLite = { user_id?: string | null; status?: string | null; amount_due_cents?: number | null; created_at?: string | null; customer_email?: string | null; profiles?: { id?: string | null; email?: string | null } | null };
 type HistoryLite = { id?: string; change_type?: string | null; from_plan_slug?: string | null; to_plan_slug?: string | null; created_at?: string | null };
-type LegacyContactLite = { id?: string | null; display_name?: string | null; email?: string | null; phone?: string | null; legacy_plan_slug?: string | null; legacy_status?: string | null };
+type LegacyContactLite = { id?: string | null; display_name?: string | null; username?: string | null; email?: string | null; phone?: string | null; legacy_plan_slug?: string | null };
 
 type CampaignAudienceContact = { source: "current" | "legacy"; user_id: string | null; legacy_id: string | null; name: string | null; email: string | null; phone: string; normalizedPhone: string; plan: string };
 export type CampaignAudiencePreview = { total: number; totalByPlan: Record<string, number>; current: number; legacy: number; duplicatesRemoved: number; selectedPlans: string[]; warnings: CommunicationWarning[] };
@@ -119,16 +119,22 @@ function normalizePhone(value?: string | null) {
 
 function selectedPlanSlugs(value: unknown) {
   if (!Array.isArray(value)) return [];
-  const allowed = new Set(["free", "plus", "premium"]);
+  const allowed = new Set(["free", "plus", "premium", "ministry"]);
   return Array.from(new Set(value.map((item) => normalize(String(item))).filter((item) => allowed.has(item))));
 }
 
+function cleanRecipientName(name?: string | null) {
+  const value = String(name ?? "").trim();
+  return !value || value.includes("@") ? "Aluno" : value;
+}
+
 function profileDisplayName(profile: ProfileLite) {
-  return profile.full_name ?? profile.email ?? null;
+  return cleanRecipientName(profile.full_name);
 }
 
 function legacyDisplayName(contact: LegacyContactLite) {
-  return contact.display_name ?? contact.email ?? null;
+  const rawName = contact.display_name || contact.username || "";
+  return cleanRecipientName(rawName);
 }
 
 async function selectProfilesByIds(supabase: SupabaseAdmin & any, ids: string[]) {
@@ -138,9 +144,8 @@ async function selectProfilesByIds(supabase: SupabaseAdmin & any, ids: string[])
 async function selectLegacyContacts(supabase: SupabaseAdmin & any, plans: string[]) {
   return supabase
     .from("vw_legacy_contacts_enriched")
-    .select("id,display_name,email,phone,legacy_plan_slug,legacy_status")
-    .in("legacy_plan_slug", plans)
-    .eq("legacy_status", "active") as PromiseLike<QueryResult<LegacyContactLite[]>>;
+    .select("id,display_name,username,email,phone,legacy_plan_slug")
+    .in("legacy_plan_slug", plans) as PromiseLike<QueryResult<LegacyContactLite[]>>;
 }
 
 function summarizeCampaignAudience(contacts: CampaignAudienceContact[], selectedPlans: string[], warnings: CommunicationWarning[], duplicatesRemoved: number): CampaignAudiencePreview {
@@ -511,7 +516,7 @@ export async function enqueueCampaignAudience(campaignId: string, audienceIds: s
     .map(({ profile, normalizedPhone }) => ({
       campaign_id: campaignId,
       user_id: profile.id,
-      recipient_name: profileDisplayName(profile),
+      recipient_name: cleanRecipientName(profileDisplayName(profile)),
       recipient_email: profile.email ?? null,
       recipient_phone: normalizedPhone,
       channel,
@@ -532,7 +537,7 @@ export async function enqueueCampaignAudienceFromPlans(campaignId: string, plans
   const rows = contacts.map((contact) => ({
     campaign_id: campaignId,
     user_id: contact.user_id,
-    recipient_name: contact.name,
+    recipient_name: cleanRecipientName(contact.name),
     recipient_email: contact.email,
     recipient_phone: contact.normalizedPhone,
     channel,
