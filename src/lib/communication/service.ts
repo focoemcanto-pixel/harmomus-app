@@ -7,6 +7,129 @@ import {
 import type { AudienceContact, Channel, CommunicationCampaign } from "@/types/communication";
 
 type SupabaseAdmin = ReturnType<typeof createSupabaseAdminClient>;
+
+type CommunicationQueueInsert = {
+  campaign_id: string;
+  user_id: string | null;
+  recipient_name: string;
+  recipient_email: string | null;
+  recipient_phone: string;
+  channel: Channel;
+  status: "pending";
+  scheduled_at: string | null;
+  payload: Record<string, unknown>;
+};
+
+type ExistingQueueJob = {
+  id: string;
+  status: string | null;
+  recipient_phone: string | null;
+  created_at: string | null;
+};
+
+const QUEUE_ACTIVE_STATUSES = new Set(["pending", "processing", "paused", "queued"]);
+
+function queueJobPriority(status?: string | null) {
+  const normalized = normalize(status);
+  if (normalized === "sent") return 0;
+  if (QUEUE_ACTIVE_STATUSES.has(normalized)) return 1;
+  if (normalized === "failed") return 2;
+  return 3;
+}
+
+function pickAuthoritativeQueueJob(jobs: ExistingQueueJob[]) {
+  return jobs
+    .slice()
+    .sort((a, b) => {
+      const priorityDiff = queueJobPriority(a.status) - queueJobPriority(b.status);
+      if (priorityDiff) return priorityDiff;
+      return new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime();
+    })[0];
+}
+
+async function upsertIdempotentCampaignQueueRows(
+  supabase: SupabaseAdmin & any,
+  rows: CommunicationQueueInsert[],
+) {
+  const uniqueRows = Array.from(
+    rows
+      .reduce<Map<string, CommunicationQueueInsert>>((acc, row) => {
+        if (!acc.has(row.recipient_phone)) acc.set(row.recipient_phone, row);
+        return acc;
+      }, new Map())
+      .values(),
+  );
+  if (!uniqueRows.length) return { queued: 0, updated: 0, skipped: rows.length };
+
+  const phones = uniqueRows.map((row) => row.recipient_phone);
+  const { data: existingRows, error: existingError } = await supabase
+    .from("communication_queue")
+    .select("id,status,recipient_phone,created_at")
+    .eq("campaign_id", uniqueRows[0].campaign_id)
+    .eq("channel", uniqueRows[0].channel)
+    .in("recipient_phone", phones);
+  if (existingError) throw new Error(existingError.message);
+
+  const existingByPhone = new Map<string, ExistingQueueJob[]>();
+  for (const job of (existingRows ?? []) as ExistingQueueJob[]) {
+    if (!job.recipient_phone) continue;
+    const jobs = existingByPhone.get(job.recipient_phone) ?? [];
+    jobs.push(job);
+    existingByPhone.set(job.recipient_phone, jobs);
+  }
+
+  const rowsToInsert: CommunicationQueueInsert[] = [];
+  const rowsToUpdate: Array<{ existing: ExistingQueueJob; row: CommunicationQueueInsert; status: string }> = [];
+  let skipped = rows.length - uniqueRows.length;
+
+  for (const row of uniqueRows) {
+    const existing = pickAuthoritativeQueueJob(existingByPhone.get(row.recipient_phone) ?? []);
+    const status = normalize(existing?.status);
+    if (!existing) {
+      rowsToInsert.push(row);
+    } else if (status === "sent") {
+      skipped += 1;
+    } else if (QUEUE_ACTIVE_STATUSES.has(status) || status === "failed") {
+      rowsToUpdate.push({ existing, row, status });
+    } else {
+      rowsToInsert.push(row);
+    }
+  }
+
+  await Promise.all(
+    rowsToUpdate.map(({ existing, row, status }) =>
+      supabase
+        .from("communication_queue")
+        .update({
+          user_id: row.user_id,
+          recipient_name: row.recipient_name,
+          recipient_email: row.recipient_email,
+          payload: row.payload,
+          scheduled_at: row.scheduled_at,
+          status: status === "failed" ? "pending" : existing.status,
+          error_message: null,
+          last_error: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existing.id)
+        .then(({ error }: { error: { message?: string } | null }) => {
+          if (error) throw new Error(error.message ?? "Falha ao atualizar fila de comunicação.");
+        }),
+    ),
+  );
+
+  let queued = 0;
+  if (rowsToInsert.length) {
+    const { data: insertedRows, error } = await supabase
+      .from("communication_queue")
+      .insert(rowsToInsert)
+      .select("id");
+    if (error) throw new Error(error.message);
+    queued = insertedRows?.length ?? rowsToInsert.length;
+  }
+
+  return { queued, updated: rowsToUpdate.length, skipped };
+}
 type QueryResult<T> = { data: T | null; error: { message?: string; code?: string } | null; count?: number | null };
 
 type LogLite = { id?: string; status?: string | null; channel?: string | null; created_at?: string | null; event?: string | null; level?: string | null };
@@ -534,7 +657,7 @@ export async function enqueueCampaignAudience(
     scheduling.rateLimits,
     scheduling.baseScheduledAt,
   );
-  const rows = contacts.map(({ profile, normalizedPhone }, index) => ({
+  const rows: CommunicationQueueInsert[] = contacts.map(({ profile, normalizedPhone }, index) => ({
     campaign_id: campaignId,
     user_id: profile.id,
     recipient_name: cleanRecipientName(profileDisplayName(profile)),
@@ -546,9 +669,8 @@ export async function enqueueCampaignAudience(
     payload: { ...payload, message, normalized_phone: normalizedPhone, audience_source: "current" },
   }));
 
-  const { error } = await supabase.from("communication_queue").insert(rows);
-  if (error) throw new Error(error.message);
-  return { queued: rows.length };
+  const result = await upsertIdempotentCampaignQueueRows(supabase, rows);
+  return { queued: result.queued };
 }
 
 export async function enqueueCampaignAudienceFromPlans(
@@ -573,7 +695,7 @@ export async function enqueueCampaignAudienceFromPlans(
     scheduling.rateLimits,
     scheduling.baseScheduledAt,
   );
-  const rows = orderedContacts.map((contact, index) => ({
+  const rows: CommunicationQueueInsert[] = orderedContacts.map((contact, index) => ({
     campaign_id: campaignId,
     user_id: contact.user_id,
     recipient_name: cleanRecipientName(contact.name),
@@ -585,7 +707,6 @@ export async function enqueueCampaignAudienceFromPlans(
     payload: { ...payload, message, normalized_phone: contact.normalizedPhone, audience_source: contact.source, plan_slug: contact.plan, legacy_contact_id: contact.legacy_id },
   }));
 
-  const { error } = await supabase.from("communication_queue").insert(rows);
-  if (error) throw new Error(error.message);
-  return { queued: rows.length, preview };
+  const result = await upsertIdempotentCampaignQueueRows(supabase, rows);
+  return { queued: result.queued, preview };
 }

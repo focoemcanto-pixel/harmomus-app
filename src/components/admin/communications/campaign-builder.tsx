@@ -692,11 +692,16 @@ export function CampaignBuilder({ campaignId }: { campaignId?: string }) {
           if (!response.ok)
             throw new Error(json?.error ?? `Falha ao enfileirar ${channel}.`);
           setAudiencePreview(asAudiencePreview(json?.data?.audience_preview));
-          return `${channel}: ${json?.data?.queued ?? 0}`;
+          return { channel, queued: Number(json?.data?.queued ?? 0) };
         }),
       );
+      const totalQueued = results.reduce((sum, result) => sum + result.queued, 0);
+      if (totalQueued === 0) {
+        setStatus("Todos os destinatários desta campanha já foram processados.");
+        return;
+      }
       setStatus(
-        `Campanha colocada em fila com status queued. ${results.join(" · ")}. O envio depende do webhook/canal configurado.`,
+        `Campanha colocada em fila com status queued. ${results.map((result) => `${result.channel}: ${result.queued}`).join(" · ")}. O envio depende do webhook/canal configurado.`,
       );
     } catch (error) {
       setStatus(
