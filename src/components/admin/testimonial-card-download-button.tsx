@@ -23,6 +23,10 @@ function loadScript(src: string) {
   });
 }
 
+function getExportSize(filename: string) {
+  return filename.includes("story") ? { width: 1080, height: 1920 } : { width: 1080, height: 1080 };
+}
+
 export function TestimonialCardDownloadButton({ filename }: TestimonialCardDownloadButtonProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,19 +40,58 @@ export function TestimonialCardDownloadButton({ filename }: TestimonialCardDownl
       const htmlToImage = (window as any).htmlToImage;
       if (!htmlToImage?.toPng) throw new Error("Gerador de imagem indisponível.");
 
-      const node = document.getElementById("testimonial-card");
+      const node = document.getElementById("testimonial-card") as HTMLElement | null;
       if (!node) throw new Error("Card não encontrado na página.");
 
-      const dataUrl = await htmlToImage.toPng(node, {
-        cacheBust: true,
-        pixelRatio: 2,
-        backgroundColor: "#030712",
-      });
+      const { width, height } = getExportSize(filename);
+      const clone = node.cloneNode(true) as HTMLElement;
+      clone.style.transform = "none";
+      clone.style.transformOrigin = "top left";
+      clone.style.position = "fixed";
+      clone.style.left = "-10000px";
+      clone.style.top = "0";
+      clone.style.width = `${width}px`;
+      clone.style.height = `${height}px`;
+      clone.style.maxWidth = `${width}px`;
+      clone.style.maxHeight = `${height}px`;
+      clone.style.margin = "0";
+      clone.style.zIndex = "-1";
+      document.body.appendChild(clone);
 
-      const link = document.createElement("a");
-      link.download = filename;
-      link.href = dataUrl;
-      link.click();
+      try {
+        await Promise.all(
+          Array.from(clone.querySelectorAll("img")).map((img) => {
+            const image = img as HTMLImageElement;
+            if (image.complete) return Promise.resolve();
+            return new Promise<void>((resolve) => {
+              image.onload = () => resolve();
+              image.onerror = () => resolve();
+            });
+          }),
+        );
+
+        const dataUrl = await htmlToImage.toPng(clone, {
+          cacheBust: true,
+          pixelRatio: 1,
+          width,
+          height,
+          canvasWidth: width,
+          canvasHeight: height,
+          backgroundColor: "#030712",
+          style: {
+            transform: "none",
+            width: `${width}px`,
+            height: `${height}px`,
+          },
+        });
+
+        const link = document.createElement("a");
+        link.download = filename;
+        link.href = dataUrl;
+        link.click();
+      } finally {
+        clone.remove();
+      }
     } catch (caughtError) {
       console.error("[testimonial-card] download failed", caughtError);
       setError(caughtError instanceof Error ? caughtError.message : "Não foi possível baixar o card.");
