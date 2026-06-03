@@ -54,6 +54,27 @@ function sanitizeText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function cleanRecipientName(value: unknown) {
+  const text = sanitizeText(value);
+  if (!text) return "";
+  if (text.includes("@")) return "";
+  if (/^https?:\/\//i.test(text)) return "";
+  return text;
+}
+
+function resolveRecipientName(job: CommunicationQueueJob) {
+  const payload = job.payload ?? {};
+  return (
+    cleanRecipientName(job.recipient_name) ||
+    cleanRecipientName(payload.display_name) ||
+    cleanRecipientName(payload.username) ||
+    cleanRecipientName(payload.recipient_name) ||
+    cleanRecipientName(payload.name) ||
+    cleanRecipientName(payload.full_name) ||
+    "Aluno"
+  );
+}
+
 function maskSecret(value: unknown) {
   const text = sanitizeText(value);
   if (!text) return "";
@@ -76,11 +97,7 @@ function buildMessage(job: CommunicationQueueJob) {
     sanitizeText(payload.message) ||
     sanitizeText(payload.text) ||
     sanitizeText(payload.mensagem);
-  const recipientName =
-    sanitizeText(job.recipient_name) ||
-    sanitizeText(payload.recipient_name) ||
-    sanitizeText(payload.name) ||
-    "Aluno";
+  const recipientName = resolveRecipientName(job);
   const link = sanitizeText(payload.link) || sanitizeText(payload.link_url);
   const plan =
     sanitizeText(payload.plano) ||
@@ -195,6 +212,7 @@ async function sendViaWebhook(
   const apiToken = sanitizeText(config.apiToken);
   const instance = sanitizeText(config.instance);
   const recipient = buildRecipient(job);
+  const recipientName = resolveRecipientName(job);
   const message = buildMessage(job);
   const mediaUrl = job.channel === "whatsapp" ? buildMediaUrl(job) : "";
 
@@ -233,7 +251,7 @@ async function sendViaWebhook(
     whatsapp: job.channel === "whatsapp" ? recipient : undefined,
     email: job.channel === "email" ? recipient : job.recipient_email,
     recipient,
-    recipient_name: job.recipient_name,
+    recipient_name: recipientName,
     text: message,
     message,
     mensagem: message,
