@@ -1,0 +1,41 @@
+name: Process communication queue
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  process-queue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Validate secrets
+        run: |
+          if [ -z "${{ secrets.HARMOMUS_APP_URL }}" ]; then
+            echo "Missing HARMOMUS_APP_URL secret"
+            exit 1
+          fi
+          if [ -z "${{ secrets.HARMOMUS_WORKER_TOKEN }}" ]; then
+            echo "Missing HARMOMUS_WORKER_TOKEN secret"
+            exit 1
+          fi
+
+      - name: Process communication queue safely
+        run: |
+          set -euo pipefail
+
+          BASE_URL="${{ secrets.HARMOMUS_APP_URL }}"
+          BASE_URL="${BASE_URL%/}"
+
+          RESPONSE=$(curl -sS -X POST "$BASE_URL/api/workers/communication/process" \
+            -H "Content-Type: application/json" \
+            -H "x-harmomus-worker-token: ${{ secrets.HARMOMUS_WORKER_TOKEN }}" \
+            --data '{"limit":2}')
+
+          echo "$RESPONSE"
+
+          if ! echo "$RESPONSE" | grep -q '"success":true'; then
+            echo "Queue processor did not return success=true"
+            exit 1
+          fi
