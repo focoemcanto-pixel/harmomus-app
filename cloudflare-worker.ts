@@ -35,7 +35,7 @@ async function processCommunicationQueueFromCron(env: Env) {
       "Content-Type": "application/json",
       "x-harmomus-worker-token": token,
     },
-    body: JSON.stringify({ limit: 2 }),
+    body: JSON.stringify({ limit: 1 }),
   });
 
   const body = await response.text().catch(() => "");
