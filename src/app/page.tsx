@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { HomeHorizontalCarousel } from "@/components/public/home-horizontal-carousel";
@@ -7,6 +8,8 @@ import { getPublishedKits, type PublicKit } from "@/lib/data/public-kits";
 import { getPublicHomeBanners } from "@/lib/data/home-banners";
 import { HomeHeroCarousel } from "@/components/public/home-hero-carousel";
 import { getPublicHomeSections } from "@/lib/data/home-sections";
+import { getActiveHomePoll } from "@/lib/data/home-polls";
+import { HomePollSection } from "@/components/public/home-poll-section";
 import { OFFICIAL_PLANS } from "@/lib/data/official-plans";
 import { SubscribeButton } from "@/components/public/subscribe-button";
 import { canAccessKit } from "@/lib/access/access-engine";
@@ -46,11 +49,15 @@ function resolveLockedPlanLabel(kit: PublicKit) {
 }
 
 export default async function HomePage() {
-  const [kits, homeBanners, homeSections, accessContext] = await Promise.all([
+  const cookieStore = await cookies();
+  const pollVisitorId = cookieStore.get("harmomus_poll_visitor")?.value ?? null;
+
+  const [kits, homeBanners, homeSections, accessContext, activePoll] = await Promise.all([
     getPublishedKits(),
     getPublicHomeBanners(),
     getPublicHomeSections(),
     getCurrentUserAccessContext(),
+    getActiveHomePoll(pollVisitorId),
   ]);
 
   const viewerPlan = accessContext.effectiveSlug === "guest" ? "free" : accessContext.effectiveSlug;
@@ -112,6 +119,8 @@ export default async function HomePage() {
             }) : <div className="rounded-2xl border border-white/10 p-8 text-center text-zinc-300">Sem lançamentos publicados ainda.</div>}
           </HomeHorizontalCarousel>
         </section>
+
+        {activePoll ? <HomePollSection initialPoll={activePoll} /> : null}
 
         <section className="space-y-4">
           <div className="flex items-end justify-between"><h2 className="text-2xl font-semibold text-white md:text-3xl">Artistas & Categorias</h2><Link href="/categorias" className="text-sm text-cyan-200 hover:text-cyan-100">Acessar categorias</Link></div>
