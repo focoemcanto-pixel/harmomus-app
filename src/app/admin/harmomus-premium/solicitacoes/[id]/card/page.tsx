@@ -76,23 +76,23 @@ function styleClasses(style?: string | null) {
 
 function LaptopMockup({ feed = false }: { feed?: boolean }) {
   return (
-    <div className={`relative overflow-hidden rounded-[1.2rem] border border-white/20 bg-[#050812] shadow-[0_34px_80px_rgba(0,0,0,0.62)] ${feed ? "h-[230px] w-[520px]" : "h-[300px] w-[650px]"}`}>
-      <div className="flex h-7 items-center gap-1.5 border-b border-white/10 bg-white/[0.06] px-4">
-        <span className="h-2 w-2 rounded-full bg-red-300/70" />
-        <span className="h-2 w-2 rounded-full bg-amber-300/70" />
-        <span className="h-2 w-2 rounded-full bg-emerald-300/70" />
-        <span className="ml-4 h-2.5 w-36 rounded-full bg-white/12" />
+    <div className={`relative overflow-hidden rounded-[1.2rem] border border-white/20 bg-[#050812] shadow-[0_34px_80px_rgba(0,0,0,0.62)] ${feed ? "h-[155px] w-[355px]" : "h-[300px] w-[650px]"}`}>
+      <div className={`${feed ? "h-5 px-3" : "h-7 px-4"} flex items-center gap-1.5 border-b border-white/10 bg-white/[0.06]`}>
+        <span className={`${feed ? "h-1.5 w-1.5" : "h-2 w-2"} rounded-full bg-red-300/70`} />
+        <span className={`${feed ? "h-1.5 w-1.5" : "h-2 w-2"} rounded-full bg-amber-300/70`} />
+        <span className={`${feed ? "h-1.5 w-1.5" : "h-2 w-2"} rounded-full bg-emerald-300/70`} />
+        <span className={`${feed ? "ml-2 h-2 w-20" : "ml-4 h-2.5 w-36"} rounded-full bg-white/12`} />
       </div>
       <img src="/testimonials/harmomus-home-mobile.svg" alt="Harmomus aberto no desktop" className="h-full w-full object-cover object-top opacity-95" />
       <div className="absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-transparent" />
-      <div className="absolute -bottom-6 left-1/2 h-6 w-40 -translate-x-1/2 rounded-b-2xl bg-black/80" />
+      <div className={`${feed ? "-bottom-4 h-4 w-28" : "-bottom-6 h-6 w-40"} absolute left-1/2 -translate-x-1/2 rounded-b-2xl bg-black/80`} />
     </div>
   );
 }
 
 function PhoneMockup({ variant = "home", feed = false }: { variant?: "home" | "player"; feed?: boolean }) {
   return (
-    <div className={`relative overflow-hidden rounded-[1.7rem] border border-white/25 bg-[#050812] p-2 shadow-[0_28px_70px_rgba(0,0,0,0.65)] ${feed ? "h-[290px] w-[138px]" : "h-[390px] w-[186px]"}`}>
+    <div className={`relative overflow-hidden rounded-[1.7rem] border border-white/25 bg-[#050812] p-2 shadow-[0_28px_70px_rgba(0,0,0,0.65)] ${feed ? "h-[185px] w-[88px]" : "h-[390px] w-[186px]"}`}>
       <div className="mx-auto mb-2 h-1.5 w-10 rounded-full bg-white/25" />
       <div className="h-full overflow-hidden rounded-[1.25rem] bg-black">
         <img src="/testimonials/harmomus-home-mobile.svg" alt={variant === "player" ? "Player Harmomus no celular" : "Home Harmomus no celular"} className={`h-full w-full object-cover ${variant === "player" ? "object-center" : "object-top"}`} />
@@ -103,14 +103,14 @@ function PhoneMockup({ variant = "home", feed = false }: { variant?: "home" | "p
 
 function MockupShowcase({ feed }: { feed: boolean }) {
   return (
-    <section className={`relative mx-auto ${feed ? "mt-8 h-[275px] w-[880px]" : "mt-14 h-[430px] w-[900px]"}`}>
+    <section className={`relative mx-auto ${feed ? "mt-5 h-[180px] w-[720px]" : "mt-14 h-[430px] w-[900px]"}`}>
       <div className="absolute left-1/2 top-0 -translate-x-1/2">
         <LaptopMockup feed={feed} />
       </div>
-      <div className={`absolute ${feed ? "left-[6%] top-10" : "left-[2%] top-20"} -rotate-[4deg]`}>
+      <div className={`absolute ${feed ? "left-[13%] top-8" : "left-[2%] top-20"} -rotate-[4deg]`}>
         <PhoneMockup variant="player" feed={feed} />
       </div>
-      <div className={`absolute ${feed ? "right-[5%] top-10" : "right-[1%] top-20"} rotate-[4deg]`}>
+      <div className={`absolute ${feed ? "right-[13%] top-8" : "right-[1%] top-20"} rotate-[4deg]`}>
         <PhoneMockup variant="home" feed={feed} />
       </div>
     </section>
@@ -126,8 +126,7 @@ export default async function TestimonialCardPage({ params, searchParams }: Page
   const format = query.format === "feed" ? "feed" : "story";
   const isFeed = format === "feed";
   const userName = request.profiles?.full_name ?? "Aluno Harmomus";
-  const testimonialTitle = request.testimonial_card_title || "Depoimento real";
-  const text = clampText(request.message || request.notes || "Feedback recebido pelo Harmomus.", isFeed ? 280 : 360);
+  const text = clampText(request.message || request.notes || "Feedback recebido pelo Harmomus.", isFeed ? 245 : 360);
   const classes = styleClasses(request.testimonial_card_style);
   const sizeClass = isFeed ? "h-[1080px] w-[1080px]" : "h-[1920px] w-[1080px]";
   const scaleClass = isFeed ? "scale-[0.62] origin-top" : "scale-[0.36] origin-top";
@@ -141,7 +140,7 @@ export default async function TestimonialCardPage({ params, searchParams }: Page
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.24em] text-cyan-200">Gerador de card</p>
           <h1 className="mt-1 text-3xl font-black">Depoimento Harmomus</h1>
-          <p className="mt-1 text-sm text-zinc-400">Template corrigido: Feed sem sobreposição e mockups com imagem real do app.</p>
+          <p className="mt-1 text-sm text-zinc-400">Mockups reduzidos no Feed para não sobrepor o título.</p>
         </div>
         <div className="flex flex-wrap items-start gap-2">
           <Link href={`/admin/harmomus-premium/solicitacoes/${id}`} className="rounded-xl border border-white/15 px-4 py-2 text-sm font-bold text-zinc-100 hover:bg-white/10">Voltar</Link>
@@ -166,20 +165,20 @@ export default async function TestimonialCardPage({ params, searchParams }: Page
 
             <MockupShowcase feed={isFeed} />
 
-            <main className={`flex flex-1 flex-col items-center text-center ${isFeed ? "pt-4" : "pt-10"}`}>
+            <main className={`flex flex-1 flex-col items-center text-center ${isFeed ? "pt-0" : "pt-10"}`}>
               <div className="flex gap-3 text-yellow-300">
-                {Array.from({ length: 5 }).map((_, index) => <Star key={index} size={isFeed ? 34 : 42} fill="currentColor" />)}
+                {Array.from({ length: 5 }).map((_, index) => <Star key={index} size={isFeed ? 30 : 42} fill="currentColor" />)}
               </div>
 
-              <h2 className={`${isFeed ? "mt-5 text-[58px]" : "mt-8 text-7xl"} font-black uppercase leading-none tracking-[0.055em] text-white`}>Transformando <span className="text-violet-300">ministérios</span></h2>
+              <h2 className={`${isFeed ? "mt-4 text-[54px]" : "mt-8 text-7xl"} font-black uppercase leading-none tracking-[0.055em] text-white`}>Transformando <span className="text-violet-300">ministérios</span></h2>
 
-              <div className={`${isFeed ? "mt-6 max-w-[880px] p-7" : "mt-10 max-w-[840px] p-11"} relative rounded-[2.4rem] border ${classes.line} bg-black/32 backdrop-blur-xl`}>
+              <div className={`${isFeed ? "mt-5 max-w-[880px] p-6" : "mt-10 max-w-[840px] p-11"} relative rounded-[2.4rem] border ${classes.line} bg-black/32 backdrop-blur-xl`}>
                 <span className={`absolute ${isFeed ? "-left-4 -top-8 text-7xl" : "-left-7 -top-10 text-8xl"} font-black ${classes.quote}`}>“</span>
-                <p className={`${isFeed ? "text-[29px] leading-[1.34]" : "text-[39px] leading-[1.42]"} font-semibold text-white`}>{text}</p>
+                <p className={`${isFeed ? "text-[27px] leading-[1.3]" : "text-[39px] leading-[1.42]"} font-semibold text-white`}>{text}</p>
                 <span className={`absolute ${isFeed ? "-bottom-10 right-5 text-7xl" : "-bottom-16 right-7 text-8xl"} font-black ${classes.quote}`}>”</span>
               </div>
 
-              <div className={`${isFeed ? "mt-7" : "mt-12"} flex items-center justify-center gap-4`}>
+              <div className={`${isFeed ? "mt-6" : "mt-12"} flex items-center justify-center gap-4`}>
                 {request.profiles?.avatar_url ? <img src={request.profiles.avatar_url} alt="" className="h-20 w-20 rounded-full border border-white/25 object-cover" /> : null}
                 <div className={request.profiles?.avatar_url ? "text-left" : "text-center"}>
                   <p className="text-3xl font-black uppercase tracking-[0.08em] text-white">{userName}</p>
@@ -188,7 +187,7 @@ export default async function TestimonialCardPage({ params, searchParams }: Page
               </div>
             </main>
 
-            <footer className={`${isFeed ? "gap-3 pt-5" : "gap-5 pt-10"} flex flex-col items-center justify-center border-t border-white/10 text-center`}>
+            <footer className={`${isFeed ? "gap-3 pt-4" : "gap-5 pt-10"} flex flex-col items-center justify-center border-t border-white/10 text-center`}>
               <div className={`inline-flex items-center gap-4 rounded-full border ${classes.line} bg-black/25 ${isFeed ? "px-8 py-3" : "px-10 py-4"}`}><Globe2 size={isFeed ? 28 : 32} className={classes.accent} /><span className={`${isFeed ? "text-3xl" : "text-4xl"} font-black tracking-tight text-white`}>harmomus.com</span></div>
               <p className={`${isFeed ? "text-lg" : "text-xl"} font-semibold text-white/70`}>Sua voz. <span className={classes.accent}>Sua missão.</span> Seu propósito.</p>
             </footer>
@@ -196,7 +195,7 @@ export default async function TestimonialCardPage({ params, searchParams }: Page
         </article>
       </div>
 
-      <div className="mx-auto mt-5 max-w-5xl rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-sm leading-6 text-zinc-300 print:hidden">O Feed 1:1 foi reorganizado para impedir sobreposição entre mockups e título. Para substituir por imagens ainda mais fiéis, basta trocar os arquivos em /public/testimonials.</div>
+      <div className="mx-auto mt-5 max-w-5xl rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-sm leading-6 text-zinc-300 print:hidden">Correção aplicada: no Feed 1:1, os mockups foram reduzidos e a área visual ficou limitada para não invadir o título.</div>
     </section>
   );
 }
