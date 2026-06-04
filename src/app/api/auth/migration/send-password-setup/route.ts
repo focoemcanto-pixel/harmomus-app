@@ -33,45 +33,76 @@ function getStripePriceId(subscription: any) {
 }
 
 function normalizeLegacyPlanSlug(value: unknown) {
-  const slug = String(value ?? "free").trim().toLowerCase();
-  return slug || "free";
+  return String(value ?? "").trim().toLowerCase();
 }
 
 async function resolvePlanBySlug(admin: any, slug: string) {
+  if (!slug) throw new Error("Plano legado ausente em legacy_members.legacy_plan_slug.");
+
   const { data: plan, error } = await admin
     .from("plans")
     .select("id,slug,stripe_price_id")
     .eq("slug", slug)
     .maybeSingle();
 
-  if (error || !plan?.id) throw new Error(`Erro ao localizar plano ${slug}:${error?.message ?? "plano ausente"}`);
+  if (error) throw new Error(`Erro ao localizar plano legado ${slug}:${error.message}`);
+  if (!plan?.id) throw new Error(`Plano legado ${slug} não está mapeado na tabela plans.slug.`);
   return plan;
+}
+
+function logLegacyPlanFallback(legacyMember: any, reason: string, details?: Record<string, unknown>) {
+  console.warn("[migration] fallback legacy plan", {
+    legacyMemberId: legacyMember?.id ?? null,
+    email: legacyMember?.email ?? null,
+    legacyPlanSlug: normalizeLegacyPlanSlug(legacyMember?.legacy_plan_slug),
+    stripeCustomerId: String(legacyMember?.stripe_customer_id ?? "").trim() || null,
+    reason,
+    ...(details ?? {}),
+  });
+}
+
+async function resolvePlanFromLegacySlug(admin: any, legacyMember: any, reason: string, details?: Record<string, unknown>) {
+  logLegacyPlanFallback(legacyMember, reason, details);
+  const legacyPlanSlug = normalizeLegacyPlanSlug(legacyMember?.legacy_plan_slug);
+  const plan = await resolvePlanBySlug(admin, legacyPlanSlug);
+  return { plan, stripeSubscription: null, stripePriceId: null };
 }
 
 async function resolveLegacyPlan(admin: any, legacyMember: any) {
   const stripeCustomerId = String(legacyMember?.stripe_customer_id ?? "").trim();
 
   if (!stripeCustomerId) {
-    const legacyPlanSlug = normalizeLegacyPlanSlug(legacyMember?.legacy_plan_slug);
-    const allowedFallbackSlugs = new Set(["free", "plus", "premium", "ministry_10", "ministry_20", "ministry_40"]);
-    const resolvedSlug = allowedFallbackSlugs.has(legacyPlanSlug) ? legacyPlanSlug : "free";
-    const plan = await resolvePlanBySlug(admin, resolvedSlug);
-    return { plan, stripeSubscription: null, stripePriceId: plan.stripe_price_id ?? null };
+    return resolvePlanFromLegacySlug(admin, legacyMember, "missing_stripe_customer_id");
   }
 
-  const stripeSubscription = await getBestCustomerSubscription(stripeCustomerId);
+  let stripeSubscription: any | null = null;
+
+  try {
+    stripeSubscription = await getBestCustomerSubscription(stripeCustomerId);
+  } catch (error) {
+    return resolvePlanFromLegacySlug(admin, legacyMember, "stripe_api_error", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   if (!stripeSubscription?.id) {
-    throw new Error("Assinatura Stripe não encontrada para esta conta migrada.");
+    return resolvePlanFromLegacySlug(admin, legacyMember, "stripe_subscription_not_found");
   }
 
   const stripeStatus = normalizeStripeStatus(stripeSubscription.status);
   if (!["active", "trialing", "past_due"].includes(stripeStatus)) {
-    throw new Error(`Assinatura Stripe encontrada, mas não está ativa. Status atual: ${stripeStatus}.`);
+    return resolvePlanFromLegacySlug(admin, legacyMember, "stripe_subscription_not_usable", {
+      stripeSubscriptionId: stripeSubscription.id,
+      stripeStatus,
+    });
   }
 
   const stripePriceId = getStripePriceId(stripeSubscription);
   if (!stripePriceId) {
-    throw new Error("Assinatura Stripe encontrada sem Price ID.");
+    return resolvePlanFromLegacySlug(admin, legacyMember, "stripe_price_id_missing", {
+      stripeSubscriptionId: stripeSubscription.id,
+      stripeStatus,
+    });
   }
 
   const { data: plan, error: planError } = await admin
@@ -80,8 +111,19 @@ async function resolveLegacyPlan(admin: any, legacyMember: any) {
     .eq("stripe_price_id", stripePriceId)
     .maybeSingle();
 
-  if (planError || !plan?.id) {
-    throw new Error(`Price ID ${stripePriceId} não está vinculado a nenhum plano ativo no Harmomus.`);
+  if (planError) {
+    return resolvePlanFromLegacySlug(admin, legacyMember, "stripe_price_plan_lookup_error", {
+      stripeSubscriptionId: stripeSubscription.id,
+      stripePriceId,
+      error: planError.message,
+    });
+  }
+
+  if (!plan?.id) {
+    return resolvePlanFromLegacySlug(admin, legacyMember, "stripe_price_not_mapped", {
+      stripeSubscriptionId: stripeSubscription.id,
+      stripePriceId,
+    });
   }
 
   return { plan, stripeSubscription, stripePriceId };
@@ -111,8 +153,8 @@ async function upsertLegacySubscription(admin: any, input: {
     next_billing_at: currentPeriodEnd,
     trial_ends_at: trialEndsAt,
     auto_renew: !cancelAtPeriodEnd,
-    gateway: stripeCustomerId ? "stripe" : "legacy",
-    gateway_customer_id: stripeCustomerId,
+    gateway: input.stripeSubscription ? "stripe" : "legacy",
+    gateway_customer_id: input.stripeSubscription ? stripeCustomerId : null,
     gateway_subscription_id: stripeSubscriptionId,
     legacy_pms_subscription_id: input.legacyMember?.legacy_subscription_id ? String(input.legacyMember.legacy_subscription_id) : null,
     migrated_from_pms: true,
@@ -233,7 +275,7 @@ export async function POST(request: Request) {
     stripeSubscription = result.stripeSubscription;
     stripePriceId = result.stripePriceId;
   } catch (error) {
-    return redirectToMigrationPage(request, email, error instanceof Error ? error.message : "Erro ao sincronizar assinatura Stripe.");
+    return redirectToMigrationPage(request, email, error instanceof Error ? error.message : "Erro ao resolver plano migrado.");
   }
 
   const { error: profileUpsertError } = await admin.from("profiles").upsert(
@@ -282,10 +324,10 @@ export async function POST(request: Request) {
     supabase_user_id: resolvedUserId,
     migrated_at: now,
     legacy_plan_slug: resolvedPlan.slug,
-    stripe_synced_at: now,
   };
 
   if (stripeSubscription?.id) {
+    legacyUpdatePayload.stripe_synced_at = now;
     legacyUpdatePayload.stripe_subscription_id = String(stripeSubscription.id);
     legacyUpdatePayload.stripe_price_id = stripePriceId;
     legacyUpdatePayload.stripe_status = normalizeStripeStatus(stripeSubscription.status);

@@ -1,9 +1,21 @@
 import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
-function isSupportedLegacyPlan(value: unknown) {
-  const slug = String(value ?? "").trim().toLowerCase();
-  return ["free", "plus", "premium", "ministry_10", "ministry_20", "ministry_40"].includes(slug);
+function normalizeLegacyPlanSlug(value: unknown) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+async function hasMappedLegacyPlan(admin: any, value: unknown) {
+  const slug = normalizeLegacyPlanSlug(value);
+  if (!slug) return false;
+
+  const { data: plan } = await admin
+    .from("plans")
+    .select("id")
+    .eq("slug", slug)
+    .maybeSingle();
+
+  return Boolean(plan?.id);
 }
 
 export async function POST(request: Request) {
@@ -27,13 +39,14 @@ export async function POST(request: Request) {
       .ilike("email", email)
       .maybeSingle();
 
-    const shouldMigrate =
+    const eligibleLegacyMember =
       !!legacyMember &&
-      isSupportedLegacyPlan(legacyMember.legacy_plan_slug) &&
       String(legacyMember.legacy_status ?? "").toLowerCase() === "active" &&
       (!legacyMember.migrated || !legacyMember.password_created);
 
-    return NextResponse.json({ migrated: shouldMigrate });
+    if (!eligibleLegacyMember) return NextResponse.json({ migrated: false });
+
+    return NextResponse.json({ migrated: await hasMappedLegacyPlan(admin, legacyMember.legacy_plan_slug) });
   } catch {
     return NextResponse.json({ migrated: false });
   }
