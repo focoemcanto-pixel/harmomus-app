@@ -80,16 +80,17 @@ function styleClasses(style?: string | null) {
 
 function getTextClass(length: number, feed: boolean) {
   if (feed) {
-    if (length > 760) return "text-[24px] leading-[1.22]";
-    if (length > 620) return "text-[27px] leading-[1.24]";
-    if (length > 460) return "text-[31px] leading-[1.28]";
-    return "text-[38px] leading-[1.28]";
+    if (length > 760) return "text-[22px] leading-[1.18]";
+    if (length > 620) return "text-[25px] leading-[1.2]";
+    if (length > 460) return "text-[29px] leading-[1.23]";
+    return "text-[36px] leading-[1.26]";
   }
 
-  if (length > 1000) return "text-[33px] leading-[1.24]";
-  if (length > 780) return "text-[37px] leading-[1.27]";
-  if (length > 560) return "text-[43px] leading-[1.31]";
-  return "text-[52px] leading-[1.33]";
+  if (length > 1000) return "text-[29px] leading-[1.18]";
+  if (length > 780) return "text-[32px] leading-[1.2]";
+  if (length > 620) return "text-[35px] leading-[1.22]";
+  if (length > 460) return "text-[39px] leading-[1.25]";
+  return "text-[48px] leading-[1.28]";
 }
 
 export default async function TestimonialCardPage({ params, searchParams }: PageProps) {
@@ -102,8 +103,8 @@ export default async function TestimonialCardPage({ params, searchParams }: Page
   const isFeed = format === "feed";
   const userName = request.profiles?.full_name ?? "Aluno Harmomus";
   const text = sanitizeFeedback(request.message || request.notes || "Feedback recebido pelo Harmomus.");
-  const isLongText = isFeed ? text.length > 460 : text.length > 620;
-  const isVeryLongText = isFeed ? text.length > 680 : text.length > 880;
+  const isLongText = isFeed ? text.length > 420 : text.length > 460;
+  const isVeryLongText = isFeed ? text.length > 620 : text.length > 700;
   const classes = styleClasses(request.testimonial_card_style);
   const sizeClass = isFeed ? "h-[1080px] w-[1080px]" : "h-[1920px] w-[1080px]";
   const scaleClass = isFeed ? "scale-[0.62] origin-top" : "scale-[0.36] origin-top";
@@ -128,43 +129,43 @@ export default async function TestimonialCardPage({ params, searchParams }: Page
       </div>
 
       <div className="mx-auto flex max-w-5xl justify-center overflow-auto rounded-3xl border border-white/10 bg-black/30 p-4 print:block print:overflow-visible print:rounded-none print:border-0 print:bg-transparent print:p-0">
-        <article id="testimonial-card" className={`${sizeClass} ${scaleClass} relative shrink-0 overflow-hidden rounded-[4rem] border bg-gradient-to-br ${classes.frame} ${isFeed ? "p-14" : "p-16"} shadow-[0_35px_120px_rgba(0,0,0,0.45)] print:scale-100 print:rounded-none print:shadow-none`}>
-          <div className={`absolute -left-40 -top-40 h-[540px] w-[540px] rounded-full ${classes.auraA} blur-3xl`} />
-          <div className={`absolute -bottom-44 -right-44 h-[620px] w-[620px] rounded-full ${classes.auraB} blur-3xl`} />
-          <div className="absolute left-1/2 top-1/3 h-[520px] w-[520px] -translate-x-1/2 rounded-full bg-violet-500/10 blur-3xl" />
-          <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px)] bg-[size:54px_54px] opacity-35" />
-          <div className="absolute inset-x-14 bottom-16 h-px bg-gradient-to-r from-transparent via-white/15 to-transparent" />
+        <article id="testimonial-card" className={`${sizeClass} ${scaleClass} relative isolate shrink-0 overflow-hidden rounded-[4rem] border bg-gradient-to-br ${classes.frame} ${isFeed ? "p-14" : "p-16"} shadow-[0_35px_120px_rgba(0,0,0,0.45)] print:scale-100 print:rounded-none print:shadow-none`}>
+          <div className={`pointer-events-none absolute -left-40 -top-40 z-0 h-[540px] w-[540px] rounded-full ${classes.auraA} blur-3xl`} />
+          <div className={`pointer-events-none absolute -bottom-44 -right-44 z-0 h-[620px] w-[620px] rounded-full ${classes.auraB} blur-3xl`} />
+          <div className="pointer-events-none absolute left-1/2 top-1/3 z-0 h-[520px] w-[520px] -translate-x-1/2 rounded-full bg-violet-500/10 blur-3xl" />
+          <div className="pointer-events-none absolute inset-0 z-0 bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px)] bg-[size:54px_54px] opacity-35" />
+          <div className="pointer-events-none absolute inset-x-14 bottom-16 z-0 h-px bg-gradient-to-r from-transparent via-white/15 to-transparent" />
 
-          <div className="relative flex h-full flex-col">
-            <header className={`flex flex-col items-center text-center ${isFeed ? "pb-8" : isVeryLongText ? "pb-8" : "pb-12"}`}>
+          <div className="relative z-10 flex h-full min-h-0 flex-col">
+            <header className={`shrink-0 flex flex-col items-center text-center ${isFeed ? "pb-6" : isVeryLongText ? "pb-6" : isLongText ? "pb-8" : "pb-12"}`}>
               {logoUrl ? (
-                <img src={logoUrl} alt={brandName} className={`${isFeed ? "h-20" : isVeryLongText ? "h-20" : "h-24"} w-auto object-contain`} />
+                <img src={logoUrl} alt={brandName} className={`${isFeed ? "h-20" : isVeryLongText ? "h-18" : "h-24"} w-auto object-contain`} />
               ) : (
                 <p className={`${isFeed ? "text-5xl" : "text-6xl"} font-black tracking-tight text-white`}>{brandName}</p>
               )}
               <p className={`${isFeed ? "mt-3 text-base" : isVeryLongText ? "mt-3 text-base" : "mt-4 text-lg"} font-bold uppercase tracking-[0.34em] ${classes.accent}`}>Kits vocais para ministérios</p>
             </header>
 
-            <main className="flex flex-1 flex-col items-center justify-center text-center">
-              <div className={`inline-flex items-center gap-3 rounded-full border ${classes.pill} ${isFeed ? "px-5 py-2 text-sm" : "px-7 py-3 text-lg"} font-black uppercase tracking-[0.22em]`}>
+            <main className="flex min-h-0 flex-1 flex-col items-center justify-center text-center">
+              <div className={`inline-flex shrink-0 items-center gap-3 rounded-full border ${classes.pill} ${isFeed ? "px-5 py-2 text-sm" : isVeryLongText ? "px-6 py-2 text-base" : "px-7 py-3 text-lg"} font-black uppercase tracking-[0.22em]`}>
                 <Heart size={isFeed ? 17 : 22} fill="currentColor" /> Depoimento real
               </div>
 
-              <div className={`mt-7 flex gap-3 text-yellow-300 ${isVeryLongText ? "scale-90" : ""}`}>
+              <div className={`flex shrink-0 gap-3 text-yellow-300 ${isFeed ? "mt-6" : isVeryLongText ? "mt-5 scale-85" : isLongText ? "mt-6 scale-90" : "mt-7"}`}>
                 {Array.from({ length: 5 }).map((_, index) => <Star key={index} size={isFeed ? 30 : isLongText ? 34 : 40} fill="currentColor" />)}
               </div>
 
-              <h2 className={`${isFeed ? "mt-5 text-[58px]" : isLongText ? "mt-6 text-[66px]" : "mt-8 text-[82px]"} font-black uppercase leading-none tracking-[0.045em] text-white`}>
+              <h2 className={`${isFeed ? "mt-5 text-[58px]" : isVeryLongText ? "mt-5 text-[54px]" : isLongText ? "mt-6 text-[62px]" : "mt-8 text-[82px]"} shrink-0 font-black uppercase leading-none tracking-[0.045em] text-white`}>
                 Transformando <span className="text-violet-300">ministérios</span>
               </h2>
 
-              <div className={`${isFeed ? "mt-8 max-w-[900px] p-8" : isLongText ? "mt-9 max-w-[930px] p-10" : "mt-12 max-w-[900px] p-12"} relative rounded-[2.8rem] border ${classes.line} bg-black/34 text-center shadow-[0_22px_80px_rgba(0,0,0,0.22)] backdrop-blur-xl`}>
-                <span className={`absolute ${isFeed ? "-left-5 -top-10 text-8xl" : "-left-8 -top-14 text-9xl"} font-black ${classes.quote}`}>“</span>
+              <div className={`${isFeed ? "mt-7 max-w-[900px] p-8" : isVeryLongText ? "mt-7 max-w-[940px] p-8" : isLongText ? "mt-8 max-w-[930px] p-9" : "mt-12 max-w-[900px] p-12"} relative z-20 rounded-[2.8rem] border ${classes.line} bg-black/34 text-center shadow-[0_22px_80px_rgba(0,0,0,0.22)] backdrop-blur-xl`}>
+                <span className={`absolute ${isFeed ? "-left-5 -top-10 text-8xl" : isVeryLongText ? "-left-6 -top-11 text-8xl" : "-left-8 -top-14 text-9xl"} font-black ${classes.quote}`}>“</span>
                 <p className={`${getTextClass(text.length, isFeed)} whitespace-pre-wrap break-words font-semibold text-white`}>{text}</p>
-                <span className={`absolute ${isFeed ? "-bottom-12 right-7 text-8xl" : "-bottom-16 right-8 text-9xl"} font-black ${classes.quote}`}>”</span>
+                <span className={`absolute ${isFeed ? "-bottom-12 right-7 text-8xl" : isVeryLongText ? "-bottom-12 right-7 text-8xl" : "-bottom-16 right-8 text-9xl"} font-black ${classes.quote}`}>”</span>
               </div>
 
-              <div className={`${isFeed ? "mt-9" : isLongText ? "mt-10" : "mt-14"} flex items-center justify-center gap-5`}>
+              <div className={`${isFeed ? "mt-9" : isVeryLongText ? "mt-8" : isLongText ? "mt-9" : "mt-14"} flex shrink-0 items-center justify-center gap-5`}>
                 {request.profiles?.avatar_url ? (
                   <img src={request.profiles.avatar_url} alt="" className={`${isFeed || isLongText ? "h-20 w-20" : "h-24 w-24"} rounded-full border border-white/25 object-cover shadow-[0_0_45px_rgba(168,85,247,0.35)]`} />
                 ) : (
@@ -177,7 +178,7 @@ export default async function TestimonialCardPage({ params, searchParams }: Page
               </div>
             </main>
 
-            <footer className={`${isFeed ? "gap-3 pt-8" : isLongText ? "gap-4 pt-9" : "gap-5 pt-12"} flex flex-col items-center justify-center border-t border-white/10 text-center`}>
+            <footer className={`${isFeed ? "gap-3 pt-8" : isVeryLongText ? "gap-3 pt-7" : isLongText ? "gap-4 pt-8" : "gap-5 pt-12"} shrink-0 flex flex-col items-center justify-center border-t border-white/10 text-center`}>
               <div className={`inline-flex items-center gap-4 rounded-full border ${classes.line} bg-black/25 ${isFeed || isLongText ? "px-8 py-3" : "px-10 py-4"}`}>
                 <Globe2 size={isFeed || isLongText ? 28 : 32} className={classes.accent} />
                 <span className={`${isFeed || isLongText ? "text-3xl" : "text-4xl"} font-black tracking-tight text-white`}>harmomus.com</span>
