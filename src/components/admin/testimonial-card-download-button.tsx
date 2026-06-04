@@ -54,7 +54,7 @@ function sanitizeCloneForExport(clone: HTMLElement) {
     element.style.transform = "none";
     element.style.filter = "none";
     element.style.backdropFilter = "none";
-    element.style.webkitBackdropFilter = "none";
+    element.style.setProperty("-webkit-backdrop-filter", "none");
     element.style.boxShadow = "none";
     element.style.textShadow = "none";
   });
@@ -153,7 +153,6 @@ export function TestimonialCardDownloadButton({ filename }: TestimonialCardDownl
             visibility: "visible",
             filter: "none",
             backdropFilter: "none",
-            webkitBackdropFilter: "none",
             boxShadow: "none",
           },
         });
