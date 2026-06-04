@@ -4,6 +4,8 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const ALLOWED_EVENTS = new Set(["Lead_free_signup", "CompleteRegistration_first_login", "InitiateCheckout_premium", "Purchase_premium"]);
 const ATTRIBUTION_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "fbclid", "gclid"] as const;
+const ALWAYS_SYNC_TO_SHEETS_EVENTS = new Set(["Lead_free_signup"]);
+const CAMPAIGN_PURCHASE_EVENTS = new Set(["Purchase_premium"]);
 
 function clean(value: unknown, maxLength = 500) {
   const text = String(value ?? "").trim();
@@ -27,6 +29,16 @@ function buildAttribution(payload: Record<string, unknown>) {
   }, {} as Record<(typeof ATTRIBUTION_KEYS)[number], string | null>);
 }
 
+function hasCampaignAttribution(attribution: Record<(typeof ATTRIBUTION_KEYS)[number], string | null>) {
+  return Boolean(attribution.utm_source || attribution.utm_campaign || attribution.fbclid);
+}
+
+function shouldSyncToSheets(eventName: string, attribution: Record<(typeof ATTRIBUTION_KEYS)[number], string | null>) {
+  if (ALWAYS_SYNC_TO_SHEETS_EVENTS.has(eventName)) return true;
+  if (CAMPAIGN_PURCHASE_EVENTS.has(eventName)) return hasCampaignAttribution(attribution);
+  return false;
+}
+
 function sheetRow(input: {
   eventName: string;
   eventId: string | null;
@@ -40,7 +52,7 @@ function sheetRow(input: {
     event_name: input.eventName,
     event_id: input.eventId,
 
-    // Campos canônicos: precisam bater exatamente com os cabeçalhos da planilha/webhook.
+    // Campos canonicos: precisam bater exatamente com os cabecalhos da planilha/webhook.
     utm_source: input.attribution.utm_source,
     utm_medium: input.attribution.utm_medium,
     utm_campaign: input.attribution.utm_campaign,
@@ -49,7 +61,7 @@ function sheetRow(input: {
     fbclid: input.attribution.fbclid,
     gclid: input.attribution.gclid,
 
-    // Aliases descritivos mantidos para compatibilidade com versões antigas do Apps Script.
+    // Aliases descritivos mantidos para compatibilidade com versoes antigas do Apps Script.
     utm_medium_publico_conjunto: input.attribution.utm_medium,
     utm_term_posicionamento: input.attribution.utm_term,
     utm_content_criativo: input.attribution.utm_content,
@@ -66,7 +78,7 @@ async function syncToSheets(row: Record<string, unknown>) {
   const configured = Boolean(webhookUrl);
   console.log("[META SHEETS] webhook configured:", configured);
 
-  if (!webhookUrl) return { skipped: true, configured: false };
+  if (!webhookUrl) return { skipped: true, configured: false, reason: "webhook_not_configured" };
 
   try {
     console.log("[META SHEETS] sending event:", row.event_name, {
@@ -143,7 +155,18 @@ export async function POST(request: Request) {
     if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
 
     const row = sheetRow({ eventName, eventId, attribution, url: eventSourceUrl, userAgent, payload });
-    const sheets = await syncToSheets(row);
+    const shouldSync = shouldSyncToSheets(eventName, attribution);
+    const sheets = shouldSync
+      ? await syncToSheets(row)
+      : { skipped: true, configured: Boolean(process.env.META_FUNNEL_SHEETS_WEBHOOK_URL), reason: "event_not_allowed_for_sheets" };
+
+    if (!shouldSync) {
+      console.log("[META SHEETS] skipped event:", eventName, {
+        reason: "event_not_allowed_for_sheets",
+        has_campaign_attribution: hasCampaignAttribution(attribution),
+      });
+    }
+
     return NextResponse.json({ ok: true, eventName, sheets, webhookConfigured: Boolean(process.env.META_FUNNEL_SHEETS_WEBHOOK_URL) });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Falha ao registrar evento." }, { status: 500 });
