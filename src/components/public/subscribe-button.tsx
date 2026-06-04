@@ -42,6 +42,10 @@ function readAttributionParams() {
   return result;
 }
 
+function readAttributionObject() {
+  return Object.fromEntries(readAttributionParams().entries());
+}
+
 function recordFunnelEvent(eventName: string, payload: Record<string, unknown>) {
   fetch("/api/meta-events/record", {
     method: "POST",
@@ -63,7 +67,7 @@ function trackInitiateCheckout(planSlug: SubscribeButtonProps["planSlug"]) {
     currency: "BRL",
     value: planValue(planSlug),
     plan: planSlug,
-    ...(readStoredAttribution() as Record<string, unknown>),
+    ...readAttributionObject(),
   };
 
   fbq("track", "InitiateCheckout", payload);
