@@ -39,13 +39,21 @@ function sheetRow(input: {
     created_at: new Date().toISOString(),
     event_name: input.eventName,
     event_id: input.eventId,
+
+    // Campos canônicos: precisam bater exatamente com os cabeçalhos da planilha/webhook.
     utm_source: input.attribution.utm_source,
-    utm_medium_publico_conjunto: input.attribution.utm_medium,
+    utm_medium: input.attribution.utm_medium,
     utm_campaign: input.attribution.utm_campaign,
-    utm_term_posicionamento: input.attribution.utm_term,
-    utm_content_criativo: input.attribution.utm_content,
+    utm_term: input.attribution.utm_term,
+    utm_content: input.attribution.utm_content,
     fbclid: input.attribution.fbclid,
     gclid: input.attribution.gclid,
+
+    // Aliases descritivos mantidos para compatibilidade com versões antigas do Apps Script.
+    utm_medium_publico_conjunto: input.attribution.utm_medium,
+    utm_term_posicionamento: input.attribution.utm_term,
+    utm_content_criativo: input.attribution.utm_content,
+
     plan: clean(input.payload.plan, 120),
     value: input.payload.value ?? null,
     event_source_url: input.url,
@@ -61,7 +69,13 @@ async function syncToSheets(row: Record<string, unknown>) {
   if (!webhookUrl) return { skipped: true, configured: false };
 
   try {
-    console.log("[META SHEETS] sending event:", row.event_name);
+    console.log("[META SHEETS] sending event:", row.event_name, {
+      utm_source: row.utm_source,
+      utm_medium: row.utm_medium,
+      utm_campaign: row.utm_campaign,
+      utm_term: row.utm_term,
+      utm_content: row.utm_content,
+    });
     const response = await fetch(webhookUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
