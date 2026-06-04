@@ -6,6 +6,7 @@ const ALLOWED_EVENTS = new Set(["Lead_free_signup", "CompleteRegistration_first_
 const ATTRIBUTION_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "fbclid", "gclid"] as const;
 const ALWAYS_SYNC_TO_SHEETS_EVENTS = new Set(["Lead_free_signup"]);
 const CAMPAIGN_PURCHASE_EVENTS = new Set(["Purchase_premium"]);
+const SHEETS_TIME_ZONE = "America/Bahia";
 
 function clean(value: unknown, maxLength = 500) {
   const text = String(value ?? "").trim();
@@ -39,6 +40,43 @@ function shouldSyncToSheets(eventName: string, attribution: Record<(typeof ATTRI
   return false;
 }
 
+function formatSheetTimestamp(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("pt-BR", {
+    timeZone: SHEETS_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}:${values.second}`;
+}
+
+function extractEmail(value: unknown) {
+  const text = String(value ?? "").trim();
+  const match = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  return match?.[0]?.toLowerCase() ?? null;
+}
+
+function getCustomerEmail(input: { eventId: string | null; payload: Record<string, unknown> }) {
+  return (
+    extractEmail(input.payload.email) ||
+    extractEmail(input.payload.customer_email) ||
+    extractEmail(input.payload.user_email) ||
+    extractEmail(input.eventId)
+  );
+}
+
+function normalizeSheetEventId(eventName: string, eventId: string | null) {
+  if (!eventId) return null;
+  if (eventName === "Lead_free_signup" && extractEmail(eventId)) return eventName;
+  return eventId;
+}
+
 function sheetRow(input: {
   eventName: string;
   eventId: string | null;
@@ -47,10 +85,15 @@ function sheetRow(input: {
   userAgent: string | null;
   payload: Record<string, unknown>;
 }) {
+  const customerEmail = getCustomerEmail({ eventId: input.eventId, payload: input.payload });
+
   return {
-    created_at: new Date().toISOString(),
+    created_at: formatSheetTimestamp(),
+    created_at_utc: new Date().toISOString(),
+    timezone: SHEETS_TIME_ZONE,
     event_name: input.eventName,
-    event_id: input.eventId,
+    event_id: normalizeSheetEventId(input.eventName, input.eventId),
+    customer_email: customerEmail,
 
     // Campos canonicos: precisam bater exatamente com os cabecalhos da planilha/webhook.
     utm_source: input.attribution.utm_source,
@@ -82,6 +125,7 @@ async function syncToSheets(row: Record<string, unknown>) {
 
   try {
     console.log("[META SHEETS] sending event:", row.event_name, {
+      customer_email: row.customer_email,
       utm_source: row.utm_source,
       utm_medium: row.utm_medium,
       utm_campaign: row.utm_campaign,
@@ -106,12 +150,13 @@ async function syncToSheets(row: Record<string, unknown>) {
 export async function GET() {
   const testEventName = "Lead_free_signup";
   const payload = {
+    email: "teste_direto_apps_script@harmomus.com",
     utm_source: "MetaAds",
     utm_medium: "DiagnosticoWebhook",
     utm_campaign: "TESTE_SHEETS_GET",
     utm_term: "manual_get",
     utm_content: "diagnostico",
-    event_id: `sheets-get-${Date.now()}`,
+    event_id: `Lead_teste_direto_apps_script@harmomus.com`,
   };
   const attribution = buildAttribution(payload);
   const eventId = clean(payload.event_id, 180);
