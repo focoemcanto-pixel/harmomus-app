@@ -27,6 +27,41 @@ function getExportSize(filename: string) {
   return filename.includes("story") ? { width: 1080, height: 1920 } : { width: 1080, height: 1080 };
 }
 
+function normalizeClassName(className: string) {
+  return className
+    .replace(/scale-\[[^\]]+\]/g, "")
+    .replace(/origin-top/g, "")
+    .replace(/print:[^\s]+/g, "")
+    .replace(/backdrop-blur[^\s]*/g, "")
+    .replace(/blur-3xl/g, "")
+    .replace(/blur-2xl/g, "")
+    .replace(/blur-xl/g, "")
+    .replace(/blur-lg/g, "")
+    .replace(/blur-md/g, "")
+    .replace(/blur-sm/g, "")
+    .replace(/blur/g, "")
+    .replace(/shadow-\[[^\]]+\]/g, "")
+    .replace(/-translate-x-1\/2/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function sanitizeCloneForExport(clone: HTMLElement) {
+  const elements = [clone, ...Array.from(clone.querySelectorAll<HTMLElement>("*"))];
+
+  elements.forEach((element) => {
+    element.className = normalizeClassName(String(element.className || ""));
+    element.style.transform = "none";
+    element.style.filter = "none";
+    element.style.backdropFilter = "none";
+    element.style.webkitBackdropFilter = "none";
+    element.style.boxShadow = "none";
+    element.style.textShadow = "none";
+  });
+
+  clone.style.isolation = "isolate";
+}
+
 function prepareCloneForExport(source: HTMLElement, width: number, height: number) {
   const host = document.createElement("div");
   host.setAttribute("data-testimonial-export-host", "true");
@@ -37,17 +72,12 @@ function prepareCloneForExport(source: HTMLElement, width: number, height: numbe
   host.style.height = `${height}px`;
   host.style.overflow = "hidden";
   host.style.pointerEvents = "none";
-  host.style.zIndex = "2147483647";
+  host.style.zIndex = "-1";
   host.style.background = "#030712";
-  host.style.transform = "translateX(-200vw)";
+  host.style.opacity = "0";
 
   const clone = source.cloneNode(true) as HTMLElement;
-  clone.className = clone.className
-    .replace(/scale-\[[^\]]+\]/g, "")
-    .replace(/origin-top/g, "")
-    .replace(/print:[^\s]+/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  sanitizeCloneForExport(clone);
 
   clone.style.transform = "none";
   clone.style.transformOrigin = "top left";
@@ -121,6 +151,10 @@ export function TestimonialCardDownloadButton({ filename }: TestimonialCardDownl
             height: `${height}px`,
             opacity: "1",
             visibility: "visible",
+            filter: "none",
+            backdropFilter: "none",
+            webkitBackdropFilter: "none",
+            boxShadow: "none",
           },
         });
 
