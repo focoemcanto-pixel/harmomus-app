@@ -228,6 +228,27 @@ function percentile(values: number[], ratio: number): number | null {
   return sorted[index] ?? null;
 }
 
+function isNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function midiRange(min: number | null, max: number | null) {
+  return {
+    min_midi: min,
+    max_midi: max,
+    min_note: isNumber(min) ? midiToNoteName(min) : null,
+    max_note: isNumber(max) ? midiToNoteName(max) : null,
+  };
+}
+
+function noteDuration(note: PitchNote) {
+  return Math.max(0.001, note.end_s - note.start_s);
+}
+
 function buildFallbackDominant(midis: number[]) {
   const histogram = new Map<number, number>();
   for (const midi of midis) histogram.set(Math.round(midi), (histogram.get(Math.round(midi)) ?? 0) + 1);
@@ -235,6 +256,73 @@ function buildFallbackDominant(midis: number[]) {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 7)
     .map(([midi, count]) => ({ midi, note: midiToNoteName(midi), occurrences: count }));
+}
+
+function buildNoteDistribution(notes: PitchNote[]) {
+  const totalDuration = notes.reduce((sum, note) => sum + noteDuration(note), 0);
+  const distribution = new Map<number, { midi: number; note: string; duration_s: number; occurrences: number }>();
+
+  for (const note of notes) {
+    const midi = Math.round(note.pitch_midi);
+    const current = distribution.get(midi) ?? { midi, note: midiToNoteName(midi), duration_s: 0, occurrences: 0 };
+    current.duration_s += noteDuration(note);
+    current.occurrences += 1;
+    distribution.set(midi, current);
+  }
+
+  return [...distribution.values()]
+    .map((entry) => ({
+      ...entry,
+      duration_s: Number(entry.duration_s.toFixed(3)),
+      duration_ratio: totalDuration > 0 ? Number((entry.duration_s / totalDuration).toFixed(4)) : 0,
+    }))
+    .sort((a, b) => b.duration_s - a.duration_s);
+}
+
+function calculateTessituraScore(notes: PitchNote[], comfortMin: number | null, comfortMax: number | null, minMidi: number | null, maxMidi: number | null) {
+  if (!notes.length || !isNumber(comfortMin) || !isNumber(comfortMax) || !isNumber(minMidi) || !isNumber(maxMidi)) return 0;
+
+  const totalDuration = notes.reduce((sum, note) => sum + noteDuration(note), 0);
+  if (totalDuration <= 0) return 0;
+
+  const comfortDuration = notes
+    .filter((note) => note.pitch_midi >= comfortMin && note.pitch_midi <= comfortMax)
+    .reduce((sum, note) => sum + noteDuration(note), 0);
+  const comfortRatio = comfortDuration / totalDuration;
+  const detectedSpan = Math.max(1, maxMidi - minMidi);
+  const comfortSpan = Math.max(1, comfortMax - comfortMin);
+  const concentrationRatio = clamp(comfortSpan / detectedSpan, 0, 1);
+  const avgConfidence = notes.reduce((sum, note) => sum + note.confidence, 0) / notes.length;
+  const peakPenalty = Math.max(0, 1 - concentrationRatio) * 20;
+  const rawScore = comfortRatio * 55 + avgConfidence * 25 + concentrationRatio * 20 - peakPenalty;
+
+  return Math.round(clamp(rawScore, 0, 100));
+}
+
+function buildMusicalLayers(notes: PitchNote[], midis: number[], comfortMin: number | null, comfortMax: number | null, minMidi: number | null, maxMidi: number | null) {
+  const lowPeakMin = percentile(midis, 0);
+  const lowPeakMax = percentile(midis, 0.05);
+  const lowStressMin = percentile(midis, 0.05);
+  const lowStressMax = percentile(midis, 0.2);
+  const highStressMin = percentile(midis, 0.8);
+  const highStressMax = percentile(midis, 0.95);
+  const highPeakMin = percentile(midis, 0.95);
+  const highPeakMax = percentile(midis, 1);
+
+  return {
+    detected_range: midiRange(minMidi, maxMidi),
+    comfort_range: midiRange(comfortMin, comfortMax),
+    stress_range: {
+      low: midiRange(lowStressMin, lowStressMax),
+      high: midiRange(highStressMin, highStressMax),
+    },
+    peak_range: {
+      low: midiRange(lowPeakMin, lowPeakMax),
+      high: midiRange(highPeakMin, highPeakMax),
+    },
+    note_distribution: buildNoteDistribution(notes).slice(0, 24),
+    tessitura_score: calculateTessituraScore(notes, comfortMin, comfortMax, minMidi, maxMidi),
+  };
 }
 
 function buildInsights(notes: PitchNote[], payload?: Partial<YinPayload>) {
@@ -259,8 +347,21 @@ function buildInsights(notes: PitchNote[], payload?: Partial<YinPayload>) {
     moderado: { min_midi: minMidi, max_midi: maxMidi },
     avancado: { min_midi: minMidi !== null ? minMidi - 2 : null, max_midi: maxMidi !== null ? maxMidi + 2 : null },
   };
+  const musicalLayers = buildMusicalLayers(sourceNotes, midis, comfortMin, comfortMax, minMidi, maxMidi);
 
-  return { minMidi, maxMidi, comfortMin, comfortMax, dominant, confidence: Number(confidence.toFixed(4)), contour, occasionalPeaks, recommend, reliableNotes: sourceNotes.length };
+  return {
+    minMidi,
+    maxMidi,
+    comfortMin,
+    comfortMax,
+    dominant,
+    confidence: Number(confidence.toFixed(4)),
+    contour,
+    occasionalPeaks,
+    recommend,
+    musicalLayers,
+    reliableNotes: sourceNotes.length,
+  };
 }
 
 async function runLibrosaPitchAnalysis(sourcePath: string) {
@@ -332,7 +433,7 @@ async function processJob(job: any) {
     const { notes, avg_pitch_midi, elapsedMs: analysisElapsedMs, analysisMode } = analysisResult;
     const insights = buildInsights(notes, analysisResult);
 
-    logs.push({ at: new Date().toISOString(), message: "Análise de tessitura concluída", analysis_mode: analysisMode, voice: normalizedVoice, notes_detected: notes.length, reliable_notes: insights.reliableNotes, avg_pitch_midi, analysis_elapsed_ms: analysisElapsedMs });
+    logs.push({ at: new Date().toISOString(), message: "Análise de tessitura concluída", analysis_mode: analysisMode, voice: normalizedVoice, notes_detected: notes.length, reliable_notes: insights.reliableNotes, tessitura_score: insights.musicalLayers.tessitura_score, avg_pitch_midi, analysis_elapsed_ms: analysisElapsedMs });
 
     if (insights.minMidi === null || insights.maxMidi === null) throw new Error("no pitch detected");
 
@@ -352,7 +453,12 @@ async function processJob(job: any) {
         dominant_notes: insights.dominant,
         recommended_tones: insights.recommend,
         vocal_confidence: insights.confidence,
-        pitch_events_json: { recommended_tones: insights.recommend, contour: insights.contour, occasional_peaks: insights.occasionalPeaks },
+        pitch_events_json: {
+          recommended_tones: insights.recommend,
+          contour: insights.contour,
+          occasional_peaks: insights.occasionalPeaks,
+          musical_layers: insights.musicalLayers,
+        },
         analysis_logs: logs,
         error_message: null,
         completed_at: new Date().toISOString(),
@@ -360,7 +466,7 @@ async function processJob(job: any) {
       .eq("id", job.id);
 
     if (error) throw new Error(error.message);
-    console.info("[audio-analysis-worker] análise concluída", { job_id: job.id, analysis_mode: analysisMode, voice: normalizedVoice, detected_range: [insights.minMidi, insights.maxMidi], comfort_range: [insights.comfortMin, insights.comfortMax], elapsed_ms: Date.now() - jobStartedAt, memory: currentMemorySnapshot() });
+    console.info("[audio-analysis-worker] análise concluída", { job_id: job.id, analysis_mode: analysisMode, voice: normalizedVoice, detected_range: [insights.minMidi, insights.maxMidi], comfort_range: [insights.comfortMin, insights.comfortMax], tessitura_score: insights.musicalLayers.tessitura_score, elapsed_ms: Date.now() - jobStartedAt, memory: currentMemorySnapshot() });
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
     let message = error instanceof Error ? error.message : String(error);
