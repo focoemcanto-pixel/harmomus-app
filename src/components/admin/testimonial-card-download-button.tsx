@@ -47,16 +47,22 @@ function normalizeClassName(className: string) {
 }
 
 function sanitizeCloneForExport(clone: HTMLElement) {
-  const elements = [clone, ...Array.from(clone.querySelectorAll<HTMLElement>("*"))];
+  const elements = [clone, ...Array.from(clone.querySelectorAll<HTMLElement | SVGElement>("*"))];
 
   elements.forEach((element) => {
-    element.className = normalizeClassName(String(element.className || ""));
-    element.style.transform = "none";
-    element.style.filter = "none";
-    element.style.backdropFilter = "none";
-    element.style.setProperty("-webkit-backdrop-filter", "none");
-    element.style.boxShadow = "none";
-    element.style.textShadow = "none";
+    if (element instanceof HTMLElement) {
+      element.className = normalizeClassName(String(element.className || ""));
+    }
+
+    const style = element instanceof HTMLElement || element instanceof SVGElement ? element.style : null;
+    if (!style) return;
+
+    style.transform = "none";
+    style.filter = "none";
+    style.backdropFilter = "none";
+    style.setProperty("-webkit-backdrop-filter", "none");
+    style.boxShadow = "none";
+    style.textShadow = "none";
   });
 
   clone.style.isolation = "isolate";
