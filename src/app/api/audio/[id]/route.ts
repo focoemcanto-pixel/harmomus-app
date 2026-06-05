@@ -13,6 +13,32 @@ export const runtime = "nodejs";
 
 type ByteRange = { start: number; end?: number; suffix?: number };
 
+type CachedAudioFile = {
+  id: string;
+  kit_id: string;
+  tone: string | null;
+  name: string | null;
+  r2_key: string | null;
+  file_type: string | null;
+  source_type: string | null;
+};
+
+type CachedKit = {
+  id: string;
+  slug: string;
+  name: string;
+  artist: string | null;
+  cover_url: string | null;
+  description: string | null;
+  lyrics: string | null;
+  required_plan: string | null;
+  allowed_plan_slugs: string[] | null;
+  original_tone: string | null;
+  default_tone: string | null;
+  allow_pitch_shift: boolean | null;
+  max_pitch_shift_semitones: number | null;
+};
+
 function parseRangeHeader(rangeHeader: string | null): ByteRange | null {
   if (!rangeHeader?.startsWith("bytes=")) return null;
   const value = rangeHeader.replace("bytes=", "").split(",")[0]?.trim();
@@ -116,7 +142,12 @@ function runAfterResponse(task: () => Promise<void>) {
 
 const AUDIO_ROUTE_PERF_LOGS = process.env.AUDIO_ROUTE_PERF_LOGS !== "false";
 const PLANS_CACHE_TTL_MS = 5 * 60 * 1000;
+const AUDIO_META_CACHE_TTL_MS = 10 * 60 * 1000;
+const KIT_META_CACHE_TTL_MS = 10 * 60 * 1000;
+
 let plansCache: { expiresAt: number; plans: any[] } | null = null;
+const audioFileCache = new Map<string, { expiresAt: number; value: CachedAudioFile | null }>();
+const kitCache = new Map<string, { expiresAt: number; value: CachedKit | null }>();
 
 function nowMs() {
   return Date.now();
@@ -138,6 +169,40 @@ async function getCachedPlans(supabase: any) {
   return { plans, cacheHit: false, durationMs: nowMs() - startedAt };
 }
 
+async function getCachedAudioFile(supabase: any, id: string) {
+  const now = nowMs();
+  const cached = audioFileCache.get(id);
+  if (cached && cached.expiresAt > now) return { data: cached.value, cacheHit: true, durationMs: 0 };
+
+  const startedAt = nowMs();
+  const { data } = await supabase
+    .from("kit_audio_files")
+    .select("id,kit_id,tone,name,r2_key,file_type,source_type")
+    .eq("id", id)
+    .maybeSingle();
+
+  const value = (data ?? null) as CachedAudioFile | null;
+  audioFileCache.set(id, { value, expiresAt: nowMs() + AUDIO_META_CACHE_TTL_MS });
+  return { data: value, cacheHit: false, durationMs: nowMs() - startedAt };
+}
+
+async function getCachedKit(supabase: any, kitId: string) {
+  const now = nowMs();
+  const cached = kitCache.get(kitId);
+  if (cached && cached.expiresAt > now) return { data: cached.value, cacheHit: true, durationMs: 0 };
+
+  const startedAt = nowMs();
+  const { data } = await supabase
+    .from("kits")
+    .select("id,slug,name,artist,cover_url,description,lyrics,required_plan,allowed_plan_slugs,original_tone,default_tone,allow_pitch_shift,max_pitch_shift_semitones")
+    .eq("id", kitId)
+    .maybeSingle();
+
+  const value = (data ?? null) as CachedKit | null;
+  kitCache.set(kitId, { value, expiresAt: nowMs() + KIT_META_CACHE_TTL_MS });
+  return { data: value, cacheHit: false, durationMs: nowMs() - startedAt };
+}
+
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const startedAt = nowMs();
   const { id } = await params;
@@ -145,26 +210,28 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const rangeLabel = request.headers.get("range") ?? "full";
   const supabase = await createClient();
 
-  const audioFileStartedAt = nowMs();
-  const { data: audioFile } = await (supabase as any).from("kit_audio_files").select("id,kit_id,tone,name,r2_key,file_type,source_type").eq("id", id).maybeSingle();
-  const audioFileMs = nowMs() - audioFileStartedAt;
+  const audioFileResult = await getCachedAudioFile(supabase as any, id);
+  const audioFile = audioFileResult.data;
+  const audioFileMs = audioFileResult.durationMs;
+
   if (!audioFile) {
-    logAudioRoutePerf(id, "not_found", { totalMs: nowMs() - startedAt, audioFileMs, range: rangeLabel });
+    logAudioRoutePerf(id, "not_found", { totalMs: nowMs() - startedAt, audioFileMs, audioFileCacheHit: audioFileResult.cacheHit, range: rangeLabel });
     return new Response("Áudio não encontrado.", { status: 404 });
   }
   if (!audioFile.r2_key) return new Response("Áudio indisponível.", { status: 502 });
 
   const parallelStartedAt = nowMs();
   const [kitResult, plansResult, context] = await Promise.all([
-    (supabase as any).from("kits").select("id,slug,name,artist,cover_url,description,lyrics,required_plan,allowed_plan_slugs,original_tone,default_tone,allow_pitch_shift,max_pitch_shift_semitones").eq("id", audioFile.kit_id).maybeSingle(),
+    getCachedKit(supabase as any, audioFile.kit_id),
     getCachedPlans(supabase as any),
     getCurrentUserAccessContext(),
   ]);
   const parallelMs = nowMs() - parallelStartedAt;
   const kit = kitResult.data;
   const plans = plansResult.plans;
+
   if (!kit) {
-    logAudioRoutePerf(id, "kit_not_found", { totalMs: nowMs() - startedAt, audioFileMs, parallelMs, range: rangeLabel });
+    logAudioRoutePerf(id, "kit_not_found", { totalMs: nowMs() - startedAt, audioFileMs, parallelMs, audioFileCacheHit: audioFileResult.cacheHit, kitCacheHit: kitResult.cacheHit, range: rangeLabel });
     return new Response("Kit não encontrado.", { status: 404 });
   }
 
@@ -236,7 +303,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const status = range ? 206 : 200;
   const headers = new Headers();
   headers.set("Content-Type", resolveAudioContentType(audioFile.file_type, streamResponse.ContentType));
-  headers.set("Cache-Control", "private, max-age=300, stale-while-revalidate=300");
+  headers.set("Cache-Control", "private, max-age=600, stale-while-revalidate=600");
   headers.set("Accept-Ranges", "bytes");
   headers.set("Content-Disposition", `inline; filename=\"${safeFilename(audioFile.name, audioFile.file_type)}\"`);
   headers.set("X-Content-Type-Options", "nosniff");
@@ -245,6 +312,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   headers.set("X-Audio-Supabase-Time", String(audioFileMs + parallelMs));
   headers.set("X-Audio-Access-Time", String(accessMs));
   headers.set("X-Audio-R2-Time", String(r2Ms));
+  headers.set("X-Audio-Meta-Cache", audioFileResult.cacheHit ? "hit" : "miss");
+  headers.set("X-Audio-Kit-Cache", kitResult.cacheHit ? "hit" : "miss");
   if (streamResponse.ETag) headers.set("ETag", streamResponse.ETag);
   if (streamResponse.LastModified) headers.set("Last-Modified", streamResponse.LastModified.toUTCString());
   if (streamResponse.ContentRange) headers.set("Content-Range", streamResponse.ContentRange);
@@ -256,6 +325,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     supabaseMs: audioFileMs + parallelMs,
     audioFileMs,
     parallelMs,
+    audioFileCacheHit: audioFileResult.cacheHit,
+    kitCacheHit: kitResult.cacheHit,
     plansCacheHit: plansResult.cacheHit,
     plansMs: plansResult.durationMs ?? 0,
     resolveKitAccessMs: accessMs,
@@ -264,7 +335,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     responseStatus: status,
     contentLength: streamResponse.ContentLength ?? null,
     contentRange: streamResponse.ContentRange ?? null,
-    streamingMode: "api-to-r2-direct-stream",
+    streamingMode: "api-to-r2-direct-stream-cached-meta",
   });
 
   if (shouldTrackPlayback) {
