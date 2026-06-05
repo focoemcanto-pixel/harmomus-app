@@ -31,11 +31,8 @@ export function MetaFunnelEvent({ eventName, dedupeKey, params, customEventName 
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const storageKey = `meta_funnel_${eventName}_${dedupeKey}`;
+    const storageKey = `meta_funnel_${eventName}_${customEventName ?? "standard"}_${dedupeKey}`;
     if (window.localStorage.getItem(storageKey)) return;
-
-    const fbq = (window as any).fbq;
-    if (typeof fbq !== "function") return;
 
     const attribution = readAttribution();
     const payload = {
@@ -45,11 +42,16 @@ export function MetaFunnelEvent({ eventName, dedupeKey, params, customEventName 
       ...params,
     };
 
-    fbq("track", eventName, payload);
+    const fbq = (window as any).fbq;
+    if (typeof fbq === "function") {
+      fbq("track", eventName, payload);
+      if (customEventName) fbq("trackCustom", customEventName, payload);
+    }
+
     if (customEventName) {
-      fbq("trackCustom", customEventName, payload);
       recordFunnelEvent(customEventName, payload, `${eventName}_${dedupeKey}`);
     }
+
     window.localStorage.setItem(storageKey, new Date().toISOString());
   }, [eventName, dedupeKey, params, customEventName]);
 
