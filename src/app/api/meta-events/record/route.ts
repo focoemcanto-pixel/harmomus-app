@@ -59,7 +59,11 @@ function formatSheetTimestamp(date = new Date()) {
 function extractEmail(value: unknown) {
   const text = String(value ?? "").trim();
   const match = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
-  return match?.[0]?.toLowerCase() ?? null;
+  if (!match?.[0]) return null;
+
+  return match[0]
+    .replace(/^(lead|lead_free_signup|complete_registration|complete_registration_first_login|complete_registration_email_confirmed|initiatecheckout|initiatecheckout_premium|purchase|purchase_premium)[_-]+/i, "")
+    .toLowerCase();
 }
 
 function getCustomerEmail(input: { eventId: string | null; payload: Record<string, unknown> }) {
@@ -72,8 +76,6 @@ function getCustomerEmail(input: { eventId: string | null; payload: Record<strin
 }
 
 function normalizeSheetEventId(input: { eventName: string; eventId: string | null; customerEmail: string | null }) {
-  // O Apps Script atual usa event_id como coluna C da planilha.
-  // Para leads, a coluna C precisa ser o e-mail limpo do cliente, não o nome do evento.
   if (input.customerEmail) return input.customerEmail;
   if (!input.eventId) return null;
   return input.eventId;
@@ -98,7 +100,6 @@ function sheetRow(input: {
     customer_email: customerEmail,
     conversion_id: input.eventId,
 
-    // Campos canonicos: precisam bater exatamente com os cabecalhos da planilha/webhook.
     utm_source: input.attribution.utm_source,
     utm_medium: input.attribution.utm_medium,
     utm_campaign: input.attribution.utm_campaign,
@@ -107,7 +108,6 @@ function sheetRow(input: {
     fbclid: input.attribution.fbclid,
     gclid: input.attribution.gclid,
 
-    // Aliases descritivos mantidos para compatibilidade com versoes antigas do Apps Script.
     utm_medium_publico_conjunto: input.attribution.utm_medium,
     utm_term_posicionamento: input.attribution.utm_term,
     utm_content_criativo: input.attribution.utm_content,
