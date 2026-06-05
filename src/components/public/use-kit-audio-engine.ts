@@ -35,6 +35,18 @@ function createAudioElement(preload: "metadata" | "auto") {
   return audio;
 }
 
+function stopAudioElement(audio: HTMLAudioElement | null | undefined, options: { resetTime?: boolean; clearSource?: boolean } = {}) {
+  if (!audio) return;
+  try { audio.pause(); } catch {}
+  if (options.resetTime !== false) {
+    try { audio.currentTime = 0; } catch {}
+  }
+  if (options.clearSource) {
+    try { audio.removeAttribute("src"); } catch {}
+    try { audio.load(); } catch {}
+  }
+}
+
 const MAX_AUDIO_CACHE_SIZE = 12;
 const HAVE_CURRENT_DATA = 2;
 const HAVE_FUTURE_DATA = 3;
@@ -180,15 +192,21 @@ export function useKitAudioEngine() {
     return audioRef.current;
   }, []);
 
+  const stopAllAudioElements = useCallback((options: { resetTime?: boolean; clearSources?: boolean } = {}) => {
+    stopAudioElement(audioRef.current, { resetTime: options.resetTime, clearSource: options.clearSources });
+    stopAudioElement(preloaderRef.current, { resetTime: options.resetTime, clearSource: options.clearSources });
+    audioCacheRef.current.forEach((cachedAudio) => {
+      stopAudioElement(cachedAudio, { resetTime: options.resetTime, clearSource: options.clearSources });
+    });
+  }, []);
+
   const trimAudioCache = useCallback((keepIdentity?: string) => {
     if (audioCacheRef.current.size <= MAX_AUDIO_CACHE_SIZE) return;
     for (const [key, cachedAudio] of audioCacheRef.current) {
       if (audioCacheRef.current.size <= MAX_AUDIO_CACHE_SIZE) break;
       if (key === keepIdentity) continue;
       if (cachedAudio === audioRef.current || cachedAudio === preloaderRef.current) continue;
-      try { cachedAudio.pause(); } catch {}
-      cachedAudio.removeAttribute("src");
-      try { cachedAudio.load(); } catch {}
+      stopAudioElement(cachedAudio, { clearSource: true });
       audioCacheRef.current.delete(key);
     }
   }, []);
@@ -229,11 +247,7 @@ export function useKitAudioEngine() {
     try { pitchControllerRef.current?.dispose(); } catch {}
     pitchControllerRef.current = null;
 
-    const audio = audioRef.current;
-    if (audio) {
-      try { audio.pause(); } catch {}
-      try { audio.currentTime = 0; } catch {}
-    }
+    stopAllAudioElements({ resetTime: true });
 
     setIsPlaying(false);
     setCurrentTime(0);
@@ -241,19 +255,15 @@ export function useKitAudioEngine() {
     setErrorMessage(null);
     setTrack(null);
     trackRef.current = null;
-  }, [cancelRaf]);
+  }, [cancelRaf, stopAllAudioElements]);
 
   const disposePlaybackSession = useCallback(async () => {
     hardInvalidatePlayback();
 
-    const preloader = preloaderRef.current;
-    if (preloader) {
-      try { preloader.pause(); } catch {}
-      preloader.removeAttribute("src");
-      preloadedSrcRef.current = null;
-      try { preloader.load(); } catch {}
-    }
-  }, [hardInvalidatePlayback]);
+    stopAllAudioElements({ resetTime: true, clearSources: true });
+    audioCacheRef.current.clear();
+    preloadedSrcRef.current = null;
+  }, [hardInvalidatePlayback, stopAllAudioElements]);
 
   const runTransition = useCallback(async (operation: () => Promise<void>) => {
     const queued = transitionLockRef.current.catch(() => undefined).then(operation);
@@ -317,9 +327,9 @@ export function useKitAudioEngine() {
       setMediaSessionActionHandlers({
         play: () => { void playTrack(fastTrack); },
         pause: () => {
-          const currentAudio = audioRef.current;
+          abortRef.current?.abort("media-session-pause");
           try { pitchControllerRef.current?.pause(); } catch {}
-          try { currentAudio?.pause(); } catch {}
+          stopAllAudioElements({ resetTime: false });
           setIsPlaying(false);
         },
         seekbackward: () => {
@@ -422,7 +432,7 @@ export function useKitAudioEngine() {
         setErrorMessage(normalizePlaybackError(error));
       }
     });
-  }, [ensureAudio, getCachedAudio, hardInvalidatePlayback, runTransition, startRafLoop]);
+  }, [ensureAudio, getCachedAudio, hardInvalidatePlayback, runTransition, startRafLoop, stopAllAudioElements]);
 
   const togglePlay = useCallback(async () => {
     const audio = audioRef.current;
@@ -431,13 +441,13 @@ export function useKitAudioEngine() {
     if (isPlaying) {
       abortRef.current?.abort("pause");
       try { pitchControllerRef.current?.pause(); } catch {}
-      audio.pause();
+      stopAllAudioElements({ resetTime: false });
       setIsPlaying(false);
       return;
     }
 
     await playTrack(trackRef.current);
-  }, [isPlaying, playTrack]);
+  }, [isPlaying, playTrack, stopAllAudioElements]);
 
   const seekTo = useCallback((seconds: number) => {
     const audio = audioRef.current;
@@ -460,6 +470,9 @@ export function useKitAudioEngine() {
     setVolume(next);
     if (audioRef.current) audioRef.current.volume = next;
     if (preloaderRef.current) preloaderRef.current.volume = next;
+    audioCacheRef.current.forEach((cachedAudio) => {
+      cachedAudio.volume = next;
+    });
   }, []);
 
   const setLoopValue = useCallback((value: boolean) => {
@@ -471,10 +484,20 @@ export function useKitAudioEngine() {
   useEffect(() => {
     ensureAudio();
     return () => {
-      hardInvalidatePlayback();
       void runTransition(disposePlaybackSession);
     };
-  }, [disposePlaybackSession, ensureAudio, hardInvalidatePlayback, runTransition]);
+  }, [disposePlaybackSession, ensureAudio, runTransition]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) hardInvalidatePlayback();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [hardInvalidatePlayback]);
 
   return {
     audioRef,
