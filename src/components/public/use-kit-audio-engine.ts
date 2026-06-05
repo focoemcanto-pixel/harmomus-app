@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { resolveFastAudioUrl } from "@/lib/audio/fast-audio-url";
 import { getPitchEngine, type PitchPlaybackController } from "@/lib/audio/pitch-engine";
 
 export interface KitTrack {
@@ -14,9 +15,17 @@ export interface KitTrack {
   artworkUrl?: string | null;
 }
 
+function normalizeTrackSource(track: KitTrack): KitTrack {
+  return {
+    ...track,
+    src: resolveFastAudioUrl(track.src),
+  };
+}
+
 function getTrackIdentity(track: KitTrack | null | undefined) {
   if (!track) return "";
-  return [track.trackId ?? track.src, track.src, track.title, String(track.semitoneShift ?? 0)].join("::");
+  const src = resolveFastAudioUrl(track.src);
+  return [track.trackId ?? src, src, track.title, String(track.semitoneShift ?? 0)].join("::");
 }
 
 function createAudioElement(preload: "metadata" | "auto") {
@@ -185,15 +194,16 @@ export function useKitAudioEngine() {
   }, []);
 
   const getCachedAudio = useCallback((identity: string, src: string, preload: "metadata" | "auto") => {
+    const fastSrc = resolveFastAudioUrl(src);
     const cached = audioCacheRef.current.get(identity);
     if (cached) {
       cached.preload = preload;
-      if (!cached.src) cached.src = src;
+      if (!cached.src) cached.src = fastSrc;
       return cached;
     }
 
     const audio = createAudioElement(preload);
-    audio.src = src;
+    audio.src = fastSrc;
     audioCacheRef.current.set(identity, audio);
     trimAudioCache(identity);
     return audio;
@@ -264,29 +274,31 @@ export function useKitAudioEngine() {
   }, [cancelRaf]);
 
   const preloadTrack = useCallback((nextTrack: KitTrack, mode: "metadata" | "auto" = "auto") => {
-    if ((nextTrack.semitoneShift ?? 0) !== 0 || !nextTrack.src) return;
-    const identity = getTrackIdentity(nextTrack);
-    const cachedAudio = getCachedAudio(identity, nextTrack.src, mode);
+    const fastTrack = normalizeTrackSource(nextTrack);
+    if ((fastTrack.semitoneShift ?? 0) !== 0 || !fastTrack.src) return;
+    const identity = getTrackIdentity(fastTrack);
+    const cachedAudio = getCachedAudio(identity, fastTrack.src, mode);
 
-    if (audioRef.current !== cachedAudio && preloadedSrcRef.current !== nextTrack.src) {
+    if (audioRef.current !== cachedAudio && preloadedSrcRef.current !== fastTrack.src) {
       preloaderRef.current = cachedAudio;
-      preloadedSrcRef.current = nextTrack.src;
+      preloadedSrcRef.current = fastTrack.src;
     }
 
     cachedAudio.preload = mode;
-    if (!cachedAudio.src) cachedAudio.src = nextTrack.src;
+    if (!cachedAudio.src) cachedAudio.src = fastTrack.src;
     warmAudio(cachedAudio);
   }, [getCachedAudio]);
 
   const playTrack = useCallback(async (nextTrack: KitTrack) => {
-    if (!nextTrack.src) return;
+    const fastTrack = normalizeTrackSource(nextTrack);
+    if (!fastTrack.src) return;
 
-    const identity = getTrackIdentity(nextTrack);
+    const identity = getTrackIdentity(fastTrack);
     const clickAt = nowPerf();
-    const metric: PlaybackMetric = { id: identity, src: nextTrack.src, clickAt };
+    const metric: PlaybackMetric = { id: identity, src: fastTrack.src, clickAt };
     playbackMetricRef.current = metric;
     logPlaybackMetric(metric, "PLAY_CLICK");
-    const canReusePreloader = (nextTrack.semitoneShift ?? 0) === 0 && preloadedSrcRef.current === nextTrack.src && preloaderRef.current?.src;
+    const canReusePreloader = (fastTrack.semitoneShift ?? 0) === 0 && preloadedSrcRef.current === fastTrack.src && preloaderRef.current?.src;
 
     hardInvalidatePlayback();
     const requestSerial = requestSerialRef.current;
@@ -299,11 +311,11 @@ export function useKitAudioEngine() {
       sessionIdRef.current = sessionId;
       activeIdentityRef.current = identity;
       setErrorMessage(null);
-      setTrack(nextTrack);
-      trackRef.current = nextTrack;
-      updateMediaSessionMetadata(nextTrack);
+      setTrack(fastTrack);
+      trackRef.current = fastTrack;
+      updateMediaSessionMetadata(fastTrack);
       setMediaSessionActionHandlers({
-        play: () => { void playTrack(nextTrack); },
+        play: () => { void playTrack(fastTrack); },
         pause: () => {
           const currentAudio = audioRef.current;
           try { pitchControllerRef.current?.pause(); } catch {}
@@ -324,8 +336,8 @@ export function useKitAudioEngine() {
       abortRef.current = abortController;
 
       let reusedPreloader = false;
-      if ((nextTrack.semitoneShift ?? 0) === 0) {
-        audio = getCachedAudio(identity, nextTrack.src, "auto");
+      if ((fastTrack.semitoneShift ?? 0) === 0) {
+        audio = getCachedAudio(identity, fastTrack.src, "auto");
         audioRef.current = audio;
         reusedPreloader = Boolean(canReusePreloader);
         if (preloaderRef.current === audio) preloadedSrcRef.current = null;
@@ -336,7 +348,7 @@ export function useKitAudioEngine() {
         preloadedSrcRef.current = null;
         reusedPreloader = true;
       } else {
-        audio.src = nextTrack.src;
+        audio.src = fastTrack.src;
       }
 
       metric.fetchStartAt = nowPerf();
@@ -347,7 +359,7 @@ export function useKitAudioEngine() {
 
       const onCanPlay = () => {
         if (playbackMetricRef.current !== metric) return;
-        metric.fetchEndAt = readResourceResponseEnd(nextTrack.src, nowPerf());
+        metric.fetchEndAt = readResourceResponseEnd(fastTrack.src, nowPerf());
         metric.canplayAt = nowPerf();
         logPlaybackMetric(metric, "FETCH_AUDIO_END");
         logPlaybackMetric(metric, "AUDIO_CANPLAY");
@@ -355,7 +367,7 @@ export function useKitAudioEngine() {
       const onPlaying = () => {
         if (playbackMetricRef.current !== metric) return;
         if (!metric.canplayAt) {
-          metric.fetchEndAt = readResourceResponseEnd(nextTrack.src, nowPerf());
+          metric.fetchEndAt = readResourceResponseEnd(fastTrack.src, nowPerf());
           metric.canplayAt = nowPerf();
         }
         metric.playingAt = nowPerf();
@@ -374,7 +386,7 @@ export function useKitAudioEngine() {
       );
 
       try {
-        const shift = nextTrack.semitoneShift ?? 0;
+        const shift = fastTrack.semitoneShift ?? 0;
         if (shift === 0) {
           if (!isStillCurrent()) return;
           try {
@@ -382,7 +394,7 @@ export function useKitAudioEngine() {
           } catch (firstPlayError) {
             if (!reusedPreloader || !isStillCurrent()) throw firstPlayError;
 
-            const fallbackAudio = getCachedAudio(`${identity}::fallback`, nextTrack.src, "auto");
+            const fallbackAudio = getCachedAudio(`${identity}::fallback`, fastTrack.src, "auto");
             fallbackAudio.volume = volumeRef.current;
             fallbackAudio.loop = loopRef.current;
             audioRef.current = fallbackAudio;
