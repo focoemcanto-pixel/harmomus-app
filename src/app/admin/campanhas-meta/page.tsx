@@ -6,41 +6,10 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const OWNER_EMAILS = new Set(["markuezemarquinhos@hotmail.com", "markuezemarquinhos@gmail.com", "banda.harmonics@hotmail.com", "bandamarcosfive@gmail.com"]);
-const ACTIVE_STATUSES = new Set(["active", "trialing", "past_due", "overdue"]);
 const UNKNOWN = "Não identificado";
-const FUNNEL_EVENTS = ["Lead_free_signup", "CompleteRegistration_first_login", "InitiateCheckout_premium", "Purchase_premium"] as const;
+const FUNNEL_EVENTS = ["Lead_free_signup", "CompleteRegistration_email_confirmed", "CompleteRegistration_first_login", "InitiateCheckout_premium", "Purchase_premium"] as const;
+const ACTIVATION_EVENTS = new Set(["CompleteRegistration_email_confirmed", "CompleteRegistration_first_login"]);
 const TEST_PATTERNS = ["teste", "test_", "diagnostico", "diagnostic"];
-
-const FALLBACK_PRICES: Record<string, number> = {
-  free: 0,
-  plus: 19.9,
-  premium: 39.9,
-  ministry_10: 397,
-  ministry_20: 697,
-  ministry_40: 1297,
-};
-
-type ProfileInfo = { email?: string | null; full_name?: string | null };
-type PlanInfo = { slug?: string | null; name?: string | null; price_cents?: number | null };
-
-type SubscriptionRow = {
-  id: string;
-  user_id?: string | null;
-  plan_id?: string | null;
-  status?: string | null;
-  utm_source?: string | null;
-  utm_medium?: string | null;
-  utm_campaign?: string | null;
-  utm_content?: string | null;
-  utm_term?: string | null;
-  fbclid?: string | null;
-  gclid?: string | null;
-  created_at?: string | null;
-  updated_at?: string | null;
-  profiles?: ProfileInfo | ProfileInfo[] | null;
-  plans?: PlanInfo | PlanInfo[] | null;
-};
 
 type MetaFunnelEventRow = {
   id: string;
@@ -48,6 +17,7 @@ type MetaFunnelEventRow = {
   event_id?: string | null;
   user_id?: string | null;
   anonymous_id?: string | null;
+  event_source_url?: string | null;
   utm_source?: string | null;
   utm_medium?: string | null;
   utm_campaign?: string | null;
@@ -59,17 +29,17 @@ type MetaFunnelEventRow = {
   created_at?: string | null;
 };
 
-type RankedGroup = {
+type RankedEventGroup = {
   key: string;
   label: string;
   campaign: string;
   source: string;
   medium: string;
-  subscribers: number;
-  active: number;
-  plus: number;
-  premium: number;
-  mrr: number;
+  lead: number;
+  activation: number;
+  checkout: number;
+  purchase: number;
+  revenue: number;
   lastAt: string | null;
 };
 
@@ -77,12 +47,14 @@ type ConversionFunnelGroup = {
   key: string;
   campaign: string;
   lead: number;
-  login: number;
+  activation: number;
   checkout: number;
   purchase: number;
-  leadToLogin: number;
-  loginToCheckout: number;
+  revenue: number;
+  leadToActivation: number;
+  activationToCheckout: number;
   checkoutToPremium: number;
+  leadToPremium: number;
   lastAt: string | null;
 };
 
@@ -95,6 +67,43 @@ function cleanLabel(value?: string | null, fallback = UNKNOWN) {
   return text || fallback;
 }
 
+function payloadText(row: MetaFunnelEventRow, key: string) {
+  const value = row.payload?.[key];
+  return typeof value === "string" || typeof value === "number" ? String(value) : null;
+}
+
+function payloadNumber(row: MetaFunnelEventRow, key: string) {
+  const value = row.payload?.[key];
+  const number = Number(value ?? 0);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function getSource(row: MetaFunnelEventRow) {
+  return cleanLabel(row.utm_source ?? payloadText(row, "utm_source"));
+}
+
+function getMedium(row: MetaFunnelEventRow) {
+  return cleanLabel(row.utm_medium ?? payloadText(row, "utm_medium"));
+}
+
+function getCampaign(row: MetaFunnelEventRow) {
+  return cleanLabel(row.utm_campaign ?? payloadText(row, "utm_campaign"));
+}
+
+function getCreative(row: MetaFunnelEventRow) {
+  return cleanLabel(row.utm_content ?? payloadText(row, "utm_content"));
+}
+
+function getPlacement(row: MetaFunnelEventRow) {
+  return cleanLabel(row.utm_term ?? payloadText(row, "utm_term"));
+}
+
+function getAttributionLabel(row: MetaFunnelEventRow, field: "utm_content" | "utm_medium" | "utm_term") {
+  if (field === "utm_content") return getCreative(row);
+  if (field === "utm_medium") return getMedium(row);
+  return getPlacement(row);
+}
+
 function isTestCampaign(value?: string | null) {
   const v = String(value || "").toLowerCase().trim();
 
@@ -105,63 +114,34 @@ function isTestCampaign(value?: string | null) {
   return TEST_PATTERNS.some((p) => v.includes(p));
 }
 
-function profileOf(row: SubscriptionRow): ProfileInfo | null {
-  return Array.isArray(row.profiles) ? (row.profiles[0] ?? null) : (row.profiles ?? null);
+function hasEventAttribution(row: MetaFunnelEventRow) {
+  return Boolean(
+    row.utm_source ||
+      row.utm_medium ||
+      row.utm_campaign ||
+      row.utm_content ||
+      row.utm_term ||
+      row.fbclid ||
+      row.gclid ||
+      payloadText(row, "utm_source") ||
+      payloadText(row, "utm_campaign") ||
+      payloadText(row, "fbclid"),
+  );
 }
 
-function planOf(row: SubscriptionRow): PlanInfo | null {
-  return Array.isArray(row.plans) ? (row.plans[0] ?? null) : (row.plans ?? null);
+function isMetaAttributed(row: MetaFunnelEventRow) {
+  const source = normalize(getSource(row));
+  return source.includes("facebook") || source.includes("instagram") || source.includes("meta") || Boolean(row.fbclid || payloadText(row, "fbclid"));
 }
 
-function isExcludedOwner(row: SubscriptionRow) {
-  return OWNER_EMAILS.has(normalize(profileOf(row)?.email));
+function isActivationEvent(eventName?: string | null) {
+  return ACTIVATION_EVENTS.has(String(eventName ?? ""));
 }
 
-function hasUtm(row: SubscriptionRow) {
-  return Boolean(row.utm_source || row.utm_medium || row.utm_campaign || row.utm_content || row.utm_term || row.fbclid || row.gclid);
-}
-
-function isMetaAttributed(row: SubscriptionRow) {
-  const source = normalize(row.utm_source);
-  return source.includes("facebook") || source.includes("instagram") || source.includes("meta") || Boolean(row.fbclid);
-}
-
-function isActive(row: SubscriptionRow) {
-  return ACTIVE_STATUSES.has(normalize(row.status));
-}
-
-function isPlus(row: SubscriptionRow) {
-  return normalize(planOf(row)?.slug) === "plus";
-}
-
-function isPremium(row: SubscriptionRow) {
-  const slug = normalize(planOf(row)?.slug);
-  return slug === "premium" || slug.startsWith("ministry");
-}
-
-function planPrice(row: SubscriptionRow) {
-  const plan = planOf(row);
-  const priceFromDb = Number(plan?.price_cents ?? 0);
-  if (priceFromDb > 0) return priceFromDb / 100;
-  const slug = normalize(plan?.slug) || "free";
-  if (slug in FALLBACK_PRICES) return FALLBACK_PRICES[slug];
-  if (slug.startsWith("ministry")) return FALLBACK_PRICES.ministry_10;
-  return 0;
-}
-
-function planLabel(row: SubscriptionRow) {
-  const plan = planOf(row);
-  if (plan?.name) return plan.name;
-  const slug = normalize(plan?.slug);
-  if (slug === "plus") return "Plus";
-  if (slug === "premium") return "Premium";
-  if (slug.startsWith("ministry")) return "Ministerial";
-  if (slug === "free") return "Free";
-  return UNKNOWN;
-}
-
-function mrrOf(rows: SubscriptionRow[]) {
-  return rows.filter(isActive).reduce((total, row) => total + planPrice(row), 0);
+function purchaseValue(row: MetaFunnelEventRow) {
+  if (row.event_name !== "Purchase_premium") return 0;
+  const value = payloadNumber(row, "value");
+  return value > 0 ? value : 39.9;
 }
 
 function formatCurrency(value: number) {
@@ -193,129 +173,89 @@ function formatDate(value?: string | null, withYear = false) {
   }).format(date);
 }
 
-function sortRankings<T extends { mrr: number; premium: number; subscribers?: number }>(items: T[]) {
-  return items.sort((a, b) => b.mrr - a.mrr || b.premium - a.premium || Number(b.subscribers ?? 0) - Number(a.subscribers ?? 0));
+function applyEventToGroup<T extends { lead: number; activation: number; checkout: number; purchase: number; revenue: number; lastAt: string | null }>(group: T, row: MetaFunnelEventRow) {
+  const eventName = row.event_name;
+
+  if (eventName === "Lead_free_signup") group.lead += 1;
+  if (isActivationEvent(eventName)) group.activation += 1;
+  if (eventName === "InitiateCheckout_premium") group.checkout += 1;
+  if (eventName === "Purchase_premium") {
+    group.purchase += 1;
+    group.revenue += purchaseValue(row);
+  }
+  if (!group.lastAt || (row.created_at && row.created_at > group.lastAt)) group.lastAt = row.created_at ?? group.lastAt;
 }
 
-function aggregateCampaigns(rows: SubscriptionRow[]) {
-  const map = new Map<string, RankedGroup>();
+function sortEventRankings(items: RankedEventGroup[]) {
+  return items.sort((a, b) => b.revenue - a.revenue || b.purchase - a.purchase || b.checkout - a.checkout || b.lead - a.lead || a.label.localeCompare(b.label));
+}
 
-  for (const row of rows) {
-    const source = cleanLabel(row.utm_source);
-    const medium = cleanLabel(row.utm_medium);
-    const campaign = cleanLabel(row.utm_campaign);
+function aggregateCampaigns(events: MetaFunnelEventRow[]) {
+  const map = new Map<string, RankedEventGroup>();
+
+  for (const row of events) {
+    const source = getSource(row);
+    const medium = getMedium(row);
+    const campaign = getCampaign(row);
     const key = `${normalize(source)}::${normalize(medium)}::${normalize(campaign)}`;
-    const current = map.get(key) ?? { key, label: campaign, campaign, source, medium, subscribers: 0, active: 0, plus: 0, premium: 0, mrr: 0, lastAt: null };
+    const current = map.get(key) ?? { key, label: campaign, campaign, source, medium, lead: 0, activation: 0, checkout: 0, purchase: 0, revenue: 0, lastAt: null };
 
-    current.subscribers += 1;
-    if (isActive(row)) {
-      current.active += 1;
-      current.mrr += planPrice(row);
-    }
-    if (isPlus(row)) current.plus += 1;
-    if (isPremium(row)) current.premium += 1;
-    if (!current.lastAt || (row.created_at && row.created_at > current.lastAt)) current.lastAt = row.created_at ?? current.lastAt;
+    applyEventToGroup(current, row);
     map.set(key, current);
   }
 
-  return sortRankings(Array.from(map.values()));
+  return sortEventRankings(Array.from(map.values()));
 }
 
-function aggregateByUtm(rows: SubscriptionRow[], field: "utm_content" | "utm_medium" | "utm_term") {
-  const map = new Map<string, RankedGroup>();
+function aggregateByUtm(events: MetaFunnelEventRow[], field: "utm_content" | "utm_medium" | "utm_term") {
+  const map = new Map<string, RankedEventGroup>();
 
-  for (const row of rows) {
-    const label = cleanLabel(row[field]);
-    const campaign = cleanLabel(row.utm_campaign);
+  for (const row of events) {
+    const label = getAttributionLabel(row, field);
+    const campaign = getCampaign(row);
+    const source = getSource(row);
+    const medium = getMedium(row);
     const key = `${normalize(label)}::${normalize(campaign)}`;
-    const current = map.get(key) ?? { key, label, campaign, source: cleanLabel(row.utm_source), medium: cleanLabel(row.utm_medium), subscribers: 0, active: 0, plus: 0, premium: 0, mrr: 0, lastAt: null };
+    const current = map.get(key) ?? { key, label, campaign, source, medium, lead: 0, activation: 0, checkout: 0, purchase: 0, revenue: 0, lastAt: null };
 
-    current.subscribers += 1;
-    if (isActive(row)) {
-      current.active += 1;
-      current.mrr += planPrice(row);
-    }
-    if (isPlus(row)) current.plus += 1;
-    if (isPremium(row)) current.premium += 1;
-    if (!current.lastAt || (row.created_at && row.created_at > current.lastAt)) current.lastAt = row.created_at ?? current.lastAt;
+    applyEventToGroup(current, row);
     map.set(key, current);
   }
 
-  return sortRankings(Array.from(map.values()));
-}
-
-function payloadText(row: MetaFunnelEventRow, key: string) {
-  const value = row.payload?.[key];
-  return typeof value === "string" || typeof value === "number" ? String(value) : null;
-}
-
-function funnelCampaign(row: MetaFunnelEventRow) {
-  return cleanLabel(row.utm_campaign ?? payloadText(row, "utm_campaign"));
+  return sortEventRankings(Array.from(map.values()));
 }
 
 function aggregateConversionFunnel(events: MetaFunnelEventRow[]) {
-  const map = new Map<string, Omit<ConversionFunnelGroup, "leadToLogin" | "loginToCheckout" | "checkoutToPremium">>();
+  const map = new Map<string, Omit<ConversionFunnelGroup, "leadToActivation" | "activationToCheckout" | "checkoutToPremium" | "leadToPremium">>();
 
   for (const row of events) {
-    const eventName = row.event_name;
-    if (!FUNNEL_EVENTS.includes(eventName as (typeof FUNNEL_EVENTS)[number])) continue;
-    if (isTestCampaign(row.utm_campaign)) continue;
-
-    const campaign = funnelCampaign(row);
+    const campaign = getCampaign(row);
     const key = normalize(campaign);
-    const current = map.get(key) ?? { key, campaign, lead: 0, login: 0, checkout: 0, purchase: 0, lastAt: null };
+    const current = map.get(key) ?? { key, campaign, lead: 0, activation: 0, checkout: 0, purchase: 0, revenue: 0, lastAt: null };
 
-    if (eventName === "Lead_free_signup") current.lead += 1;
-    if (eventName === "CompleteRegistration_first_login") current.login += 1;
-    if (eventName === "InitiateCheckout_premium") current.checkout += 1;
-    if (eventName === "Purchase_premium") current.purchase += 1;
-    if (!current.lastAt || (row.created_at && row.created_at > current.lastAt)) current.lastAt = row.created_at ?? current.lastAt;
+    applyEventToGroup(current, row);
     map.set(key, current);
   }
 
   return Array.from(map.values())
-    .map((group) => ({ ...group, leadToLogin: ratioPercent(group.login, group.lead), loginToCheckout: ratioPercent(group.checkout, group.login), checkoutToPremium: ratioPercent(group.purchase, group.checkout) }))
-    .sort((a, b) => b.purchase - a.purchase || b.checkout - a.checkout || b.login - a.login || b.lead - a.lead || a.campaign.localeCompare(b.campaign));
-}
-
-async function fetchSubscriptions() {
-  const supabase = createSupabaseAdminClient() as any;
-  const relationSelect = "id,user_id,plan_id,status,utm_source,utm_medium,utm_campaign,utm_content,utm_term,fbclid,gclid,created_at,updated_at,profiles(email,full_name),plans(slug,name,price_cents)";
-  const baseSelect = "id,user_id,plan_id,status,utm_source,utm_medium,utm_campaign,utm_content,utm_term,fbclid,gclid,created_at,updated_at";
-
-  const relationResult = await supabase.from("subscriptions").select(relationSelect).order("created_at", { ascending: false }).limit(1000);
-  if (!relationResult.error) return { rows: (relationResult.data ?? []) as SubscriptionRow[], errorMessage: null as string | null, fallbackMessage: null as string | null };
-
-  const baseResult = await supabase.from("subscriptions").select(baseSelect).order("created_at", { ascending: false }).limit(1000);
-  if (baseResult.error) return { rows: [] as SubscriptionRow[], errorMessage: baseResult.error.message as string | null, fallbackMessage: relationResult.error.message as string | null };
-
-  const rows = (baseResult.data ?? []) as SubscriptionRow[];
-  const userIds = Array.from(new Set(rows.map((row) => row.user_id).filter(Boolean)));
-  const planIds = Array.from(new Set(rows.map((row) => row.plan_id).filter(Boolean)));
-
-  const [profilesResult, plansResult] = await Promise.all([
-    userIds.length ? supabase.from("profiles").select("id,email,full_name").in("id", userIds) : Promise.resolve({ data: [], error: null }),
-    planIds.length ? supabase.from("plans").select("id,slug,name,price_cents").in("id", planIds) : Promise.resolve({ data: [], error: null }),
-  ]);
-
-  const profilesById = new Map<string, ProfileInfo>((profilesResult.data ?? []).map((profile: any) => [profile.id, { email: profile.email, full_name: profile.full_name }]));
-  const plansById = new Map<string, PlanInfo>((plansResult.data ?? []).map((plan: any) => [plan.id, { slug: plan.slug, name: plan.name, price_cents: plan.price_cents }]));
-
-  return {
-    rows: rows.map((row) => ({ ...row, profiles: row.user_id ? profilesById.get(row.user_id) : null, plans: row.plan_id ? plansById.get(row.plan_id) : null })),
-    errorMessage: null as string | null,
-    fallbackMessage: [relationResult.error.message, profilesResult.error ? `profiles: ${profilesResult.error.message}` : null, plansResult.error ? `plans: ${plansResult.error.message}` : null].filter(Boolean).join(" | "),
-  };
+    .map((group) => ({
+      ...group,
+      leadToActivation: ratioPercent(group.activation, group.lead),
+      activationToCheckout: ratioPercent(group.checkout, group.activation),
+      checkoutToPremium: ratioPercent(group.purchase, group.checkout),
+      leadToPremium: ratioPercent(group.purchase, group.lead),
+    }))
+    .sort((a, b) => b.purchase - a.purchase || b.checkout - a.checkout || b.activation - a.activation || b.lead - a.lead || a.campaign.localeCompare(b.campaign));
 }
 
 async function fetchMetaFunnelEvents() {
   const supabase = createSupabaseAdminClient() as any;
   const result = await supabase
     .from("meta_funnel_events")
-    .select("id,event_name,user_id,anonymous_id,event_id,utm_source,utm_medium,utm_campaign,utm_content,utm_term,fbclid,gclid,payload,created_at")
+    .select("id,event_name,user_id,anonymous_id,event_id,event_source_url,utm_source,utm_medium,utm_campaign,utm_content,utm_term,fbclid,gclid,payload,created_at")
     .in("event_name", FUNNEL_EVENTS)
     .order("created_at", { ascending: false })
-    .limit(5000);
+    .limit(10000);
 
   if (result.error) return { rows: [] as MetaFunnelEventRow[], errorMessage: result.error.message as string | null };
   return { rows: (result.data ?? []) as MetaFunnelEventRow[], errorMessage: null as string | null };
@@ -376,12 +316,6 @@ function DiagnosticAlert({ tone, title, description }: { tone: "cyan" | "emerald
   );
 }
 
-function StatusBadge({ status }: { status?: string | null }) {
-  const value = normalize(status);
-  const tone = value === "active" || value === "trialing" ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-100" : value === "pending" || value === "past_due" || value === "overdue" ? "border-amber-400/25 bg-amber-500/10 text-amber-100" : "border-white/10 bg-white/5 text-zinc-200";
-  return <span className={`rounded-full border px-2.5 py-1 text-xs ${tone}`}>{cleanLabel(status, "Sem status")}</span>;
-}
-
 function EmptyRow({ colSpan, message }: { colSpan: number; message: string }) {
   return (
     <tr>
@@ -392,17 +326,18 @@ function EmptyRow({ colSpan, message }: { colSpan: number; message: string }) {
   );
 }
 
-function RankingTable({ rows, labelTitle, emptyMessage }: { rows: RankedGroup[]; labelTitle: string; emptyMessage: string }) {
+function RankingTable({ rows, labelTitle, emptyMessage }: { rows: RankedEventGroup[]; labelTitle: string; emptyMessage: string }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[700px] text-left text-sm">
+      <table className="w-full min-w-[820px] text-left text-sm">
         <thead className="bg-white/[0.03] text-xs uppercase tracking-[0.16em] text-zinc-500">
           <tr>
             <th className="px-5 py-4">{labelTitle}</th>
             <th className="px-5 py-4">Campanha</th>
-            <th className="px-5 py-4">Assinantes</th>
+            <th className="px-5 py-4">Leads</th>
+            <th className="px-5 py-4">Checkouts</th>
             <th className="px-5 py-4">Premium</th>
-            <th className="px-5 py-4">MRR estimado</th>
+            <th className="px-5 py-4">Receita</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-white/10">
@@ -410,12 +345,13 @@ function RankingTable({ rows, labelTitle, emptyMessage }: { rows: RankedGroup[];
             <tr key={item.key} className="text-zinc-300 transition hover:bg-white/[0.03]">
               <td className="max-w-[260px] px-5 py-4"><span className="block truncate font-medium text-white">{item.label}</span></td>
               <td className="max-w-[240px] px-5 py-4"><span className="block truncate text-zinc-400">{item.campaign}</span></td>
-              <td className="px-5 py-4">{formatNumber(item.subscribers)}</td>
-              <td className="px-5 py-4 text-violet-100">{formatNumber(item.premium)}</td>
-              <td className="px-5 py-4 font-medium text-emerald-100">{formatCurrency(item.mrr)}</td>
+              <td className="px-5 py-4">{formatNumber(item.lead)}</td>
+              <td className="px-5 py-4 text-amber-100">{formatNumber(item.checkout)}</td>
+              <td className="px-5 py-4 text-violet-100">{formatNumber(item.purchase)}</td>
+              <td className="px-5 py-4 font-medium text-emerald-100">{formatCurrency(item.revenue)}</td>
             </tr>
           ))}
-          {!rows.length ? <EmptyRow colSpan={5} message={emptyMessage} /> : null}
+          {!rows.length ? <EmptyRow colSpan={6} message={emptyMessage} /> : null}
         </tbody>
       </table>
     </div>
@@ -423,31 +359,28 @@ function RankingTable({ rows, labelTitle, emptyMessage }: { rows: RankedGroup[];
 }
 
 export default async function CampanhasMetaPage() {
-  const [{ rows: fetchedRows, errorMessage, fallbackMessage }, { rows: funnelEvents, errorMessage: funnelErrorMessage }] = await Promise.all([fetchSubscriptions(), fetchMetaFunnelEvents()]);
-  const rows = fetchedRows.filter((row) => !isExcludedOwner(row) && !isTestCampaign(row.utm_campaign));
-  const productionFunnelEvents = funnelEvents.filter((event) => !isTestCampaign(event.utm_campaign));
-  const attributedRows = rows.filter(hasUtm);
-  const metaRows = attributedRows.filter(isMetaAttributed);
-  const rankingRows = metaRows.length ? metaRows : attributedRows;
+  const { rows: fetchedEvents, errorMessage: funnelErrorMessage } = await fetchMetaFunnelEvents();
+  const productionFunnelEvents = fetchedEvents.filter((event) => !isTestCampaign(getCampaign(event)));
+  const attributedEvents = productionFunnelEvents.filter(hasEventAttribution);
+  const metaEvents = attributedEvents.filter(isMetaAttributed);
+  const rankingEvents = metaEvents.length ? metaEvents : attributedEvents;
 
-  const campaigns = aggregateCampaigns(rankingRows).slice(0, 12);
-  const creatives = aggregateByUtm(rankingRows, "utm_content").slice(0, 12);
-  const audiences = aggregateByUtm(rankingRows, "utm_medium").slice(0, 12);
-  const placements = aggregateByUtm(rankingRows, "utm_term").slice(0, 12);
+  const campaigns = aggregateCampaigns(rankingEvents).slice(0, 12);
+  const creatives = aggregateByUtm(rankingEvents, "utm_content").slice(0, 12);
+  const audiences = aggregateByUtm(rankingEvents, "utm_medium").slice(0, 12);
+  const placements = aggregateByUtm(rankingEvents, "utm_term").slice(0, 12);
 
-  const coverage = rows.length ? (attributedRows.length / rows.length) * 100 : 0;
-  const premiumAttributed = attributedRows.filter(isPremium);
-  const plusAttributed = attributedRows.filter(isPlus);
-  const activePremiumAttributed = premiumAttributed.filter(isActive);
-  const lastTrackedConversion = attributedRows[0]?.created_at ?? null;
-  const freeTracked = attributedRows.filter((row) => normalize(planOf(row)?.slug) === "free");
   const conversionFunnel = aggregateConversionFunnel(productionFunnelEvents).slice(0, 20);
   const totalFunnelLeads = productionFunnelEvents.filter((row) => row.event_name === "Lead_free_signup").length;
-  const totalFunnelLogins = productionFunnelEvents.filter((row) => row.event_name === "CompleteRegistration_first_login").length;
+  const totalFunnelActivations = productionFunnelEvents.filter((row) => isActivationEvent(row.event_name)).length;
   const totalFunnelCheckouts = productionFunnelEvents.filter((row) => row.event_name === "InitiateCheckout_premium").length;
   const totalFunnelPurchases = productionFunnelEvents.filter((row) => row.event_name === "Purchase_premium").length;
+  const totalRevenue = productionFunnelEvents.reduce((total, row) => total + purchaseValue(row), 0);
   const averageLeadToPremium = ratioPercent(totalFunnelPurchases, totalFunnelLeads);
+  const averageCheckoutToPremium = ratioPercent(totalFunnelPurchases, totalFunnelCheckouts);
+  const coverage = productionFunnelEvents.length ? (attributedEvents.length / productionFunnelEvents.length) * 100 : 0;
   const lastFunnelEvent = productionFunnelEvents[0]?.created_at ?? null;
+  const lastTrackedConversion = attributedEvents[0]?.created_at ?? null;
 
   return (
     <div className="space-y-8">
@@ -460,53 +393,51 @@ export default async function CampanhasMetaPage() {
               <Sparkles className="h-3.5 w-3.5" /> Premium · Marketing
             </div>
             <h1 className="mt-4 text-3xl font-semibold tracking-tight text-white sm:text-4xl">Campanhas Meta</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">Acompanhe campanhas, criativos, públicos, posicionamentos, assinantes e receita atribuída por UTM.</p>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">Acompanhe campanhas, criativos, públicos, posicionamentos, leads, checkouts e vendas atribuídas por UTM.</p>
           </div>
           <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-zinc-300">
-            UTMs oficiais: <span className="font-medium text-white">source=MetaAds · medium=conjunto · campaign=campanha · term=posicionamento · content=criativo</span>
+            Fonte atual: <span className="font-medium text-white">meta_funnel_events</span>. UTMs oficiais: <span className="font-medium text-white">source=MetaAds · medium=conjunto · campaign=campanha · term=posicionamento · content=criativo</span>
           </div>
         </div>
       </header>
 
-      {errorMessage ? <DiagnosticAlert tone="rose" title="Falha ao carregar subscriptions" description={errorMessage} /> : null}
-      {fallbackMessage ? <DiagnosticAlert tone="amber" title="Relacionamento carregado por fallback" description="A consulta relacional profiles/plans falhou, então o painel buscou assinaturas, perfis e planos separadamente para continuar carregando." /> : null}
-      {funnelErrorMessage ? <DiagnosticAlert tone="amber" title="Funil pronto para leitura futura" description="A tabela meta_funnel_events ainda não está disponível neste ambiente ou a migration não foi aplicada. O dashboard existente continua usando subscriptions normalmente." /> : null}
+      {funnelErrorMessage ? <DiagnosticAlert tone="amber" title="Funil indisponível" description="A tabela meta_funnel_events ainda não está disponível neste ambiente ou a migration não foi aplicada." /> : null}
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-        <MetricCard title="Taxa média Lead → Premium" value={formatPercent(averageLeadToPremium)} caption={`${formatNumber(totalFunnelPurchases)} compras premium / ${formatNumber(totalFunnelLeads)} leads`} tone="rose" icon={Trophy} />
-        <MetricCard title="Assinaturas rastreadas" value={formatNumber(attributedRows.length)} caption={`${formatNumber(rows.length)} assinaturas analisadas`} tone="cyan" icon={Users} />
-        <MetricCard title="Premium atribuídos" value={formatNumber(premiumAttributed.length)} caption={`${formatNumber(activePremiumAttributed.length)} premium ativos`} tone="violet" icon={Sparkles} />
-        <MetricCard title="Plus atribuídos" value={formatNumber(plusAttributed.length)} caption="Assinantes Plus com UTM/fbclid/gclid" tone="emerald" icon={BadgeCheck} />
-        <MetricCard title="MRR estimado" value={formatCurrency(mrrOf(attributedRows))} caption="Planos ativos com preço do banco ou fallback" tone="emerald" icon={TrendingUp} />
-        <MetricCard title="Cobertura UTM" value={formatPercent(coverage)} caption="Percentual de assinaturas com rastreamento" tone={coverage < 50 ? "amber" : "cyan"} icon={Target} />
+        <MetricCard title="Lead → Premium" value={formatPercent(averageLeadToPremium)} caption={`${formatNumber(totalFunnelPurchases)} compras / ${formatNumber(totalFunnelLeads)} leads`} tone="rose" icon={Trophy} />
+        <MetricCard title="Checkout → Premium" value={formatPercent(averageCheckoutToPremium)} caption={`${formatNumber(totalFunnelPurchases)} compras / ${formatNumber(totalFunnelCheckouts)} checkouts`} tone="amber" icon={ShoppingCart} />
+        <MetricCard title="Leads rastreados" value={formatNumber(totalFunnelLeads)} caption="Cadastros gratuitos capturados" tone="cyan" icon={Users} />
+        <MetricCard title="Ativações" value={formatNumber(totalFunnelActivations)} caption="E-mails confirmados / primeiros acessos" tone="violet" icon={LogIn} />
+        <MetricCard title="Receita atribuída" value={formatCurrency(totalRevenue)} caption="Soma dos Purchase_premium atribuídos" tone="emerald" icon={TrendingUp} />
+        <MetricCard title="Cobertura UTM" value={formatPercent(coverage)} caption={`${formatNumber(attributedEvents.length)} de ${formatNumber(productionFunnelEvents.length)} eventos com rastreio`} tone={coverage < 50 ? "amber" : "cyan"} icon={Target} />
       </section>
 
-      <SectionCard eyebrow="Fase 2 · Funil de Conversão" title="Funil de Conversão por campanha" description="Eventos Meta agrupados por utm_campaign e ordenados por Purchase_premium.">
+      <SectionCard eyebrow="Fase 2 · Funil de Conversão" title="Funil de Conversão por campanha" description="Eventos agrupados por utm_campaign e ordenados por Purchase_premium.">
         <div className="grid gap-4 border-b border-white/10 p-5 md:grid-cols-4">
           <div className="rounded-2xl border border-cyan-400/15 bg-cyan-500/10 p-4"><div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-cyan-100/75"><Users className="h-4 w-4" /> Leads</div><p className="mt-2 text-2xl font-semibold text-white">{formatNumber(totalFunnelLeads)}</p></div>
-          <div className="rounded-2xl border border-violet-400/15 bg-violet-500/10 p-4"><div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-violet-100/75"><LogIn className="h-4 w-4" /> Logins</div><p className="mt-2 text-2xl font-semibold text-white">{formatNumber(totalFunnelLogins)}</p></div>
+          <div className="rounded-2xl border border-violet-400/15 bg-violet-500/10 p-4"><div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-violet-100/75"><LogIn className="h-4 w-4" /> Ativações</div><p className="mt-2 text-2xl font-semibold text-white">{formatNumber(totalFunnelActivations)}</p></div>
           <div className="rounded-2xl border border-amber-400/15 bg-amber-500/10 p-4"><div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-amber-100/75"><ShoppingCart className="h-4 w-4" /> Checkouts</div><p className="mt-2 text-2xl font-semibold text-white">{formatNumber(totalFunnelCheckouts)}</p></div>
           <div className="rounded-2xl border border-emerald-400/15 bg-emerald-500/10 p-4"><div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-100/75"><Sparkles className="h-4 w-4" /> Premium</div><p className="mt-2 text-2xl font-semibold text-white">{formatNumber(totalFunnelPurchases)}</p></div>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1180px] text-left text-sm">
-            <thead className="bg-white/[0.03] text-xs uppercase tracking-[0.16em] text-zinc-500"><tr><th className="px-5 py-4">Campanha</th><th className="px-5 py-4">Lead_free_signup</th><th className="px-5 py-4">CompleteRegistration_first_login</th><th className="px-5 py-4">InitiateCheckout_premium</th><th className="px-5 py-4">Purchase_premium</th><th className="px-5 py-4">Lead → Login %</th><th className="px-5 py-4">Login → Checkout %</th><th className="px-5 py-4">Checkout → Premium %</th><th className="px-5 py-4">Último evento</th></tr></thead>
+          <table className="w-full min-w-[1280px] text-left text-sm">
+            <thead className="bg-white/[0.03] text-xs uppercase tracking-[0.16em] text-zinc-500"><tr><th className="px-5 py-4">Campanha</th><th className="px-5 py-4">Leads</th><th className="px-5 py-4">Ativações</th><th className="px-5 py-4">Checkouts</th><th className="px-5 py-4">Premium</th><th className="px-5 py-4">Receita</th><th className="px-5 py-4">Lead → Ativação</th><th className="px-5 py-4">Ativação → Checkout</th><th className="px-5 py-4">Checkout → Premium</th><th className="px-5 py-4">Lead → Premium</th><th className="px-5 py-4">Último evento</th></tr></thead>
             <tbody className="divide-y divide-white/10">
-              {conversionFunnel.map((campaign) => (<tr key={campaign.key} className="text-zinc-300 transition hover:bg-white/[0.03]"><td className="max-w-[300px] px-5 py-4"><span className="block truncate font-medium text-white">{campaign.campaign}</span></td><td className="px-5 py-4">{formatNumber(campaign.lead)}</td><td className="px-5 py-4 text-violet-100">{formatNumber(campaign.login)}</td><td className="px-5 py-4 text-amber-100">{formatNumber(campaign.checkout)}</td><td className="px-5 py-4 font-semibold text-emerald-100">{formatNumber(campaign.purchase)}</td><td className="px-5 py-4">{formatPercent(campaign.leadToLogin)}</td><td className="px-5 py-4">{formatPercent(campaign.loginToCheckout)}</td><td className="px-5 py-4">{formatPercent(campaign.checkoutToPremium)}</td><td className="px-5 py-4 text-zinc-500">{formatDate(campaign.lastAt, true)}</td></tr>))}
-              {!conversionFunnel.length ? <EmptyRow colSpan={9} message="Nenhum evento de funil armazenado ainda." /> : null}
+              {conversionFunnel.map((campaign) => (<tr key={campaign.key} className="text-zinc-300 transition hover:bg-white/[0.03]"><td className="max-w-[300px] px-5 py-4"><span className="block truncate font-medium text-white">{campaign.campaign}</span></td><td className="px-5 py-4">{formatNumber(campaign.lead)}</td><td className="px-5 py-4 text-violet-100">{formatNumber(campaign.activation)}</td><td className="px-5 py-4 text-amber-100">{formatNumber(campaign.checkout)}</td><td className="px-5 py-4 font-semibold text-emerald-100">{formatNumber(campaign.purchase)}</td><td className="px-5 py-4 font-semibold text-emerald-100">{formatCurrency(campaign.revenue)}</td><td className="px-5 py-4">{formatPercent(campaign.leadToActivation)}</td><td className="px-5 py-4">{formatPercent(campaign.activationToCheckout)}</td><td className="px-5 py-4">{formatPercent(campaign.checkoutToPremium)}</td><td className="px-5 py-4">{formatPercent(campaign.leadToPremium)}</td><td className="px-5 py-4 text-zinc-500">{formatDate(campaign.lastAt, true)}</td></tr>))}
+              {!conversionFunnel.length ? <EmptyRow colSpan={11} message="Nenhum evento de funil armazenado ainda." /> : null}
             </tbody>
           </table>
         </div>
-        <div className="border-t border-white/10 px-5 py-4 text-xs leading-5 text-zinc-500">Último evento de funil: <span className="text-zinc-300">{formatDate(lastFunnelEvent, true)}</span>. Eventos lidos: Lead_free_signup, CompleteRegistration_first_login, InitiateCheckout_premium e Purchase_premium.</div>
+        <div className="border-t border-white/10 px-5 py-4 text-xs leading-5 text-zinc-500">Último evento de funil: <span className="text-zinc-300">{formatDate(lastFunnelEvent, true)}</span>. Eventos lidos: Lead_free_signup, CompleteRegistration_email_confirmed, CompleteRegistration_first_login, InitiateCheckout_premium e Purchase_premium.</div>
       </SectionCard>
 
       <section className="grid gap-5 xl:grid-cols-[1.3fr_0.7fr]">
-        <SectionCard eyebrow="Ranking por campanha" title="Campanhas com maior receita atribuída" description="Agrupamento por utm_source + utm_medium + utm_campaign. No padrão atual, utm_medium representa conjunto/público.">
+        <SectionCard eyebrow="Ranking por campanha" title="Campanhas com maior receita atribuída" description="Agrupamento por utm_source + utm_medium + utm_campaign, usando eventos de funil.">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] text-left text-sm">
-              <thead className="bg-white/[0.03] text-xs uppercase tracking-[0.16em] text-zinc-500"><tr><th className="px-5 py-4">Campanha</th><th className="px-5 py-4">Origem</th><th className="px-5 py-4">Conjunto/Público</th><th className="px-5 py-4">Assinantes totais</th><th className="px-5 py-4">Ativos</th><th className="px-5 py-4">Plus</th><th className="px-5 py-4">Premium</th><th className="px-5 py-4">MRR estimado</th><th className="px-5 py-4">Última conversão</th></tr></thead>
+            <table className="w-full min-w-[1080px] text-left text-sm">
+              <thead className="bg-white/[0.03] text-xs uppercase tracking-[0.16em] text-zinc-500"><tr><th className="px-5 py-4">Campanha</th><th className="px-5 py-4">Origem</th><th className="px-5 py-4">Conjunto/Público</th><th className="px-5 py-4">Leads</th><th className="px-5 py-4">Ativações</th><th className="px-5 py-4">Checkouts</th><th className="px-5 py-4">Premium</th><th className="px-5 py-4">Receita</th><th className="px-5 py-4">Último evento</th></tr></thead>
               <tbody className="divide-y divide-white/10">
-                {campaigns.map((campaign) => (<tr key={campaign.key} className="text-zinc-300 transition hover:bg-white/[0.03]"><td className="max-w-[280px] px-5 py-4"><span className="block truncate font-medium text-white">{campaign.campaign}</span></td><td className="px-5 py-4">{campaign.source}</td><td className="px-5 py-4 text-zinc-400">{campaign.medium}</td><td className="px-5 py-4">{formatNumber(campaign.subscribers)}</td><td className="px-5 py-4">{formatNumber(campaign.active)}</td><td className="px-5 py-4">{formatNumber(campaign.plus)}</td><td className="px-5 py-4 text-violet-100">{formatNumber(campaign.premium)}</td><td className="px-5 py-4 font-medium text-emerald-100">{formatCurrency(campaign.mrr)}</td><td className="px-5 py-4 text-zinc-500">{formatDate(campaign.lastAt)}</td></tr>))}
+                {campaigns.map((campaign) => (<tr key={campaign.key} className="text-zinc-300 transition hover:bg-white/[0.03]"><td className="max-w-[280px] px-5 py-4"><span className="block truncate font-medium text-white">{campaign.campaign}</span></td><td className="px-5 py-4">{campaign.source}</td><td className="px-5 py-4 text-zinc-400">{campaign.medium}</td><td className="px-5 py-4">{formatNumber(campaign.lead)}</td><td className="px-5 py-4 text-violet-100">{formatNumber(campaign.activation)}</td><td className="px-5 py-4 text-amber-100">{formatNumber(campaign.checkout)}</td><td className="px-5 py-4 text-violet-100">{formatNumber(campaign.purchase)}</td><td className="px-5 py-4 font-medium text-emerald-100">{formatCurrency(campaign.revenue)}</td><td className="px-5 py-4 text-zinc-500">{formatDate(campaign.lastAt)}</td></tr>))}
                 {!campaigns.length ? <EmptyRow colSpan={9} message="Nenhuma campanha rastreada por UTM ainda." /> : null}
               </tbody>
             </table>
@@ -514,34 +445,31 @@ export default async function CampanhasMetaPage() {
         </SectionCard>
 
         <div className="space-y-5">
-          <div className="rounded-3xl border border-white/10 bg-zinc-950/65 p-5 shadow-2xl shadow-black/20"><p className="text-xs font-semibold uppercase tracking-[0.24em] text-violet-200/70">Funil visual simples</p><h2 className="mt-1 text-xl font-semibold text-white">Assinaturas rastreadas</h2><div className="mt-5 space-y-3">{[["Assinaturas Free rastreadas", freeTracked.length, "bg-zinc-500"], ["Plus rastreadas", plusAttributed.length, "bg-cyan-400"], ["Premium rastreadas", premiumAttributed.length, "bg-violet-400"], ["Premium ativos", activePremiumAttributed.length, "bg-emerald-400"]].map(([label, value, color]) => (<div key={String(label)} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"><div className="flex items-center justify-between gap-3 text-sm"><span className="text-zinc-300">{label}</span><span className="font-semibold text-white">{formatNumber(Number(value))}</span></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10"><div className={`h-full rounded-full ${color}`} style={{ width: `${Math.min(100, attributedRows.length ? (Number(value) / attributedRows.length) * 100 : 0)}%` }} /></div></div>))}</div></div>
-          <div className="rounded-3xl border border-white/10 bg-zinc-950/65 p-5 shadow-2xl shadow-black/20"><p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200/70">Diagnóstico</p><h2 className="mt-1 text-xl font-semibold text-white">Qualidade da atribuição</h2><div className="mt-5 space-y-3">{!attributedRows.length ? <DiagnosticAlert tone="amber" title="Nenhuma UTM encontrada ainda" description="Quando assinaturas chegarem com UTM, fbclid ou gclid, os rankings serão preenchidos automaticamente." /> : null}{metaRows.length ? <DiagnosticAlert tone="emerald" title="Campanhas com origem Meta detectadas" description="Há assinaturas com utm_source contendo facebook, instagram ou meta, ou com fbclid capturado." /> : null}{coverage < 50 ? <DiagnosticAlert tone="amber" title="Cobertura UTM baixa" description="Menos de 50% das assinaturas analisadas possuem UTM, fbclid ou gclid. Revise URLs dos anúncios e checkout." /> : null}{attributedRows.length && coverage >= 50 ? <DiagnosticAlert tone="cyan" title="Cobertura UTM saudável" description="A maior parte das assinaturas analisadas já possui rastreamento de campanha." /> : null}</div></div>
+          <div className="rounded-3xl border border-white/10 bg-zinc-950/65 p-5 shadow-2xl shadow-black/20"><p className="text-xs font-semibold uppercase tracking-[0.24em] text-violet-200/70">Funil visual simples</p><h2 className="mt-1 text-xl font-semibold text-white">Eventos rastreados</h2><div className="mt-5 space-y-3">{[["Leads", totalFunnelLeads, "bg-cyan-400"], ["Ativações", totalFunnelActivations, "bg-violet-400"], ["Checkouts", totalFunnelCheckouts, "bg-amber-400"], ["Premium", totalFunnelPurchases, "bg-emerald-400"]].map(([label, value, color]) => (<div key={String(label)} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"><div className="flex items-center justify-between gap-3 text-sm"><span className="text-zinc-300">{label}</span><span className="font-semibold text-white">{formatNumber(Number(value))}</span></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10"><div className={`h-full rounded-full ${color}`} style={{ width: `${Math.min(100, totalFunnelLeads ? (Number(value) / totalFunnelLeads) * 100 : 0)}%` }} /></div></div>))}</div></div>
+          <div className="rounded-3xl border border-white/10 bg-zinc-950/65 p-5 shadow-2xl shadow-black/20"><p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200/70">Diagnóstico</p><h2 className="mt-1 text-xl font-semibold text-white">Qualidade da atribuição</h2><div className="mt-5 space-y-3">{!attributedEvents.length ? <DiagnosticAlert tone="amber" title="Nenhuma UTM encontrada ainda" description="Quando eventos chegarem com UTM, fbclid ou gclid, os rankings serão preenchidos automaticamente." /> : null}{metaEvents.length ? <DiagnosticAlert tone="emerald" title="Campanhas com origem Meta detectadas" description="Há eventos com utm_source contendo facebook, instagram ou meta, ou com fbclid capturado." /> : null}{coverage < 50 ? <DiagnosticAlert tone="amber" title="Cobertura UTM baixa" description="Menos de 50% dos eventos analisados possuem UTM, fbclid ou gclid. Revise URLs dos anúncios e persistência no checkout." /> : null}{attributedEvents.length && coverage >= 50 ? <DiagnosticAlert tone="cyan" title="Cobertura UTM saudável" description="A maior parte dos eventos analisados já possui rastreamento de campanha." /> : null}{!totalFunnelActivations ? <DiagnosticAlert tone="amber" title="Evento de ativação ainda zerado" description="O painel já aceita CompleteRegistration_email_confirmed, mas só novos cadastros após o deploy devem alimentar essa métrica." /> : null}</div></div>
         </div>
       </section>
 
       <section className="grid gap-5 xl:grid-cols-3">
-        <SectionCard eyebrow="Ranking por criativo" title="Criativos que mais converteram" description="Agrupamento por utm_content."><RankingTable rows={creatives} labelTitle="Criativo" emptyMessage="Nenhum criativo rastreado por utm_content ainda." /></SectionCard>
+        <SectionCard eyebrow="Ranking por criativo" title="Criativos que mais converteram" description="Agrupamento por utm_content usando eventos de funil."><RankingTable rows={creatives} labelTitle="Criativo" emptyMessage="Nenhum criativo rastreado por utm_content ainda." /></SectionCard>
         <SectionCard eyebrow="Ranking por público/conjunto" title="Públicos com melhor atribuição" description="Agrupamento por utm_medium conforme padrão do gestor."><RankingTable rows={audiences} labelTitle="Público/conjunto" emptyMessage="Nenhum público/conjunto rastreado por utm_medium ainda." /></SectionCard>
         <SectionCard eyebrow="Ranking por posicionamento" title="Posicionamentos com melhor atribuição" description="Agrupamento por utm_term conforme padrão do gestor."><RankingTable rows={placements} labelTitle="Posicionamento" emptyMessage="Nenhum posicionamento rastreado por utm_term ainda." /></SectionCard>
       </section>
 
-      <SectionCard eyebrow="Últimas conversões" title="Assinaturas recentes com atribuição" description="Dados de subscriptions enriquecidos com profiles e plans quando disponíveis.">
+      <SectionCard eyebrow="Últimos eventos" title="Eventos recentes com atribuição" description="Base operacional lida diretamente de meta_funnel_events.">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1280px] text-left text-sm">
-            <thead className="bg-white/[0.03] text-xs uppercase tracking-[0.16em] text-zinc-500"><tr><th className="px-5 py-4">Nome</th><th className="px-5 py-4">Email</th><th className="px-5 py-4">Plano</th><th className="px-5 py-4">Status</th><th className="px-5 py-4">Origem</th><th className="px-5 py-4">Campanha</th><th className="px-5 py-4">Criativo</th><th className="px-5 py-4">Público/conjunto</th><th className="px-5 py-4">Posicionamento</th><th className="px-5 py-4">Data</th></tr></thead>
+            <thead className="bg-white/[0.03] text-xs uppercase tracking-[0.16em] text-zinc-500"><tr><th className="px-5 py-4">Evento</th><th className="px-5 py-4">Campanha</th><th className="px-5 py-4">Criativo</th><th className="px-5 py-4">Público/conjunto</th><th className="px-5 py-4">Posicionamento</th><th className="px-5 py-4">Origem</th><th className="px-5 py-4">Valor</th><th className="px-5 py-4">Data</th></tr></thead>
             <tbody className="divide-y divide-white/10">
-              {attributedRows.slice(0, 30).map((row) => {
-                const profile = profileOf(row);
-                return (<tr key={row.id} className="text-zinc-300 transition hover:bg-white/[0.03]"><td className="max-w-[220px] px-5 py-4"><span className="block truncate font-medium text-white">{cleanLabel(profile?.full_name)}</span></td><td className="max-w-[260px] px-5 py-4"><span className="block truncate text-zinc-400">{cleanLabel(profile?.email)}</span></td><td className="px-5 py-4">{planLabel(row)}</td><td className="px-5 py-4"><StatusBadge status={row.status} /></td><td className="px-5 py-4">{cleanLabel(row.utm_source, row.fbclid ? "facebook/fbclid" : UNKNOWN)}</td><td className="max-w-[260px] px-5 py-4"><span className="block truncate">{cleanLabel(row.utm_campaign)}</span></td><td className="max-w-[220px] px-5 py-4"><span className="block truncate text-zinc-500">{cleanLabel(row.utm_content)}</span></td><td className="max-w-[220px] px-5 py-4"><span className="block truncate text-zinc-500">{cleanLabel(row.utm_medium)}</span></td><td className="max-w-[220px] px-5 py-4"><span className="block truncate text-zinc-500">{cleanLabel(row.utm_term)}</span></td><td className="px-5 py-4 text-zinc-500">{formatDate(row.created_at, true)}</td></tr>);
-              })}
-              {!attributedRows.length ? <EmptyRow colSpan={10} message="Nenhuma conversão rastreada ainda." /> : null}
+              {attributedEvents.slice(0, 40).map((row) => (<tr key={row.id} className="text-zinc-300 transition hover:bg-white/[0.03]"><td className="max-w-[220px] px-5 py-4"><span className="block truncate font-medium text-white">{cleanLabel(row.event_name)}</span></td><td className="max-w-[260px] px-5 py-4"><span className="block truncate">{getCampaign(row)}</span></td><td className="max-w-[220px] px-5 py-4"><span className="block truncate text-zinc-500">{getCreative(row)}</span></td><td className="max-w-[220px] px-5 py-4"><span className="block truncate text-zinc-500">{getMedium(row)}</span></td><td className="max-w-[220px] px-5 py-4"><span className="block truncate text-zinc-500">{getPlacement(row)}</span></td><td className="px-5 py-4">{getSource(row)}</td><td className="px-5 py-4 font-medium text-emerald-100">{row.event_name === "Purchase_premium" ? formatCurrency(purchaseValue(row)) : "—"}</td><td className="px-5 py-4 text-zinc-500">{formatDate(row.created_at, true)}</td></tr>))}
+              {!attributedEvents.length ? <EmptyRow colSpan={8} message="Nenhum evento rastreado por UTM ainda." /> : null}
             </tbody>
           </table>
         </div>
       </SectionCard>
 
-      <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-zinc-950/80 via-zinc-950/70 to-violet-950/20 p-5 text-sm leading-6 text-zinc-400 shadow-2xl shadow-black/20">
-        <div className="flex items-start gap-3"><BarChart3 className="mt-1 h-5 w-5 shrink-0 text-cyan-200" /><p>O MRR é estimado com <span className="text-zinc-200">plans.price_cents</span> quando disponível; caso contrário, usa os fallbacks Plus R$19,90, Premium R$39,90 e planos ministeriais R$397/R$697/R$1.297. Custos, CAC e ROAS dependem de integração futura com Meta Marketing API ou importação de investimento.</p></div>
+      <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 text-xs leading-5 text-zinc-500">
+        Última conversão rastreada: <span className="text-zinc-300">{formatDate(lastTrackedConversion, true)}</span>. Os rankings agora usam eventos de funil, não assinaturas, porque a tabela subscriptions ainda não possui UTMs preenchidas.
       </div>
     </div>
   );
