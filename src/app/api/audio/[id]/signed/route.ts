@@ -9,7 +9,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 
-const SIGNED_AUDIO_TTL_SECONDS = 900;
+const SIGNED_AUDIO_TTL_SECONDS = 3600;
 const PLANS_CACHE_TTL_MS = 5 * 60 * 1000;
 const AUDIO_META_CACHE_TTL_MS = 10 * 60 * 1000;
 const KIT_META_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -172,7 +172,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     const signedUrl = await createSignedAudioUrl(audioFile.r2_key, SIGNED_AUDIO_TTL_SECONDS);
     const response = NextResponse.redirect(signedUrl, { status: 307 });
-    response.headers.set("Cache-Control", "private, max-age=840, stale-while-revalidate=60");
+    response.headers.set("Cache-Control", "private, max-age=3540, stale-while-revalidate=60");
     response.headers.set("X-Audio-Signed-Redirect", "1");
     response.headers.set("X-Audio-Signed-TTFB", String(nowMs() - startedAt));
     return response;
