@@ -6,6 +6,10 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 const BASE_SELECT = "id,kit_id,tone,name,file_type,source_type";
 const TESSITURA_SELECT = `${BASE_SELECT},min_midi_note,max_midi_note,detected_min_midi_note,detected_max_midi_note,tessitura_confidence,tessitura_source`;
 
+function signedAudioPath(audioFileId: string) {
+  return `/api/audio/${audioFileId}/signed`;
+}
+
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const current = await getCurrentUserAccessContext();
@@ -36,7 +40,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       list.push({
         id: file.id,
         name: file.name,
-        streamUrl: `/api/audio/${file.id}`,
+        streamUrl: signedAudioPath(file.id),
         tone,
         voice: normalizeVoice(file.name),
         fileType: file.file_type,
