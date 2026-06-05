@@ -1,7 +1,7 @@
 "use client";
 
 import { Pause, Play, RotateCcw, RotateCw, Repeat2, Volume2 } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 
 import { type KitTrack, useKitAudioEngine } from "@/components/public/use-kit-audio-engine";
 
@@ -117,10 +117,14 @@ export function HarmomusPlayer({
   }), [src, title, semitoneShift, trackId, mediaMetadata]);
   const isCurrentTrack = Boolean(track && src && currentSemitoneShift === semitoneShift && engineIsCurrentTrack(candidateTrack));
 
-  useEffect(() => {
+  const warmCandidateTrack = useCallback((mode: "metadata" | "auto" = "auto") => {
     if (!canPlay || !src) return;
-    preloadTrack(candidateTrack);
+    preloadTrack(candidateTrack, mode);
   }, [canPlay, src, candidateTrack, preloadTrack]);
+
+  useEffect(() => {
+    warmCandidateTrack("auto");
+  }, [warmCandidateTrack]);
 
   const formatTime = useMemo(
     () => (value: number) => `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, "0")}`,
@@ -134,6 +138,8 @@ export function HarmomusPlayer({
     }
 
     if (!src) return;
+
+    warmCandidateTrack("auto");
 
     if (isCurrentTrack) {
       await togglePlay();
@@ -152,7 +158,13 @@ export function HarmomusPlayer({
           <RotateCcw size={18} />
         </button>
 
-        <button onClick={handlePlay} className="rounded-full border border-gold-400/50 p-2">
+        <button
+          onClick={handlePlay}
+          onMouseEnter={() => warmCandidateTrack("auto")}
+          onFocus={() => warmCandidateTrack("auto")}
+          onTouchStart={() => warmCandidateTrack("auto")}
+          className="rounded-full border border-gold-400/50 p-2"
+        >
           {isPlaying && isCurrentTrack ? <Pause size={18} /> : <Play size={18} />}
         </button>
 
