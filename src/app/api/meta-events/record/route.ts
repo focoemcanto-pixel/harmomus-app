@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
-const ALLOWED_EVENTS = new Set(["Lead_free_signup", "CompleteRegistration_first_login", "InitiateCheckout_premium", "Purchase_premium"]);
+const ALLOWED_EVENTS = new Set(["Lead_free_signup", "CompleteRegistration_first_login", "CompleteRegistration_email_confirmed", "InitiateCheckout_premium", "Purchase_premium"]);
 const ATTRIBUTION_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "fbclid", "gclid"] as const;
 const ALWAYS_SYNC_TO_SHEETS_EVENTS = new Set(["Lead_free_signup"]);
 const CAMPAIGN_PURCHASE_EVENTS = new Set(["Purchase_premium"]);
