@@ -49,7 +49,9 @@ function nowMs() {
 }
 
 function fallbackAudioUrl(request: NextRequest, id: string) {
-  return new URL(`/api/audio/${id}`, request.url);
+  const url = new URL(`/api/audio/${id}`, request.url);
+  url.searchParams.set("proxy", "1");
+  return url;
 }
 
 function resolveRequiredPlan(plans: any[] | null | undefined, requiredPlanValue: unknown) {
