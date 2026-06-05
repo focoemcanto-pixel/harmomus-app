@@ -60,6 +60,15 @@ function resolveRequiredPlan(plans: any[] | null | undefined, requiredPlanValue:
   return (plans ?? []).find((plan: any) => plan.id === raw || plan.slug === raw) ?? null;
 }
 
+function resolveAllowedPlanSlugs(allowedPlanSlugs: string[] | null | undefined, requiredPlan: { slug?: string | null } | null): PublicKit["allowedPlanSlugs"] {
+  const valid = new Set(["free", "plus", "premium"]);
+  const sanitized = (allowedPlanSlugs ?? []).filter((slug): slug is "free" | "plus" | "premium" => valid.has(slug));
+  if (sanitized.length > 0) return sanitized;
+  if (requiredPlan?.slug === "premium") return ["premium"];
+  if (requiredPlan?.slug === "plus") return ["plus", "premium"];
+  return ["free", "plus", "premium"];
+}
+
 async function getCachedPlans(supabase: any) {
   const now = nowMs();
   if (plansCache && plansCache.expiresAt > now) return plansCache.plans;
@@ -137,7 +146,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       id: kit.id,
       slug: kit.slug,
       name: kit.name,
-      artist: kit.artist,
+      artist: kit.artist ?? "",
       coverUrl: kit.cover_url,
       description: kit.description,
       lyrics: kit.lyrics,
@@ -147,13 +156,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       maxPitchShiftSemitones: kit.max_pitch_shift_semitones ?? 2,
       category: null,
       requiredPlan,
-      allowedPlanSlugs: Array.isArray(kit.allowed_plan_slugs) && kit.allowed_plan_slugs.length
-        ? kit.allowed_plan_slugs as any
-        : requiredPlan?.slug === "premium"
-          ? ["premium"]
-          : requiredPlan?.slug === "plus"
-            ? ["plus", "premium"]
-            : ["free", "plus", "premium"],
+      allowedPlanSlugs: resolveAllowedPlanSlugs(kit.allowed_plan_slugs, requiredPlan),
       tones: [],
     };
 
