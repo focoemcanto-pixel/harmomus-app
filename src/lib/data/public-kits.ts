@@ -35,7 +35,7 @@ export interface PublicKitSearchItem {
   id: string;
   slug: string;
   name: string;
-  artist: string;
+  artist: string | null;
   category: string;
   searchText: string;
 }
@@ -44,7 +44,7 @@ export interface PublicKit {
   id: string;
   slug: string;
   name: string;
-  artist: string;
+  artist: string | null;
   coverUrl: string | null;
   description: string | null;
   lyrics: string | null;
@@ -222,7 +222,7 @@ export async function getPublishedKitSearchItems(limit = 250): Promise<PublicKit
   if (error) throw new Error(`Falha ao buscar busca pública: ${error.message}`);
   return (data ?? []).map((kit: any) => {
     const category = kit.category?.name ?? "Sem categoria";
-    return { id: kit.id, slug: kit.slug, name: kit.name, artist: kit.artist, category, searchText: `${kit.name} ${kit.artist} ${category}`.toLowerCase() };
+    return { id: kit.id, slug: kit.slug, name: kit.name, artist: kit.artist, category, searchText: `${kit.name} ${kit.artist ?? ""} ${category}`.toLowerCase() };
   });
 }
 
