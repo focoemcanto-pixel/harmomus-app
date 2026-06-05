@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { analyzeAudioUrlPitch } from "@/lib/audio/pitch-analysis";
-import { midiToBrazilianNote } from "@/lib/music-notes";
+import { midiToBrazilianNote, midiToSpnNote } from "@/lib/music-notes";
 import { calculateToneRecommendation, getRecommendationPriority, type ToneRecommendation } from "@/lib/recommendation-engine";
 import { getVocalProfile, type VocalProfileType } from "@/lib/vocal-profiles";
 import type { KitAudioFile, KitAudioToneGroup } from "@/types/kit-audio";
@@ -65,14 +65,14 @@ const STATUS_STYLES: Record<string, { label: string; className: string; dot: str
 function getJobMidiRange(job: AnalysisJob, prefix: "detected" | "comfort") {
   if (prefix === "detected") {
     return {
-      min: job.detected_min_note ?? job.detected_min_midi ?? null,
-      max: job.detected_max_note ?? job.detected_max_midi ?? null,
+      min: job.detected_min_midi ?? job.detected_min_note ?? null,
+      max: job.detected_max_midi ?? job.detected_max_note ?? null,
     };
   }
 
   return {
-    min: job.comfort_min_note ?? job.comfort_min_midi ?? null,
-    max: job.comfort_max_note ?? job.comfort_max_midi ?? null,
+    min: job.comfort_min_midi ?? job.comfort_min_note ?? null,
+    max: job.comfort_max_midi ?? job.comfort_max_note ?? null,
   };
 }
 
@@ -81,6 +81,26 @@ function hasCompleteAiAnalysis(job?: AnalysisJob | null) {
   const detected = getJobMidiRange(job, "detected");
   const comfort = getJobMidiRange(job, "comfort");
   return [detected.min, detected.max, comfort.min, comfort.max].every((value) => typeof value === "number");
+}
+
+function formatTechnicalRange(min?: number | null, max?: number | null) {
+  if (typeof min !== "number" || typeof max !== "number") return "— → —";
+  return `${midiToSpnNote(min)} → ${midiToSpnNote(max)}`;
+}
+
+function getAiDisplayRanges(job?: AnalysisJob | null) {
+  const detected = job ? getJobMidiRange(job, "detected") : { min: null, max: null };
+  const comfort = job ? getJobMidiRange(job, "comfort") : { min: null, max: null };
+  return {
+    detectedRange: formatTechnicalRange(detected.min, detected.max),
+    comfortRange: formatTechnicalRange(comfort.min, comfort.max),
+  };
+}
+
+function getProfileComfortRange(voice: KitAudioFile["voice"]) {
+  if (voice === "todos") return "— → —";
+  const profile = getVocalProfile(voice);
+  return profile ? formatTechnicalRange(profile.comfortMinMidi, profile.comfortMaxMidi) : "— → —";
 }
 
 function getVoiceRecommendation(voice: KitAudioFile["voice"], job?: AnalysisJob | null) {
@@ -192,15 +212,23 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
     return { total, completed, processing, pending, failed, progress };
   }, [jobs]);
 
+  function getAnalysisJobForFile(audioFileId?: string) {
+    if (!audioFileId) return null;
+    return analysisJobs.find((job) => job.audio_file_id === audioFileId) ?? null;
+  }
+
   const criticalRecommendationsByVoice = useMemo(() => {
-    const result: Array<{ voice: VocalProfileType; voiceLabel: string; tone: string; recommendation: ToneRecommendation }> = [];
+    const result: Array<{ voice: VocalProfileType; voiceLabel: string; tone: string; recommendation: ToneRecommendation; job: AnalysisJob | null }> = [];
 
     (["tenor", "contralto", "soprano"] as const).forEach((voice) => {
       const candidates = tones.flatMap((toneGroup) =>
         toneGroup.files
           .filter((file) => isGeneratedAudio(file) && file.voice === voice)
-          .map((file) => ({ tone: toneGroup.tone, recommendation: getVoiceRecommendation(file.voice, getAnalysisJobForFile(file.id)) }))
-          .filter((candidate): candidate is { tone: string; recommendation: ToneRecommendation } => candidate.recommendation !== null && candidate.recommendation.risk !== "incomplete"),
+          .map((file) => {
+            const job = getAnalysisJobForFile(file.id);
+            return { tone: toneGroup.tone, job, recommendation: getVoiceRecommendation(file.voice, job) };
+          })
+          .filter((candidate): candidate is { tone: string; job: AnalysisJob | null; recommendation: ToneRecommendation } => candidate.recommendation !== null && candidate.recommendation.risk !== "incomplete"),
       );
 
       const best = candidates.sort((a, b) => getRecommendationPriority(b.recommendation.risk) - getRecommendationPriority(a.recommendation.risk))[0];
@@ -265,11 +293,6 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
 
     return () => window.clearInterval(interval);
   }, [jobs, analysisJobs]);
-
-  function getAnalysisJobForFile(audioFileId?: string) {
-    if (!audioFileId) return null;
-    return analysisJobs.find((job) => job.audio_file_id === audioFileId) ?? null;
-  }
 
   async function enqueueAiAnalysis(audioFileId?: string, options?: { silent?: boolean }) {
     if (!audioFileId) return;
@@ -487,6 +510,7 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
           </div>
           <div className="mt-4 h-2 overflow-hidden rounded-full bg-black/40"><div className="h-full rounded-full bg-gradient-to-r from-emerald-400 via-cyan-300 to-blue-400 transition-all" style={{ width: `${jobStats.progress}%` }} /></div>
           <div className="mt-3 grid gap-2 sm:grid-cols-4">
+            <div className="rounded-xl border border-white/10 bg-white/5 p-3"><span className="block text-lg font-semibold text-white">{jobStats.total}</span><span className="text-[11px] uppercase tracking-wide text-zinc-400">Total</span></div>
             <div className="rounded-xl border border-emerald-400/20 bg-emerald-500/10 p-3"><span className="block text-lg font-semibold text-emerald-200">{jobStats.completed}</span><span className="text-[11px] uppercase tracking-wide text-emerald-100/70">Concluídos</span></div>
             <div className="rounded-xl border border-sky-400/20 bg-sky-500/10 p-3"><span className="block text-lg font-semibold text-sky-200">{jobStats.processing}</span><span className="text-[11px] uppercase tracking-wide text-sky-100/70">Processando</span></div>
             <div className="rounded-xl border border-amber-400/20 bg-amber-500/10 p-3"><span className="block text-lg font-semibold text-amber-200">{jobStats.pending}</span><span className="text-[11px] uppercase tracking-wide text-amber-100/70">Na fila</span></div>
@@ -521,10 +545,11 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
           {(["tenor", "contralto", "soprano"] as const).map((voice) => {
             const item = criticalRecommendationsByVoice.find((recommendation) => recommendation.voice === voice);
             const voiceLabel = getVocalProfile(voice)?.label ?? voice;
+            const ranges = item ? getAiDisplayRanges(item.job) : null;
             return (
               <div key={voice} className="rounded-xl border border-cyan-400/20 bg-black/20 p-3">
                 <span className="block text-xs text-cyan-100/70">Estado mais crítico para {voiceLabel}</span>
-                {item ? <><span className="mt-1 block text-lg font-bold text-cyan-100">Tom {item.tone}</span><span className={`mt-2 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${getRecommendationBadgeClass(item.recommendation.risk)}`}>{item.recommendation.label}</span><span className="mt-2 block text-[11px] text-cyan-100/75">Confortável detectado: {item.recommendation.display.comfortRange}</span><span className="block text-[11px] text-cyan-100/75">Perfil vocal analisado: {item.recommendation.display.profileComfortRange}</span><span className="mt-2 block text-[11px] text-cyan-100/80">{item.recommendation.explanation}</span>{item.recommendation.redistributionActions.length > 0 ? <ul className="mt-2 list-disc space-y-1 pl-4 text-[11px] text-cyan-50/80">{item.recommendation.redistributionActions.map((action) => <li key={`${voice}-${item.tone}-${action}`}>{action}</li>)}</ul> : null}</> : <span className="mt-2 block text-xs text-cyan-100/60">Sem alerta em tons gerados.</span>}
+                {item ? <><span className="mt-1 block text-lg font-bold text-cyan-100">Tom {item.tone}</span><span className={`mt-2 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${getRecommendationBadgeClass(item.recommendation.risk)}`}>{item.recommendation.label}</span><span className="mt-2 block text-[11px] text-cyan-100/75">Confortável detectado: {ranges?.comfortRange ?? item.recommendation.display.comfortRange}</span><span className="block text-[11px] text-cyan-100/75">Perfil vocal analisado: {getProfileComfortRange(voice)}</span><span className="mt-2 block text-[11px] text-cyan-100/80">{item.recommendation.explanation}</span>{item.recommendation.redistributionActions.length > 0 ? <ul className="mt-2 list-disc space-y-1 pl-4 text-[11px] text-cyan-50/80">{item.recommendation.redistributionActions.map((action) => <li key={`${voice}-${item.tone}-${action}`}>{action}</li>)}</ul> : null}</> : <span className="mt-2 block text-xs text-cyan-100/60">Sem alerta em tons gerados.</span>}
               </div>
             );
           })}
@@ -561,6 +586,7 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
                         const recommendation = isGeneratedAudio(file) ? getVoiceRecommendation(file.voice, aiJob) : null;
                         const aiConfidence = formatAiConfidence(aiJob?.vocal_confidence);
                         const log = Array.isArray(aiJob?.analysis_logs) && aiJob.analysis_logs[0]?.message ? aiJob.analysis_logs[0].message : null;
+                        const aiRanges = getAiDisplayRanges(aiJob);
 
                         return (
                           <li key={file.key} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border/60 px-3 py-2 text-xs">
@@ -578,10 +604,10 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
                             <div className="min-w-[190px] text-right">
                               {!aiJob ? <span className="text-[11px] text-cyan-100/70">IA: sem job</span> : <>
                                 <span className="block text-[11px] font-semibold uppercase tracking-wide text-cyan-100">IA: {recommendation?.risk === "incomplete" ? "análise incompleta" : aiJob.status}</span>
-                                <span className="block text-[11px] text-cyan-100/80">Tessitura detectada: {recommendation?.display.detectedRange ?? "— → —"}</span>
-                                <span className="block text-[11px] text-cyan-100/80">Confortável detectado: {recommendation?.display.comfortRange ?? "— → —"}</span>
+                                <span className="block text-[11px] text-cyan-100/80">Tessitura detectada: {aiRanges.detectedRange}</span>
+                                <span className="block text-[11px] text-cyan-100/80">Confortável detectado: {aiRanges.comfortRange}</span>
                                 {file.voice !== "todos" ? <span className="block text-[11px] text-cyan-100/80">Perfil vocal analisado: {formatProfileVoice(file.voice) ?? "—"}</span> : null}
-                                {isGeneratedAudio(file) && recommendation ? <><span className="block text-[11px] text-cyan-100/80">Conforto do perfil: {recommendation.display.profileComfortRange}</span><span className="block text-[11px] font-semibold text-cyan-100">Classificação: {recommendation.label} • Overflow: {recommendation.overflowSemitones} semitom{recommendation.overflowSemitones === 1 ? "" : "s"}</span><span className="block max-w-[220px] text-[11px] text-cyan-100/80">{recommendation.explanation}</span>{recommendation.redistributionActions.length ? <ul className="mt-1 max-w-[240px] list-disc space-y-0.5 pl-4 text-left text-[11px] text-cyan-50/80">{recommendation.redistributionActions.map((action) => <li key={`${file.id ?? file.key}-${action}`}>{action}</li>)}</ul> : null}<span className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${getRecommendationBadgeClass(recommendation.risk)}`}>{recommendation.label}</span></> : <span className="block max-w-[220px] text-[11px] text-emerald-100/80">Original: referência do arranjo. Sem sugestão automática de reorganização.</span>}
+                                {isGeneratedAudio(file) && recommendation ? <><span className="block text-[11px] text-cyan-100/80">Conforto do perfil: {getProfileComfortRange(file.voice)}</span><span className="block text-[11px] font-semibold text-cyan-100">Classificação: {recommendation.label} • Overflow: {recommendation.overflowSemitones} semitom{recommendation.overflowSemitones === 1 ? "" : "s"}</span><span className="block max-w-[220px] text-[11px] text-cyan-100/80">{recommendation.explanation}</span>{recommendation.redistributionActions.length ? <ul className="mt-1 max-w-[240px] list-disc space-y-0.5 pl-4 text-left text-[11px] text-cyan-50/80">{recommendation.redistributionActions.map((action) => <li key={`${file.id ?? file.key}-${action}`}>{action}</li>)}</ul> : null}<span className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${getRecommendationBadgeClass(recommendation.risk)}`}>{recommendation.label}</span></> : <span className="block max-w-[220px] text-[11px] text-emerald-100/80">Original: referência do arranjo. Sem sugestão automática de reorganização.</span>}
                                 {aiConfidence ? <span className="block text-[11px] text-cyan-100/80">Confiança: {aiConfidence}</span> : null}
                                 {aiJob.analysis_method ? <span className="block text-[11px] text-cyan-100/80">Método: {aiJob.analysis_method}</span> : null}
                                 <span className="block max-w-[220px] truncate text-[11px] text-cyan-100/70">{aiJob.error_message ?? (recommendation?.risk === "incomplete" ? "Análise incompleta — reanalisar" : log ?? "sem logs")}</span>
