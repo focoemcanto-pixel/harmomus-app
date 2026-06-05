@@ -35,7 +35,7 @@ function createAudioElement(preload: "metadata" | "auto") {
   return audio;
 }
 
-const MAX_AUDIO_CACHE_SIZE = 8;
+const MAX_AUDIO_CACHE_SIZE = 12;
 const HAVE_CURRENT_DATA = 2;
 const HAVE_FUTURE_DATA = 3;
 const NETWORK_EMPTY = 0;
