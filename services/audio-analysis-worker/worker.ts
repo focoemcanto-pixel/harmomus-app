@@ -1,7 +1,7 @@
 import { mkdtemp, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 
 import { createClient } from "@supabase/supabase-js";
 
@@ -11,13 +11,14 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const HEARTBEAT_INTERVAL_MS = 15 * 1000;
 const STALE_PROCESSING_MS = 30 * 60 * 1000;
 
-// 0 means full audio. This is now the default because tessitura cannot be trusted from only 30s.
 const ANALYSIS_MAX_SECONDS = Math.max(0, Number(process.env.ANALYSIS_MAX_SECONDS ?? "0") || 0);
 const ANALYSIS_SAMPLE_RATE = 16000;
 const ANALYSIS_TIMEOUT_MS = Math.max(30_000, Number(process.env.ANALYSIS_TIMEOUT_MS ?? "120000") || 120_000);
 const FFMPEG_TIMEOUT_MS = Math.max(30_000, Number(process.env.FFMPEG_TIMEOUT_MS ?? "90000") || 90_000);
-const KILL_GRACE_MS = 2_000;
 const MAX_CONCURRENT_ANALYSIS = 1;
+const MIN_PITCH_CONFIDENCE = Math.max(0, Math.min(1, Number(process.env.MIN_PITCH_CONFIDENCE ?? "0.75") || 0.75));
+const MIN_SUSTAINED_NOTE_MS = Math.max(40, Number(process.env.MIN_SUSTAINED_NOTE_MS ?? "120") || 120);
+const NOTE_GAP_TOLERANCE_SECONDS = 0.06;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -59,6 +60,11 @@ function normalizeVoice(value: string | null | undefined) {
 
 const DIRECT_VOICES = new Set(["soprano", "contralto", "tenor"]);
 const IGNORED_ANALYSIS_LABELS = new Set(["todos", "mix", "completo"]);
+const VOICE_RANGES: Record<string, { min: number; max: number }> = {
+  soprano: { min: 48, max: 84 },
+  contralto: { min: 43, max: 79 },
+  tenor: { min: 48, max: 72 },
+};
 
 type PitchNote = { start_s: number; end_s: number; pitch_midi: number; confidence: number };
 
@@ -72,6 +78,15 @@ type YinPayload = {
   comfort_min_midi: number | null;
   comfort_max_midi: number | null;
   dominant_notes: Array<{ midi: number; note: string; occurrences: number }>;
+};
+
+type FilterStats = {
+  raw_events: number;
+  removed_by_range: number;
+  removed_by_confidence: number;
+  removed_by_duration: number;
+  octave_corrections: number;
+  final_events: number;
 };
 
 async function reserveJob() {
@@ -140,12 +155,6 @@ async function recoverStaleProcessingJobs() {
   console.warn("[audio-analysis-worker] stale jobs recovered", { jobs: recoveredJobs });
 }
 
-async function killDescendants(pid: number): Promise<void> {
-  await new Promise<void>((resolve) => {
-    execFile("bash", ["-lc", `pkill -TERM -P ${pid} || true; sleep 0.2; pkill -KILL -P ${pid} || true`], () => resolve());
-  });
-}
-
 async function runSubprocess(command: string, args: string[], timeoutMs: number, timeoutLogLabel: string, extraEnv?: Record<string, string>) {
   return await new Promise<{ stdout: string; stderr: string; exitCode: number | null }>((resolve, reject) => {
     let stdout = "";
@@ -154,37 +163,15 @@ async function runSubprocess(command: string, args: string[], timeoutMs: number,
     let settled = false;
     const startedAt = Date.now();
     const child = spawn(command, args, {
-      detached: true,
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, OMP_NUM_THREADS: "1", OPENBLAS_NUM_THREADS: "1", MKL_NUM_THREADS: "1", NUMEXPR_NUM_THREADS: "1", ...extraEnv },
     });
 
-    const rejectTimeout = () => {
-      if (settled) return;
-      settled = true;
-      reject(new Error(`timeout ${timeoutLogLabel}: subprocess exceeded ${timeoutMs}ms (elapsed_ms=${Date.now() - startedAt})`));
-    };
-
-    const killTree = (signal: NodeJS.Signals) => {
-      if (!child.pid) return;
-      void killDescendants(child.pid);
-      try {
-        process.kill(-child.pid, signal);
-      } catch {
-        try {
-          child.kill(signal);
-        } catch {
-          // noop
-        }
-      }
-    };
-
     const timeoutHandle = setTimeout(() => {
       timedOut = true;
       console.error("[audio-analysis-worker] timeout detection", { command, pid: child.pid, timeout_label: timeoutLogLabel, timeout_ms: timeoutMs, memory: currentMemorySnapshot() });
-      killTree("SIGTERM");
-      setTimeout(() => killTree("SIGKILL"), KILL_GRACE_MS / 2);
-      setTimeout(rejectTimeout, KILL_GRACE_MS);
+      child.kill("SIGTERM");
+      setTimeout(() => child.kill("SIGKILL"), 1000);
     }, timeoutMs);
 
     child.stdout?.on("data", (chunk: Buffer | string) => {
@@ -209,7 +196,7 @@ async function runSubprocess(command: string, args: string[], timeoutMs: number,
       settled = true;
       clearTimeout(timeoutHandle);
       if (timedOut) {
-        reject(new Error(`timeout ${timeoutLogLabel}: subprocess killed after ${timeoutMs}ms`));
+        reject(new Error(`timeout ${timeoutLogLabel}: subprocess killed after ${timeoutMs}ms (elapsed_ms=${Date.now() - startedAt})`));
         return;
       }
       if (code !== 0) {
@@ -247,6 +234,122 @@ function midiRange(min: number | null, max: number | null) {
 
 function noteDuration(note: PitchNote) {
   return Math.max(0.001, note.end_s - note.start_s);
+}
+
+function normalizePitchNote(note: PitchNote): PitchNote {
+  return {
+    start_s: Number(note.start_s),
+    end_s: Number(note.end_s),
+    pitch_midi: Math.round(Number(note.pitch_midi)),
+    confidence: isNumber(note.confidence) ? note.confidence : 0,
+  };
+}
+
+function voiceRangeFor(voice: string) {
+  return VOICE_RANGES[normalizeVoice(voice)] ?? { min: 36, max: 84 };
+}
+
+function shouldCorrectOctave(note: PitchNote, notes: PitchNote[], index: number, voiceRange: { min: number; max: number }) {
+  const midi = Math.round(note.pitch_midi);
+  const raised = midi + 12;
+  if (midi >= voiceRange.min || raised > voiceRange.max) return false;
+
+  const window = notes.slice(Math.max(0, index - 5), Math.min(notes.length, index + 6));
+  const neighbors = window.filter((candidate) => candidate !== note && Math.abs(candidate.start_s - note.start_s) <= 0.5);
+  const contextualEvidence = neighbors.filter((candidate) => Math.abs(Math.round(candidate.pitch_midi) - raised) <= 2).length;
+  const samePitchClassEvidence = neighbors.filter((candidate) => Math.abs(Math.round(candidate.pitch_midi) - raised) <= 12 && Math.round(candidate.pitch_midi) % 12 === raised % 12).length;
+
+  return contextualEvidence >= 1 || samePitchClassEvidence >= 2;
+}
+
+function correctOctaveErrors(notes: PitchNote[], voice: string) {
+  const voiceRange = voiceRangeFor(voice);
+  let corrections = 0;
+  const sorted = [...notes].sort((a, b) => a.start_s - b.start_s);
+  const corrected = sorted.map((note, index) => {
+    if (!shouldCorrectOctave(note, sorted, index, voiceRange)) return note;
+    corrections += 1;
+    return { ...note, pitch_midi: Math.round(note.pitch_midi) + 12 };
+  });
+
+  return { notes: corrected, corrections };
+}
+
+function mergeAndFilterSustainedNotes(notes: PitchNote[]) {
+  const sorted = [...notes].sort((a, b) => a.start_s - b.start_s);
+  const merged: PitchNote[] = [];
+  let removedByDuration = 0;
+  let current: (PitchNote & { confidence_sum: number; frames: number }) | null = null;
+
+  const flush = () => {
+    if (!current) return;
+    const durationMs = noteDuration(current) * 1000;
+    if (durationMs < MIN_SUSTAINED_NOTE_MS) {
+      removedByDuration += current.frames;
+      current = null;
+      return;
+    }
+    merged.push({
+      start_s: current.start_s,
+      end_s: current.end_s,
+      pitch_midi: current.pitch_midi,
+      confidence: Number((current.confidence_sum / current.frames).toFixed(4)),
+    });
+    current = null;
+  };
+
+  for (const note of sorted) {
+    const midi = Math.round(note.pitch_midi);
+    if (current && Math.round(current.pitch_midi) === midi && note.start_s - current.end_s <= NOTE_GAP_TOLERANCE_SECONDS) {
+      current.end_s = Math.max(current.end_s, note.end_s);
+      current.confidence_sum += note.confidence;
+      current.frames += 1;
+      continue;
+    }
+    flush();
+    current = { ...note, pitch_midi: midi, confidence_sum: note.confidence, frames: 1 };
+  }
+  flush();
+
+  return { notes: merged, removedByDuration };
+}
+
+function filterPitchNotesForVoice(notes: PitchNote[], voice: string) {
+  const voiceRange = voiceRangeFor(voice);
+  const stats: FilterStats = {
+    raw_events: notes.length,
+    removed_by_range: 0,
+    removed_by_confidence: 0,
+    removed_by_duration: 0,
+    octave_corrections: 0,
+    final_events: 0,
+  };
+
+  const normalized = notes
+    .map(normalizePitchNote)
+    .filter((note) => Number.isFinite(note.start_s) && Number.isFinite(note.end_s) && note.end_s > note.start_s && Number.isFinite(note.pitch_midi));
+
+  const confidenceFiltered = normalized.filter((note) => {
+    const keep = note.confidence >= MIN_PITCH_CONFIDENCE;
+    if (!keep) stats.removed_by_confidence += 1;
+    return keep;
+  });
+
+  const octaveResult = correctOctaveErrors(confidenceFiltered, voice);
+  stats.octave_corrections = octaveResult.corrections;
+
+  const rangeFiltered = octaveResult.notes.filter((note) => {
+    const midi = Math.round(note.pitch_midi);
+    const keep = midi >= voiceRange.min && midi <= voiceRange.max;
+    if (!keep) stats.removed_by_range += 1;
+    return keep;
+  });
+
+  const sustained = mergeAndFilterSustainedNotes(rangeFiltered);
+  stats.removed_by_duration = sustained.removedByDuration;
+  stats.final_events = sustained.notes.length;
+
+  return { notes: sustained.notes, stats, voiceRange };
 }
 
 function buildFallbackDominant(midis: number[]) {
@@ -325,16 +428,19 @@ function buildMusicalLayers(notes: PitchNote[], midis: number[], comfortMin: num
   };
 }
 
-function buildInsights(notes: PitchNote[], payload?: Partial<YinPayload>) {
-  const reliableNotes = notes.filter((note) => note.confidence >= 0.45 && note.end_s > note.start_s);
-  const sourceNotes = reliableNotes.length >= 5 ? reliableNotes : notes;
+function buildInsights(notes: PitchNote[], voice: string, payload?: Partial<YinPayload>) {
+  const rawMidis = notes.map((n) => Math.round(n.pitch_midi)).filter(Number.isFinite);
+  const rawDetectedMin = percentile(rawMidis, 0);
+  const rawDetectedMax = percentile(rawMidis, 1);
+  const filtered = filterPitchNotesForVoice(notes, voice);
+  const sourceNotes = filtered.notes;
   const midis = sourceNotes.map((n) => Math.round(n.pitch_midi));
 
-  const minMidi = payload?.detected_min_midi ?? percentile(midis, 0.03);
-  const maxMidi = payload?.detected_max_midi ?? percentile(midis, 0.97);
-  const comfortMin = payload?.comfort_min_midi ?? percentile(midis, 0.2);
-  const comfortMax = payload?.comfort_max_midi ?? percentile(midis, 0.8);
-  const dominant = payload?.dominant_notes?.length ? payload.dominant_notes : buildFallbackDominant(midis);
+  const minMidi = percentile(midis, 0.03);
+  const maxMidi = percentile(midis, 0.97);
+  const comfortMin = percentile(midis, 0.2);
+  const comfortMax = percentile(midis, 0.8);
+  const dominant = buildFallbackDominant(midis);
   const confidence = sourceNotes.length ? sourceNotes.reduce((sum, n) => sum + n.confidence, 0) / sourceNotes.length : 0;
   const contour = sourceNotes.slice(0, 4000).map((n) => ({ t: Number(n.start_s.toFixed(3)), midi: Math.round(n.pitch_midi), note: midiToNoteName(n.pitch_midi) }));
   const occasionalPeaks = sourceNotes
@@ -348,6 +454,21 @@ function buildInsights(notes: PitchNote[], payload?: Partial<YinPayload>) {
     avancado: { min_midi: minMidi !== null ? minMidi - 2 : null, max_midi: maxMidi !== null ? maxMidi + 2 : null },
   };
   const musicalLayers = buildMusicalLayers(sourceNotes, midis, comfortMin, comfortMax, minMidi, maxMidi);
+  const analysisDebug = {
+    raw_detected_min: rawDetectedMin,
+    raw_detected_max: rawDetectedMax,
+    raw_detected_min_note: isNumber(rawDetectedMin) ? midiToNoteName(rawDetectedMin) : null,
+    raw_detected_max_note: isNumber(rawDetectedMax) ? midiToNoteName(rawDetectedMax) : null,
+    filtered_detected_min: minMidi,
+    filtered_detected_max: maxMidi,
+    filtered_detected_min_note: isNumber(minMidi) ? midiToNoteName(minMidi) : null,
+    filtered_detected_max_note: isNumber(maxMidi) ? midiToNoteName(maxMidi) : null,
+    voice_range: midiRange(filtered.voiceRange.min, filtered.voiceRange.max),
+    min_confidence: MIN_PITCH_CONFIDENCE,
+    min_sustained_note_ms: MIN_SUSTAINED_NOTE_MS,
+    detector_reported_min_midi: payload?.detected_min_midi ?? null,
+    detector_reported_max_midi: payload?.detected_max_midi ?? null,
+  };
 
   return {
     minMidi,
@@ -360,6 +481,8 @@ function buildInsights(notes: PitchNote[], payload?: Partial<YinPayload>) {
     occasionalPeaks,
     recommend,
     musicalLayers,
+    filterStats: filtered.stats,
+    analysisDebug,
     reliableNotes: sourceNotes.length,
   };
 }
@@ -431,11 +554,11 @@ async function processJob(job: any) {
 
     const analysisResult = await runLibrosaPitchAnalysis(optimizedWavPath);
     const { notes, avg_pitch_midi, elapsedMs: analysisElapsedMs, analysisMode } = analysisResult;
-    const insights = buildInsights(notes, analysisResult);
+    const insights = buildInsights(notes, normalizedVoice, analysisResult);
 
-    logs.push({ at: new Date().toISOString(), message: "Análise de tessitura concluída", analysis_mode: analysisMode, voice: normalizedVoice, notes_detected: notes.length, reliable_notes: insights.reliableNotes, tessitura_score: insights.musicalLayers.tessitura_score, avg_pitch_midi, analysis_elapsed_ms: analysisElapsedMs });
+    logs.push({ at: new Date().toISOString(), message: "Análise de tessitura concluída", analysis_mode: analysisMode, voice: normalizedVoice, notes_detected: notes.length, reliable_notes: insights.reliableNotes, filter_stats: insights.filterStats, tessitura_score: insights.musicalLayers.tessitura_score, avg_pitch_midi, analysis_elapsed_ms: analysisElapsedMs });
 
-    if (insights.minMidi === null || insights.maxMidi === null) throw new Error("no pitch detected");
+    if (insights.minMidi === null || insights.maxMidi === null) throw new Error("no pitch detected after vocal filters");
 
     const { error } = await supabase
       .from("audio_analysis_jobs")
@@ -458,6 +581,8 @@ async function processJob(job: any) {
           contour: insights.contour,
           occasional_peaks: insights.occasionalPeaks,
           musical_layers: insights.musicalLayers,
+          filter_stats: insights.filterStats,
+          analysis_debug: insights.analysisDebug,
         },
         analysis_logs: logs,
         error_message: null,
@@ -466,7 +591,7 @@ async function processJob(job: any) {
       .eq("id", job.id);
 
     if (error) throw new Error(error.message);
-    console.info("[audio-analysis-worker] análise concluída", { job_id: job.id, analysis_mode: analysisMode, voice: normalizedVoice, detected_range: [insights.minMidi, insights.maxMidi], comfort_range: [insights.comfortMin, insights.comfortMax], tessitura_score: insights.musicalLayers.tessitura_score, elapsed_ms: Date.now() - jobStartedAt, memory: currentMemorySnapshot() });
+    console.info("[audio-analysis-worker] análise concluída", { job_id: job.id, analysis_mode: analysisMode, voice: normalizedVoice, detected_range: [insights.minMidi, insights.maxMidi], comfort_range: [insights.comfortMin, insights.comfortMax], filter_stats: insights.filterStats, tessitura_score: insights.musicalLayers.tessitura_score, elapsed_ms: Date.now() - jobStartedAt, memory: currentMemorySnapshot() });
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
     let message = error instanceof Error ? error.message : String(error);
@@ -487,7 +612,7 @@ async function main() {
   if (configuredMax !== MAX_CONCURRENT_ANALYSIS) {
     console.warn("[audio-analysis-worker] MAX_CONCURRENT_ANALYSIS inválido para este worker; forçando execução serial", { configured: configuredMax, enforced: MAX_CONCURRENT_ANALYSIS });
   }
-  console.info("[audio-analysis-worker] started", { ENABLE_SMART_TESSITURA_ANALYSIS, MAX_CONCURRENT_ANALYSIS, analysis_pipeline: "ffmpeg-full-audio -> librosa-yin", analysis_max_seconds: ANALYSIS_MAX_SECONDS > 0 ? ANALYSIS_MAX_SECONDS : "full-audio", analysis_sample_rate: ANALYSIS_SAMPLE_RATE, analysis_timeout_ms: ANALYSIS_TIMEOUT_MS, memory: currentMemorySnapshot() });
+  console.info("[audio-analysis-worker] started", { ENABLE_SMART_TESSITURA_ANALYSIS, MAX_CONCURRENT_ANALYSIS, analysis_pipeline: "ffmpeg-full-audio -> librosa-yin", analysis_max_seconds: ANALYSIS_MAX_SECONDS > 0 ? ANALYSIS_MAX_SECONDS : "full-audio", analysis_sample_rate: ANALYSIS_SAMPLE_RATE, analysis_timeout_ms: ANALYSIS_TIMEOUT_MS, min_pitch_confidence: MIN_PITCH_CONFIDENCE, min_sustained_note_ms: MIN_SUSTAINED_NOTE_MS, memory: currentMemorySnapshot() });
 
   while (true) {
     try {
