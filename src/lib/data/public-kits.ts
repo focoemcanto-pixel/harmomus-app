@@ -54,7 +54,7 @@ export interface PublicKit {
   maxPitchShiftSemitones: number;
   category: { id: string; name: string; slug: string; description: string | null; cover_url: string | null } | null;
   requiredPlan: { id: string; name: string; slug: string } | null;
-  allowedPlanSlugs: ("free" | "plus" | "premium")[];
+  allowedPlanSlugs: string[];
   tones: PublicKitToneGroup[];
 }
 
@@ -134,7 +134,7 @@ function mapKit(
 
   const category = kit.category_id ? categoriesMap.get(kit.category_id) ?? null : null;
   const requiredPlan = resolveRequiredPlan(kit, plansMap);
-  const allowedPlanSlugs: ("free" | "plus" | "premium")[] = Array.isArray((kit as any).allowed_plan_slugs) && (kit as any).allowed_plan_slugs.length
+  const allowedPlanSlugs: string[] = Array.isArray((kit as any).allowed_plan_slugs) && (kit as any).allowed_plan_slugs.length
     ? Array.from(new Set(((kit as any).allowed_plan_slugs as unknown[]).map((slug) => normalizePlan(slug))))
     : requiredPlan?.slug === "premium"
       ? ["premium"]
