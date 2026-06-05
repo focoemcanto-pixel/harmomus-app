@@ -42,23 +42,26 @@ function recordFunnelEvent(eventName: string, payload: Record<string, unknown>, 
 function trackCompleteRegistration(searchParams: URLSearchParams) {
   if (searchParams.get("meta_complete_registration") !== "1") return;
 
-  const storageKey = "meta_funnel_CompleteRegistration_first_login";
+  const email = String(searchParams.get("email") || "").trim().toLowerCase();
+  const storageKey = `meta_funnel_CompleteRegistration_first_login_${email || "anonymous"}`;
   if (window.localStorage.getItem(storageKey)) return;
-
-  const fbq = (window as any).fbq;
-  if (typeof fbq !== "function") return;
 
   const attribution = readStoredAttribution();
   const payload = {
     content_name: "Harmomus First Login",
     content_category: "subscription_signup",
     plan: "free",
+    ...(email ? { email, customer_email: email } : {}),
     ...attribution,
   };
 
-  fbq("track", "CompleteRegistration", payload);
-  fbq("trackCustom", "CompleteRegistration_first_login", payload);
-  recordFunnelEvent("CompleteRegistration_first_login", payload, storageKey);
+  const fbq = (window as any).fbq;
+  if (typeof fbq === "function") {
+    fbq("track", "CompleteRegistration", payload);
+    fbq("trackCustom", "CompleteRegistration_first_login", payload);
+  }
+
+  recordFunnelEvent("CompleteRegistration_first_login", payload, `CompleteRegistration_first_login_${email || Date.now()}`);
   window.localStorage.setItem(storageKey, new Date().toISOString());
 }
 
