@@ -71,10 +71,12 @@ function getCustomerEmail(input: { eventId: string | null; payload: Record<strin
   );
 }
 
-function normalizeSheetEventId(eventName: string, eventId: string | null) {
-  if (!eventId) return null;
-  if (eventName === "Lead_free_signup" && extractEmail(eventId)) return eventName;
-  return eventId;
+function normalizeSheetEventId(input: { eventName: string; eventId: string | null; customerEmail: string | null }) {
+  // O Apps Script atual usa event_id como coluna C da planilha.
+  // Para leads, a coluna C precisa ser o e-mail limpo do cliente, não o nome do evento.
+  if (input.customerEmail) return input.customerEmail;
+  if (!input.eventId) return null;
+  return input.eventId;
 }
 
 function sheetRow(input: {
@@ -92,8 +94,9 @@ function sheetRow(input: {
     created_at_utc: new Date().toISOString(),
     timezone: SHEETS_TIME_ZONE,
     event_name: input.eventName,
-    event_id: normalizeSheetEventId(input.eventName, input.eventId),
+    event_id: normalizeSheetEventId({ eventName: input.eventName, eventId: input.eventId, customerEmail }),
     customer_email: customerEmail,
+    conversion_id: input.eventId,
 
     // Campos canonicos: precisam bater exatamente com os cabecalhos da planilha/webhook.
     utm_source: input.attribution.utm_source,
@@ -126,6 +129,8 @@ async function syncToSheets(row: Record<string, unknown>) {
   try {
     console.log("[META SHEETS] sending event:", row.event_name, {
       customer_email: row.customer_email,
+      event_id: row.event_id,
+      conversion_id: row.conversion_id,
       utm_source: row.utm_source,
       utm_medium: row.utm_medium,
       utm_campaign: row.utm_campaign,
