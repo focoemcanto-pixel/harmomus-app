@@ -134,13 +134,16 @@ export default async function KitsPage() {
                     <Link href={`/admin/kits/${kit.id}/editar`} className="inline-flex items-center justify-center rounded-xl border border-border px-4 py-2.5 text-sm font-medium text-foreground transition hover:border-gold-500/40 hover:bg-surface-muted">
                       Editar
                     </Link>
+                    <Link href={`/admin/kits/${kit.id}/artes`} className="inline-flex items-center justify-center rounded-xl border border-violet-400/40 bg-violet-500/10 px-4 py-2.5 text-sm font-semibold text-violet-200 transition hover:bg-violet-500/20">
+                      🎨 Gerar Arte
+                    </Link>
                     <Link href={`/biblioteca/${kit.slug}`} className="inline-flex items-center justify-center rounded-xl border border-border px-4 py-2.5 text-sm font-medium text-foreground transition hover:border-cyan-400/40 hover:bg-cyan-500/10">
                       Ver público
                     </Link>
                     <form action={handleDelete}>
                       <input type="hidden" name="id" value={kit.id} />
                       <input type="hidden" name="name" value={kit.name} />
-                      <ConfirmSubmitButton message={`Tem certeza que deseja excluir o kit \"${kit.name}\"? Esta ação não poderá ser desfeita.`} className="inline-flex w-full items-center justify-center rounded-xl border border-red-500/50 px-4 py-2.5 text-sm font-semibold text-red-300 transition hover:bg-red-500/10 sm:w-auto">
+                      <ConfirmSubmitButton message={`Tem certeza que deseja excluir o kit "${kit.name}"? Esta ação não poderá ser desfeita.`} className="inline-flex w-full items-center justify-center rounded-xl border border-red-500/50 px-4 py-2.5 text-sm font-semibold text-red-300 transition hover:bg-red-500/10 sm:w-auto">
                         Excluir
                       </ConfirmSubmitButton>
                     </form>
