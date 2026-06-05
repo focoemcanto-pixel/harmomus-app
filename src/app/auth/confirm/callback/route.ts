@@ -20,6 +20,16 @@ function normalizeNext(raw: string | null, type?: string) {
   return raw;
 }
 
+function appendConfirmedEmail(next: string, email?: string | null) {
+  if (!email) return next;
+  if (!next.startsWith("/login")) return next;
+
+  const url = new URL(next, "https://harmomus.local");
+  url.searchParams.set("confirmed", "1");
+  url.searchParams.set("email", email.toLowerCase());
+  return `${url.pathname}${url.search}`;
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
@@ -106,5 +116,6 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.redirect(new URL(next, request.url), 303);
+  const finalNext = type === "recovery" ? next : appendConfirmedEmail(next, user?.email ?? null);
+  return NextResponse.redirect(new URL(finalNext, request.url), 303);
 }
