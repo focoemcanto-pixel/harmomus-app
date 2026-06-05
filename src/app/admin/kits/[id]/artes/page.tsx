@@ -42,7 +42,6 @@ export default async function KitArtsPage({ params, searchParams }: PageProps) {
   const coverUrl = kit.cover_url ?? "https://placehold.co/1080x1080/090914/f8fafc?text=Kit+Vocal";
   const artist = kit.artist || "Artista";
   const plan = getPlanLabel(kit.required_plan);
-  const tone = kit.default_tone || kit.original_tone || "Todos os tons";
 
   return (
     <section className="min-h-screen bg-[#02030a] px-4 py-8 text-white print:bg-transparent print:p-0">
@@ -74,42 +73,41 @@ export default async function KitArtsPage({ params, searchParams }: PageProps) {
             <div className="rounded-full border border-violet-300/50 bg-violet-500/15 px-5 py-2 text-lg font-black uppercase tracking-[0.18em] text-violet-100">Novidade</div>
           </div>
 
-          <div className={`relative z-10 grid h-full ${isStory ? "grid-rows-[auto_1fr_auto] pt-32" : "grid-cols-[.95fr_1.05fr] gap-8 pt-24"}`}>
-            <div className={`${isStory ? "text-center" : "flex flex-col justify-center"}`}>
+          <div className={`relative z-10 grid h-full ${isStory ? "grid-rows-[auto_1fr_auto] pt-32" : "grid-cols-[.96fr_1.04fr] gap-8 pt-24 pb-32"}`}>
+            <div className={`${isStory ? "text-center" : "flex flex-col justify-center pb-16"}`}>
               <div className="mb-8 h-px w-full bg-gradient-to-r from-amber-300 via-transparent to-transparent" />
-              <p className={`${isStory ? "text-[74px]" : "text-[82px]"} font-black uppercase leading-[.92] tracking-tight text-white`}>Kit vocal</p>
-              <p className={`${isStory ? "text-[72px]" : "text-[76px]"} bg-gradient-to-r from-violet-300 to-blue-300 bg-clip-text font-black uppercase leading-none tracking-tight text-transparent`}>disponível!</p>
-              <p className="mt-10 text-2xl font-black uppercase tracking-[0.42em] text-amber-200">Novo lançamento</p>
-              <h2 className={`${isStory ? "mt-10 text-[92px]" : "mt-8 text-[86px]"} font-serif italic leading-none text-amber-200`}>{kit.name}</h2>
+              <p className={`${isStory ? "text-[74px]" : "text-[76px]"} font-black uppercase leading-[.92] tracking-tight text-white`}>Kit vocal</p>
+              <p className={`${isStory ? "text-[72px]" : "text-[70px]"} bg-gradient-to-r from-violet-300 to-blue-300 bg-clip-text font-black uppercase leading-none tracking-tight text-transparent`}>disponível!</p>
+              <p className={`${isStory ? "mt-10" : "mt-8"} text-2xl font-black uppercase tracking-[0.42em] text-amber-200`}>Novo lançamento</p>
+              <h2 className={`${isStory ? "mt-10 text-[92px]" : "mt-7 text-[76px]"} font-serif italic leading-none text-amber-200`}>{kit.name}</h2>
               <p className="mt-3 text-2xl font-bold uppercase tracking-[0.38em] text-amber-100/85">{artist}</p>
-              <p className="mt-10 max-w-[520px] text-3xl font-medium leading-tight text-white/88">O kit vocal completo para você estudar, ensaiar e ministrar com <span className="font-black text-amber-200">excelência.</span></p>
-              <div className="mt-8 rounded-3xl border border-white/15 bg-black/35 p-6">
+              <p className={`${isStory ? "mt-10" : "mt-7"} max-w-[520px] text-3xl font-medium leading-tight text-white/88`}>O kit vocal completo para você estudar, ensaiar e ministrar com <span className="font-black text-amber-200">excelência.</span></p>
+              <div className={`${isStory ? "mt-8" : "mt-7"} rounded-3xl border border-white/15 bg-black/35 p-5`}>
                 <p className="text-xl text-white/80">Já disponível na</p>
-                <p className="mt-1 text-4xl font-black tracking-wide text-violet-300">HARMOMUS<span className="text-amber-200">.COM</span></p>
+                <p className="mt-1 text-[38px] font-black tracking-wide text-violet-300">HARMOMUS<span className="text-amber-200">.COM</span></p>
               </div>
             </div>
 
-            <div className={`${isStory ? "mt-12" : "relative"} flex items-center justify-center`}>
-              <div className={`${isStory ? "h-[760px] w-[760px]" : "h-[830px] w-[560px]"} relative overflow-hidden rounded-[3rem] border border-amber-200/45 bg-black shadow-[0_0_90px_rgba(245,158,11,.16)]`}>
+            <div className={`${isStory ? "mt-12" : "relative pb-14"} flex items-center justify-center`}>
+              <div className={`${isStory ? "h-[760px] w-[760px]" : "h-[720px] w-[500px]"} relative overflow-hidden rounded-[3rem] border border-amber-200/45 bg-black shadow-[0_0_90px_rgba(245,158,11,.16)]`}>
                 <img src={coverUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/10" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/72 via-transparent to-black/10" />
                 <div className="absolute left-8 top-8 rounded-full bg-violet-500 px-4 py-2 text-sm font-black uppercase tracking-[0.18em] text-white">{plan}</div>
                 <div className="absolute bottom-8 left-8 right-8 rounded-3xl border border-white/15 bg-black/55 p-5">
                   <p className="text-3xl font-black text-white">{kit.name}</p>
                   <p className="mt-1 text-lg text-white/70">{artist}</p>
-                  <div className="mt-4 flex items-center justify-between rounded-2xl border border-amber-200/35 bg-amber-300/10 px-4 py-3 text-amber-100">
-                    <span className="text-sm font-bold uppercase tracking-[0.16em]">Tom principal</span>
-                    <strong className="text-xl">{tone}</strong>
+                  <div className="mt-4 rounded-2xl border border-amber-200/35 bg-amber-300/10 px-4 py-3 text-center text-amber-100">
+                    <span className="text-sm font-bold uppercase tracking-[0.16em]">5 tons já disponíveis</span>
                   </div>
                 </div>
               </div>
             </div>
 
             <footer className={`${isStory ? "mt-10" : "absolute bottom-10 left-10 right-10"} z-20 grid grid-cols-4 gap-4`}>
-              <div className="rounded-2xl border border-white/15 bg-white/5 p-4 text-center"><SlidersHorizontal className="mx-auto text-violet-300" /><p className="mt-2 text-lg font-bold">Todos os tons</p></div>
-              <div className="rounded-2xl border border-white/15 bg-white/5 p-4 text-center"><UserRound className="mx-auto text-violet-300" /><p className="mt-2 text-lg font-bold">Vozes separadas</p></div>
-              <div className="rounded-2xl border border-white/15 bg-white/5 p-4 text-center"><PlayCircle className="mx-auto text-violet-300" /><p className="mt-2 text-lg font-bold">Player inteligente</p></div>
-              <div className="rounded-2xl border border-white/15 bg-white/5 p-4 text-center"><Sparkles className="mx-auto text-violet-300" /><p className="mt-2 text-lg font-bold">Qualidade profissional</p></div>
+              <div className="rounded-2xl border border-white/15 bg-black/45 p-4 text-center"><SlidersHorizontal className="mx-auto text-violet-300" /><p className="mt-2 text-lg font-bold">5 tons disponíveis</p></div>
+              <div className="rounded-2xl border border-white/15 bg-black/45 p-4 text-center"><UserRound className="mx-auto text-violet-300" /><p className="mt-2 text-lg font-bold">Vozes separadas</p></div>
+              <div className="rounded-2xl border border-white/15 bg-black/45 p-4 text-center"><PlayCircle className="mx-auto text-violet-300" /><p className="mt-2 text-lg font-bold">Player inteligente</p></div>
+              <div className="rounded-2xl border border-white/15 bg-black/45 p-4 text-center"><Sparkles className="mx-auto text-violet-300" /><p className="mt-2 text-lg font-bold">Qualidade profissional</p></div>
             </footer>
           </div>
         </article>
