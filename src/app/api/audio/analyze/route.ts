@@ -27,16 +27,17 @@ type ExistingAnalysisJob = {
   detected_max_note?: number | null;
   comfort_min_note?: number | null;
   comfort_max_note?: number | null;
+  pitch_events_json?: Record<string, unknown> | null;
 };
 
 const ENABLE_SMART_TESSITURA_ANALYSIS = String(process.env.ENABLE_SMART_TESSITURA_ANALYSIS ?? "false").toLowerCase() === "true";
 const VOICES = ["soprano", "contralto", "tenor"] as const;
 
 function hasCompleteAnalysis(job: ExistingAnalysisJob) {
-  const detectedMin = job.detected_min_note ?? job.detected_min_midi;
-  const detectedMax = job.detected_max_note ?? job.detected_max_midi;
-  const comfortMin = job.comfort_min_note ?? job.comfort_min_midi;
-  const comfortMax = job.comfort_max_note ?? job.comfort_max_midi;
+  const detectedMin = job.detected_min_midi ?? job.detected_min_note;
+  const detectedMax = job.detected_max_midi ?? job.detected_max_note;
+  const comfortMin = job.comfort_min_midi ?? job.comfort_min_note;
+  const comfortMax = job.comfort_max_midi ?? job.comfort_max_note;
 
   return [detectedMin, detectedMax, comfortMin, comfortMax].every((value) => typeof value === "number");
 }
@@ -44,15 +45,21 @@ function hasCompleteAnalysis(job: ExistingAnalysisJob) {
 function getAnalysisRange(job: ExistingAnalysisJob, prefix: "detected" | "comfort") {
   if (prefix === "detected") {
     return {
-      min: job.detected_min_note ?? job.detected_min_midi ?? null,
-      max: job.detected_max_note ?? job.detected_max_midi ?? null,
+      min: job.detected_min_midi ?? job.detected_min_note ?? null,
+      max: job.detected_max_midi ?? job.detected_max_note ?? null,
     };
   }
 
   return {
-    min: job.comfort_min_note ?? job.comfort_min_midi ?? null,
-    max: job.comfort_max_note ?? job.comfort_max_midi ?? null,
+    min: job.comfort_min_midi ?? job.comfort_min_note ?? null,
+    max: job.comfort_max_midi ?? job.comfort_max_note ?? null,
   };
+}
+
+function getPeakMaxMidi(job: ExistingAnalysisJob) {
+  const musicalLayers = job.pitch_events_json?.musical_layers as { peak_range?: { high?: { max_midi?: number | null } } } | undefined;
+  const peakMax = musicalLayers?.peak_range?.high?.max_midi;
+  return typeof peakMax === "number" ? peakMax : null;
 }
 
 function getJobRecommendation(job: ExistingAnalysisJob) {
@@ -68,6 +75,7 @@ function getJobRecommendation(job: ExistingAnalysisJob) {
     detectedMaxMidi: detectedRange.max,
     comfortMinMidi: comfortRange.min,
     comfortMaxMidi: comfortRange.max,
+    peakMaxMidi: getPeakMaxMidi(job),
   });
 }
 
@@ -119,7 +127,7 @@ export async function POST(request: Request) {
     const fileIds = targetFiles.map((file) => file.id);
     const { data: existingJobs, error: existingJobsError } = await supabase
       .from("audio_analysis_jobs")
-      .select("id,audio_file_id,status,detected_min_midi,detected_max_midi,comfort_min_midi,comfort_max_midi,detected_min_note,detected_max_note,comfort_min_note,comfort_max_note")
+      .select("id,audio_file_id,status,detected_min_midi,detected_max_midi,comfort_min_midi,comfort_max_midi,detected_min_note,detected_max_note,comfort_min_note,comfort_max_note,pitch_events_json")
       .eq("kit_id", kitId)
       .eq("analysis_type", "tessitura")
       .in("audio_file_id", fileIds)
@@ -242,10 +250,10 @@ export async function GET(request: Request) {
     const jobs = (data ?? []).map((job) => {
       const normalizedJob = {
         ...job,
-        detected_min_note: job.detected_min_note ?? job.detected_min_midi ?? null,
-        detected_max_note: job.detected_max_note ?? job.detected_max_midi ?? null,
-        comfort_min_note: job.comfort_min_note ?? job.comfort_min_midi ?? null,
-        comfort_max_note: job.comfort_max_note ?? job.comfort_max_midi ?? null,
+        detected_min_note: job.detected_min_midi ?? job.detected_min_note ?? null,
+        detected_max_note: job.detected_max_midi ?? job.detected_max_note ?? null,
+        comfort_min_note: job.comfort_min_midi ?? job.comfort_min_note ?? null,
+        comfort_max_note: job.comfort_max_midi ?? job.comfort_max_note ?? null,
       };
 
       return {
