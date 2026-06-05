@@ -20,6 +20,7 @@ const MIN_PITCH_CONFIDENCE = Math.max(0, Math.min(1, Number(process.env.MIN_PITC
 const MIN_SUSTAINED_NOTE_MS = Math.max(40, Number(process.env.MIN_SUSTAINED_NOTE_MS ?? "80") || 80);
 const NOTE_GAP_TOLERANCE_SECONDS = 0.06;
 const DOMINANT_COVERAGE_RATIO = 0.8;
+const MUSICAL_RANGE_MARGIN_SEMITONES = Math.max(0, Math.min(2, Number(process.env.MUSICAL_RANGE_MARGIN_SEMITONES ?? "1") || 1));
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -406,6 +407,29 @@ function buildDominantRange(distribution: NoteDistributionEntry[]) {
   return midiRange(percentile(selected, 0), percentile(selected, 1));
 }
 
+function buildMusicalRange(dominantRange: ReturnType<typeof midiRange>, voiceRange: { min: number; max: number }) {
+  if (!isNumber(dominantRange.min_midi) || !isNumber(dominantRange.max_midi)) return midiRange(null, null);
+  return midiRange(
+    clamp(dominantRange.min_midi - MUSICAL_RANGE_MARGIN_SEMITONES, voiceRange.min, voiceRange.max),
+    clamp(dominantRange.max_midi + MUSICAL_RANGE_MARGIN_SEMITONES, voiceRange.min, voiceRange.max),
+  );
+}
+
+function buildPeakNotes(distribution: NoteDistributionEntry[], musicalRange: ReturnType<typeof midiRange>) {
+  if (!isNumber(musicalRange.min_midi) || !isNumber(musicalRange.max_midi)) return [];
+  return distribution
+    .filter((entry) => entry.midi < musicalRange.min_midi! || entry.midi > musicalRange.max_midi!)
+    .map((entry) => ({
+      midi: entry.midi,
+      note: entry.note,
+      direction: entry.midi < musicalRange.min_midi! ? "low" : "high",
+      duration_s: entry.duration_s,
+      duration_ratio: entry.duration_ratio,
+      occurrences: entry.occurrences,
+    }))
+    .sort((a, b) => b.duration_ratio - a.duration_ratio || a.midi - b.midi);
+}
+
 function buildExtrema(distribution: NoteDistributionEntry[]) {
   if (!distribution.length) {
     return { lowest_note: null, highest_note: null };
@@ -446,8 +470,10 @@ function calculateTessituraScore(notes: PitchNote[], comfortMin: number | null, 
   return Math.round(clamp(rawScore, 0, 100));
 }
 
-function buildMusicalLayers(notes: PitchNote[], midis: number[], comfortMin: number | null, comfortMax: number | null, minMidi: number | null, maxMidi: number | null) {
+function buildMusicalLayers(notes: PitchNote[], midis: number[], comfortMin: number | null, comfortMax: number | null, minMidi: number | null, maxMidi: number | null, voiceRange: { min: number; max: number }) {
   const noteDistribution = buildNoteDistribution(notes);
+  const dominantRange = buildDominantRange(noteDistribution);
+  const musicalRange = buildMusicalRange(dominantRange, voiceRange);
   const lowPeakMin = percentile(midis, 0);
   const lowPeakMax = percentile(midis, 0.05);
   const lowStressMin = percentile(midis, 0.05);
@@ -459,9 +485,12 @@ function buildMusicalLayers(notes: PitchNote[], midis: number[], comfortMin: num
   const extrema = buildExtrema(noteDistribution);
 
   return {
+    absolute_range: midiRange(minMidi, maxMidi),
     real_range: midiRange(minMidi, maxMidi),
     detected_range: midiRange(minMidi, maxMidi),
-    dominant_range: buildDominantRange(noteDistribution),
+    dominant_range: dominantRange,
+    musical_range: musicalRange,
+    musical_range_margin_semitones: MUSICAL_RANGE_MARGIN_SEMITONES,
     comfort_range: midiRange(comfortMin, comfortMax),
     stress_range: {
       low: midiRange(lowStressMin, lowStressMax),
@@ -471,6 +500,7 @@ function buildMusicalLayers(notes: PitchNote[], midis: number[], comfortMin: num
       low: midiRange(lowPeakMin, lowPeakMax),
       high: midiRange(highPeakMin, highPeakMax),
     },
+    peak_notes: buildPeakNotes(noteDistribution, musicalRange),
     ...extrema,
     note_distribution: noteDistribution,
     tessitura_score: calculateTessituraScore(notes, comfortMin, comfortMax, minMidi, maxMidi),
@@ -504,7 +534,7 @@ function buildInsights(notes: PitchNote[], voice: string, payload?: Partial<YinP
     moderado: { min_midi: realMinMidi, max_midi: realMaxMidi },
     avancado: { min_midi: realMinMidi !== null ? realMinMidi - 2 : null, max_midi: realMaxMidi !== null ? realMaxMidi + 2 : null },
   };
-  const musicalLayers = buildMusicalLayers(sourceNotes, midis, comfortMin, comfortMax, realMinMidi, realMaxMidi);
+  const musicalLayers = buildMusicalLayers(sourceNotes, midis, comfortMin, comfortMax, realMinMidi, realMaxMidi, filtered.voiceRange);
   const analysisDebug = {
     raw_detected_min: rawDetectedMin,
     raw_detected_max: rawDetectedMax,
@@ -522,6 +552,7 @@ function buildInsights(notes: PitchNote[], voice: string, payload?: Partial<YinP
     min_confidence: MIN_PITCH_CONFIDENCE,
     min_sustained_note_ms: MIN_SUSTAINED_NOTE_MS,
     dominant_coverage_ratio: DOMINANT_COVERAGE_RATIO,
+    musical_range_margin_semitones: MUSICAL_RANGE_MARGIN_SEMITONES,
     detector_reported_min_midi: payload?.detected_min_midi ?? null,
     detector_reported_max_midi: payload?.detected_max_midi ?? null,
   };
@@ -612,7 +643,7 @@ async function processJob(job: any) {
     const { notes, avg_pitch_midi, elapsedMs: analysisElapsedMs, analysisMode } = analysisResult;
     const insights = buildInsights(notes, normalizedVoice, analysisResult);
 
-    logs.push({ at: new Date().toISOString(), message: "Análise de tessitura concluída", analysis_mode: analysisMode, voice: normalizedVoice, notes_detected: notes.length, reliable_notes: insights.reliableNotes, filter_stats: insights.filterStats, real_range: insights.musicalLayers.real_range, dominant_range: insights.musicalLayers.dominant_range, tessitura_score: insights.musicalLayers.tessitura_score, avg_pitch_midi, analysis_elapsed_ms: analysisElapsedMs });
+    logs.push({ at: new Date().toISOString(), message: "Análise de tessitura concluída", analysis_mode: analysisMode, voice: normalizedVoice, notes_detected: notes.length, reliable_notes: insights.reliableNotes, filter_stats: insights.filterStats, absolute_range: insights.musicalLayers.absolute_range, dominant_range: insights.musicalLayers.dominant_range, musical_range: insights.musicalLayers.musical_range, tessitura_score: insights.musicalLayers.tessitura_score, avg_pitch_midi, analysis_elapsed_ms: analysisElapsedMs });
 
     if (insights.minMidi === null || insights.maxMidi === null) throw new Error("no pitch detected after vocal filters");
 
@@ -647,7 +678,7 @@ async function processJob(job: any) {
       .eq("id", job.id);
 
     if (error) throw new Error(error.message);
-    console.info("[audio-analysis-worker] análise concluída", { job_id: job.id, analysis_mode: analysisMode, voice: normalizedVoice, detected_range: [insights.minMidi, insights.maxMidi], comfort_range: [insights.comfortMin, insights.comfortMax], filter_stats: insights.filterStats, tessitura_score: insights.musicalLayers.tessitura_score, elapsed_ms: Date.now() - jobStartedAt, memory: currentMemorySnapshot() });
+    console.info("[audio-analysis-worker] análise concluída", { job_id: job.id, analysis_mode: analysisMode, voice: normalizedVoice, detected_range: [insights.minMidi, insights.maxMidi], comfort_range: [insights.comfortMin, insights.comfortMax], musical_range: insights.musicalLayers.musical_range, filter_stats: insights.filterStats, tessitura_score: insights.musicalLayers.tessitura_score, elapsed_ms: Date.now() - jobStartedAt, memory: currentMemorySnapshot() });
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
     let message = error instanceof Error ? error.message : String(error);
@@ -668,7 +699,7 @@ async function main() {
   if (configuredMax !== MAX_CONCURRENT_ANALYSIS) {
     console.warn("[audio-analysis-worker] MAX_CONCURRENT_ANALYSIS inválido para este worker; forçando execução serial", { configured: configuredMax, enforced: MAX_CONCURRENT_ANALYSIS });
   }
-  console.info("[audio-analysis-worker] started", { ENABLE_SMART_TESSITURA_ANALYSIS, MAX_CONCURRENT_ANALYSIS, analysis_pipeline: "ffmpeg-full-audio -> librosa-yin", analysis_max_seconds: ANALYSIS_MAX_SECONDS > 0 ? ANALYSIS_MAX_SECONDS : "full-audio", analysis_sample_rate: ANALYSIS_SAMPLE_RATE, analysis_timeout_ms: ANALYSIS_TIMEOUT_MS, min_pitch_confidence: MIN_PITCH_CONFIDENCE, min_sustained_note_ms: MIN_SUSTAINED_NOTE_MS, memory: currentMemorySnapshot() });
+  console.info("[audio-analysis-worker] started", { ENABLE_SMART_TESSITURA_ANALYSIS, MAX_CONCURRENT_ANALYSIS, analysis_pipeline: "ffmpeg-full-audio -> librosa-yin", analysis_max_seconds: ANALYSIS_MAX_SECONDS > 0 ? ANALYSIS_MAX_SECONDS : "full-audio", analysis_sample_rate: ANALYSIS_SAMPLE_RATE, analysis_timeout_ms: ANALYSIS_TIMEOUT_MS, min_pitch_confidence: MIN_PITCH_CONFIDENCE, min_sustained_note_ms: MIN_SUSTAINED_NOTE_MS, musical_range_margin_semitones: MUSICAL_RANGE_MARGIN_SEMITONES, memory: currentMemorySnapshot() });
 
   while (true) {
     try {
