@@ -4,6 +4,13 @@ import type { VoiceType } from "@/lib/data/public-kits";
 
 const VOICES: VoiceType[] = ["todos", "tenor", "contralto", "soprano"];
 
+const VOICE_LABELS: Record<VoiceType, string> = {
+  todos: "Todos",
+  tenor: "Tenor",
+  contralto: "Contralto",
+  soprano: "Soprano / Barítono",
+};
+
 interface VoiceSelectorProps {
   selectedVoice: VoiceType;
   onSelectVoice: (voice: VoiceType) => void;
@@ -19,11 +26,11 @@ export function VoiceSelector({ selectedVoice, onSelectVoice }: VoiceSelectorPro
             key={voice}
             type="button"
             onClick={() => onSelectVoice(voice)}
-            className={`rounded-lg border px-3 py-1.5 text-sm capitalize transition ${
+            className={`rounded-lg border px-3 py-1.5 text-sm transition ${
               isActive ? "border-blue-300 bg-blue-300/15 text-blue-100" : "border-white/20 bg-white/5 text-zinc-200"
             }`}
           >
-            {voice}
+            {VOICE_LABELS[voice]}
           </button>
         );
       })}
