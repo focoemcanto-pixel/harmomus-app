@@ -94,6 +94,18 @@ function createAudioElement(preload: "metadata" | "auto") {
   return audio;
 }
 
+function stopAudioElement(audio: HTMLAudioElement | null | undefined, options: { resetTime?: boolean; clearSource?: boolean } = {}) {
+  if (!audio) return;
+  try { audio.pause(); } catch {}
+  if (options.resetTime !== false) {
+    try { audio.currentTime = 0; } catch {}
+  }
+  if (options.clearSource) {
+    try { audio.removeAttribute("src"); } catch {}
+    try { audio.load(); } catch {}
+  }
+}
+
 function friendlyPlaybackError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error ?? "");
   if (/not supported|no supported source|media|decode|failed/i.test(message)) {
@@ -188,15 +200,24 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
     pitchControllerRef.current = null;
   }
 
+  function stopAllAudio(options: { clearCurrentSource?: boolean; clearCacheSources?: boolean } = {}) {
+    stopAudioElement(audioRef.current, { clearSource: options.clearCurrentSource });
+    stopAudioElement(preloadAudioRef.current, { clearSource: options.clearCacheSources });
+
+    audioCacheRef.current.forEach((audio) => {
+      stopAudioElement(audio, { clearSource: options.clearCacheSources });
+    });
+  }
+
   function resetPlayback(nextSrc?: string | null) {
     pitchSessionRef.current += 1;
     disposePitchController();
+    playbackMetricRef.current = null;
+
+    stopAllAudio({ clearCurrentSource: !nextSrc });
 
     const audio = audioRef.current;
     if (audio) {
-      try { audio.pause(); } catch {}
-      try { audio.currentTime = 0; } catch {}
-
       if (nextSrc) {
         const currentSrc = audio.getAttribute("src") || audio.src || "";
         if (currentSrc !== nextSrc) {
@@ -273,13 +294,15 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
   useEffect(() => {
     return () => {
       resetPlayback(null);
+      stopAllAudio({ clearCurrentSource: true, clearCacheSources: true });
+      audioCacheRef.current.clear();
     };
   }, []);
 
   function playKitAt(index: number) {
     if (index < 0 || index >= kits.length) return;
-    setCurrentKitIndex(index);
     resetPlayback(null);
+    setCurrentKitIndex(index);
   }
 
   function next() {
@@ -287,6 +310,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
 
     if (currentKitIndex >= kits.length - 1) {
       if (replayAtEnd) {
+        resetPlayback(null);
         setCurrentKitIndex(0);
       } else {
         resetPlayback(null);
@@ -294,8 +318,8 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
       return;
     }
 
-    setCurrentKitIndex((prev) => prev + 1);
     resetPlayback(null);
+    setCurrentKitIndex((prev) => prev + 1);
   }
 
   function prev() {
@@ -305,8 +329,8 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
       return;
     }
 
-    setCurrentKitIndex((prevIndex) => prevIndex - 1);
     resetPlayback(null);
+    setCurrentKitIndex((prevIndex) => prevIndex - 1);
   }
 
   async function togglePlay() {
@@ -411,14 +435,14 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
     });
 
     const voices = getVoiceOptions(currentKit, previewResolution?.sourceTone ?? tone);
+    resetPlayback(null);
     setSelectedTone(tone);
     setSelectedVoice(voices.includes(selectedVoice as PlaylistTrackVoice) ? selectedVoice : firstVoice(voices));
-    resetPlayback(null);
   }
 
   function handleVoiceChange(voice: PlaylistTrackVoice) {
-    setSelectedVoice(voice);
     resetPlayback(null);
+    setSelectedVoice(voice);
   }
 
   if (!currentKit) {
@@ -545,7 +569,11 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
                     Replay {replayAtEnd ? "ON" : "OFF"}
                   </button>
                   <span className="text-xs text-zinc-400">{isSelectedToneReal ? "Original" : "Harmomus IA"}</span>
-                  <Link href="/minhas-playlists" className="ml-auto rounded-full border border-white/20 px-4 py-2 text-sm text-zinc-100">
+                  <Link
+                    href="/minhas-playlists"
+                    onClick={() => resetPlayback(null)}
+                    className="ml-auto rounded-full border border-white/20 px-4 py-2 text-sm text-zinc-100"
+                  >
                     Sair da playlist
                   </Link>
                 </div>
