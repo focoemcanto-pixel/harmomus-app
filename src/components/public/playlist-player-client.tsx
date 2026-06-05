@@ -124,6 +124,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
   const playbackMetricRef = useRef<PlaybackMetric | null>(null);
   const pitchControllerRef = useRef<PitchPlaybackController | null>(null);
   const pitchSessionRef = useRef(0);
+  const progressSyncTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [currentKitIndex, setCurrentKitIndex] = useState(0);
   const [selectedTone, setSelectedTone] = useState("");
@@ -200,7 +201,31 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
     pitchControllerRef.current = null;
   }
 
+  function syncProgressFromAudio(audio = audioRef.current) {
+    if (!audio) return;
+    const nextTime = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
+    const nextDuration = Number.isFinite(audio.duration) ? audio.duration : 0;
+    setCurrentTime(nextTime);
+    setDuration(nextDuration);
+  }
+
+  function stopProgressSync() {
+    if (progressSyncTimerRef.current) {
+      clearInterval(progressSyncTimerRef.current);
+      progressSyncTimerRef.current = null;
+    }
+  }
+
+  function startProgressSync(audio = audioRef.current) {
+    stopProgressSync();
+    syncProgressFromAudio(audio);
+    progressSyncTimerRef.current = setInterval(() => {
+      syncProgressFromAudio(audio);
+    }, 250);
+  }
+
   function stopAllAudio(options: { clearCurrentSource?: boolean; clearCacheSources?: boolean } = {}) {
+    stopProgressSync();
     stopAudioElement(audioRef.current, { clearSource: options.clearCurrentSource });
     stopAudioElement(preloadAudioRef.current, { clearSource: options.clearCacheSources });
 
@@ -274,6 +299,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
     audio.preload = "auto";
     audio.load();
     audioRef.current = audio;
+    syncProgressFromAudio(audio);
   }, [activeTrackKey, playableTrack?.streamUrl, semitoneShift]);
 
   useEffect(() => {
@@ -294,6 +320,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
   useEffect(() => {
     return () => {
       resetPlayback(null);
+      stopProgressSync();
       stopAllAudio({ clearCurrentSource: true, clearCacheSources: true });
       audioCacheRef.current.clear();
     };
@@ -358,6 +385,8 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
     if (isPlaying) {
       try { pitchControllerRef.current?.pause(); } catch {}
       audio.pause();
+      stopProgressSync();
+      syncProgressFromAudio(audio);
       setIsPlaying(false);
       return;
     }
@@ -373,6 +402,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
       if (playbackMetricRef.current !== metric) return;
       metric.fetchEndAt = readResourceResponseEnd(src, nowPerf());
       metric.canplayAt = nowPerf();
+      syncProgressFromAudio(audio);
       logPlaybackMetric(metric, "FETCH_AUDIO_END");
       logPlaybackMetric(metric, "AUDIO_CANPLAY");
     };
@@ -383,6 +413,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
         metric.canplayAt = nowPerf();
       }
       metric.playingAt = nowPerf();
+      startProgressSync(audio);
       logPlaybackMetric(metric, "AUDIO_PLAYING");
     };
     audio.addEventListener("canplay", onCanPlay, { once: true });
@@ -396,7 +427,10 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
 
       if (semitoneShift === 0) {
         await audio.play();
-        if (session === pitchSessionRef.current) setIsPlaying(true);
+        if (session === pitchSessionRef.current) {
+          setIsPlaying(true);
+          startProgressSync(audio);
+        }
         return;
       }
 
@@ -410,9 +444,13 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
 
       pitchControllerRef.current = controller;
       await controller.play();
-      if (session === pitchSessionRef.current) setIsPlaying(true);
+      if (session === pitchSessionRef.current) {
+        setIsPlaying(true);
+        startProgressSync(audio);
+      }
     } catch (error) {
       console.error("[PlaylistPlayer] playback failed", error);
+      stopProgressSync();
       setPlaybackError(friendlyPlaybackError(error));
       setIsPlaying(false);
     } finally {
@@ -454,13 +492,22 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
       <audio
         ref={audioRef}
         preload="auto"
-        onPlay={() => setIsPlaying(true)}
-        onPause={() => setIsPlaying(false)}
+        onPlay={() => {
+          setIsPlaying(true);
+          startProgressSync(audioRef.current);
+        }}
+        onPause={() => {
+          setIsPlaying(false);
+          stopProgressSync();
+          syncProgressFromAudio(audioRef.current);
+        }}
         onEnded={() => {
+          stopProgressSync();
           disposePitchController();
           next();
         }}
         onError={() => {
+          stopProgressSync();
           setPlaybackError("Não foi possível carregar este áudio. Tente novamente ou escolha outro tom/voz.");
           setIsPlaying(false);
           setIsLoadingPlayback(false);
@@ -550,7 +597,10 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
                   onChange={(e) => {
                     const value = Number(e.target.value);
                     setCurrentTime(value);
-                    if (audioRef.current) audioRef.current.currentTime = value;
+                    if (audioRef.current) {
+                      audioRef.current.currentTime = value;
+                      syncProgressFromAudio(audioRef.current);
+                    }
                   }}
                   className="w-full"
                 />
