@@ -17,8 +17,9 @@ const ANALYSIS_TIMEOUT_MS = Math.max(30_000, Number(process.env.ANALYSIS_TIMEOUT
 const FFMPEG_TIMEOUT_MS = Math.max(30_000, Number(process.env.FFMPEG_TIMEOUT_MS ?? "90000") || 90_000);
 const MAX_CONCURRENT_ANALYSIS = 1;
 const MIN_PITCH_CONFIDENCE = Math.max(0, Math.min(1, Number(process.env.MIN_PITCH_CONFIDENCE ?? "0.75") || 0.75));
-const MIN_SUSTAINED_NOTE_MS = Math.max(40, Number(process.env.MIN_SUSTAINED_NOTE_MS ?? "120") || 120);
+const MIN_SUSTAINED_NOTE_MS = Math.max(40, Number(process.env.MIN_SUSTAINED_NOTE_MS ?? "80") || 80);
 const NOTE_GAP_TOLERANCE_SECONDS = 0.06;
+const DOMINANT_COVERAGE_RATIO = 0.8;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -87,6 +88,14 @@ type FilterStats = {
   removed_by_duration: number;
   octave_corrections: number;
   final_events: number;
+};
+
+type NoteDistributionEntry = {
+  midi: number;
+  note: string;
+  duration_s: number;
+  occurrences: number;
+  duration_ratio: number;
 };
 
 async function reserveJob() {
@@ -361,7 +370,7 @@ function buildFallbackDominant(midis: number[]) {
     .map(([midi, count]) => ({ midi, note: midiToNoteName(midi), occurrences: count }));
 }
 
-function buildNoteDistribution(notes: PitchNote[]) {
+function buildNoteDistribution(notes: PitchNote[]): NoteDistributionEntry[] {
   const totalDuration = notes.reduce((sum, note) => sum + noteDuration(note), 0);
   const distribution = new Map<number, { midi: number; note: string; duration_s: number; occurrences: number }>();
 
@@ -379,7 +388,42 @@ function buildNoteDistribution(notes: PitchNote[]) {
       duration_s: Number(entry.duration_s.toFixed(3)),
       duration_ratio: totalDuration > 0 ? Number((entry.duration_s / totalDuration).toFixed(4)) : 0,
     }))
-    .sort((a, b) => b.duration_s - a.duration_s);
+    .sort((a, b) => a.midi - b.midi);
+}
+
+function buildDominantRange(distribution: NoteDistributionEntry[]) {
+  if (!distribution.length) return midiRange(null, null);
+  let coverage = 0;
+  const selected = [...distribution]
+    .sort((a, b) => b.duration_s - a.duration_s)
+    .filter((entry) => {
+      if (coverage >= DOMINANT_COVERAGE_RATIO) return false;
+      coverage += entry.duration_ratio;
+      return true;
+    })
+    .map((entry) => entry.midi);
+
+  return midiRange(percentile(selected, 0), percentile(selected, 1));
+}
+
+function buildExtrema(distribution: NoteDistributionEntry[]) {
+  if (!distribution.length) {
+    return { lowest_note: null, highest_note: null };
+  }
+  const byMidi = [...distribution].sort((a, b) => a.midi - b.midi);
+  const lowest = byMidi[0];
+  const highest = byMidi[byMidi.length - 1];
+  const serialize = (entry: NoteDistributionEntry | undefined) =>
+    entry
+      ? {
+          midi: entry.midi,
+          note: entry.note,
+          duration_s: entry.duration_s,
+          duration_ratio: entry.duration_ratio,
+          occurrences: entry.occurrences,
+        }
+      : null;
+  return { lowest_note: serialize(lowest), highest_note: serialize(highest) };
 }
 
 function calculateTessituraScore(notes: PitchNote[], comfortMin: number | null, comfortMax: number | null, minMidi: number | null, maxMidi: number | null) {
@@ -403,6 +447,7 @@ function calculateTessituraScore(notes: PitchNote[], comfortMin: number | null, 
 }
 
 function buildMusicalLayers(notes: PitchNote[], midis: number[], comfortMin: number | null, comfortMax: number | null, minMidi: number | null, maxMidi: number | null) {
+  const noteDistribution = buildNoteDistribution(notes);
   const lowPeakMin = percentile(midis, 0);
   const lowPeakMax = percentile(midis, 0.05);
   const lowStressMin = percentile(midis, 0.05);
@@ -411,9 +456,12 @@ function buildMusicalLayers(notes: PitchNote[], midis: number[], comfortMin: num
   const highStressMax = percentile(midis, 0.95);
   const highPeakMin = percentile(midis, 0.95);
   const highPeakMax = percentile(midis, 1);
+  const extrema = buildExtrema(noteDistribution);
 
   return {
+    real_range: midiRange(minMidi, maxMidi),
     detected_range: midiRange(minMidi, maxMidi),
+    dominant_range: buildDominantRange(noteDistribution),
     comfort_range: midiRange(comfortMin, comfortMax),
     stress_range: {
       low: midiRange(lowStressMin, lowStressMax),
@@ -423,7 +471,8 @@ function buildMusicalLayers(notes: PitchNote[], midis: number[], comfortMin: num
       low: midiRange(lowPeakMin, lowPeakMax),
       high: midiRange(highPeakMin, highPeakMax),
     },
-    note_distribution: buildNoteDistribution(notes).slice(0, 24),
+    ...extrema,
+    note_distribution: noteDistribution,
     tessitura_score: calculateTessituraScore(notes, comfortMin, comfortMax, minMidi, maxMidi),
   };
 }
@@ -436,43 +485,50 @@ function buildInsights(notes: PitchNote[], voice: string, payload?: Partial<YinP
   const sourceNotes = filtered.notes;
   const midis = sourceNotes.map((n) => Math.round(n.pitch_midi));
 
-  const minMidi = percentile(midis, 0.03);
-  const maxMidi = percentile(midis, 0.97);
+  const realMinMidi = percentile(midis, 0);
+  const realMaxMidi = percentile(midis, 1);
+  const robustMinMidi = percentile(midis, 0.03);
+  const robustMaxMidi = percentile(midis, 0.97);
   const comfortMin = percentile(midis, 0.2);
   const comfortMax = percentile(midis, 0.8);
   const dominant = buildFallbackDominant(midis);
   const confidence = sourceNotes.length ? sourceNotes.reduce((sum, n) => sum + n.confidence, 0) / sourceNotes.length : 0;
   const contour = sourceNotes.slice(0, 4000).map((n) => ({ t: Number(n.start_s.toFixed(3)), midi: Math.round(n.pitch_midi), note: midiToNoteName(n.pitch_midi) }));
   const occasionalPeaks = sourceNotes
-    .filter((n) => (minMidi !== null && n.pitch_midi <= minMidi - 1) || (maxMidi !== null && n.pitch_midi >= maxMidi + 1))
+    .filter((n) => (robustMinMidi !== null && n.pitch_midi <= robustMinMidi - 1) || (robustMaxMidi !== null && n.pitch_midi >= robustMaxMidi + 1))
     .slice(0, 200)
     .map((n) => ({ t: Number(n.start_s.toFixed(3)), midi: Math.round(n.pitch_midi), note: midiToNoteName(n.pitch_midi) }));
 
   const recommend = {
     comfortavel: { min_midi: comfortMin, max_midi: comfortMax },
-    moderado: { min_midi: minMidi, max_midi: maxMidi },
-    avancado: { min_midi: minMidi !== null ? minMidi - 2 : null, max_midi: maxMidi !== null ? maxMidi + 2 : null },
+    moderado: { min_midi: realMinMidi, max_midi: realMaxMidi },
+    avancado: { min_midi: realMinMidi !== null ? realMinMidi - 2 : null, max_midi: realMaxMidi !== null ? realMaxMidi + 2 : null },
   };
-  const musicalLayers = buildMusicalLayers(sourceNotes, midis, comfortMin, comfortMax, minMidi, maxMidi);
+  const musicalLayers = buildMusicalLayers(sourceNotes, midis, comfortMin, comfortMax, realMinMidi, realMaxMidi);
   const analysisDebug = {
     raw_detected_min: rawDetectedMin,
     raw_detected_max: rawDetectedMax,
     raw_detected_min_note: isNumber(rawDetectedMin) ? midiToNoteName(rawDetectedMin) : null,
     raw_detected_max_note: isNumber(rawDetectedMax) ? midiToNoteName(rawDetectedMax) : null,
-    filtered_detected_min: minMidi,
-    filtered_detected_max: maxMidi,
-    filtered_detected_min_note: isNumber(minMidi) ? midiToNoteName(minMidi) : null,
-    filtered_detected_max_note: isNumber(maxMidi) ? midiToNoteName(maxMidi) : null,
+    filtered_detected_min: realMinMidi,
+    filtered_detected_max: realMaxMidi,
+    filtered_detected_min_note: isNumber(realMinMidi) ? midiToNoteName(realMinMidi) : null,
+    filtered_detected_max_note: isNumber(realMaxMidi) ? midiToNoteName(realMaxMidi) : null,
+    robust_detected_min: robustMinMidi,
+    robust_detected_max: robustMaxMidi,
+    robust_detected_min_note: isNumber(robustMinMidi) ? midiToNoteName(robustMinMidi) : null,
+    robust_detected_max_note: isNumber(robustMaxMidi) ? midiToNoteName(robustMaxMidi) : null,
     voice_range: midiRange(filtered.voiceRange.min, filtered.voiceRange.max),
     min_confidence: MIN_PITCH_CONFIDENCE,
     min_sustained_note_ms: MIN_SUSTAINED_NOTE_MS,
+    dominant_coverage_ratio: DOMINANT_COVERAGE_RATIO,
     detector_reported_min_midi: payload?.detected_min_midi ?? null,
     detector_reported_max_midi: payload?.detected_max_midi ?? null,
   };
 
   return {
-    minMidi,
-    maxMidi,
+    minMidi: realMinMidi,
+    maxMidi: realMaxMidi,
     comfortMin,
     comfortMax,
     dominant,
@@ -556,7 +612,7 @@ async function processJob(job: any) {
     const { notes, avg_pitch_midi, elapsedMs: analysisElapsedMs, analysisMode } = analysisResult;
     const insights = buildInsights(notes, normalizedVoice, analysisResult);
 
-    logs.push({ at: new Date().toISOString(), message: "Análise de tessitura concluída", analysis_mode: analysisMode, voice: normalizedVoice, notes_detected: notes.length, reliable_notes: insights.reliableNotes, filter_stats: insights.filterStats, tessitura_score: insights.musicalLayers.tessitura_score, avg_pitch_midi, analysis_elapsed_ms: analysisElapsedMs });
+    logs.push({ at: new Date().toISOString(), message: "Análise de tessitura concluída", analysis_mode: analysisMode, voice: normalizedVoice, notes_detected: notes.length, reliable_notes: insights.reliableNotes, filter_stats: insights.filterStats, real_range: insights.musicalLayers.real_range, dominant_range: insights.musicalLayers.dominant_range, tessitura_score: insights.musicalLayers.tessitura_score, avg_pitch_midi, analysis_elapsed_ms: analysisElapsedMs });
 
     if (insights.minMidi === null || insights.maxMidi === null) throw new Error("no pitch detected after vocal filters");
 
