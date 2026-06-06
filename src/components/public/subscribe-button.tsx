@@ -88,7 +88,7 @@ export function SubscribeButton({ planSlug, label, className }: SubscribeButtonP
 
     trackInitiateCheckout(planSlug);
 
-    const checkoutUrl = new URL("/checkout", window.location.origin);
+    const checkoutUrl = new URL("/api/billing/checkout", window.location.origin);
     checkoutUrl.searchParams.set("plan", planSlug);
     const attribution = readAttributionParams();
     attribution.forEach((value, key) => checkoutUrl.searchParams.set(key, value));
