@@ -1,9 +1,12 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import { PublicAppShell } from "@/components/public/public-app-shell";
+import { getCurrentUser } from "@/lib/auth/current-user";
 import { getPlans } from "@/lib/data/plans";
 
 const PAID_PLAN_SLUGS = new Set(["plus", "premium", "ministry_10", "ministry_20", "ministry_40"]);
+const ASAAS_TESTER_EMAILS = new Set(["markuezemarquinhos@hotmail.com"]);
 const ATTRIBUTION_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "fbclid", "gclid"] as const;
 
 type CheckoutPageProps = {
@@ -33,7 +36,7 @@ function buildHref(path: string, planSlug: string, params: Record<string, string
 }
 
 export default async function CheckoutPage({ searchParams }: CheckoutPageProps) {
-  const [params, plans] = await Promise.all([searchParams, getPlans()]);
+  const [params, plans, user] = await Promise.all([searchParams, getPlans(), getCurrentUser()]);
   const selectedPlan = String(getStringParam(params, "plan") ?? "premium").trim().toLowerCase();
   const plan = plans.find((item) => item.slug.toLowerCase() === selectedPlan && PAID_PLAN_SLUGS.has(item.slug));
 
@@ -42,6 +45,11 @@ export default async function CheckoutPage({ searchParams }: CheckoutPageProps) 
   const price = typeof plan?.price_cents === "number"
     ? new Intl.NumberFormat("pt-BR", { style: "currency", currency: plan.currency || "BRL" }).format(plan.price_cents / 100)
     : null;
+
+  const email = user?.email?.trim().toLowerCase();
+  if (!email || !ASAAS_TESTER_EMAILS.has(email)) {
+    redirect(buildHref("/api/billing/checkout", planSlug, params));
+  }
 
   const options: PaymentOption[] = [
     {
