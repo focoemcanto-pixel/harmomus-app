@@ -22,6 +22,12 @@ export interface PublicKitAudioFile {
   maxMidiNote: number | null;
   detectedMinMidiNote: number | null;
   detectedMaxMidiNote: number | null;
+  absoluteMinMidiNote?: number | null;
+  absoluteMaxMidiNote?: number | null;
+  dominantMinMidiNote?: number | null;
+  dominantMaxMidiNote?: number | null;
+  musicalMinMidiNote?: number | null;
+  musicalMaxMidiNote?: number | null;
   tessituraConfidence: number | null;
   tessituraSource: "manual" | "auto" | "hybrid";
 }
@@ -66,6 +72,26 @@ const VOICE_MAP: Record<string, VoiceType> = {
   soprano: "soprano",
 };
 
+type MidiRangeJson = {
+  min_midi?: number | null;
+  max_midi?: number | null;
+};
+
+type MusicalLayersJson = {
+  musical_range?: MidiRangeJson | null;
+  dominant_range?: MidiRangeJson | null;
+  absolute_range?: MidiRangeJson | null;
+  real_range?: MidiRangeJson | null;
+};
+
+type CompletedAnalysisJob = {
+  audio_file_id: string | null;
+  pitch_events_json?: { musical_layers?: MusicalLayersJson | null } | null;
+  detected_min_midi?: number | null;
+  detected_max_midi?: number | null;
+  vocal_confidence?: number | null;
+};
+
 function normalizeVoice(value: string): VoiceType {
   const normalized = value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
   for (const [key, target] of Object.entries(VOICE_MAP)) {
@@ -91,6 +117,14 @@ function resolveRequiredPlan(
   return plansMap.get(raw) ?? Array.from(plansMap.values()).find((plan) => plan.slug === raw) ?? null;
 }
 
+function getNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function getLatestAnalysisForFile(file: Database["public"]["Tables"]["kit_audio_files"]["Row"], analysisByFileId: Map<string, CompletedAnalysisJob>) {
+  return analysisByFileId.get(file.id) ?? null;
+}
+
 function mapKit(
   kit: Database["public"]["Tables"]["kits"]["Row"] & {
     original_tone?: string | null;
@@ -101,6 +135,7 @@ function mapKit(
   categoriesMap: Map<string, Database["public"]["Tables"]["categories"]["Row"]>,
   plansMap: Map<string, Database["public"]["Tables"]["plans"]["Row"]>,
   files: Database["public"]["Tables"]["kit_audio_files"]["Row"][],
+  analysisByFileId = new Map<string, CompletedAnalysisJob>(),
 ): PublicKit {
   const tonesMap = new Map<string, PublicKitToneGroup>();
 
@@ -112,6 +147,16 @@ function mapKit(
 
     const voice = normalizeVoice(file.name);
     const source = normalizeAudioSource((file as any).source_type);
+    const analysis = getLatestAnalysisForFile(file, analysisByFileId);
+    const musicalLayers = analysis?.pitch_events_json?.musical_layers ?? null;
+    const musicalRange = musicalLayers?.musical_range ?? null;
+    const dominantRange = musicalLayers?.dominant_range ?? null;
+    const absoluteRange = musicalLayers?.absolute_range ?? musicalLayers?.real_range ?? null;
+    const musicalMin = getNumber(musicalRange?.min_midi);
+    const musicalMax = getNumber(musicalRange?.max_midi);
+    const absoluteMin = getNumber(absoluteRange?.min_midi) ?? getNumber(analysis?.detected_min_midi);
+    const absoluteMax = getNumber(absoluteRange?.max_midi) ?? getNumber(analysis?.detected_max_midi);
+
     tonesMap.get(tone)!.voices[voice] = {
       id: file.id,
       tone,
@@ -123,12 +168,18 @@ function mapKit(
       source_type: source,
       source,
       isGenerated: source === "generated",
-      minMidiNote: (file as any).min_midi_note ?? null,
-      maxMidiNote: (file as any).max_midi_note ?? null,
-      detectedMinMidiNote: (file as any).detected_min_midi_note ?? null,
-      detectedMaxMidiNote: (file as any).detected_max_midi_note ?? null,
-      tessituraConfidence: (file as any).tessitura_confidence ?? null,
-      tessituraSource: (file as any).tessitura_source ?? "manual",
+      minMidiNote: musicalMin ?? (file as any).min_midi_note ?? null,
+      maxMidiNote: musicalMax ?? (file as any).max_midi_note ?? null,
+      detectedMinMidiNote: musicalMin ?? (file as any).detected_min_midi_note ?? null,
+      detectedMaxMidiNote: musicalMax ?? (file as any).detected_max_midi_note ?? null,
+      absoluteMinMidiNote: absoluteMin,
+      absoluteMaxMidiNote: absoluteMax,
+      dominantMinMidiNote: getNumber(dominantRange?.min_midi),
+      dominantMaxMidiNote: getNumber(dominantRange?.max_midi),
+      musicalMinMidiNote: musicalMin,
+      musicalMaxMidiNote: musicalMax,
+      tessituraConfidence: analysis?.vocal_confidence ?? (file as any).tessitura_confidence ?? null,
+      tessituraSource: analysis ? "hybrid" : (file as any).tessitura_source ?? "manual",
     };
   }
 
@@ -167,6 +218,16 @@ function groupFilesByKit(files: Database["public"]["Tables"]["kit_audio_files"][
     const list = map.get(file.kit_id) ?? [];
     list.push(file);
     map.set(file.kit_id, list);
+  }
+  return map;
+}
+
+function groupAnalysesByFileId(rows: CompletedAnalysisJob[]) {
+  const map = new Map<string, CompletedAnalysisJob>();
+  for (const row of rows) {
+    if (!row.audio_file_id) continue;
+    if (map.has(row.audio_file_id)) continue;
+    map.set(row.audio_file_id, row);
   }
   return map;
 }
@@ -226,7 +287,6 @@ export async function getPublishedKitSearchItems(limit = 250): Promise<PublicKit
   });
 }
 
-
 export async function getPublishedKitById(id: string): Promise<PublicKit | null> {
   const supabase = await getPublicClient();
   const { data: kit, error: kitError } = await supabase
@@ -239,26 +299,36 @@ export async function getPublishedKitById(id: string): Promise<PublicKit | null>
   if (kitError) throw new Error(`Falha ao buscar kit: ${kitError.message}`);
   if (!kit) return null;
 
-  const [{ data: category, error: categoryError }, { data: plans, error: plansError }, { data: files, error: filesError }] = await Promise.all([
+  const [{ data: category, error: categoryError }, { data: plans, error: plansError }, { data: files, error: filesError }, { data: analyses, error: analysesError }] = await Promise.all([
     kit.category_id ? supabase.from("categories").select("*").eq("id", kit.category_id).maybeSingle() : Promise.resolve({ data: null, error: null }),
     supabase.from("plans").select("*"),
     supabase.from("kit_audio_files").select("*").eq("kit_id", kit.id).order("tone", { ascending: true }),
+    supabase
+      .from("audio_analysis_jobs")
+      .select("audio_file_id,pitch_events_json,detected_min_midi,detected_max_midi,vocal_confidence,completed_at")
+      .eq("kit_id", kit.id)
+      .eq("analysis_type", "tessitura")
+      .eq("status", "completed")
+      .order("completed_at", { ascending: false }),
   ]);
 
   if (categoryError) throw new Error(`Falha ao buscar categoria: ${categoryError.message}`);
   if (plansError) throw new Error(`Falha ao buscar planos: ${plansError.message}`);
   if (filesError) throw new Error(`Falha ao buscar áudios do kit: ${filesError.message}`);
+  if (analysesError) console.warn("[public-kits] falha ao buscar análises IA", analysesError.message);
 
   const categoriesMap = new Map<string, Database["public"]["Tables"]["categories"]["Row"]>();
   if (category) categoriesMap.set(category.id, category as Database["public"]["Tables"]["categories"]["Row"]);
   const plansRows = (plans ?? []) as Database["public"]["Tables"]["plans"]["Row"][];
   const plansMap = new Map(plansRows.map((row) => [row.id, row]));
+  const analysisByFileId = groupAnalysesByFileId((analyses ?? []) as CompletedAnalysisJob[]);
 
   return mapKit(
     kit as Database["public"]["Tables"]["kits"]["Row"] & any,
     categoriesMap,
     plansMap,
     (files ?? []) as Database["public"]["Tables"]["kit_audio_files"]["Row"][],
+    analysisByFileId,
   );
 }
 
@@ -273,26 +343,5 @@ export async function getPublishedKitBySlug(slug: string): Promise<PublicKit | n
 
   if (kitError) throw new Error(`Falha ao buscar kit: ${kitError.message}`);
   if (!kit) return null;
-
-  const [{ data: category, error: categoryError }, { data: plans, error: plansError }, { data: files, error: filesError }] = await Promise.all([
-    kit.category_id ? supabase.from("categories").select("*").eq("id", kit.category_id).maybeSingle() : Promise.resolve({ data: null, error: null }),
-    supabase.from("plans").select("*"),
-    supabase.from("kit_audio_files").select("*").eq("kit_id", kit.id).order("tone", { ascending: true }),
-  ]);
-
-  if (categoryError) throw new Error(`Falha ao buscar categoria: ${categoryError.message}`);
-  if (plansError) throw new Error(`Falha ao buscar planos: ${plansError.message}`);
-  if (filesError) throw new Error(`Falha ao buscar áudios do kit: ${filesError.message}`);
-
-  const categoriesMap = new Map<string, Database["public"]["Tables"]["categories"]["Row"]>();
-  if (category) categoriesMap.set(category.id, category as Database["public"]["Tables"]["categories"]["Row"]);
-  const plansRows = (plans ?? []) as Database["public"]["Tables"]["plans"]["Row"][];
-  const plansMap = new Map(plansRows.map((row) => [row.id, row]));
-
-  return mapKit(
-    kit as Database["public"]["Tables"]["kits"]["Row"] & any,
-    categoriesMap,
-    plansMap,
-    (files ?? []) as Database["public"]["Tables"]["kit_audio_files"]["Row"][],
-  );
+  return getPublishedKitById(kit.id);
 }
