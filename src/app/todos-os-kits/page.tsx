@@ -11,7 +11,7 @@ export default async function TodosOsKitsPage() {
       id: kit.id,
       slug: kit.slug,
       name: kit.name,
-      artist: kit.artist,
+      artist: kit.artist?.trim() || "Harmomus",
       categoryName: kit.category?.name ?? null,
       requiredPlanSlug: kit.requiredPlan?.slug ?? null,
       allowedPlanSlugs: kit.allowedPlanSlugs ?? [],
