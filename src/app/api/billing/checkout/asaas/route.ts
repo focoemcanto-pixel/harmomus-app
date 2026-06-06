@@ -8,10 +8,6 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const ALLOWED_PLAN_SLUGS = new Set(["plus", "premium", "ministry_10", "ministry_20", "ministry_40"]);
 const ALLOWED_METHODS = new Set(["pix", "boleto"]);
-const ASAAS_TESTER_EMAILS = new Set(["focoemcanto@gmail.com"]);
-const ASAAS_TESTER_CPF_CNPJ: Record<string, string> = {
-  "focoemcanto@gmail.com": "12345678909",
-};
 const ATTRIBUTION_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "fbclid", "gclid"] as const;
 
 type ProfileRow = {
@@ -89,10 +85,6 @@ export async function GET(req: Request) {
     if (!user?.email) return NextResponse.redirect(loginRedirectUrl(req, planSlug, method), { status: 303 });
 
     const email = user.email.trim().toLowerCase();
-    if (!ASAAS_TESTER_EMAILS.has(email)) {
-      return NextResponse.redirect(appUrl(req, "/assinar?error=Checkout%20Asaas%20ainda%20em%20teste"), { status: 303 });
-    }
-
     const plans = await getPlans();
     const plan = plans.find((item) => item.slug === planSlug && ALLOWED_PLAN_SLUGS.has(item.slug));
     if (!plan?.id || typeof plan.price_cents !== "number" || plan.price_cents <= 0) {
@@ -128,7 +120,6 @@ export async function GET(req: Request) {
         email,
         externalReference: user.id,
         phone: cleanValue(typedProfile?.phone),
-        cpfCnpj: ASAAS_TESTER_CPF_CNPJ[email],
       });
 
     const billingType = billingTypeFromMethod(method);
