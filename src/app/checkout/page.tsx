@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { CheckoutPaymentSelector } from "@/components/public/checkout-payment-selector";
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { getPlans } from "@/lib/data/plans";
@@ -11,14 +12,6 @@ const ATTRIBUTION_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_term"
 
 type CheckoutPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
-};
-
-type PaymentOption = {
-  title: string;
-  description: string;
-  button: string;
-  href: string;
-  badge: string;
 };
 
 function getStringParam(params: Record<string, string | string[] | undefined> | undefined, key: string) {
@@ -51,30 +44,6 @@ export default async function CheckoutPage({ searchParams }: CheckoutPageProps) 
     redirect(buildHref("/api/billing/checkout", planSlug, params));
   }
 
-  const options: PaymentOption[] = [
-    {
-      title: "Cartão",
-      description: "Cartão de crédito recorrente.",
-      button: "Continuar com Cartão",
-      href: buildHref("/api/billing/checkout", planSlug, params),
-      badge: "Stripe",
-    },
-    {
-      title: "Pix",
-      description: "Pagamento via Pix.",
-      button: "Continuar com Pix",
-      href: buildHref("/api/billing/checkout/asaas", planSlug, params, { method: "pix" }),
-      badge: "Asaas",
-    },
-    {
-      title: "Boleto",
-      description: "Boleto mensal recorrente.",
-      button: "Continuar com Boleto",
-      href: buildHref("/api/billing/checkout/asaas", planSlug, params, { method: "boleto" }),
-      badge: "Asaas",
-    },
-  ];
-
   return (
     <PublicAppShell>
       <main className="min-h-screen bg-gradient-to-b from-[#020617] via-[#060b1a] to-[#09031a] px-4 pb-12 pt-24 text-white md:px-8 md:pt-28">
@@ -92,20 +61,57 @@ export default async function CheckoutPage({ searchParams }: CheckoutPageProps) 
             ) : null}
           </div>
 
-          <div className="mt-8 grid gap-5 md:grid-cols-3">
-            {options.map((option) => (
-              <article key={option.title} className="flex min-h-[260px] flex-col rounded-3xl border border-white/15 bg-white/[0.05] p-6 shadow-[0_18px_60px_rgba(15,23,42,0.35)]">
-                <div className="flex items-center justify-between gap-3">
-                  <h2 className="text-2xl font-semibold">{option.title}</h2>
-                  <span className="rounded-full border border-cyan-300/40 bg-cyan-400/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-cyan-100">{option.badge}</span>
-                </div>
-                <p className="mt-4 flex-1 text-sm leading-6 text-zinc-200">{option.description}</p>
-                <a href={option.href} className="mt-6 rounded-xl bg-gradient-to-r from-cyan-300 to-fuchsia-300 px-4 py-3 text-center text-sm font-semibold text-slate-950 transition hover:opacity-90">
-                  {option.button}
-                </a>
-              </article>
-            ))}
-          </div>
+          <CheckoutPaymentSelector
+            planName={planName}
+            monthlyPrice={price ?? "R$39,00/mês"}
+            options={[
+              {
+                id: "card",
+                title: "Cartão de Crédito",
+                label: "Cartão",
+                eyebrow: "7 dias grátis",
+                description: "Não paga nada hoje. Cobrança automática após o período gratuito.",
+                href: buildHref("/api/billing/checkout", planSlug, params),
+                badge: "Stripe",
+                bullets: [
+                  "Acesso imediato",
+                  "7 dias grátis",
+                  "Renovação automática",
+                  "Cancele quando quiser",
+                ],
+              },
+              {
+                id: "pix",
+                title: "Pix",
+                label: "Pix",
+                eyebrow: "Pagamento instantâneo",
+                description: "Acesso liberado após confirmação do pagamento.",
+                href: buildHref("/api/billing/checkout/asaas", planSlug, params, { method: "pix" }),
+                badge: "Asaas",
+                bullets: [
+                  "Sem cartão",
+                  "Confirmação rápida",
+                  "Cobrança mensal",
+                  "Processado pelo Asaas",
+                ],
+              },
+              {
+                id: "boleto",
+                title: "Boleto Bancário",
+                label: "Boleto",
+                eyebrow: "Pagamento por boleto",
+                description: "Acesso liberado após compensação bancária.",
+                href: buildHref("/api/billing/checkout/asaas", planSlug, params, { method: "boleto" }),
+                badge: "Asaas",
+                bullets: [
+                  "Pagamento por boleto",
+                  "Compensação bancária",
+                  "Cobrança mensal",
+                  "Processado pelo Asaas",
+                ],
+              },
+            ]}
+          />
 
           <div className="mt-8 flex flex-wrap gap-3 text-sm">
             <Link href={`/assinar?plan=${encodeURIComponent(planSlug)}`} className="rounded-xl border border-white/15 px-4 py-3 text-zinc-100 hover:bg-white/10">Voltar aos planos</Link>
