@@ -49,8 +49,6 @@ const HAVE_CURRENT_DATA = 2;
 const HAVE_FUTURE_DATA = 3;
 const NETWORK_EMPTY = 0;
 const NETWORK_LOADING = 2;
-const SIGNED_URL_CACHE_SAFETY_MS = 30_000;
-const SIGNED_URL_SESSION_PREFIX = "harmomus:signed-audio-url:";
 
 type PlaybackMetric = {
   id: string;
@@ -62,18 +60,8 @@ type PlaybackMetric = {
   playingAt?: number;
 };
 
-type SignedUrlCacheEntry = {
-  url?: string;
-  expiresAt: number;
-  promise?: Promise<string>;
-};
-
 function nowPerf() {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
-}
-
-function nowMs() {
-  return Date.now();
 }
 
 function logPlaybackMetric(metric: PlaybackMetric, event: "PLAY_CLICK" | "FETCH_AUDIO_START" | "FETCH_AUDIO_END" | "AUDIO_CANPLAY" | "AUDIO_PLAYING") {
@@ -127,52 +115,6 @@ function warmAudio(audio: HTMLAudioElement) {
   try { audio.load(); } catch {}
 }
 
-function getSignedUrlResolverPath(src: string) {
-  const value = String(src ?? "").trim();
-  const match = value.match(/^\/api\/audio\/([^/?#]+)(?:\/signed)?([?#].*)?$/);
-  if (!match?.[1]) return null;
-  return `/api/audio/${match[1]}/signed-url${match[2] ?? ""}`;
-}
-
-function readSessionSignedUrl(resolverPath: string) {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.sessionStorage.getItem(`${SIGNED_URL_SESSION_PREFIX}${resolverPath}`);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { url?: string; expiresAt?: number };
-    if (!parsed.url || !parsed.expiresAt || parsed.expiresAt <= nowMs()) {
-      window.sessionStorage.removeItem(`${SIGNED_URL_SESSION_PREFIX}${resolverPath}`);
-      return null;
-    }
-    return parsed.url;
-  } catch {
-    return null;
-  }
-}
-
-function writeSessionSignedUrl(resolverPath: string, url: string, expiresAt: number) {
-  if (typeof window === "undefined") return;
-  try {
-    window.sessionStorage.setItem(`${SIGNED_URL_SESSION_PREFIX}${resolverPath}`, JSON.stringify({ url, expiresAt }));
-  } catch {}
-}
-
-async function fetchSignedAudioUrl(src: string) {
-  const resolverPath = getSignedUrlResolverPath(src);
-  if (!resolverPath) return src;
-
-  const response = await fetch(resolverPath, {
-    method: "GET",
-    credentials: "same-origin",
-    cache: "force-cache",
-  });
-
-  if (!response.ok) throw new Error("Não foi possível preparar este áudio.");
-  const payload = await response.json() as { url?: string; expiresIn?: number };
-  if (!payload.url) throw new Error("URL do áudio indisponível.");
-  return payload.url;
-}
-
 function artworkFromTrack(track: KitTrack) {
   const src = track.artworkUrl?.trim();
   if (!src) return undefined;
@@ -185,6 +127,7 @@ function artworkFromTrack(track: KitTrack) {
 
 function updateMediaSessionMetadata(track: KitTrack) {
   if (typeof navigator === "undefined" || !("mediaSession" in navigator) || typeof MediaMetadata === "undefined") return;
+
   try {
     navigator.mediaSession.metadata = new MediaMetadata({
       title: track.mediaTitle || track.title || "Harmomus",
@@ -229,7 +172,6 @@ export function useKitAudioEngine() {
   const loopRef = useRef(false);
   const requestSerialRef = useRef(0);
   const audioCacheRef = useRef<Map<string, HTMLAudioElement>>(new Map());
-  const signedUrlCacheRef = useRef<Map<string, SignedUrlCacheEntry>>(new Map());
   const playbackMetricRef = useRef<PlaybackMetric | null>(null);
 
   const ensureAudio = useCallback(() => {
@@ -240,36 +182,6 @@ export function useKitAudioEngine() {
     return audioRef.current;
   }, []);
 
-  const resolvePlayableAudioUrl = useCallback(async (src: string) => {
-    const fastSrc = resolveFastAudioUrl(src);
-    const resolverPath = getSignedUrlResolverPath(fastSrc);
-    if (!resolverPath) return fastSrc;
-
-    const cached = signedUrlCacheRef.current.get(resolverPath);
-    if (cached?.url && cached.expiresAt > nowMs()) return cached.url;
-    if (cached?.promise) return cached.promise;
-
-    const sessionCachedUrl = readSessionSignedUrl(resolverPath);
-    if (sessionCachedUrl) {
-      const expiresAt = nowMs() + 10 * 60 * 1000;
-      signedUrlCacheRef.current.set(resolverPath, { url: sessionCachedUrl, expiresAt });
-      return sessionCachedUrl;
-    }
-
-    const promise = fetchSignedAudioUrl(fastSrc).then((url) => {
-      const expiresAt = nowMs() + 55 * 60 * 1000 - SIGNED_URL_CACHE_SAFETY_MS;
-      signedUrlCacheRef.current.set(resolverPath, { url, expiresAt });
-      writeSessionSignedUrl(resolverPath, url, expiresAt);
-      return url;
-    }).catch((error) => {
-      signedUrlCacheRef.current.delete(resolverPath);
-      throw error;
-    });
-
-    signedUrlCacheRef.current.set(resolverPath, { promise, expiresAt: nowMs() + 30_000 });
-    return promise;
-  }, []);
-
   const syncAudioState = useCallback((audio: HTMLAudioElement) => {
     setCurrentTime(audio.currentTime || 0);
     setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
@@ -277,8 +189,17 @@ export function useKitAudioEngine() {
   }, []);
 
   const attachAudioStateListeners = useCallback((audio: HTMLAudioElement, isStillCurrent: () => boolean, signal: AbortSignal) => {
-    const sync = () => { if (isStillCurrent()) syncAudioState(audio); };
-    const markEnded = () => { if (isStillCurrent()) { syncAudioState(audio); setIsPlaying(false); setIsPreparing(false); } };
+    const sync = () => {
+      if (!isStillCurrent()) return;
+      syncAudioState(audio);
+    };
+    const markEnded = () => {
+      if (!isStillCurrent()) return;
+      syncAudioState(audio);
+      setIsPlaying(false);
+      setIsPreparing(false);
+    };
+
     audio.addEventListener("timeupdate", sync, { signal });
     audio.addEventListener("loadedmetadata", sync, { signal });
     audio.addEventListener("durationchange", sync, { signal });
@@ -291,7 +212,9 @@ export function useKitAudioEngine() {
   const stopAllAudioElements = useCallback((options: { resetTime?: boolean; clearSources?: boolean } = {}) => {
     stopAudioElement(audioRef.current, { resetTime: options.resetTime, clearSource: options.clearSources });
     stopAudioElement(preloaderRef.current, { resetTime: options.resetTime, clearSource: options.clearSources });
-    audioCacheRef.current.forEach((cachedAudio) => stopAudioElement(cachedAudio, { resetTime: options.resetTime, clearSource: options.clearSources }));
+    audioCacheRef.current.forEach((cachedAudio) => {
+      stopAudioElement(cachedAudio, { resetTime: options.resetTime, clearSource: options.clearSources });
+    });
   }, []);
 
   const trimAudioCache = useCallback((keepIdentity?: string) => {
@@ -306,14 +229,16 @@ export function useKitAudioEngine() {
   }, []);
 
   const getCachedAudio = useCallback((identity: string, src: string, preload: "metadata" | "auto") => {
+    const fastSrc = resolveFastAudioUrl(src);
     const cached = audioCacheRef.current.get(identity);
     if (cached) {
       cached.preload = preload;
-      if (cached.src !== src) cached.src = src;
+      if (!cached.src) cached.src = fastSrc;
       return cached;
     }
+
     const audio = createAudioElement(preload);
-    audio.src = src;
+    audio.src = fastSrc;
     audioCacheRef.current.set(identity, audio);
     trimAudioCache(identity);
     return audio;
@@ -333,9 +258,12 @@ export function useKitAudioEngine() {
     abortRef.current?.abort("hard-invalidate");
     abortRef.current = null;
     cancelRaf();
+
     try { pitchControllerRef.current?.dispose(); } catch {}
     pitchControllerRef.current = null;
+
     stopAllAudioElements({ resetTime: true });
+
     setIsPlaying(false);
     setIsPreparing(false);
     setCurrentTime(0);
@@ -371,42 +299,31 @@ export function useKitAudioEngine() {
   }, [cancelRaf]);
 
   const preloadTrack = useCallback((nextTrack: KitTrack, mode: "metadata" | "auto" = "auto") => {
-    const baseTrack = normalizeTrackSource(nextTrack);
-    if ((baseTrack.semitoneShift ?? 0) !== 0 || !baseTrack.src) return;
-    const identity = getTrackIdentity(baseTrack);
+    const fastTrack = normalizeTrackSource(nextTrack);
+    if ((fastTrack.semitoneShift ?? 0) !== 0 || !fastTrack.src) return;
+    const identity = getTrackIdentity(fastTrack);
+    const cachedAudio = getCachedAudio(identity, fastTrack.src, mode);
 
-    void resolvePlayableAudioUrl(baseTrack.src).then((playableSrc) => {
-      const cachedAudio = getCachedAudio(identity, playableSrc, mode);
-      if (audioRef.current !== cachedAudio && preloadedSrcRef.current !== playableSrc) {
-        preloaderRef.current = cachedAudio;
-        preloadedSrcRef.current = playableSrc;
-      }
-      cachedAudio.preload = mode;
-      warmAudio(cachedAudio);
-    }).catch(() => undefined);
-  }, [getCachedAudio, resolvePlayableAudioUrl]);
-
-  const playTrack = useCallback(async (nextTrack: KitTrack) => {
-    const baseTrack = normalizeTrackSource(nextTrack);
-    if (!baseTrack.src) return;
-
-    setIsPreparing(true);
-    const identity = getTrackIdentity(baseTrack);
-    const clickAt = nowPerf();
-    const metric: PlaybackMetric = { id: identity, src: baseTrack.src, clickAt };
-    playbackMetricRef.current = metric;
-    logPlaybackMetric(metric, "PLAY_CLICK");
-
-    let playableSrc = baseTrack.src;
-    try {
-      playableSrc = await resolvePlayableAudioUrl(baseTrack.src);
-    } catch (error) {
-      setIsPreparing(false);
-      setErrorMessage(normalizePlaybackError(error));
-      return;
+    if (audioRef.current !== cachedAudio && preloadedSrcRef.current !== fastTrack.src) {
+      preloaderRef.current = cachedAudio;
+      preloadedSrcRef.current = fastTrack.src;
     }
 
-    const fastTrack = { ...baseTrack, src: playableSrc };
+    cachedAudio.preload = mode;
+    if (!cachedAudio.src) cachedAudio.src = fastTrack.src;
+    warmAudio(cachedAudio);
+  }, [getCachedAudio]);
+
+  const playTrack = useCallback(async (nextTrack: KitTrack) => {
+    const fastTrack = normalizeTrackSource(nextTrack);
+    if (!fastTrack.src) return;
+
+    setIsPreparing(true);
+    const identity = getTrackIdentity(fastTrack);
+    const clickAt = nowPerf();
+    const metric: PlaybackMetric = { id: identity, src: fastTrack.src, clickAt };
+    playbackMetricRef.current = metric;
+    logPlaybackMetric(metric, "PLAY_CLICK");
     const canReusePreloader = (fastTrack.semitoneShift ?? 0) === 0 && preloadedSrcRef.current === fastTrack.src && preloaderRef.current?.src;
 
     hardInvalidatePlayback();
@@ -421,11 +338,11 @@ export function useKitAudioEngine() {
       sessionIdRef.current = sessionId;
       activeIdentityRef.current = identity;
       setErrorMessage(null);
-      setTrack(baseTrack);
-      trackRef.current = baseTrack;
-      updateMediaSessionMetadata(baseTrack);
+      setTrack(fastTrack);
+      trackRef.current = fastTrack;
+      updateMediaSessionMetadata(fastTrack);
       setMediaSessionActionHandlers({
-        play: () => { void playTrack(nextTrack); },
+        play: () => { void playTrack(fastTrack); },
         pause: () => {
           abortRef.current?.abort("media-session-pause");
           try { pitchControllerRef.current?.pause(); } catch {}
@@ -445,8 +362,8 @@ export function useKitAudioEngine() {
 
       const abortController = new AbortController();
       abortRef.current = abortController;
-      let reusedPreloader = false;
 
+      let reusedPreloader = false;
       if ((fastTrack.semitoneShift ?? 0) === 0) {
         audio = getCachedAudio(identity, fastTrack.src, "auto");
         audioRef.current = audio;
@@ -470,9 +387,9 @@ export function useKitAudioEngine() {
         getTrackIdentity(trackRef.current) === identity
       );
 
-      metric.src = fastTrack.src;
       metric.fetchStartAt = nowPerf();
       logPlaybackMetric(metric, "FETCH_AUDIO_START");
+
       audio.volume = volumeRef.current;
       audio.loop = loopRef.current;
       attachAudioStateListeners(audio, isStillCurrent, abortController.signal);
@@ -505,6 +422,7 @@ export function useKitAudioEngine() {
             await audio.play();
           } catch (firstPlayError) {
             if (!reusedPreloader || !isStillCurrent()) throw firstPlayError;
+
             const fallbackAudio = getCachedAudio(`${identity}::fallback`, fastTrack.src, "auto");
             fallbackAudio.volume = volumeRef.current;
             fallbackAudio.loop = loopRef.current;
@@ -537,7 +455,7 @@ export function useKitAudioEngine() {
         setErrorMessage(normalizePlaybackError(error));
       }
     });
-  }, [attachAudioStateListeners, ensureAudio, getCachedAudio, hardInvalidatePlayback, resolvePlayableAudioUrl, runTransition, startRafLoop, stopAllAudioElements, syncAudioState]);
+  }, [attachAudioStateListeners, ensureAudio, getCachedAudio, hardInvalidatePlayback, runTransition, startRafLoop, stopAllAudioElements, syncAudioState]);
 
   const togglePlay = useCallback(async () => {
     const audio = audioRef.current;
@@ -576,7 +494,9 @@ export function useKitAudioEngine() {
     setVolume(next);
     if (audioRef.current) audioRef.current.volume = next;
     if (preloaderRef.current) preloaderRef.current.volume = next;
-    audioCacheRef.current.forEach((cachedAudio) => { cachedAudio.volume = next; });
+    audioCacheRef.current.forEach((cachedAudio) => {
+      cachedAudio.volume = next;
+    });
   }, []);
 
   const setLoopValue = useCallback((value: boolean) => {
@@ -587,12 +507,18 @@ export function useKitAudioEngine() {
 
   useEffect(() => {
     ensureAudio();
-    return () => { void runTransition(disposePlaybackSession); };
+    return () => {
+      void runTransition(disposePlaybackSession);
+    };
   }, [disposePlaybackSession, ensureAudio, runTransition]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
-    const handleVisibilityChange = () => { if (document.hidden) hardInvalidatePlayback(); };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) hardInvalidatePlayback();
+    };
+
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [hardInvalidatePlayback]);
