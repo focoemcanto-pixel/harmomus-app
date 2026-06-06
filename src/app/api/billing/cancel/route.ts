@@ -73,7 +73,9 @@ export async function POST(req: Request) {
         .update({
           status: "canceled",
           auto_renew: false,
-          canceled_at: new Date().toISOString(),
+          next_billing_at: null,
+          current_period_end: null,
+          cancel_at_period_end: false,
           updated_at: new Date().toISOString(),
         })
         .eq("id", subscription.id)
