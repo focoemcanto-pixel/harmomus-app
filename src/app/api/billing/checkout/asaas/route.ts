@@ -113,15 +113,6 @@ export async function GET(req: Request) {
     const typedProfile = (profile ?? null) as ProfileRow | null;
     const rows = (existingSubscriptions ?? []) as ExistingSubscriptionRow[];
 
-    const activeStripe = rows.find((subscription) =>
-      String(subscription.gateway ?? "").toLowerCase() === "stripe" &&
-      ["active", "trialing", "pending", "overdue"].includes(String(subscription.status ?? "").toLowerCase())
-    );
-
-    if (activeStripe) {
-      return NextResponse.redirect(appUrl(req, "/assinatura?error=Sua%20assinatura%20Stripe%20continua%20ativa.%20Use%20o%20portal%20Stripe%20para%20gerenciar."), { status: 303 });
-    }
-
     const existingAsaas = rows.find((subscription) =>
       String(subscription.gateway ?? "").toLowerCase() === "asaas"
     ) ?? null;
