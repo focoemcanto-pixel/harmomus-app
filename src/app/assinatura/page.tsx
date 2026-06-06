@@ -8,6 +8,7 @@ import {
   getStripeSubscription,
   listCustomerInvoices,
 } from "@/lib/stripe/client";
+import { listSubscriptionPayments } from "@/lib/asaas/subscriptions";
 import { getPlans } from "@/lib/data/plans";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -48,6 +49,10 @@ function invoiceStatusLabel(status?: string | null) {
   if (normalized === "void") return "Cancelado";
   if (normalized === "uncollectible") return "Não cobrável";
   if (normalized === "draft") return "Rascunho";
+  if (normalized === "received" || normalized === "confirmed") return "Pago";
+  if (normalized === "pending") return "Pendente";
+  if (normalized === "overdue") return "Vencido";
+  if (normalized === "deleted" || normalized === "cancelled" || normalized === "canceled") return "Cancelado";
   return status || "—";
 }
 
@@ -109,7 +114,28 @@ function normalizeInvoices(invoices: any[], currentSubscriptionId?: string | nul
 }
 
 function getInvoiceUrl(invoice: any) {
-  return invoice.hosted_invoice_url ?? invoice.invoice_pdf ?? null;
+  return invoice.hosted_invoice_url ?? invoice.invoice_pdf ?? invoice.invoiceUrl ?? invoice.bankSlipUrl ?? invoice.transactionReceiptUrl ?? null;
+}
+
+function asaasTimestampToIso(invoice: any) {
+  const value = invoice.created ?? invoice.dueDate ?? invoice.paymentDate ?? invoice.clientPaymentDate;
+  if (typeof value === "number") return stripeTimestampToIso(value);
+  if (typeof value !== "string") return null;
+  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T12:00:00.000Z` : value;
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function formatInvoiceDate(invoice: any, gateway: string) {
+  return gateway === "asaas" ? formatDate(asaasTimestampToIso(invoice)) : formatDate(stripeTimestampToIso(invoice.created));
+}
+
+function formatInvoiceAmount(invoice: any, gateway: string) {
+  if (gateway === "asaas") {
+    const value = typeof invoice.value === "number" ? invoice.value : null;
+    return value === null ? "Não informado" : new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
+  }
+  return formatAmount(invoice.amount_paid ?? invoice.total, invoice.currency);
 }
 
 function ministryPlanLabel(planType?: string | null) {
@@ -225,11 +251,15 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
   const currentPlanSlug = String(context.plan?.slug ?? context.effectiveSlug ?? "free").toLowerCase();
   const isFreePlan = currentPlanSlug === "free";
   const status = String(context.subscription?.status ?? (isFreePlan ? "active" : "pending")).toLowerCase();
-  const customerId = context.subscription?.stripe_customer_id ?? context.subscription?.gateway_customer_id;
-  const subscriptionId = context.subscription?.stripe_subscription_id;
+  const gateway = String(context.subscription?.gateway ?? "stripe").toLowerCase();
+  const isAsaas = gateway === "asaas";
+  const isStripe = !isAsaas;
+  const customerId = isStripe ? context.subscription?.stripe_customer_id ?? context.subscription?.gateway_customer_id : context.subscription?.gateway_customer_id;
+  const subscriptionId = isStripe ? context.subscription?.stripe_subscription_id : context.subscription?.gateway_subscription_id;
   const cancelAtPeriodEnd = Boolean((context.subscription as any)?.cancel_at_period_end);
-  const hasStripeLink = Boolean(customerId && subscriptionId);
-  const hasUnsyncedPremium = context.plan?.slug === "premium" && (status === "pending" || !hasStripeLink);
+  const hasStripeLink = Boolean(isStripe && customerId && subscriptionId);
+  const hasAsaasLink = Boolean(isAsaas && customerId && subscriptionId);
+  const hasUnsyncedPremium = context.plan?.slug === "premium" && status === "pending" && !hasStripeLink && !hasAsaasLink;
 
   let invoices: any[] = [];
   let paymentMethodLabel = isFreePlan ? EMPTY_VALUE : customerId ? "Não cadastrado" : "Não vinculado";
@@ -238,7 +268,7 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
   let periodEndDate: string | null = isFreePlan ? null : context.subscription?.current_period_end ?? null;
   let trialEndDate: string | null = isFreePlan ? null : context.subscription?.trial_ends_at ?? null;
 
-  if (!isFreePlan && customerId && process.env.STRIPE_SECRET_KEY) {
+  if (!isFreePlan && isStripe && customerId && process.env.STRIPE_SECRET_KEY) {
     const [invoiceResponse, paymentMethodsResponse, stripeSubscription] = await Promise.all([
       listCustomerInvoices(customerId, 24).catch(() => ({ data: [] })),
       getCustomerPaymentMethods(customerId, 1).catch(() => ({ data: [] })),
@@ -263,6 +293,16 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
         periodEndDate = trialEndIso;
       }
     }
+  }
+
+  if (!isFreePlan && isAsaas && subscriptionId && process.env.ASAAS_API_KEY) {
+    const asaasPayments = await listSubscriptionPayments(subscriptionId, 12).catch(() => []);
+    invoices = asaasPayments.slice(0, 6);
+    paymentMethodLabel = asaasPayments[0]?.billingType === "PIX" ? "Pix" : asaasPayments[0]?.billingType === "BOLETO" ? "Boleto" : "Asaas";
+    billingCycle = "Mensal";
+  } else if (!isFreePlan && isAsaas) {
+    paymentMethodLabel = "Asaas";
+    billingCycle = "Mensal";
   }
 
   const renewalStatus = isFreePlan
@@ -335,8 +375,8 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
                       const invoiceUrl = getInvoiceUrl(invoice);
                       return (
                         <tr key={invoice.id}>
-                          <td className="px-3 py-3">{formatDate(stripeTimestampToIso(invoice.created))}</td>
-                          <td className="px-3 py-3">{formatAmount(invoice.amount_paid ?? invoice.total, invoice.currency)}</td>
+                          <td className="px-3 py-3">{formatInvoiceDate(invoice, gateway)}</td>
+                          <td className="px-3 py-3">{formatInvoiceAmount(invoice, gateway)}</td>
                           <td className="px-3 py-3">{currentPlan}</td>
                           <td className="px-3 py-3">{invoiceStatusLabel(invoice.status)}</td>
                           <td className="px-3 py-3">{paymentMethodLabel}</td>
@@ -361,16 +401,29 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
           <div className="mt-8 rounded-2xl border border-white/10 bg-white/[0.03] p-5">
             <h2 className="text-lg font-semibold">Gerenciar assinatura</h2>
             <div className="mt-4 flex flex-wrap gap-3">
-              <form action="/api/billing/portal" method="post">
-                <button className="rounded-xl bg-gradient-to-r from-cyan-300 to-blue-400 px-5 py-3 text-sm font-semibold text-slate-900">Abrir portal Stripe</button>
-              </form>
+              {isStripe ? (
+                <form action="/api/billing/portal" method="post">
+                  <button className="rounded-xl bg-gradient-to-r from-cyan-300 to-blue-400 px-5 py-3 text-sm font-semibold text-slate-900">Abrir portal Stripe</button>
+                </form>
+              ) : (
+                <span className="rounded-xl bg-gradient-to-r from-cyan-300 to-blue-400 px-5 py-3 text-sm font-semibold text-slate-900">Gerenciar Assinatura</span>
+              )}
+              {isAsaas && invoices[0] ? (
+                <a href={getInvoiceUrl(invoices[0]) ?? "#"} target="_blank" rel="noreferrer" className="rounded-xl border border-cyan-300/50 bg-cyan-500/10 px-5 py-3 text-sm font-semibold text-cyan-100">Visualizar cobrança</a>
+              ) : null}
+              {isAsaas ? (
+                <span className="rounded-xl border border-white/15 px-5 py-3 text-sm font-semibold text-zinc-100">Vencimento: {formatDate(nextBillingDate, EMPTY_VALUE)}</span>
+              ) : null}
               <a href="/assinar?plan=premium" className="rounded-xl border border-fuchsia-300/50 bg-fuchsia-500/10 px-5 py-3 text-sm font-semibold text-fuchsia-100">Trocar plano</a>
-              {!cancelAtPeriodEnd && hasStripeLink ? (
+              {!cancelAtPeriodEnd && (hasStripeLink || hasAsaasLink) ? (
                 <form action="/api/billing/cancel" method="post"><CancelSubscriptionButton /></form>
               ) : null}
             </div>
-            {!hasStripeLink ? (
+            {isStripe && !hasStripeLink ? (
               <p className="mt-3 text-xs text-zinc-400">Cancelamento direto indisponível porque esta assinatura não está vinculada ao Stripe neste cadastro.</p>
+            ) : null}
+            {isAsaas ? (
+              <p className="mt-3 text-xs text-zinc-400">Assinaturas Asaas são gerenciadas pelo Harmomus. Use visualizar cobrança para abrir o boleto/Pix atual ou cancelar para encerrar a recorrência.</p>
             ) : null}
           </div>
         </section>
