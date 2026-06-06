@@ -6,7 +6,7 @@ import { getCurrentUser } from "@/lib/auth/current-user";
 import { getPlans } from "@/lib/data/plans";
 
 const PAID_PLAN_SLUGS = new Set(["plus", "premium", "ministry_10", "ministry_20", "ministry_40"]);
-const ASAAS_TESTER_EMAILS = new Set(["markuezemarquinhos@hotmail.com"]);
+const ASAAS_TESTER_EMAILS = new Set(["focoemcanto@gmail.com"]);
 const ATTRIBUTION_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "fbclid", "gclid"] as const;
 
 type CheckoutPageProps = {
