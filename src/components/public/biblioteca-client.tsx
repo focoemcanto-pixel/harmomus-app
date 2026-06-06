@@ -19,10 +19,14 @@ function normalizeSearch(value: string) {
     .trim();
 }
 
+function resolveKitArtist(kit: Pick<PublicKit, "artist">) {
+  return kit.artist?.trim() || "Harmomus";
+}
+
 function getKitSearchText(kit: PublicKit) {
   return normalizeSearch([
     kit.name,
-    kit.artist,
+    resolveKitArtist(kit),
     kit.category?.name,
     kit.requiredPlan?.name,
     kit.tones.map((tone) => tone.tone).join(" "),
@@ -49,7 +53,7 @@ export function BibliotecaClient({ kits, planSlug }: BibliotecaClientProps) {
   );
 
   const artists = useMemo(
-    () => Array.from(new Set(kits.map((kit) => kit.artist).filter(Boolean))).sort((a, b) => a.localeCompare(b, "pt-BR")),
+    () => Array.from(new Set(kits.map((kit) => resolveKitArtist(kit)))).sort((a, b) => a.localeCompare(b, "pt-BR")),
     [kits],
   );
 
@@ -64,7 +68,7 @@ export function BibliotecaClient({ kits, planSlug }: BibliotecaClientProps) {
     return kits.filter((kit) => {
       const matchesQuery = !normalizedQuery || getKitSearchText(kit).includes(normalizedQuery);
       const matchesCategory = !category || kit.category?.slug === category;
-      const matchesArtist = !artist || kit.artist === artist;
+      const matchesArtist = !artist || resolveKitArtist(kit) === artist;
       const matchesPlan = !plan || kit.requiredPlan?.slug === plan;
 
       return matchesQuery && matchesCategory && matchesArtist && matchesPlan;
@@ -156,7 +160,7 @@ export function BibliotecaClient({ kits, planSlug }: BibliotecaClientProps) {
                   ) : null}
                 </div>
                 <h3 className="mt-3 text-white">{kit.name}</h3>
-                <p className="text-sm text-zinc-300">{kit.artist}</p>
+                <p className="text-sm text-zinc-300">{resolveKitArtist(kit)}</p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {kit.category ? <span className="rounded-full border border-white/10 px-2 py-1 text-xs text-zinc-300">{kit.category.name}</span> : null}
                   {kit.requiredPlan ? <span className="rounded-full border border-gold-500/40 bg-gold-500/10 px-2 py-1 text-xs text-gold-300">{kit.requiredPlan.name}</span> : null}
