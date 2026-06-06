@@ -15,7 +15,6 @@ export interface TessituraSourceFile {
   confidence?: number | null;
 }
 
-
 export type IndividualVoiceTessituraStatus = "comfortable" | "too-high" | "too-low" | "unavailable";
 
 export interface IndividualVoiceTessituraRecommendation {
@@ -45,7 +44,7 @@ export interface VocalRange {
 }
 
 export interface OfficialVocalRange {
-  type: Exclude<VocalRangeType, "baritono">;
+  type: GroupTessituraVoice;
   label: string;
   absolute: VocalZone;
   comfortable: VocalZone;
@@ -64,10 +63,7 @@ export interface TessituraAnalysis {
   requestedTone: string;
   sourceTone: string;
   semitoneShift: number;
-  targetMidiRange: {
-    min: number;
-    max: number;
-  };
+  targetMidiRange: { min: number; max: number };
   status: TessituraStatus;
   suggestedRange: VocalRangeType;
   suggestedOctaveShift: 0 | -12 | 12;
@@ -79,10 +75,7 @@ export interface TargetVoiceTessituraAnalysis {
   sourceTone: string;
   semitoneShift: number;
   voice: VocalRangeType;
-  targetMidiRange: {
-    min: number;
-    max: number;
-  };
+  targetMidiRange: { min: number; max: number };
   status: TessituraStatus;
   suggestedOctaveShift: 0 | -12 | 12;
   toleranceSemitones: number;
@@ -90,30 +83,29 @@ export interface TargetVoiceTessituraAnalysis {
 }
 
 const DEFAULT_TESSITURA_TOLERANCE_SEMITONES = 1;
-const DEFAULT_INDIVIDUAL_VOICE_TOLERANCE_SEMITONES = 4;
-const DEFAULT_INDIVIDUAL_VOICE_ALERT_THRESHOLD_SEMITONES = 2;
+const PUBLIC_RECOMMENDATION_MARGIN_SEMITONES = 1;
 
-export const OFFICIAL_VOCAL_RANGES: Record<Exclude<VocalRangeType, "baritono">, OfficialVocalRange> = {
+export const OFFICIAL_VOCAL_RANGES: Record<GroupTessituraVoice, OfficialVocalRange> = {
   tenor: {
     type: "tenor",
     label: "Tenor",
     absolute: { minMidi: 48, maxMidi: 72 },
-    comfortable: { minMidi: 53, maxMidi: 67 },
-    warningMarginSemitones: 2,
+    comfortable: { minMidi: 48, maxMidi: 68 },
+    warningMarginSemitones: 1,
   },
   contralto: {
     type: "contralto",
     label: "Contralto",
-    absolute: { minMidi: 50, maxMidi: 74 },
-    comfortable: { minMidi: 53, maxMidi: 71 },
-    warningMarginSemitones: 2,
+    absolute: { minMidi: 43, maxMidi: 79 },
+    comfortable: { minMidi: 55, maxMidi: 74 },
+    warningMarginSemitones: 1,
   },
   soprano: {
     type: "soprano",
     label: "Soprano",
-    absolute: { minMidi: 57, maxMidi: 77 },
-    comfortable: { minMidi: 60, maxMidi: 72 },
-    warningMarginSemitones: 2,
+    absolute: { minMidi: 48, maxMidi: 84 },
+    comfortable: { minMidi: 60, maxMidi: 76 },
+    warningMarginSemitones: 1,
   },
 };
 
@@ -129,25 +121,25 @@ export const VOCAL_RANGES: Record<VocalRangeType, VocalRange> = {
   tenor: {
     type: "tenor",
     label: "Tenor",
-    comfortable: { minMidi: 48, maxMidi: 67 },
-    extended: { minMidi: 45, maxMidi: 71 },
+    comfortable: { minMidi: 48, maxMidi: 68 },
+    extended: { minMidi: 45, maxMidi: 72 },
     extreme: { minMidi: 43, maxMidi: 74 },
     preferredOctaveShift: 0,
   },
   contralto: {
     type: "contralto",
     label: "Contralto",
-    comfortable: { minMidi: 52, maxMidi: 72 },
-    extended: { minMidi: 48, maxMidi: 76 },
-    extreme: { minMidi: 45, maxMidi: 79 },
+    comfortable: { minMidi: 55, maxMidi: 74 },
+    extended: { minMidi: 50, maxMidi: 78 },
+    extreme: { minMidi: 43, maxMidi: 79 },
     preferredOctaveShift: 0,
   },
   soprano: {
     type: "soprano",
     label: "Soprano",
-    comfortable: { minMidi: 57, maxMidi: 72 },
-    extended: { minMidi: 55, maxMidi: 79 },
-    extreme: { minMidi: 53, maxMidi: 84 },
+    comfortable: { minMidi: 60, maxMidi: 76 },
+    extended: { minMidi: 55, maxMidi: 81 },
+    extreme: { minMidi: 48, maxMidi: 84 },
     preferredOctaveShift: 0,
   },
 };
@@ -175,7 +167,7 @@ export function toneToMidi(value: string, octave = 4): number | null {
   return base + (octave - 4) * 12;
 }
 
-export function applySemitoneShift(midi: number, semitoneShift: number, octaveShift: number = 0) {
+export function applySemitoneShift(midi: number, semitoneShift: number, octaveShift = 0) {
   return midi + semitoneShift + octaveShift;
 }
 
@@ -221,15 +213,11 @@ function buildTargetVoiceMessage({ status, range, semitoneShift, shiftedMin, shi
   const tooHigh = shiftedMax > range.comfortable.maxMidi;
   const tooLow = shiftedMin < range.comfortable.minMidi;
 
-  if (status === "comfortable") {
-    return `A modulação deixou a linha ${direction}, mas ainda dentro da zona confortável de ${range.label}.`;
-  }
-
+  if (status === "comfortable") return `A modulação deixou a linha ${direction}, mas ainda dentro da zona confortável de ${range.label}.`;
   if (status === "extended") {
     const edge = tooHigh ? "aproximando a região alta" : tooLow ? "aproximando a região baixa" : "fora do centro confortável";
     return `A modulação deixou a linha ${direction}, ${edge} de ${range.label}. Ainda é utilizável, mas merece atenção no ensaio.`;
   }
-
   if (status === "extreme") {
     const edge = tooHigh ? "muito alta" : tooLow ? "muito baixa" : "em região extrema";
     return `A modulação deixou a linha ${direction} e ${edge} para ${range.label}. Use como alerta técnico, não como proibição automática.`;
@@ -306,48 +294,32 @@ export function analyzeTessitura({
 
   const shiftedMin = applySemitoneShift(sourceMinMidi, semitoneShift);
   const shiftedMax = applySemitoneShift(sourceMaxMidi, semitoneShift);
-  const classification = classifyRange(shiftedMin, shiftedMax);
-  const octaveShift = classification.status === "unsafe" ? getOctaveAlternative(shiftedMin, shiftedMax, classification.suggestedRange, DEFAULT_TESSITURA_TOLERANCE_SEMITONES) : 0;
-
-  const messageMap: Record<TessituraStatus, string> = {
-    comfortable: "Tessitura confortável para o nipe sugerido.",
-    extended: "Tessitura utilizável, mas próxima dos limites de conforto.",
-    extreme: "Tessitura extrema detectada. Requer maior técnica e controle vocal.",
-    unsafe: "Tessitura fora da região segura recomendada.",
-  };
+  const { status, suggestedRange } = classifyRange(shiftedMin, shiftedMax);
+  const octaveShift = status === "unsafe" ? getOctaveAlternative(shiftedMin, shiftedMax, suggestedRange, DEFAULT_TESSITURA_TOLERANCE_SEMITONES) : 0;
 
   return {
     requestedTone,
     sourceTone,
     semitoneShift,
     targetMidiRange: { min: shiftedMin, max: shiftedMax },
-    status: classification.status,
-    suggestedRange: classification.suggestedRange.type,
+    status,
+    suggestedRange: suggestedRange.type,
     suggestedOctaveShift: octaveShift,
-    message: messageMap[classification.status],
+    message: buildTargetVoiceMessage({ status, range: suggestedRange, semitoneShift, shiftedMin, shiftedMax, suggestedOctaveShift: octaveShift }),
   };
 }
-export function classifyOfficialVoiceRange(
-  voice: VocalRangeType,
-  mainMinMidi?: number | null,
-  mainMaxMidi?: number | null,
-): VocalRangeRecommendation | null {
-  if (voice === "baritono" || typeof mainMinMidi !== "number" || typeof mainMaxMidi !== "number") return null;
 
+export function getOfficialVocalRangeRecommendation(minMidi: number, maxMidi: number, voice: GroupTessituraVoice): VocalRangeRecommendation {
   const range = OFFICIAL_VOCAL_RANGES[voice];
-  const belowComfort = Math.max(0, range.comfortable.minMidi - mainMinMidi);
-  const aboveComfort = Math.max(0, mainMaxMidi - range.comfortable.maxMidi);
+  const belowComfort = Math.max(0, range.comfortable.minMidi - minMidi);
+  const aboveComfort = Math.max(0, maxMidi - range.comfortable.maxMidi);
+  const belowAbsolute = Math.max(0, range.absolute.minMidi - minMidi);
+  const aboveAbsolute = Math.max(0, maxMidi - range.absolute.maxMidi);
   const overflowSemitones = Math.max(belowComfort, aboveComfort);
-  const outsideAbsoluteRange = mainMinMidi < range.absolute.minMidi || mainMaxMidi > range.absolute.maxMidi;
+  const outsideAbsoluteRange = belowAbsolute > 0 || aboveAbsolute > 0;
 
   if (!outsideAbsoluteRange && overflowSemitones === 0) {
-    return {
-      level: "safe",
-      label: "Seguro",
-      overflowSemitones,
-      outsideAbsoluteRange,
-      reason: "range principal dentro da zona confortável",
-    };
+    return { level: "safe", label: "Seguro", overflowSemitones: 0, outsideAbsoluteRange: false, reason: `dentro da região confortável de ${range.label}` };
   }
 
   const direction = aboveComfort > belowComfort ? "acima" : belowComfort > aboveComfort ? "abaixo" : "fora";
@@ -361,7 +333,6 @@ export function classifyOfficialVoiceRange(
 
   return { level: "risky", label: "Arriscado", overflowSemitones, outsideAbsoluteRange, reason };
 }
-
 
 function pickBestSourceForVoice(files: TessituraSourceFile[], voice: GroupTessituraVoice, targetTone: CanonicalTone) {
   let best: { file: TessituraSourceFile; semitoneShift: number; distance: number; usedRealFile: boolean } | null = null;
@@ -385,38 +356,30 @@ function pickBestSourceForVoice(files: TessituraSourceFile[], voice: GroupTessit
   return best;
 }
 
-
 const INDIVIDUAL_VOICE_RECOMMENDATIONS: Record<GroupTessituraVoice, { tooHigh: string; tooLow: string }> = {
   soprano: {
-    tooHigh: "Contralto",
-    tooLow: "Tenor uma oitava abaixo",
+    tooHigh: "a voz do contralto",
+    tooLow: "uma linha mais aguda do arranjo, se perder brilho ou projeção",
   },
   contralto: {
-    tooHigh: "Tenor",
-    tooLow: "Soprano",
+    tooHigh: "a voz do tenor",
+    tooLow: "a voz do soprano, se a linha atual ficar pesada ou sem presença",
   },
   tenor: {
-    tooHigh: "Soprano uma oitava abaixo",
-    tooLow: "Contralto",
+    tooHigh: "a voz do soprano uma oitava abaixo",
+    tooLow: "a voz do contralto, se a linha atual perder presença",
   },
 };
 
 function getIndividualComfortableRange(voice: GroupTessituraVoice): VocalZone {
-  const comfortableRange = OFFICIAL_VOCAL_RANGES[voice].comfortable;
-
-  if (voice !== "tenor") return comfortableRange;
-
-  return {
-    minMidi: Math.min(VOCAL_RANGES.baritono.comfortable.minMidi, comfortableRange.minMidi),
-    maxMidi: Math.max(VOCAL_RANGES.tenor.comfortable.maxMidi, comfortableRange.maxMidi),
-  };
+  return OFFICIAL_VOCAL_RANGES[voice].comfortable;
 }
 
-function getIndividualVoiceOverflow(minMidi: number, maxMidi: number, voice: GroupTessituraVoice, toleranceSemitones = DEFAULT_INDIVIDUAL_VOICE_TOLERANCE_SEMITONES) {
+function getIndividualVoiceOverflow(minMidi: number, maxMidi: number, voice: GroupTessituraVoice, marginSemitones = PUBLIC_RECOMMENDATION_MARGIN_SEMITONES) {
   const comfortableRange = getIndividualComfortableRange(voice);
   const expandedRange = {
-    minMidi: comfortableRange.minMidi - toleranceSemitones,
-    maxMidi: comfortableRange.maxMidi + toleranceSemitones,
+    minMidi: comfortableRange.minMidi - marginSemitones,
+    maxMidi: comfortableRange.maxMidi + marginSemitones,
   };
 
   return {
@@ -431,12 +394,10 @@ function classifyIndividualVoice(
   minMidi: number,
   maxMidi: number,
   voice: GroupTessituraVoice,
-  toleranceSemitones = DEFAULT_INDIVIDUAL_VOICE_TOLERANCE_SEMITONES,
-  alertThresholdSemitones = DEFAULT_INDIVIDUAL_VOICE_ALERT_THRESHOLD_SEMITONES,
+  marginSemitones = PUBLIC_RECOMMENDATION_MARGIN_SEMITONES,
 ): IndividualVoiceTessituraStatus {
-  const { highOverflow, lowOverflow } = getIndividualVoiceOverflow(minMidi, maxMidi, voice, toleranceSemitones);
-
-  if (highOverflow <= alertThresholdSemitones && lowOverflow <= alertThresholdSemitones) return "comfortable";
+  const { highOverflow, lowOverflow } = getIndividualVoiceOverflow(minMidi, maxMidi, voice, marginSemitones);
+  if (highOverflow === 0 && lowOverflow === 0) return "comfortable";
   return highOverflow >= lowOverflow ? "too-high" : "too-low";
 }
 
@@ -461,33 +422,35 @@ function buildIndividualVoiceRecommendation(files: TessituraSourceFile[], voice:
       sourceTone: null,
       semitoneShift: null,
       recommendation: "",
-      reason: `Não há dados de tessitura salvos para ${label}.`,
+      reason: `Não há dados de tessitura musical salvos para ${label}.`,
     };
   }
 
-  const toleranceSemitones = DEFAULT_INDIVIDUAL_VOICE_TOLERANCE_SEMITONES;
-  const alertThresholdSemitones = DEFAULT_INDIVIDUAL_VOICE_ALERT_THRESHOLD_SEMITONES;
   const targetMin = applySemitoneShift(source.file.minMidi, source.semitoneShift);
   const targetMax = applySemitoneShift(source.file.maxMidi, source.semitoneShift);
-  const status = classifyIndividualVoice(targetMin, targetMax, voice, toleranceSemitones, alertThresholdSemitones);
-  const { comfortableRange, expandedRange, highOverflow, lowOverflow } = getIndividualVoiceOverflow(targetMin, targetMax, voice, toleranceSemitones);
+  const status = classifyIndividualVoice(targetMin, targetMax, voice);
+  const { expandedRange, highOverflow, lowOverflow } = getIndividualVoiceOverflow(targetMin, targetMax, voice);
   const sourceTone = normalizeTone(source.file.tone);
   const direction = directionText(source.semitoneShift);
   const recommendationSet = INDIVIDUAL_VOICE_RECOMMENDATIONS[voice];
-  const recommendedVoice = status === "too-high" ? recommendationSet.tooHigh : recommendationSet.tooLow;
+  const recommendedLine = status === "too-high" ? recommendationSet.tooHigh : recommendationSet.tooLow;
+  const rangeText = `${midiToBrazilianNote(targetMin)} → ${midiToBrazilianNote(targetMax)}`;
+  const toleratedText = `${midiToBrazilianNote(expandedRange.minMidi)} → ${midiToBrazilianNote(expandedRange.maxMidi)}`;
+  const sourceDescription = source.usedRealFile
+    ? `Arquivo real em ${sourceTone ?? source.file.tone}.`
+    : `Projeção ${direction} a partir de ${sourceTone ?? source.file.tone}.`;
+
   const recommendation = status === "comfortable"
     ? ""
     : status === "too-high"
-      ? `Nesse tom, a linha de ${label} ultrapassa a tessitura padrão do nipe. Recomendado cantar a linha do ${recommendedVoice}.`
-      : `Nesse tom, a linha de ${label} ficou abaixo da tessitura padrão do nipe. Recomendado cantar a linha do ${recommendedVoice}.`;
-  const sourceDescription = source.usedRealFile
-    ? `Arquivo real de ${label} em ${sourceTone ?? source.file.tone}.`
-    : `Projeção ${direction} a partir de ${sourceTone ?? source.file.tone}.`;
+      ? `Nesta tonalidade, é mais seguro cantar ${recommendedLine}.`
+      : `Nesta tonalidade, teste ${recommendedLine}.`;
+
   const reason = status === "comfortable"
-    ? `Dentro da margem confortável para este nipe. A linha do ${label} fica entre ${midiToBrazilianNote(targetMin)} e ${midiToBrazilianNote(targetMax)}.`
+    ? `A linha de ${label} fica musicalmente entre ${rangeText}, dentro da margem confortável do nipe. ${sourceDescription}`
     : status === "too-high"
-      ? `A linha do ${label} chega até ${midiToBrazilianNote(targetMax)}, acima da faixa tolerada de ${midiToBrazilianNote(expandedRange.maxMidi)} para este nipe.`
-      : `A linha do ${label} desce até ${midiToBrazilianNote(targetMin)}, abaixo da faixa tolerada de ${midiToBrazilianNote(expandedRange.minMidi)} para este nipe.`;
+      ? `A linha de ${label} fica musicalmente entre ${rangeText} e passa ${highOverflow} semitom${highOverflow === 1 ? "" : "s"} acima da margem tolerada (${toleratedText}). ${sourceDescription}`
+      : `A linha de ${label} fica musicalmente entre ${rangeText} e passa ${lowOverflow} semitom${lowOverflow === 1 ? "" : "s"} abaixo da margem tolerada (${toleratedText}). ${sourceDescription}`;
 
   if (process.env.NODE_ENV !== "production") {
     console.debug("[tessitura:individual]", {
@@ -495,12 +458,10 @@ function buildIndividualVoiceRecommendation(files: TessituraSourceFile[], voice:
       selectedTone: targetTone,
       sourceTone: sourceTone ?? source.file.tone,
       sourceMode: source.usedRealFile ? "arquivo-real" : "projecao",
-      detectedMidiRange: { min: source.file.minMidi, max: source.file.maxMidi },
+      musicalMidiRange: { min: source.file.minMidi, max: source.file.maxMidi },
       projectedMidiRange: { min: targetMin, max: targetMax },
-      rangeUsed: comfortableRange,
       expandedRange,
-      toleranceSemitones,
-      alertThresholdSemitones,
+      marginSemitones: PUBLIC_RECOMMENDATION_MARGIN_SEMITONES,
       overflow: { high: highOverflow, low: lowOverflow },
       status,
     });
@@ -515,7 +476,7 @@ function buildIndividualVoiceRecommendation(files: TessituraSourceFile[], voice:
     sourceTone,
     semitoneShift: source.semitoneShift,
     recommendation,
-    reason: `${reason} ${sourceDescription}`,
+    reason,
   };
 }
 
