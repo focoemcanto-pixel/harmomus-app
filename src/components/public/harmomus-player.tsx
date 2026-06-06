@@ -1,6 +1,6 @@
 "use client";
 
-import { Pause, Play, RotateCcw, RotateCw, Repeat2, Volume2 } from "lucide-react";
+import { Loader2, Pause, Play, RotateCcw, RotateCw, Repeat2, Volume2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { type KitTrack, useKitAudioEngine } from "@/components/public/use-kit-audio-engine";
@@ -71,6 +71,7 @@ export function HarmomusPlayer({
   const {
     track,
     isPlaying,
+    isPreparing,
     currentTime,
     duration,
     volume,
@@ -117,6 +118,7 @@ export function HarmomusPlayer({
     artworkUrl: mediaMetadata.artworkUrl,
   }), [src, title, semitoneShift, trackId, mediaMetadata]);
   const isCurrentTrack = Boolean(track && src && currentSemitoneShift === semitoneShift && engineIsCurrentTrack(candidateTrack));
+  const isPreparingThisTrack = isPreparing && (!track || isCurrentTrack || engineIsCurrentTrack(candidateTrack));
 
   const warmCandidateTrack = useCallback((mode: "metadata" | "auto" = "auto") => {
     if (!canPlay || !src) return;
@@ -133,6 +135,8 @@ export function HarmomusPlayer({
   );
 
   const handlePlay = useCallback(async () => {
+    if (isPreparingThisTrack) return;
+
     if (!canPlay) {
       onBlocked();
       return;
@@ -148,7 +152,7 @@ export function HarmomusPlayer({
     }
 
     await playTrack(candidateTrack);
-  }, [canPlay, candidateTrack, isCurrentTrack, onBlocked, playTrack, src, togglePlay, warmCandidateTrack]);
+  }, [canPlay, candidateTrack, isCurrentTrack, isPreparingThisTrack, onBlocked, playTrack, src, togglePlay, warmCandidateTrack]);
 
   const handlePointerDown = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
     warmCandidateTrack("auto");
@@ -172,7 +176,7 @@ export function HarmomusPlayer({
       <p className="mb-3 text-sm text-muted">{title}</p>
 
       <div className="flex items-center gap-3">
-        <button onClick={() => skipBy(-10)} disabled={!isCurrentTrack} className="disabled:opacity-40">
+        <button onClick={() => skipBy(-10)} disabled={!isCurrentTrack || isPreparingThisTrack} className="disabled:opacity-40">
           <RotateCcw size={18} />
         </button>
 
@@ -181,16 +185,19 @@ export function HarmomusPlayer({
           onPointerDown={handlePointerDown}
           onMouseEnter={() => warmCandidateTrack("auto")}
           onFocus={() => warmCandidateTrack("auto")}
-          className="touch-manipulation rounded-full border border-gold-400/50 p-2"
+          disabled={isPreparingThisTrack}
+          aria-busy={isPreparingThisTrack}
+          aria-label={isPreparingThisTrack ? "Preparando áudio" : isPlaying && isCurrentTrack ? "Pausar áudio" : "Reproduzir áudio"}
+          className="touch-manipulation rounded-full border border-gold-400/50 p-2 transition disabled:cursor-wait disabled:opacity-80"
         >
-          {isPlaying && isCurrentTrack ? <Pause size={18} /> : <Play size={18} />}
+          {isPreparingThisTrack ? <Loader2 size={18} className="animate-spin" /> : isPlaying && isCurrentTrack ? <Pause size={18} /> : <Play size={18} />}
         </button>
 
-        <button onClick={() => skipBy(10)} disabled={!isCurrentTrack} className="disabled:opacity-40">
+        <button onClick={() => skipBy(10)} disabled={!isCurrentTrack || isPreparingThisTrack} className="disabled:opacity-40">
           <RotateCw size={18} />
         </button>
 
-        <button onClick={() => setLoopValue(!loop)} className={loop ? "text-gold-300" : ""}>
+        <button onClick={() => setLoopValue(!loop)} className={loop ? "text-gold-300" : ""} disabled={isPreparingThisTrack}>
           <Repeat2 size={18} />
         </button>
 
@@ -214,12 +221,12 @@ export function HarmomusPlayer({
         max={duration || 0}
         value={isCurrentTrack ? currentTime : 0}
         onChange={(e) => seekTo(Number(e.target.value))}
-        disabled={!isCurrentTrack}
+        disabled={!isCurrentTrack || isPreparingThisTrack}
         className="mt-3 w-full disabled:opacity-40"
       />
 
       <div className="mt-1 flex justify-between text-xs text-muted">
-        <span>{formatTime(isCurrentTrack ? currentTime : 0)}</span>
+        <span>{isPreparingThisTrack ? "Preparando..." : formatTime(isCurrentTrack ? currentTime : 0)}</span>
         <span>{formatTime(isCurrentTrack ? duration : 0)}</span>
       </div>
 
