@@ -42,6 +42,27 @@ export async function createCustomer(input: {
   });
 }
 
+export async function updateCustomer(customerId: string, input: {
+  name?: string | null;
+  email?: string | null;
+  externalReference?: string | null;
+  phone?: string | null;
+  mobilePhone?: string | null;
+  cpfCnpj?: string | null;
+}) {
+  return asaasFetch<AsaasCustomer>(`/customers/${encodeURIComponent(customerId)}`, {
+    method: "POST",
+    body: {
+      name: input.name ?? undefined,
+      email: input.email ?? undefined,
+      externalReference: input.externalReference ?? undefined,
+      phone: input.phone ?? undefined,
+      mobilePhone: input.mobilePhone ?? undefined,
+      cpfCnpj: input.cpfCnpj ?? undefined,
+    },
+  });
+}
+
 export async function getCustomer(customerId: string) {
   return asaasFetch<AsaasCustomer>(`/customers/${encodeURIComponent(customerId)}`, { method: "GET" });
 }
