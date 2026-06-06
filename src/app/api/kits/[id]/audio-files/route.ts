@@ -35,8 +35,8 @@ type AnalysisJobRow = {
   completed_at?: string | null;
 };
 
-function signedAudioPath(audioFileId: string) {
-  return `/api/audio/${audioFileId}/signed`;
+function audioPath(audioFileId: string) {
+  return `/api/audio/${audioFileId}`;
 }
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -77,7 +77,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       list.push({
         id: file.id,
         name: file.name,
-        streamUrl: signedAudioPath(file.id),
+        streamUrl: audioPath(file.id),
         tone,
         voice: normalizeVoice(file.name),
         fileType: file.file_type,
