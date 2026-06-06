@@ -11,6 +11,7 @@ const HANDLED_EVENTS = new Set([
   "SUBSCRIPTION_CREATED",
   "SUBSCRIPTION_UPDATED",
   "SUBSCRIPTION_DELETED",
+  "SUBSCRIPTION_INACTIVATED",
 ]);
 
 type AsaasWebhookPayment = {
@@ -102,7 +103,7 @@ function externalUserId(payload: AsaasWebhookPayload) {
 function statusForEvent(event: string) {
   if (event === "PAYMENT_RECEIVED" || event === "PAYMENT_CONFIRMED") return "active";
   if (event === "PAYMENT_OVERDUE") return "overdue";
-  if (event === "PAYMENT_DELETED" || event === "SUBSCRIPTION_DELETED") return "canceled";
+  if (event === "PAYMENT_DELETED" || event === "SUBSCRIPTION_DELETED" || event === "SUBSCRIPTION_INACTIVATED") return "canceled";
   return null;
 }
 
@@ -140,9 +141,12 @@ async function findSubscription(
     const { data, error } = await supabase
       .from("subscriptions")
       .select("id,user_id,status,gateway_subscription_id,gateway_customer_id")
+      .eq("gateway", "asaas")
       .eq("user_id", userId)
+      .order("updated_at", { ascending: false })
+      .limit(1)
       .maybeSingle();
-    if (error) throw new Error(`Falha ao localizar assinatura por usuário: ${error.message}`);
+    if (error) throw new Error(`Falha ao localizar assinatura Asaas por usuário: ${error.message}`);
     if (data) return data as SubscriptionRow;
   }
 
@@ -156,7 +160,6 @@ function buildUpdatePayload(event: string, payload: AsaasWebhookPayload) {
   const now = new Date().toISOString();
   const canceled = status === "canceled";
   const active = status === "active";
-  const overdue = status === "overdue";
 
   return {
     gateway: "asaas",
@@ -215,14 +218,14 @@ export async function POST(req: Request) {
 
     const subscription = await findSubscription(supabase, payload);
     if (!subscription?.id) {
-      await markEvent(supabase, payload, false, "Assinatura local não encontrada.");
+      await markEvent(supabase, payload, false, "Assinatura local Asaas não encontrada.");
       return NextResponse.json({ received: true, synced: false });
     }
 
     const updatePayload = buildUpdatePayload(event, payload);
     const sanitizedPayload = Object.fromEntries(Object.entries(updatePayload).filter(([, value]) => value !== undefined && value !== null));
-    const { error } = await supabase.from("subscriptions").update(sanitizedPayload).eq("id", subscription.id);
-    if (error) throw new Error(`Falha ao sincronizar assinatura: ${error.message}`);
+    const { error } = await supabase.from("subscriptions").update(sanitizedPayload).eq("id", subscription.id).eq("gateway", "asaas");
+    if (error) throw new Error(`Falha ao sincronizar assinatura Asaas: ${error.message}`);
 
     await markEvent(supabase, payload, true);
     return NextResponse.json({ received: true, synced: true });
