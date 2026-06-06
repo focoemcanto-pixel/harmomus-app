@@ -8,7 +8,10 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const ALLOWED_PLAN_SLUGS = new Set(["plus", "premium", "ministry_10", "ministry_20", "ministry_40"]);
 const ALLOWED_METHODS = new Set(["pix", "boleto"]);
-const ASAAS_TESTER_EMAILS = new Set(["markuezemarquinhos@hotmail.com"]);
+const ASAAS_TESTER_EMAILS = new Set(["focoemcanto@gmail.com"]);
+const ASAAS_TESTER_CPF_CNPJ: Record<string, string> = {
+  "focoemcanto@gmail.com": "12345678909",
+};
 const ATTRIBUTION_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "fbclid", "gclid"] as const;
 
 type ProfileRow = {
@@ -125,6 +128,7 @@ export async function GET(req: Request) {
         email,
         externalReference: user.id,
         phone: cleanValue(typedProfile?.phone),
+        cpfCnpj: ASAAS_TESTER_CPF_CNPJ[email],
       });
 
     const billingType = billingTypeFromMethod(method);
