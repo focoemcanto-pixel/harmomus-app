@@ -135,6 +135,35 @@ function normalizeEffectivePlanSlug(value: unknown): EffectivePlanSlug {
   return "free";
 }
 
+function planForSubscription(plans: Plan[] | null | undefined, subscription: Subscription | null | undefined) {
+  return (plans ?? []).find((p: Plan) => p.id === subscription?.plan_id) ?? null;
+}
+
+function planSlugForSubscription(plans: Plan[] | null | undefined, subscription: Subscription | null | undefined) {
+  return String(planForSubscription(plans, subscription)?.slug ?? "").trim().toLowerCase();
+}
+
+function subscriptionRank(subscription: Subscription, plans: Plan[] | null | undefined) {
+  const slug = planSlugForSubscription(plans, subscription);
+  const status = String(subscription.status ?? "").toLowerCase();
+  const gateway = String((subscription as any).gateway ?? "").toLowerCase();
+  const planWeight = isMinistryPlanSlug(slug) || slug === "premium" ? 300 : slug === "plus" ? 200 : 0;
+  const statusWeight = status === "active" ? 40 : status === "trialing" ? 35 : status === "overdue" ? 20 : 0;
+  const gatewayWeight = gateway === "stripe" ? 3 : gateway === "asaas" ? 2 : 1;
+  return planWeight + statusWeight + gatewayWeight;
+}
+
+function pickSubscriptionForAccess(subscriptions: Subscription[] | null | undefined, plans: Plan[] | null | undefined) {
+  const rows = subscriptions ?? [];
+  if (!rows.length) return null;
+
+  const usable = rows
+    .filter((subscription) => isSubscriptionUsable(subscription, planSlugForSubscription(plans, subscription)))
+    .sort((a, b) => subscriptionRank(b, plans) - subscriptionRank(a, plans));
+
+  return usable[0] ?? rows[0] ?? null;
+}
+
 function buildMinistryContextFromRows(
   membership: any,
   ministry: any,
@@ -205,7 +234,7 @@ export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessCo
     };
 
   const admin = createSupabaseAdminClient() as any;
-  const [{ data: plans }, { data: subscription }, profile] = await Promise.all([
+  const [{ data: plans }, { data: subscriptions }, profile] = await Promise.all([
     admin.from("plans").select("*"),
     admin
       .from("subscriptions")
@@ -213,15 +242,13 @@ export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessCo
       .eq("user_id", data.user.id)
       .order("updated_at", { ascending: false })
       .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
+      .limit(10),
     findProfileForUser(supabase, data.user),
   ]);
 
-  const typedSubscription = (subscription as Subscription | null) ?? null;
-  const plan =
-    (plans ?? []).find((p: Plan) => p.id === typedSubscription?.plan_id) ??
-    null;
+  const typedSubscriptions = (subscriptions as Subscription[] | null) ?? [];
+  const typedSubscription = pickSubscriptionForAccess(typedSubscriptions, plans) as Subscription | null;
+  const plan = planForSubscription(plans, typedSubscription);
   const rawPlanSlug = String(plan?.slug ?? "")
     .trim()
     .toLowerCase();
