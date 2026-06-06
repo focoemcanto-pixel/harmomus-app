@@ -1,9 +1,12 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import { PublicAppShell } from "@/components/public/public-app-shell";
+import { getCurrentUser } from "@/lib/auth/current-user";
 import { getPlans } from "@/lib/data/plans";
 
 const PAID_PLAN_SLUGS = new Set(["plus", "premium", "ministry_10", "ministry_20", "ministry_40"]);
+const ASAAS_TESTER_EMAILS = ["markuezemarquinhos@hotmail.com"];
 const ATTRIBUTION_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "fbclid", "gclid"] as const;
 
 type CheckoutPageProps = {
@@ -23,6 +26,10 @@ function getStringParam(params: Record<string, string | string[] | undefined> | 
   return typeof value === "string" ? value : undefined;
 }
 
+function isAsaasTesterEmail(email: string | null | undefined) {
+  return Boolean(email && ASAAS_TESTER_EMAILS.includes(email.trim().toLowerCase()));
+}
+
 function buildHref(path: string, planSlug: string, params: Record<string, string | string[] | undefined> | undefined, extra?: Record<string, string>) {
   const query = new URLSearchParams({ plan: planSlug, ...extra });
   for (const key of ATTRIBUTION_KEYS) {
@@ -33,11 +40,17 @@ function buildHref(path: string, planSlug: string, params: Record<string, string
 }
 
 export default async function CheckoutPage({ searchParams }: CheckoutPageProps) {
-  const [params, plans] = await Promise.all([searchParams, getPlans()]);
+  const [params, plans, user] = await Promise.all([searchParams, getPlans(), getCurrentUser()]);
   const selectedPlan = String(getStringParam(params, "plan") ?? "premium").trim().toLowerCase();
   const plan = plans.find((item) => item.slug.toLowerCase() === selectedPlan && PAID_PLAN_SLUGS.has(item.slug));
 
   const planSlug = plan?.slug ?? "premium";
+  const stripeCheckoutHref = buildHref("/api/billing/checkout", planSlug, params);
+
+  if (!isAsaasTesterEmail(user?.email)) {
+    redirect(stripeCheckoutHref);
+  }
+
   const planName = plan?.name ?? "Premium";
   const price = typeof plan?.price_cents === "number"
     ? new Intl.NumberFormat("pt-BR", { style: "currency", currency: plan.currency || "BRL" }).format(plan.price_cents / 100)
@@ -48,7 +61,7 @@ export default async function CheckoutPage({ searchParams }: CheckoutPageProps) 
       title: "Cartão",
       description: "Cartão de crédito recorrente.",
       button: "Continuar com Cartão",
-      href: buildHref("/api/billing/checkout", planSlug, params),
+      href: stripeCheckoutHref,
       badge: "Stripe",
     },
     {

@@ -7,6 +7,7 @@ import { getPlans } from "@/lib/data/plans";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const ALLOWED_PLAN_SLUGS = new Set(["plus", "premium", "ministry_10", "ministry_20", "ministry_40"]);
+const ASAAS_TESTER_EMAILS = ["markuezemarquinhos@hotmail.com"];
 const ALLOWED_METHODS = new Set(["pix", "boleto"]);
 const ATTRIBUTION_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "fbclid", "gclid"] as const;
 
@@ -24,6 +25,10 @@ type ExistingSubscriptionRow = {
   status?: string | null;
 };
 
+function isAsaasTesterEmail(email: string | null | undefined) {
+  return Boolean(email && ASAAS_TESTER_EMAILS.includes(email.trim().toLowerCase()));
+}
+
 function cleanValue(value: unknown) {
   const text = String(value ?? "").trim();
   return text ? text.slice(0, 500) : null;
@@ -38,6 +43,16 @@ function loginRedirectUrl(req: Request, planSlug: string, method: string) {
   checkout.searchParams.set("plan", planSlug || "premium");
   checkout.searchParams.set("method", method);
   return appUrl(req, `/login?redirect=${encodeURIComponent(`${checkout.pathname}${checkout.search}`)}`);
+}
+
+function stripeCheckoutUrl(req: Request, planSlug: string, sourceUrl: URL) {
+  const checkout = appUrl(req, "/api/billing/checkout");
+  checkout.searchParams.set("plan", planSlug || "premium");
+  for (const key of ATTRIBUTION_KEYS) {
+    const value = cleanValue(sourceUrl.searchParams.get(key));
+    if (value) checkout.searchParams.set(key, value);
+  }
+  return checkout;
 }
 
 function billingTypeFromMethod(method: string): AsaasBillingType | null {
@@ -83,6 +98,9 @@ export async function GET(req: Request) {
 
     const user = await getCurrentUser();
     if (!user?.email) return NextResponse.redirect(loginRedirectUrl(req, planSlug, method), { status: 303 });
+    if (!isAsaasTesterEmail(user.email)) {
+      return NextResponse.redirect(stripeCheckoutUrl(req, planSlug, url), { status: 303 });
+    }
 
     const plans = await getPlans();
     const plan = plans.find((item) => item.slug === planSlug && ALLOWED_PLAN_SLUGS.has(item.slug));
