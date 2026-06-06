@@ -192,6 +192,32 @@ export function useKitAudioEngine() {
     return audioRef.current;
   }, []);
 
+  const syncAudioState = useCallback((audio: HTMLAudioElement) => {
+    setCurrentTime(audio.currentTime || 0);
+    setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
+    setIsPlaying(!audio.paused && !audio.ended);
+  }, []);
+
+  const attachAudioStateListeners = useCallback((audio: HTMLAudioElement, isStillCurrent: () => boolean, signal: AbortSignal) => {
+    const sync = () => {
+      if (!isStillCurrent()) return;
+      syncAudioState(audio);
+    };
+    const markEnded = () => {
+      if (!isStillCurrent()) return;
+      syncAudioState(audio);
+      setIsPlaying(false);
+    };
+
+    audio.addEventListener("timeupdate", sync, { signal });
+    audio.addEventListener("loadedmetadata", sync, { signal });
+    audio.addEventListener("durationchange", sync, { signal });
+    audio.addEventListener("playing", sync, { signal });
+    audio.addEventListener("pause", sync, { signal });
+    audio.addEventListener("ended", markEnded, { signal });
+    sync();
+  }, [syncAudioState]);
+
   const stopAllAudioElements = useCallback((options: { resetTime?: boolean; clearSources?: boolean } = {}) => {
     stopAudioElement(audioRef.current, { resetTime: options.resetTime, clearSource: options.clearSources });
     stopAudioElement(preloaderRef.current, { resetTime: options.resetTime, clearSource: options.clearSources });
@@ -361,11 +387,20 @@ export function useKitAudioEngine() {
         audio.src = fastTrack.src;
       }
 
+      const isStillCurrent = () => (
+        !abortController.signal.aborted &&
+        sessionIdRef.current === sessionId &&
+        requestSerialRef.current === requestSerial &&
+        activeIdentityRef.current === identity &&
+        getTrackIdentity(trackRef.current) === identity
+      );
+
       metric.fetchStartAt = nowPerf();
       logPlaybackMetric(metric, "FETCH_AUDIO_START");
 
       audio.volume = volumeRef.current;
       audio.loop = loopRef.current;
+      attachAudioStateListeners(audio, isStillCurrent, abortController.signal);
 
       const onCanPlay = () => {
         if (playbackMetricRef.current !== metric) return;
@@ -383,17 +418,9 @@ export function useKitAudioEngine() {
         metric.playingAt = nowPerf();
         logPlaybackMetric(metric, "AUDIO_PLAYING");
       };
-      audio.addEventListener("canplay", onCanPlay, { once: true });
-      audio.addEventListener("playing", onPlaying, { once: true });
+      audio.addEventListener("canplay", onCanPlay, { once: true, signal: abortController.signal });
+      audio.addEventListener("playing", onPlaying, { once: true, signal: abortController.signal });
       if (shouldReloadBeforePlay(audio)) audio.load();
-
-      const isStillCurrent = () => (
-        !abortController.signal.aborted &&
-        sessionIdRef.current === sessionId &&
-        requestSerialRef.current === requestSerial &&
-        activeIdentityRef.current === identity &&
-        getTrackIdentity(trackRef.current) === identity
-      );
 
       try {
         const shift = fastTrack.semitoneShift ?? 0;
@@ -409,6 +436,7 @@ export function useKitAudioEngine() {
             fallbackAudio.loop = loopRef.current;
             audioRef.current = fallbackAudio;
             audio = fallbackAudio;
+            attachAudioStateListeners(fallbackAudio, isStillCurrent, abortController.signal);
             if (shouldReloadBeforePlay(fallbackAudio)) fallbackAudio.load();
             await fallbackAudio.play();
           }
@@ -424,6 +452,7 @@ export function useKitAudioEngine() {
         }
 
         if (!isStillCurrent()) return;
+        syncAudioState(audio);
         setIsPlaying(true);
         startRafLoop(sessionId, requestSerial, identity);
       } catch (error) {
@@ -432,7 +461,7 @@ export function useKitAudioEngine() {
         setErrorMessage(normalizePlaybackError(error));
       }
     });
-  }, [ensureAudio, getCachedAudio, hardInvalidatePlayback, runTransition, startRafLoop, stopAllAudioElements]);
+  }, [attachAudioStateListeners, ensureAudio, getCachedAudio, hardInvalidatePlayback, runTransition, startRafLoop, stopAllAudioElements, syncAudioState]);
 
   const togglePlay = useCallback(async () => {
     const audio = audioRef.current;
