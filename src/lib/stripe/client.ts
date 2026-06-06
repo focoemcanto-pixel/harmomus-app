@@ -33,16 +33,45 @@ async function stripe<T>(path: string, body?: URLSearchParams, method = "POST"):
   return res.json() as Promise<T>;
 }
 
-export async function getOrCreateCustomer(params: { email: string; userId: string; existingCustomerId?: string | null }) {
-  if (params.existingCustomerId) return params.existingCustomerId;
+function isStaleCustomerError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return message.includes("No such customer") || message.includes("similar object exists in test mode") || message.includes("similar object exists in live mode");
+}
 
-  const query = new URLSearchParams({ email: params.email, limit: "1" });
-  const existing = await stripe<{ data: Array<{ id: string }> }>(`/customers?${query.toString()}`, undefined, "GET");
-  if (existing.data?.[0]?.id) return existing.data[0].id;
-
-  const form = new URLSearchParams({ email: params.email, "metadata[user_id]": params.userId });
+async function createCustomer(email: string, userId: string) {
+  const form = new URLSearchParams({ email, "metadata[user_id]": userId });
   const customer = await stripe<{ id: string }>("/customers", form);
   return customer.id;
+}
+
+async function findCustomerByEmail(email: string) {
+  const query = new URLSearchParams({ email, limit: "1" });
+  const existing = await stripe<{ data: Array<{ id: string }> }>(`/customers?${query.toString()}`, undefined, "GET");
+  return existing.data?.[0]?.id ?? null;
+}
+
+async function customerExists(customerId: string) {
+  try {
+    await stripe<{ id: string }>(`/customers/${encodeURIComponent(customerId)}`, undefined, "GET");
+    return true;
+  } catch (error) {
+    if (isStaleCustomerError(error)) return false;
+    throw error;
+  }
+}
+
+export async function getOrCreateCustomer(params: { email: string; userId: string; existingCustomerId?: string | null }) {
+  const existingCustomerId = params.existingCustomerId?.trim();
+
+  if (existingCustomerId) {
+    const exists = await customerExists(existingCustomerId);
+    if (exists) return existingCustomerId;
+  }
+
+  const customerFromEmail = await findCustomerByEmail(params.email);
+  if (customerFromEmail) return customerFromEmail;
+
+  return createCustomer(params.email, params.userId);
 }
 
 export async function createCheckoutSession(input: {
