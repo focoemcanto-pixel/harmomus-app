@@ -34,6 +34,9 @@ Defina no Cloudflare (Preview e Production):
 - `STRIPE_WEBHOOK_SECRET`
 - `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`
 - `NEXT_PUBLIC_APP_URL`
+- `ASAAS_API_KEY`
+- `ASAAS_ENV` (`sandbox` em preview, `production` em produção)
+- `ASAAS_WEBHOOK_TOKEN`
 
 ## 4) Comandos corretos
 ### Preview local (Cloudflare Worker local)

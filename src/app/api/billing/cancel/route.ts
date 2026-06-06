@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { cancelSubscriptionAtPeriodEnd } from "@/lib/stripe/client";
+import { cancelSubscription as cancelAsaasSubscription } from "@/lib/asaas/subscriptions";
 
 function appUrl(path: string, req: Request) {
   return new URL(path, process.env.NEXT_PUBLIC_APP_URL || req.url);
@@ -28,6 +29,34 @@ export async function POST(req: Request) {
 
     if (subscriptionError) {
       throw new Error(`Falha ao buscar assinatura: ${subscriptionError.message}`);
+    }
+
+    const gateway = String(subscription?.gateway ?? "stripe").toLowerCase();
+
+    if (gateway === "asaas") {
+      const asaasSubscriptionId = subscription?.gateway_subscription_id;
+      if (!asaasSubscriptionId) {
+        return NextResponse.redirect(appUrl("/assinatura?error=Nenhuma assinatura Asaas ativa encontrada", req), 303);
+      }
+
+      await cancelAsaasSubscription(asaasSubscriptionId);
+
+      const { error: updateError } = await supabase
+        .from("subscriptions")
+        .update({
+          status: "canceled",
+          auto_renew: false,
+          canceled_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", subscription.id)
+        .eq("user_id", user.id);
+
+      if (updateError) {
+        throw new Error(`Assinatura cancelada no Asaas, mas falhou ao atualizar o banco: ${updateError.message}`);
+      }
+
+      return NextResponse.redirect(appUrl("/assinatura?message=Assinatura Asaas cancelada.", req), 303);
     }
 
     if (!subscription?.stripe_subscription_id) {

@@ -100,13 +100,15 @@ function isLegacyPmsSubscription(subscription: Subscription | null | undefined) 
   );
 }
 
+const OVERDUE_GRACE_PERIOD_MS = 7 * 24 * 60 * 60 * 1000;
+
 function isSubscriptionUsable(
   subscription: Subscription | null | undefined,
   planSlug?: string | null,
 ) {
   if (!subscription) return false;
   const status = String(subscription.status ?? "").toLowerCase();
-  if (!["active", "trialing"].includes(status)) return false;
+  if (!["active", "trialing", "overdue"].includes(status)) return false;
 
   const isLegacyPms = isLegacyPmsSubscription(subscription);
   if (
@@ -120,7 +122,8 @@ function isSubscriptionUsable(
   const periodEnd = (subscription as any).current_period_end
     ? new Date((subscription as any).current_period_end).getTime()
     : Number.POSITIVE_INFINITY;
-  return periodEnd > Date.now();
+  const accessUntil = status === "overdue" ? periodEnd + OVERDUE_GRACE_PERIOD_MS : periodEnd;
+  return accessUntil > Date.now();
 }
 
 function normalizeEffectivePlanSlug(value: unknown): EffectivePlanSlug {

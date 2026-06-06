@@ -1,7 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { normalizePlan } from "@/lib/access/access-engine";
 
-const PAID_ACCESS_STATUSES = new Set(["active", "trialing"]);
+const PAID_ACCESS_STATUSES = new Set(["active", "trialing", "overdue"]);
+const OVERDUE_GRACE_PERIOD_MS = 7 * 24 * 60 * 60 * 1000;
 
 function resolveEffectivePlan(subscription: any) {
   const status = String(subscription?.status ?? "none").toLowerCase();
@@ -9,6 +10,13 @@ function resolveEffectivePlan(subscription: any) {
 
   if (!PAID_ACCESS_STATUSES.has(status)) {
     return { planSlug: "free" as const, hierarchyLevel: 1 };
+  }
+
+  if (status === "overdue") {
+    const periodEnd = subscription?.current_period_end ? new Date(subscription.current_period_end).getTime() : Number.NEGATIVE_INFINITY;
+    if (periodEnd + OVERDUE_GRACE_PERIOD_MS <= Date.now()) {
+      return { planSlug: "free" as const, hierarchyLevel: 1 };
+    }
   }
 
   const hierarchyLevel = Number(
