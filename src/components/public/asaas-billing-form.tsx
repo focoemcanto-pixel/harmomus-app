@@ -37,7 +37,9 @@ export function AsaasBillingForm({ href, className, children }: AsaasBillingForm
   useEffect(() => {
     const element = formRef.current;
     if (!element) return;
-    const top = element.getBoundingClientRect().top + window.scrollY - 96;
+    const isMobile = window.matchMedia("(max-width: 768px)").matches;
+    const offset = isMobile ? 36 : 96;
+    const top = element.getBoundingClientRect().top + window.scrollY - offset;
     window.scrollTo({ top, behavior: "smooth" });
   }, []);
 
