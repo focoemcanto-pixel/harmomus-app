@@ -356,7 +356,36 @@ function pickBestSourceForVoice(files: TessituraSourceFile[], voice: GroupTessit
   return best;
 }
 
-const INDIVIDUAL_VOICE_RECOMMENDATIONS: Record<GroupTessituraVoice, { tooHigh: string; tooLow: string }> = {
+type RedistributionCandidateConfig = {
+  voice: GroupTessituraVoice;
+  octaveShift?: 0 | -12 | 12;
+  label: string;
+};
+
+type RedistributionCandidate = RedistributionCandidateConfig & {
+  status: IndividualVoiceTessituraStatus;
+  minMidi: number;
+  maxMidi: number;
+  sourceTone: string | null;
+  usedRealFile: boolean;
+};
+
+const REDISTRIBUTION_CANDIDATES: Record<GroupTessituraVoice, Record<"too-high" | "too-low", RedistributionCandidateConfig[]>> = {
+  soprano: {
+    "too-high": [{ voice: "contralto", label: "voz do contralto" }],
+    "too-low": [{ voice: "tenor", octaveShift: 12, label: "voz do tenor uma oitava acima" }, { voice: "contralto", label: "voz do contralto" }],
+  },
+  contralto: {
+    "too-high": [{ voice: "tenor", label: "voz do tenor" }],
+    "too-low": [{ voice: "soprano", label: "voz do soprano" }],
+  },
+  tenor: {
+    "too-high": [{ voice: "soprano", octaveShift: -12, label: "voz do soprano uma oitava abaixo" }, { voice: "contralto", label: "voz do contralto" }],
+    "too-low": [{ voice: "contralto", label: "voz do contralto" }],
+  },
+};
+
+const FALLBACK_RECOMMENDATIONS: Record<GroupTessituraVoice, { tooHigh: string; tooLow: string }> = {
   soprano: {
     tooHigh: "a voz do contralto",
     tooLow: "uma linha mais aguda do arranjo, se perder brilho ou projeção",
@@ -408,6 +437,64 @@ function individualVoiceStatusLabel(status: IndividualVoiceTessituraStatus): Ind
   return "Sem dados";
 }
 
+function evaluateCandidateLine(files: TessituraSourceFile[], singerVoice: GroupTessituraVoice, targetTone: CanonicalTone, candidate: RedistributionCandidateConfig): RedistributionCandidate | null {
+  const source = pickBestSourceForVoice(files, candidate.voice, targetTone);
+  if (!source) return null;
+
+  const octaveShift = candidate.octaveShift ?? 0;
+  const targetMin = applySemitoneShift(source.file.minMidi, source.semitoneShift, octaveShift);
+  const targetMax = applySemitoneShift(source.file.maxMidi, source.semitoneShift, octaveShift);
+  const status = classifyIndividualVoice(targetMin, targetMax, singerVoice);
+
+  return {
+    ...candidate,
+    octaveShift,
+    status,
+    minMidi: targetMin,
+    maxMidi: targetMax,
+    sourceTone: normalizeTone(source.file.tone),
+    usedRealFile: source.usedRealFile,
+  };
+}
+
+function findRedistributionCandidate(files: TessituraSourceFile[], singerVoice: GroupTessituraVoice, status: IndividualVoiceTessituraStatus, targetTone: CanonicalTone) {
+  if (status !== "too-high" && status !== "too-low") return null;
+  const configs = REDISTRIBUTION_CANDIDATES[singerVoice][status];
+  const evaluated = configs
+    .map((candidate) => evaluateCandidateLine(files, singerVoice, targetTone, candidate))
+    .filter((candidate): candidate is RedistributionCandidate => Boolean(candidate));
+
+  return evaluated.find((candidate) => candidate.status === "comfortable") ?? evaluated[0] ?? null;
+}
+
+function buildRedistributionRecommendation({
+  status,
+  voice,
+  fallbackLine,
+  candidate,
+}: {
+  status: IndividualVoiceTessituraStatus;
+  voice: GroupTessituraVoice;
+  fallbackLine: string;
+  candidate: RedistributionCandidate | null;
+}) {
+  if (status === "comfortable") return "";
+
+  if (candidate?.status === "comfortable") {
+    return `Nesta tonalidade, recomendamos cantar a ${candidate.label}. Ela fica musicalmente entre ${midiToBrazilianNote(candidate.minMidi)} e ${midiToBrazilianNote(candidate.maxMidi)}, dentro da sua margem confortável.`;
+  }
+
+  if (candidate) {
+    const candidateStatus = individualVoiceStatusLabel(candidate.status).toLowerCase();
+    return `Nesta tonalidade, teste a ${candidate.label}; ela é a alternativa mais próxima, mas ainda aparece como ${candidateStatus}. Confirme no ensaio antes de definir.`;
+  }
+
+  const label = OFFICIAL_VOCAL_RANGES[voice].label;
+  return status === "too-high"
+    ? `Nesta tonalidade, é mais seguro testar ${fallbackLine} para aliviar a região alta do ${label}.`
+    : `Nesta tonalidade, teste ${fallbackLine} se a linha atual perder presença, brilho ou afinação.`;
+}
+
 function buildIndividualVoiceRecommendation(files: TessituraSourceFile[], voice: GroupTessituraVoice, targetTone: CanonicalTone): IndividualVoiceTessituraRecommendation {
   const source = pickBestSourceForVoice(files, voice, targetTone);
   const label = OFFICIAL_VOCAL_RANGES[voice].label;
@@ -432,25 +519,28 @@ function buildIndividualVoiceRecommendation(files: TessituraSourceFile[], voice:
   const { expandedRange, highOverflow, lowOverflow } = getIndividualVoiceOverflow(targetMin, targetMax, voice);
   const sourceTone = normalizeTone(source.file.tone);
   const direction = directionText(source.semitoneShift);
-  const recommendationSet = INDIVIDUAL_VOICE_RECOMMENDATIONS[voice];
-  const recommendedLine = status === "too-high" ? recommendationSet.tooHigh : recommendationSet.tooLow;
+  const fallbackSet = FALLBACK_RECOMMENDATIONS[voice];
+  const fallbackLine = status === "too-high" ? fallbackSet.tooHigh : fallbackSet.tooLow;
+  const candidate = findRedistributionCandidate(files, voice, status, targetTone);
   const rangeText = `${midiToBrazilianNote(targetMin)} → ${midiToBrazilianNote(targetMax)}`;
   const toleratedText = `${midiToBrazilianNote(expandedRange.minMidi)} → ${midiToBrazilianNote(expandedRange.maxMidi)}`;
   const sourceDescription = source.usedRealFile
     ? `Arquivo real em ${sourceTone ?? source.file.tone}.`
     : `Projeção ${direction} a partir de ${sourceTone ?? source.file.tone}.`;
 
-  const recommendation = status === "comfortable"
-    ? ""
-    : status === "too-high"
-      ? `Nesta tonalidade, é mais seguro cantar ${recommendedLine}.`
-      : `Nesta tonalidade, teste ${recommendedLine}.`;
+  const recommendation = buildRedistributionRecommendation({ status, voice, fallbackLine, candidate });
+
+  const candidateReason = candidate
+    ? candidate.status === "comfortable"
+      ? ` A alternativa sugerida (${candidate.label}) também foi checada pela Harmomus IA e encaixou entre ${midiToBrazilianNote(candidate.minMidi)} e ${midiToBrazilianNote(candidate.maxMidi)}.`
+      : ` A alternativa mais próxima (${candidate.label}) foi checada, mas ainda precisa de validação no ensaio.`
+    : "";
 
   const reason = status === "comfortable"
     ? `A linha de ${label} fica musicalmente entre ${rangeText}, dentro da margem confortável do nipe. ${sourceDescription}`
     : status === "too-high"
-      ? `A linha de ${label} fica musicalmente entre ${rangeText} e passa ${highOverflow} semitom${highOverflow === 1 ? "" : "s"} acima da margem tolerada (${toleratedText}). ${sourceDescription}`
-      : `A linha de ${label} fica musicalmente entre ${rangeText} e passa ${lowOverflow} semitom${lowOverflow === 1 ? "" : "s"} abaixo da margem tolerada (${toleratedText}). ${sourceDescription}`;
+      ? `A linha de ${label} fica musicalmente entre ${rangeText} e passa ${highOverflow} semitom${highOverflow === 1 ? "" : "s"} acima da margem tolerada (${toleratedText}). ${sourceDescription}${candidateReason}`
+      : `A linha de ${label} fica musicalmente entre ${rangeText} e passa ${lowOverflow} semitom${lowOverflow === 1 ? "" : "s"} abaixo da margem tolerada (${toleratedText}). ${sourceDescription}${candidateReason}`;
 
   if (process.env.NODE_ENV !== "production") {
     console.debug("[tessitura:individual]", {
@@ -463,6 +553,7 @@ function buildIndividualVoiceRecommendation(files: TessituraSourceFile[], voice:
       expandedRange,
       marginSemitones: PUBLIC_RECOMMENDATION_MARGIN_SEMITONES,
       overflow: { high: highOverflow, low: lowOverflow },
+      redistributionCandidate: candidate,
       status,
     });
   }
