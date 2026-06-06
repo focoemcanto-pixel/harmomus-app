@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
 import { KitAudioSyncCard } from "@/components/admin/kit-audio-sync-card";
@@ -117,7 +117,7 @@ export default async function EditarKitPage({ params }: { params: Promise<{ id: 
 
     if (!name || !slug || !artist) {
       console.error("[admin-kit-edit] missing required fields", { kitId: id, name, slug, artist });
-      return;
+      redirect(`/admin/kits/${id}/editar?saveError=missing_fields`);
     }
 
     try {
@@ -149,7 +149,10 @@ export default async function EditarKitPage({ params }: { params: Promise<{ id: 
       revalidatePath(`/biblioteca/${slug}`, "page");
     } catch (error) {
       console.error("[admin-kit-edit] failed", error);
+      redirect(`/admin/kits/${id}/editar?saveError=1`);
     }
+
+    redirect(`/admin/kits/${id}/editar?savedAt=${Date.now()}`);
   }
 
   return (
