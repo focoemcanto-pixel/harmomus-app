@@ -4,6 +4,7 @@ import { timingSafeEqual } from "node:crypto";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const HANDLED_EVENTS = new Set([
+  "PAYMENT_CREATED",
   "PAYMENT_RECEIVED",
   "PAYMENT_CONFIRMED",
   "PAYMENT_OVERDUE",
@@ -157,23 +158,23 @@ function buildUpdatePayload(event: string, payload: AsaasWebhookPayload) {
   const status = statusForEvent(event);
   const paymentDueDate = payload.payment?.dueDate;
   const subscriptionDueDate = payload.subscription?.nextDueDate;
-  const now = new Date().toISOString();
-  const canceled = status === "canceled";
   const active = status === "active";
-  const nextBillingDate = active ? nextMonthlyDate(paymentDueDate) : parseAsaasDate(subscriptionDueDate ?? paymentDueDate);
+  const canceled = status === "canceled";
+  const created = event === "PAYMENT_CREATED";
+  const baseDueDate = subscriptionDueDate ?? paymentDueDate;
+  const nextBillingDate = active ? nextMonthlyDate(paymentDueDate) : parseAsaasDate(baseDueDate);
 
   return {
     gateway: "asaas",
     gateway_customer_id: gatewayCustomerId(payload),
     gateway_subscription_id: gatewaySubscriptionId(payload),
     status: status ?? undefined,
-    current_period_end: active ? nextBillingDate : parseAsaasDate(subscriptionDueDate ?? paymentDueDate),
-    next_billing_at: nextBillingDate,
-    canceled_at: canceled ? now : undefined,
+    current_period_end: active ? nextBillingDate : created ? undefined : parseAsaasDate(baseDueDate),
+    next_billing_at: canceled ? null : nextBillingDate,
     auto_renew: canceled ? false : undefined,
     last_webhook_event: event,
-    starts_at: active ? now : undefined,
-    updated_at: now,
+    starts_at: active ? new Date().toISOString() : undefined,
+    updated_at: new Date().toISOString(),
   };
 }
 
@@ -224,7 +225,7 @@ export async function POST(req: Request) {
     }
 
     const updatePayload = buildUpdatePayload(event, payload);
-    const sanitizedPayload = Object.fromEntries(Object.entries(updatePayload).filter(([, value]) => value !== undefined && value !== null));
+    const sanitizedPayload = Object.fromEntries(Object.entries(updatePayload).filter(([, value]) => value !== undefined));
     const { error } = await supabase.from("subscriptions").update(sanitizedPayload).eq("id", subscription.id).eq("gateway", "asaas");
     if (error) throw new Error(`Falha ao sincronizar assinatura Asaas: ${error.message}`);
 
