@@ -8,6 +8,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const ALLOWED_PLAN_SLUGS = new Set(["plus", "premium", "ministry_10", "ministry_20", "ministry_40"]);
 const ALLOWED_METHODS = new Set(["pix", "boleto"]);
+const ASAAS_TESTER_EMAILS = new Set(["markuezemarquinhos@hotmail.com"]);
 const ATTRIBUTION_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "fbclid", "gclid"] as const;
 
 type ProfileRow = {
@@ -84,6 +85,11 @@ export async function GET(req: Request) {
     const user = await getCurrentUser();
     if (!user?.email) return NextResponse.redirect(loginRedirectUrl(req, planSlug, method), { status: 303 });
 
+    const email = user.email.trim().toLowerCase();
+    if (!ASAAS_TESTER_EMAILS.has(email)) {
+      return NextResponse.redirect(appUrl(req, "/assinar?error=Checkout%20Asaas%20ainda%20em%20teste"), { status: 303 });
+    }
+
     const plans = await getPlans();
     const plan = plans.find((item) => item.slug === planSlug && ALLOWED_PLAN_SLUGS.has(item.slug));
     if (!plan?.id || typeof plan.price_cents !== "number" || plan.price_cents <= 0) {
@@ -91,20 +97,36 @@ export async function GET(req: Request) {
     }
 
     const supabase = createSupabaseAdminClient();
-    const [{ data: profile }, { data: existingSubscription, error: existingError }] = await Promise.all([
+    const [{ data: profile }, { data: existingSubscriptions, error: existingError }] = await Promise.all([
       supabase.from("profiles").select("id,email,full_name,phone").eq("id", user.id).maybeSingle(),
-      supabase.from("subscriptions").select("id,gateway,gateway_customer_id,status").eq("user_id", user.id).maybeSingle(),
+      supabase
+        .from("subscriptions")
+        .select("id,gateway,gateway_customer_id,status")
+        .eq("user_id", user.id)
+        .order("updated_at", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(10),
     ]);
 
     if (existingError) throw new Error(`Falha ao buscar assinatura atual: ${existingError.message}`);
 
     const typedProfile = (profile ?? null) as ProfileRow | null;
-    const typedExisting = (existingSubscription ?? null) as ExistingSubscriptionRow | null;
-    if (typedExisting?.gateway === "stripe" && ["active", "trialing", "pending", "overdue"].includes(String(typedExisting.status ?? "").toLowerCase())) {
+    const rows = (existingSubscriptions ?? []) as ExistingSubscriptionRow[];
+
+    const activeStripe = rows.find((subscription) =>
+      String(subscription.gateway ?? "").toLowerCase() === "stripe" &&
+      ["active", "trialing", "pending", "overdue"].includes(String(subscription.status ?? "").toLowerCase())
+    );
+
+    if (activeStripe) {
       return NextResponse.redirect(appUrl(req, "/assinatura?error=Sua%20assinatura%20Stripe%20continua%20ativa.%20Use%20o%20portal%20Stripe%20para%20gerenciar."), { status: 303 });
     }
-    const email = user.email.trim().toLowerCase();
-    const existingAsaasCustomerId = typedExisting?.gateway === "asaas" ? typedExisting.gateway_customer_id : null;
+
+    const existingAsaas = rows.find((subscription) =>
+      String(subscription.gateway ?? "").toLowerCase() === "asaas"
+    ) ?? null;
+
+    const existingAsaasCustomerId = existingAsaas?.gateway_customer_id ?? null;
     const customer = existingAsaasCustomerId
       ? { id: existingAsaasCustomerId }
       : (await findCustomerByEmail(email)) ?? await createCustomer({
@@ -141,8 +163,8 @@ export async function GET(req: Request) {
       ...attributionFromUrl(url),
     };
 
-    const result = typedExisting?.id
-      ? await supabase.from("subscriptions").update(payload).eq("id", typedExisting.id).eq("user_id", user.id)
+    const result = existingAsaas?.id
+      ? await supabase.from("subscriptions").update(payload).eq("id", existingAsaas.id).eq("user_id", user.id)
       : await supabase.from("subscriptions").insert({ ...payload, created_at: now });
 
     if (result.error) throw new Error(`Falha ao salvar assinatura Asaas: ${result.error.message}`);
