@@ -100,15 +100,13 @@ function isLegacyPmsSubscription(subscription: Subscription | null | undefined) 
   );
 }
 
-const OVERDUE_GRACE_PERIOD_MS = 7 * 24 * 60 * 60 * 1000;
-
 function isSubscriptionUsable(
   subscription: Subscription | null | undefined,
   planSlug?: string | null,
 ) {
   if (!subscription) return false;
   const status = String(subscription.status ?? "").toLowerCase();
-  if (!["active", "trialing", "overdue"].includes(status)) return false;
+  if (!["active", "trialing"].includes(status)) return false;
 
   const isLegacyPms = isLegacyPmsSubscription(subscription);
   if (
@@ -122,8 +120,7 @@ function isSubscriptionUsable(
   const periodEnd = (subscription as any).current_period_end
     ? new Date((subscription as any).current_period_end).getTime()
     : Number.POSITIVE_INFINITY;
-  const accessUntil = status === "overdue" ? periodEnd + OVERDUE_GRACE_PERIOD_MS : periodEnd;
-  return accessUntil > Date.now();
+  return periodEnd > Date.now();
 }
 
 function normalizeEffectivePlanSlug(value: unknown): EffectivePlanSlug {
@@ -148,7 +145,7 @@ function subscriptionRank(subscription: Subscription, plans: Plan[] | null | und
   const status = String(subscription.status ?? "").toLowerCase();
   const gateway = String((subscription as any).gateway ?? "").toLowerCase();
   const planWeight = isMinistryPlanSlug(slug) || slug === "premium" ? 300 : slug === "plus" ? 200 : 0;
-  const statusWeight = status === "active" ? 40 : status === "trialing" ? 35 : status === "overdue" ? 20 : 0;
+  const statusWeight = status === "active" ? 40 : status === "trialing" ? 35 : 0;
   const gatewayWeight = gateway === "stripe" ? 3 : gateway === "asaas" ? 2 : 1;
   return planWeight + statusWeight + gatewayWeight;
 }
@@ -246,6 +243,7 @@ export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessCo
     findProfileForUser(supabase, data.user),
   ]);
 
+  const isAdmin = isPlatformAdminRole(profile?.role);
   const typedSubscriptions = (subscriptions as Subscription[] | null) ?? [];
   const typedSubscription = pickSubscriptionForAccess(typedSubscriptions, plans) as Subscription | null;
   const plan = planForSubscription(plans, typedSubscription);
@@ -296,7 +294,7 @@ export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessCo
     );
   }
 
-  const effectiveSlug: EffectivePlanSlug = ministryContext
+  const effectiveSlug: EffectivePlanSlug = isAdmin || ministryContext
     ? "premium"
     : usableSubscription
       ? paidPlanSlug
@@ -310,7 +308,7 @@ export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessCo
     hierarchyLevel:
       effectiveSlug === "premium" ? 3 : effectiveSlug === "plus" ? 2 : 1,
     isGuest: false,
-    isAdmin: isPlatformAdminRole(profile?.role),
+    isAdmin,
     ministry: ministryContext,
   };
 }
