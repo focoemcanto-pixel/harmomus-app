@@ -10,6 +10,10 @@ interface LibraryContentProps {
   kits: PublicKit[];
 }
 
+function resolveKitArtist(kit: Pick<PublicKit, "artist">) {
+  return kit.artist?.trim() || "Harmomus";
+}
+
 export function LibraryContent({ kits }: LibraryContentProps) {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("all");
@@ -25,7 +29,7 @@ export function LibraryContent({ kits }: LibraryContentProps) {
       const matchesSearch =
         !normalizedSearch ||
         kit.name.toLowerCase().includes(normalizedSearch) ||
-        kit.artist.toLowerCase().includes(normalizedSearch);
+        resolveKitArtist(kit).toLowerCase().includes(normalizedSearch);
       const matchesCategory = category === "all" || (kit.category?.name ?? "Sem categoria") === category;
       const matchesPlan = plan === "all" || (kit.requiredPlan?.name ?? "Livre") === plan;
 
