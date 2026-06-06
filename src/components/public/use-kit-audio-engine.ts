@@ -50,6 +50,7 @@ const HAVE_FUTURE_DATA = 3;
 const NETWORK_EMPTY = 0;
 const NETWORK_LOADING = 2;
 const SIGNED_URL_CACHE_SAFETY_MS = 30_000;
+const SIGNED_URL_SESSION_PREFIX = "harmomus:signed-audio-url:";
 
 type PlaybackMetric = {
   id: string;
@@ -131,6 +132,29 @@ function getSignedUrlResolverPath(src: string) {
   const match = value.match(/^\/api\/audio\/([^/?#]+)(?:\/signed)?([?#].*)?$/);
   if (!match?.[1]) return null;
   return `/api/audio/${match[1]}/signed-url${match[2] ?? ""}`;
+}
+
+function readSessionSignedUrl(resolverPath: string) {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(`${SIGNED_URL_SESSION_PREFIX}${resolverPath}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { url?: string; expiresAt?: number };
+    if (!parsed.url || !parsed.expiresAt || parsed.expiresAt <= nowMs()) {
+      window.sessionStorage.removeItem(`${SIGNED_URL_SESSION_PREFIX}${resolverPath}`);
+      return null;
+    }
+    return parsed.url;
+  } catch {
+    return null;
+  }
+}
+
+function writeSessionSignedUrl(resolverPath: string, url: string, expiresAt: number) {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(`${SIGNED_URL_SESSION_PREFIX}${resolverPath}`, JSON.stringify({ url, expiresAt }));
+  } catch {}
 }
 
 async function fetchSignedAudioUrl(src: string) {
@@ -225,8 +249,17 @@ export function useKitAudioEngine() {
     if (cached?.url && cached.expiresAt > nowMs()) return cached.url;
     if (cached?.promise) return cached.promise;
 
+    const sessionCachedUrl = readSessionSignedUrl(resolverPath);
+    if (sessionCachedUrl) {
+      const expiresAt = nowMs() + 10 * 60 * 1000;
+      signedUrlCacheRef.current.set(resolverPath, { url: sessionCachedUrl, expiresAt });
+      return sessionCachedUrl;
+    }
+
     const promise = fetchSignedAudioUrl(fastSrc).then((url) => {
-      signedUrlCacheRef.current.set(resolverPath, { url, expiresAt: nowMs() + 55 * 60 * 1000 - SIGNED_URL_CACHE_SAFETY_MS });
+      const expiresAt = nowMs() + 55 * 60 * 1000 - SIGNED_URL_CACHE_SAFETY_MS;
+      signedUrlCacheRef.current.set(resolverPath, { url, expiresAt });
+      writeSessionSignedUrl(resolverPath, url, expiresAt);
       return url;
     }).catch((error) => {
       signedUrlCacheRef.current.delete(resolverPath);
