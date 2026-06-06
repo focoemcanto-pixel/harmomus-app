@@ -9,6 +9,32 @@ function appUrl(path: string, req: Request) {
   return new URL(path, process.env.NEXT_PUBLIC_APP_URL || req.url);
 }
 
+function normalizedGateway(subscription: any) {
+  return String(subscription?.gateway ?? "stripe").trim().toLowerCase();
+}
+
+function normalizedStatus(subscription: any) {
+  return String(subscription?.status ?? "").trim().toLowerCase();
+}
+
+function isCancelable(subscription: any) {
+  return ["active", "trialing", "pending", "overdue"].includes(normalizedStatus(subscription));
+}
+
+function pickSubscriptionToCancel(subscriptions: any[]) {
+  const rows = subscriptions ?? [];
+  const cancelable = rows.filter(isCancelable);
+  const asaas = cancelable.find((subscription) => normalizedGateway(subscription) === "asaas" && subscription?.gateway_subscription_id);
+  if (asaas) return asaas;
+
+  const stripe = cancelable.find((subscription) => normalizedGateway(subscription) === "stripe" && subscription?.stripe_subscription_id);
+  if (stripe) return stripe;
+
+  return rows.find((subscription) => normalizedGateway(subscription) === "asaas" && subscription?.gateway_subscription_id)
+    ?? rows.find((subscription) => normalizedGateway(subscription) === "stripe" && subscription?.stripe_subscription_id)
+    ?? null;
+}
+
 export async function POST(req: Request) {
   try {
     const user = await getCurrentUser();
@@ -19,19 +45,20 @@ export async function POST(req: Request) {
 
     const supabase = createSupabaseAdminClient() as any;
 
-    const { data: subscription, error: subscriptionError } = await supabase
+    const { data: subscriptions, error: subscriptionError } = await supabase
       .from("subscriptions")
       .select("*")
       .eq("user_id", user.id)
+      .order("updated_at", { ascending: false })
       .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .limit(10);
 
     if (subscriptionError) {
       throw new Error(`Falha ao buscar assinatura: ${subscriptionError.message}`);
     }
 
-    const gateway = String(subscription?.gateway ?? "stripe").toLowerCase();
+    const subscription = pickSubscriptionToCancel(subscriptions ?? []);
+    const gateway = normalizedGateway(subscription);
 
     if (gateway === "asaas") {
       const asaasSubscriptionId = subscription?.gateway_subscription_id;
@@ -50,7 +77,8 @@ export async function POST(req: Request) {
           updated_at: new Date().toISOString(),
         })
         .eq("id", subscription.id)
-        .eq("user_id", user.id);
+        .eq("user_id", user.id)
+        .eq("gateway", "asaas");
 
       if (updateError) {
         throw new Error(`Assinatura cancelada no Asaas, mas falhou ao atualizar o banco: ${updateError.message}`);
@@ -86,7 +114,8 @@ export async function POST(req: Request) {
         updated_at: new Date().toISOString(),
       })
       .eq("id", subscription.id)
-      .eq("user_id", user.id);
+      .eq("user_id", user.id)
+      .eq("gateway", "stripe");
 
     if (updateError) {
       throw new Error(`Assinatura cancelada no Stripe, mas falhou ao atualizar o banco: ${updateError.message}`);
