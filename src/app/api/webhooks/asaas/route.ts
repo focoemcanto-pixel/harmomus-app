@@ -83,7 +83,7 @@ function addMonths(value: string, months: number) {
   return date.toISOString();
 }
 
-function paidPeriodEnd(dueDate?: string | null) {
+function nextMonthlyDate(dueDate?: string | null) {
   const due = parseAsaasDate(dueDate);
   return due ? addMonths(due, 1) : null;
 }
@@ -160,14 +160,15 @@ function buildUpdatePayload(event: string, payload: AsaasWebhookPayload) {
   const now = new Date().toISOString();
   const canceled = status === "canceled";
   const active = status === "active";
+  const nextBillingDate = active ? nextMonthlyDate(paymentDueDate) : parseAsaasDate(subscriptionDueDate ?? paymentDueDate);
 
   return {
     gateway: "asaas",
     gateway_customer_id: gatewayCustomerId(payload),
     gateway_subscription_id: gatewaySubscriptionId(payload),
     status: status ?? undefined,
-    current_period_end: active ? paidPeriodEnd(paymentDueDate) : parseAsaasDate(subscriptionDueDate ?? paymentDueDate),
-    next_billing_at: parseAsaasDate(subscriptionDueDate ?? paymentDueDate),
+    current_period_end: active ? nextBillingDate : parseAsaasDate(subscriptionDueDate ?? paymentDueDate),
+    next_billing_at: nextBillingDate,
     canceled_at: canceled ? now : undefined,
     auto_renew: canceled ? false : undefined,
     last_webhook_event: event,
