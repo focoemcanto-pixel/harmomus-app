@@ -16,10 +16,7 @@ export interface KitTrack {
 }
 
 function normalizeTrackSource(track: KitTrack): KitTrack {
-  return {
-    ...track,
-    src: resolveFastAudioUrl(track.src),
-  };
+  return { ...track, src: resolveFastAudioUrl(track.src) };
 }
 
 function getTrackIdentity(track: KitTrack | null | undefined) {
@@ -52,6 +49,7 @@ const HAVE_CURRENT_DATA = 2;
 const HAVE_FUTURE_DATA = 3;
 const NETWORK_EMPTY = 0;
 const NETWORK_LOADING = 2;
+const SIGNED_URL_CACHE_SAFETY_MS = 30_000;
 
 type PlaybackMetric = {
   id: string;
@@ -63,8 +61,18 @@ type PlaybackMetric = {
   playingAt?: number;
 };
 
+type SignedUrlCacheEntry = {
+  url?: string;
+  expiresAt: number;
+  promise?: Promise<string>;
+};
+
 function nowPerf() {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
+function nowMs() {
+  return Date.now();
 }
 
 function logPlaybackMetric(metric: PlaybackMetric, event: "PLAY_CLICK" | "FETCH_AUDIO_START" | "FETCH_AUDIO_END" | "AUDIO_CANPLAY" | "AUDIO_PLAYING") {
@@ -95,9 +103,7 @@ function normalizePlaybackError(error: unknown) {
   if (/operation is not supported|not supported source|no supported source|media resource/i.test(message)) {
     return "Não foi possível iniciar este áudio. Tente clicar novamente.";
   }
-  if (/play\(\) request was interrupted|aborted/i.test(message)) {
-    return null;
-  }
+  if (/play\(\) request was interrupted|aborted/i.test(message)) return null;
   return message || "Não foi possível reproduzir este áudio agora.";
 }
 
@@ -120,6 +126,29 @@ function warmAudio(audio: HTMLAudioElement) {
   try { audio.load(); } catch {}
 }
 
+function getSignedUrlResolverPath(src: string) {
+  const value = String(src ?? "").trim();
+  const match = value.match(/^\/api\/audio\/([^/?#]+)(?:\/signed)?([?#].*)?$/);
+  if (!match?.[1]) return null;
+  return `/api/audio/${match[1]}/signed-url${match[2] ?? ""}`;
+}
+
+async function fetchSignedAudioUrl(src: string) {
+  const resolverPath = getSignedUrlResolverPath(src);
+  if (!resolverPath) return src;
+
+  const response = await fetch(resolverPath, {
+    method: "GET",
+    credentials: "same-origin",
+    cache: "force-cache",
+  });
+
+  if (!response.ok) throw new Error("Não foi possível preparar este áudio.");
+  const payload = await response.json() as { url?: string; expiresIn?: number };
+  if (!payload.url) throw new Error("URL do áudio indisponível.");
+  return payload.url;
+}
+
 function artworkFromTrack(track: KitTrack) {
   const src = track.artworkUrl?.trim();
   if (!src) return undefined;
@@ -132,7 +161,6 @@ function artworkFromTrack(track: KitTrack) {
 
 function updateMediaSessionMetadata(track: KitTrack) {
   if (typeof navigator === "undefined" || !("mediaSession" in navigator) || typeof MediaMetadata === "undefined") return;
-
   try {
     navigator.mediaSession.metadata = new MediaMetadata({
       title: track.mediaTitle || track.title || "Harmomus",
@@ -145,14 +173,8 @@ function updateMediaSessionMetadata(track: KitTrack) {
   }
 }
 
-function setMediaSessionActionHandlers(actions: {
-  play?: () => void;
-  pause?: () => void;
-  seekbackward?: () => void;
-  seekforward?: () => void;
-}) {
+function setMediaSessionActionHandlers(actions: { play?: () => void; pause?: () => void; seekbackward?: () => void; seekforward?: () => void }) {
   if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
-
   try { navigator.mediaSession.setActionHandler("play", actions.play ?? null); } catch {}
   try { navigator.mediaSession.setActionHandler("pause", actions.pause ?? null); } catch {}
   try { navigator.mediaSession.setActionHandler("seekbackward", actions.seekbackward ?? null); } catch {}
@@ -162,6 +184,7 @@ function setMediaSessionActionHandlers(actions: {
 export function useKitAudioEngine() {
   const [track, setTrack] = useState<KitTrack | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isPreparing, setIsPreparing] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
@@ -182,6 +205,7 @@ export function useKitAudioEngine() {
   const loopRef = useRef(false);
   const requestSerialRef = useRef(0);
   const audioCacheRef = useRef<Map<string, HTMLAudioElement>>(new Map());
+  const signedUrlCacheRef = useRef<Map<string, SignedUrlCacheEntry>>(new Map());
   const playbackMetricRef = useRef<PlaybackMetric | null>(null);
 
   const ensureAudio = useCallback(() => {
@@ -192,6 +216,27 @@ export function useKitAudioEngine() {
     return audioRef.current;
   }, []);
 
+  const resolvePlayableAudioUrl = useCallback(async (src: string) => {
+    const fastSrc = resolveFastAudioUrl(src);
+    const resolverPath = getSignedUrlResolverPath(fastSrc);
+    if (!resolverPath) return fastSrc;
+
+    const cached = signedUrlCacheRef.current.get(resolverPath);
+    if (cached?.url && cached.expiresAt > nowMs()) return cached.url;
+    if (cached?.promise) return cached.promise;
+
+    const promise = fetchSignedAudioUrl(fastSrc).then((url) => {
+      signedUrlCacheRef.current.set(resolverPath, { url, expiresAt: nowMs() + 55 * 60 * 1000 - SIGNED_URL_CACHE_SAFETY_MS });
+      return url;
+    }).catch((error) => {
+      signedUrlCacheRef.current.delete(resolverPath);
+      throw error;
+    });
+
+    signedUrlCacheRef.current.set(resolverPath, { promise, expiresAt: nowMs() + 30_000 });
+    return promise;
+  }, []);
+
   const syncAudioState = useCallback((audio: HTMLAudioElement) => {
     setCurrentTime(audio.currentTime || 0);
     setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
@@ -199,16 +244,8 @@ export function useKitAudioEngine() {
   }, []);
 
   const attachAudioStateListeners = useCallback((audio: HTMLAudioElement, isStillCurrent: () => boolean, signal: AbortSignal) => {
-    const sync = () => {
-      if (!isStillCurrent()) return;
-      syncAudioState(audio);
-    };
-    const markEnded = () => {
-      if (!isStillCurrent()) return;
-      syncAudioState(audio);
-      setIsPlaying(false);
-    };
-
+    const sync = () => { if (isStillCurrent()) syncAudioState(audio); };
+    const markEnded = () => { if (isStillCurrent()) { syncAudioState(audio); setIsPlaying(false); setIsPreparing(false); } };
     audio.addEventListener("timeupdate", sync, { signal });
     audio.addEventListener("loadedmetadata", sync, { signal });
     audio.addEventListener("durationchange", sync, { signal });
@@ -221,9 +258,7 @@ export function useKitAudioEngine() {
   const stopAllAudioElements = useCallback((options: { resetTime?: boolean; clearSources?: boolean } = {}) => {
     stopAudioElement(audioRef.current, { resetTime: options.resetTime, clearSource: options.clearSources });
     stopAudioElement(preloaderRef.current, { resetTime: options.resetTime, clearSource: options.clearSources });
-    audioCacheRef.current.forEach((cachedAudio) => {
-      stopAudioElement(cachedAudio, { resetTime: options.resetTime, clearSource: options.clearSources });
-    });
+    audioCacheRef.current.forEach((cachedAudio) => stopAudioElement(cachedAudio, { resetTime: options.resetTime, clearSource: options.clearSources }));
   }, []);
 
   const trimAudioCache = useCallback((keepIdentity?: string) => {
@@ -238,16 +273,14 @@ export function useKitAudioEngine() {
   }, []);
 
   const getCachedAudio = useCallback((identity: string, src: string, preload: "metadata" | "auto") => {
-    const fastSrc = resolveFastAudioUrl(src);
     const cached = audioCacheRef.current.get(identity);
     if (cached) {
       cached.preload = preload;
-      if (!cached.src) cached.src = fastSrc;
+      if (cached.src !== src) cached.src = src;
       return cached;
     }
-
     const audio = createAudioElement(preload);
-    audio.src = fastSrc;
+    audio.src = src;
     audioCacheRef.current.set(identity, audio);
     trimAudioCache(identity);
     return audio;
@@ -264,18 +297,14 @@ export function useKitAudioEngine() {
     requestSerialRef.current += 1;
     sessionIdRef.current = null;
     activeIdentityRef.current = "";
-
     abortRef.current?.abort("hard-invalidate");
     abortRef.current = null;
-
     cancelRaf();
-
     try { pitchControllerRef.current?.dispose(); } catch {}
     pitchControllerRef.current = null;
-
     stopAllAudioElements({ resetTime: true });
-
     setIsPlaying(false);
+    setIsPreparing(false);
     setCurrentTime(0);
     setDuration(0);
     setErrorMessage(null);
@@ -285,7 +314,6 @@ export function useKitAudioEngine() {
 
   const disposePlaybackSession = useCallback(async () => {
     hardInvalidatePlayback();
-
     stopAllAudioElements({ resetTime: true, clearSources: true });
     audioCacheRef.current.clear();
     preloadedSrcRef.current = null;
@@ -310,33 +338,46 @@ export function useKitAudioEngine() {
   }, [cancelRaf]);
 
   const preloadTrack = useCallback((nextTrack: KitTrack, mode: "metadata" | "auto" = "auto") => {
-    const fastTrack = normalizeTrackSource(nextTrack);
-    if ((fastTrack.semitoneShift ?? 0) !== 0 || !fastTrack.src) return;
-    const identity = getTrackIdentity(fastTrack);
-    const cachedAudio = getCachedAudio(identity, fastTrack.src, mode);
+    const baseTrack = normalizeTrackSource(nextTrack);
+    if ((baseTrack.semitoneShift ?? 0) !== 0 || !baseTrack.src) return;
+    const identity = getTrackIdentity(baseTrack);
 
-    if (audioRef.current !== cachedAudio && preloadedSrcRef.current !== fastTrack.src) {
-      preloaderRef.current = cachedAudio;
-      preloadedSrcRef.current = fastTrack.src;
-    }
-
-    cachedAudio.preload = mode;
-    if (!cachedAudio.src) cachedAudio.src = fastTrack.src;
-    warmAudio(cachedAudio);
-  }, [getCachedAudio]);
+    void resolvePlayableAudioUrl(baseTrack.src).then((playableSrc) => {
+      const cachedAudio = getCachedAudio(identity, playableSrc, mode);
+      if (audioRef.current !== cachedAudio && preloadedSrcRef.current !== playableSrc) {
+        preloaderRef.current = cachedAudio;
+        preloadedSrcRef.current = playableSrc;
+      }
+      cachedAudio.preload = mode;
+      warmAudio(cachedAudio);
+    }).catch(() => undefined);
+  }, [getCachedAudio, resolvePlayableAudioUrl]);
 
   const playTrack = useCallback(async (nextTrack: KitTrack) => {
-    const fastTrack = normalizeTrackSource(nextTrack);
-    if (!fastTrack.src) return;
+    const baseTrack = normalizeTrackSource(nextTrack);
+    if (!baseTrack.src) return;
 
-    const identity = getTrackIdentity(fastTrack);
+    setIsPreparing(true);
+    const identity = getTrackIdentity(baseTrack);
     const clickAt = nowPerf();
-    const metric: PlaybackMetric = { id: identity, src: fastTrack.src, clickAt };
+    const metric: PlaybackMetric = { id: identity, src: baseTrack.src, clickAt };
     playbackMetricRef.current = metric;
     logPlaybackMetric(metric, "PLAY_CLICK");
+
+    let playableSrc = baseTrack.src;
+    try {
+      playableSrc = await resolvePlayableAudioUrl(baseTrack.src);
+    } catch (error) {
+      setIsPreparing(false);
+      setErrorMessage(normalizePlaybackError(error));
+      return;
+    }
+
+    const fastTrack = { ...baseTrack, src: playableSrc };
     const canReusePreloader = (fastTrack.semitoneShift ?? 0) === 0 && preloadedSrcRef.current === fastTrack.src && preloaderRef.current?.src;
 
     hardInvalidatePlayback();
+    setIsPreparing(true);
     const requestSerial = requestSerialRef.current;
 
     await runTransition(async () => {
@@ -347,16 +388,17 @@ export function useKitAudioEngine() {
       sessionIdRef.current = sessionId;
       activeIdentityRef.current = identity;
       setErrorMessage(null);
-      setTrack(fastTrack);
-      trackRef.current = fastTrack;
-      updateMediaSessionMetadata(fastTrack);
+      setTrack(baseTrack);
+      trackRef.current = baseTrack;
+      updateMediaSessionMetadata(baseTrack);
       setMediaSessionActionHandlers({
-        play: () => { void playTrack(fastTrack); },
+        play: () => { void playTrack(nextTrack); },
         pause: () => {
           abortRef.current?.abort("media-session-pause");
           try { pitchControllerRef.current?.pause(); } catch {}
           stopAllAudioElements({ resetTime: false });
           setIsPlaying(false);
+          setIsPreparing(false);
         },
         seekbackward: () => {
           const currentAudio = audioRef.current;
@@ -370,8 +412,8 @@ export function useKitAudioEngine() {
 
       const abortController = new AbortController();
       abortRef.current = abortController;
-
       let reusedPreloader = false;
+
       if ((fastTrack.semitoneShift ?? 0) === 0) {
         audio = getCachedAudio(identity, fastTrack.src, "auto");
         audioRef.current = audio;
@@ -395,9 +437,9 @@ export function useKitAudioEngine() {
         getTrackIdentity(trackRef.current) === identity
       );
 
+      metric.src = fastTrack.src;
       metric.fetchStartAt = nowPerf();
       logPlaybackMetric(metric, "FETCH_AUDIO_START");
-
       audio.volume = volumeRef.current;
       audio.loop = loopRef.current;
       attachAudioStateListeners(audio, isStillCurrent, abortController.signal);
@@ -430,7 +472,6 @@ export function useKitAudioEngine() {
             await audio.play();
           } catch (firstPlayError) {
             if (!reusedPreloader || !isStillCurrent()) throw firstPlayError;
-
             const fallbackAudio = getCachedAudio(`${identity}::fallback`, fastTrack.src, "auto");
             fallbackAudio.volume = volumeRef.current;
             fallbackAudio.loop = loopRef.current;
@@ -453,15 +494,17 @@ export function useKitAudioEngine() {
 
         if (!isStillCurrent()) return;
         syncAudioState(audio);
+        setIsPreparing(false);
         setIsPlaying(true);
         startRafLoop(sessionId, requestSerial, identity);
       } catch (error) {
         if (!isStillCurrent()) return;
+        setIsPreparing(false);
         setIsPlaying(false);
         setErrorMessage(normalizePlaybackError(error));
       }
     });
-  }, [attachAudioStateListeners, ensureAudio, getCachedAudio, hardInvalidatePlayback, runTransition, startRafLoop, stopAllAudioElements, syncAudioState]);
+  }, [attachAudioStateListeners, ensureAudio, getCachedAudio, hardInvalidatePlayback, resolvePlayableAudioUrl, runTransition, startRafLoop, stopAllAudioElements, syncAudioState]);
 
   const togglePlay = useCallback(async () => {
     const audio = audioRef.current;
@@ -472,6 +515,7 @@ export function useKitAudioEngine() {
       try { pitchControllerRef.current?.pause(); } catch {}
       stopAllAudioElements({ resetTime: false });
       setIsPlaying(false);
+      setIsPreparing(false);
       return;
     }
 
@@ -499,9 +543,7 @@ export function useKitAudioEngine() {
     setVolume(next);
     if (audioRef.current) audioRef.current.volume = next;
     if (preloaderRef.current) preloaderRef.current.volume = next;
-    audioCacheRef.current.forEach((cachedAudio) => {
-      cachedAudio.volume = next;
-    });
+    audioCacheRef.current.forEach((cachedAudio) => { cachedAudio.volume = next; });
   }, []);
 
   const setLoopValue = useCallback((value: boolean) => {
@@ -512,18 +554,12 @@ export function useKitAudioEngine() {
 
   useEffect(() => {
     ensureAudio();
-    return () => {
-      void runTransition(disposePlaybackSession);
-    };
+    return () => { void runTransition(disposePlaybackSession); };
   }, [disposePlaybackSession, ensureAudio, runTransition]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
-
-    const handleVisibilityChange = () => {
-      if (document.hidden) hardInvalidatePlayback();
-    };
-
+    const handleVisibilityChange = () => { if (document.hidden) hardInvalidatePlayback(); };
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [hardInvalidatePlayback]);
@@ -533,6 +569,7 @@ export function useKitAudioEngine() {
     preloaderRef,
     track,
     isPlaying,
+    isPreparing,
     currentTime,
     duration,
     volume,
