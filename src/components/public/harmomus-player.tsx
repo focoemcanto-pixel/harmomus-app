@@ -1,7 +1,7 @@
 "use client";
 
 import { Pause, Play, RotateCcw, RotateCw, Repeat2, Volume2 } from "lucide-react";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { type KitTrack, useKitAudioEngine } from "@/components/public/use-kit-audio-engine";
 
@@ -85,6 +85,7 @@ export function HarmomusPlayer({
     setLoopValue,
     isCurrentTrack: engineIsCurrentTrack,
   } = engine;
+  const suppressNextClickRef = useRef(false);
 
   const trackMeta = useMemo(() => parseTrackMeta(title), [title]);
   const trackId = useMemo(
@@ -131,7 +132,7 @@ export function HarmomusPlayer({
     [],
   );
 
-  async function handlePlay() {
+  const handlePlay = useCallback(async () => {
     if (!canPlay) {
       onBlocked();
       return;
@@ -147,7 +148,24 @@ export function HarmomusPlayer({
     }
 
     await playTrack(candidateTrack);
-  }
+  }, [canPlay, candidateTrack, isCurrentTrack, onBlocked, playTrack, src, togglePlay, warmCandidateTrack]);
+
+  const handlePointerDown = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    warmCandidateTrack("auto");
+    if (event.pointerType !== "touch" && event.pointerType !== "pen") return;
+
+    event.preventDefault();
+    suppressNextClickRef.current = true;
+    void handlePlay();
+  }, [handlePlay, warmCandidateTrack]);
+
+  const handleClick = useCallback(() => {
+    if (suppressNextClickRef.current) {
+      suppressNextClickRef.current = false;
+      return;
+    }
+    void handlePlay();
+  }, [handlePlay]);
 
   return (
     <div className="rounded-xl border border-white/10 bg-black/30 p-4">
@@ -159,11 +177,11 @@ export function HarmomusPlayer({
         </button>
 
         <button
-          onClick={handlePlay}
+          onClick={handleClick}
+          onPointerDown={handlePointerDown}
           onMouseEnter={() => warmCandidateTrack("auto")}
           onFocus={() => warmCandidateTrack("auto")}
-          onTouchStart={() => warmCandidateTrack("auto")}
-          className="rounded-full border border-gold-400/50 p-2"
+          className="touch-manipulation rounded-full border border-gold-400/50 p-2"
         >
           {isPlaying && isCurrentTrack ? <Pause size={18} /> : <Play size={18} />}
         </button>
