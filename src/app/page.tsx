@@ -49,6 +49,10 @@ function resolveLockedPlanLabel(kit: PublicKit) {
   return "PREMIUM";
 }
 
+function resolveKitArtist(kit: Pick<PublicKit, "artist">) {
+  return kit.artist?.trim() || "Harmomus";
+}
+
 export default async function HomePage() {
   const cookieStore = await cookies();
   const pollVisitorId = cookieStore.get("harmomus_poll_visitor")?.value ?? null;
@@ -92,8 +96,8 @@ export default async function HomePage() {
             </div>
             <div className="relative min-w-0 overflow-hidden rounded-[2rem]">
               <HomeHeroCarousel
-                banners={homeBanners.length ? homeBanners : latestKits.slice(0, 1).map((kit, index) => ({ id: `fallback-${index}`, title: kit.name, subtitle: kit.artist, button_label: "Ver kit", button_href: `/biblioteca/${kit.slug}`, image_url: kit.coverUrl ?? "", mobile_image_url: null }))}
-                latestKits={latestKits.map((kit) => ({ id: kit.id, slug: kit.slug, name: kit.name, artist: kit.artist, coverUrl: kit.coverUrl }))}
+                banners={homeBanners.length ? homeBanners : latestKits.slice(0, 1).map((kit, index) => ({ id: `fallback-${index}`, title: kit.name, subtitle: resolveKitArtist(kit), button_label: "Ver kit", button_href: `/biblioteca/${kit.slug}`, image_url: kit.coverUrl ?? "", mobile_image_url: null }))}
+                latestKits={latestKits.map((kit) => ({ id: kit.id, slug: kit.slug, name: kit.name, artist: resolveKitArtist(kit), coverUrl: kit.coverUrl }))}
               />
             </div>
           </div>
@@ -116,7 +120,7 @@ export default async function HomePage() {
                     {kit.coverUrl ? <img src={kit.coverUrl} alt={kit.name} className={`aspect-square w-full object-cover transition duration-500 group-hover:scale-105 ${locked ? "opacity-65" : ""}`} /> : <div className="aspect-square w-full bg-gradient-to-br from-zinc-900 to-[#141828]" />}
                     {locked ? <><div className="absolute inset-0 bg-black/30" /><div className="absolute right-3 top-3 z-20 rounded-full border border-gold-300/50 bg-black/75 px-3 py-1 text-[11px] font-bold tracking-[0.14em] text-gold-100 shadow-lg">🔒 {lockedPlan}</div><div className="absolute bottom-3 left-3 right-3 rounded-xl border border-white/15 bg-black/75 px-3 py-2 text-center backdrop-blur"><p className="text-xs font-semibold text-white">{lockedText}</p><p className="mt-0.5 text-[11px] text-zinc-300">Faça upgrade para desbloquear</p></div></> : null}
                   </div>
-                  <div className="p-4"><p className="truncate text-lg font-semibold text-white">{kit.name}</p><p className="truncate text-sm text-zinc-300">{kit.artist}</p></div>
+                  <div className="p-4"><p className="truncate text-lg font-semibold text-white">{kit.name}</p><p className="truncate text-sm text-zinc-300">{resolveKitArtist(kit)}</p></div>
                 </Link>
               );
             }) : <div className="rounded-2xl border border-white/10 p-8 text-center text-zinc-300">Sem lançamentos publicados ainda.</div>}
