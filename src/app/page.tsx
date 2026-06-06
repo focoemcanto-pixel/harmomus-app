@@ -14,6 +14,7 @@ import { OFFICIAL_PLANS } from "@/lib/data/official-plans";
 import { SubscribeButton } from "@/components/public/subscribe-button";
 import { canAccessKit } from "@/lib/access/access-engine";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
+import { LegacyBillingNotice } from "@/components/public/legacy-billing-notice";
 
 export const revalidate = 300;
 
@@ -77,6 +78,8 @@ export default async function HomePage() {
   return (
     <PublicAppShell>
       <main className="mx-auto w-full max-w-[1320px] space-y-10 px-4 pb-16 pt-6 md:px-8">
+        <LegacyBillingNotice accessContext={accessContext} />
+
         <section className="relative overflow-hidden rounded-[2rem] border border-white/15 bg-[radial-gradient(circle_at_20%_20%,rgba(59,130,246,0.35),transparent_35%),radial-gradient(circle_at_80%_0%,rgba(168,85,247,0.28),transparent_35%),linear-gradient(145deg,#030712,#070d1f_45%,#09051a)] p-5 md:p-10">
           <div className="relative grid gap-8 lg:grid-cols-[1.1fr_1fr]">
             <div>
