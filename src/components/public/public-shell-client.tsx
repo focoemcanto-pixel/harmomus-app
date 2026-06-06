@@ -10,7 +10,7 @@ interface SearchItem {
   id: string;
   slug: string;
   name: string;
-  artist: string;
+  artist: string | null;
   category: string;
   searchText: string;
 }
@@ -22,6 +22,10 @@ const MINISTRY_PLAN_SLUGS = new Set([
   "ministry_20",
   "ministry_40",
 ]);
+
+function resolveSearchArtist(item: Pick<SearchItem, "artist">) {
+  return item.artist?.trim() || "Harmomus";
+}
 
 function UserSilhouetteIcon() {
   return (
@@ -183,7 +187,7 @@ export function PublicShellClient({
                 >
                   <p className="text-sm text-white">{item.name}</p>
                   <p className="text-xs text-zinc-300">
-                    {item.artist} • {item.category}
+                    {resolveSearchArtist(item)} • {item.category}
                   </p>
                 </Link>
               ))}
@@ -212,7 +216,7 @@ export function PublicShellClient({
               >
                 <p className="text-sm text-white">{item.name}</p>
                 <p className="text-xs text-zinc-300">
-                  {item.artist} • {item.category}
+                  {resolveSearchArtist(item)} • {item.category}
                 </p>
               </Link>
             ))}
