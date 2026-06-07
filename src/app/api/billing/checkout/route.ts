@@ -3,18 +3,25 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { startStripeCheckout } from "@/lib/data/billing";
 import { getPlans } from "@/lib/data/plans";
+import { trackMarketingEvent } from "@/lib/communications/events";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const ATTRIBUTION_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "fbclid", "gclid"] as const;
 
-async function resolvePlanId(planIdOrSlug: string) {
-  if (!planIdOrSlug) return "";
+type ResolvedPlan = { id: string; slug: string; name?: string | null };
+
+async function resolvePlan(planIdOrSlug: string): Promise<ResolvedPlan | null> {
+  if (!planIdOrSlug) return null;
   const plans = await getPlans();
   const normalized = planIdOrSlug.toLowerCase();
   const matched = plans.find((plan) => plan.id === planIdOrSlug || plan.slug.toLowerCase() === normalized);
-  if (matched?.id) return matched.id;
+  if (matched?.id) return { id: matched.id, slug: matched.slug, name: matched.name };
   const ministryAliases = ["ministry_10", "ministry_20", "ministry_40"];
-  if (ministryAliases.includes(normalized)) return plans.find((p) => p.slug === normalized)?.id ?? "";
-  return "";
+  if (ministryAliases.includes(normalized)) {
+    const ministryPlan = plans.find((p) => p.slug === normalized);
+    return ministryPlan?.id ? { id: ministryPlan.id, slug: ministryPlan.slug, name: ministryPlan.name } : null;
+  }
+  return null;
 }
 
 function toErrorMessage(error: unknown) {
@@ -77,19 +84,66 @@ function loginRedirectUrl(req: Request, planSlug: string, attribution: Record<st
   return new URL(`/login?redirect=${encodeURIComponent(`${redirect.pathname}${redirect.search}`)}`, req.url);
 }
 
+function pagePathFromReferrer(req: Request) {
+  const referrer = req.headers.get("referer") || req.headers.get("referrer");
+  if (!referrer) return null;
+  try {
+    const url = new URL(referrer);
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return referrer.slice(0, 240);
+  }
+}
+
+function deviceTypeFromRequest(req: Request) {
+  const ua = String(req.headers.get("user-agent") ?? "").toLowerCase();
+  return /mobile|android|iphone|ipad|ipod/.test(ua) ? "mobile" : "desktop";
+}
+
+async function trackCheckoutStarted(input: {
+  userId: string;
+  plan: ResolvedPlan;
+  attribution: Record<string, string>;
+  req: Request;
+  method: "GET" | "POST";
+}) {
+  try {
+    const supabase = createSupabaseAdminClient() as any;
+    await trackMarketingEvent(supabase, {
+      userId: input.userId,
+      eventKey: "checkout_started",
+      eventLabel: "Checkout iniciado",
+      channel: "app",
+      metadata: {
+        plan_id: input.plan.id,
+        plan_slug: input.plan.slug,
+        plan_name: input.plan.name ?? null,
+        attribution: input.attribution,
+        method: input.method,
+        page_path: pagePathFromReferrer(input.req),
+        device_type: deviceTypeFromRequest(input.req),
+      },
+    });
+  } catch (error) {
+    console.warn("[billing.checkout] falha ao registrar checkout_started", error);
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const form = await req.formData();
     const planParam = String(form.get("plan") ?? form.get("plan_id") ?? "");
-    const planId = await resolvePlanId(planParam);
-    if (!planId) return NextResponse.json({ error: "Plano inválido." }, { status: 400 });
+    const plan = await resolvePlan(planParam);
+    if (!plan) return NextResponse.json({ error: "Plano inválido." }, { status: 400 });
 
     const attribution = mergeAttribution(attributionFromReferrer(req), attributionFromForm(form));
     const user = await getCurrentUser();
-    if (!user?.email) return NextResponse.redirect(loginRedirectUrl(req, planParam, attribution), { status: 303 });
+    if (!user?.email) return NextResponse.redirect(loginRedirectUrl(req, planParam || plan.slug, attribution), { status: 303 });
+
+    await trackCheckoutStarted({ userId: user.id, plan, attribution, req, method: "POST" });
 
     const requestUrl = new URL(req.url);
-    const session = await startStripeCheckout(user.id, user.email, planId, requestUrl.origin, attribution);
+    const session = await startStripeCheckout(user.id, user.email, plan.id, requestUrl.origin, attribution);
     return NextResponse.redirect(session.url, { status: 303 });
   } catch (error) {
     return NextResponse.json({ error: toErrorMessage(error) }, { status: 400 });
@@ -101,8 +155,8 @@ export async function GET(req: Request) {
 
   try {
     const planParam = String(url.searchParams.get("plan") ?? "");
-    const planId = await resolvePlanId(planParam);
-    if (!planId) {
+    const plan = await resolvePlan(planParam);
+    if (!plan) {
       const redirect = new URL("/assinar", req.url);
       redirect.searchParams.set("error", "Plano inválido");
       return NextResponse.redirect(redirect, { status: 303 });
@@ -110,9 +164,11 @@ export async function GET(req: Request) {
 
     const attribution = mergeAttribution(attributionFromReferrer(req), attributionFromUrl(url));
     const user = await getCurrentUser();
-    if (!user?.email) return NextResponse.redirect(loginRedirectUrl(req, planParam, attribution), { status: 303 });
+    if (!user?.email) return NextResponse.redirect(loginRedirectUrl(req, planParam || plan.slug, attribution), { status: 303 });
 
-    const session = await startStripeCheckout(user.id, user.email, planId, url.origin, attribution);
+    await trackCheckoutStarted({ userId: user.id, plan, attribution, req, method: "GET" });
+
+    const session = await startStripeCheckout(user.id, user.email, plan.id, url.origin, attribution);
     return NextResponse.redirect(session.url, { status: 303 });
   } catch (error) {
     url.pathname = "/assinar";
