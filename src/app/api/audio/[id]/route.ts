@@ -286,7 +286,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     defaultTone: kit.default_tone ?? kit.original_tone ?? null,
     allowPitchShift: kit.allow_pitch_shift ?? true,
     maxPitchShiftSemitones: kit.max_pitch_shift_semitones ?? 2,
-    manualTessituraRanges: [],
+    manualTessituraRanges: {},
     category: null,
     requiredPlan,
     allowedPlanSlugs: Array.isArray(kit.allowed_plan_slugs) && kit.allowed_plan_slugs.length ? kit.allowed_plan_slugs : requiredPlan?.slug === "premium" ? ["premium"] : requiredPlan?.slug === "plus" ? ["plus", "premium"] : ["free", "plus", "premium"],
