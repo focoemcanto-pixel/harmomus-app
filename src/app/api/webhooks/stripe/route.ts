@@ -262,8 +262,19 @@ function getCheckoutCompletedEvent(planSlug?: string | null) {
 
 function shouldDispatchPlanActivated(eventType: string, context: NonNullable<SyncedSubscriptionContext>) {
   if (!["active", "trialing"].includes(context.status)) return false;
+
+  const currentPlan = normalizePlanFamily(context.planSlug);
+  const previousPlan = normalizePlanFamily(context.previousPlanSlug);
+
+  if (!currentPlan || currentPlan === "free") return false;
+
   if (["checkout.session.completed", "customer.subscription.created"].includes(eventType)) return true;
-  return eventType === "customer.subscription.updated" && normalizePlanFamily(context.planSlug) !== normalizePlanFamily(context.previousPlanSlug);
+
+  if (eventType === "invoice.paid") {
+    return previousPlan !== currentPlan;
+  }
+
+  return eventType === "customer.subscription.updated" && previousPlan !== currentPlan;
 }
 
 function planRank(slug?: string | null) {
