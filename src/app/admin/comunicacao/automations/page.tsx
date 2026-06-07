@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { revalidatePath } from "next/cache";
 import { Bot, Clock, Flame, PauseCircle, PlayCircle, ShieldCheck, Zap } from "lucide-react";
 
 import { CommunicationShell } from "@/components/admin/communications/communication-shell";
+import { getMarketingEngineSettings, updateMarketingEngineSettings } from "@/lib/communication/engine-settings";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 type Automation = {
@@ -61,6 +63,13 @@ function formatDate(value?: string | null) {
   }).format(new Date(value));
 }
 
+function nextRunLabel(value?: string | null, intervalMinutes = 5) {
+  if (!value) return "Após o próximo cron";
+  const date = new Date(value);
+  date.setMinutes(date.getMinutes() + intervalMinutes);
+  return formatDate(date.toISOString());
+}
+
 function statusBadge(status?: string | null) {
   const normalized = String(status ?? "").toLowerCase();
   const label = normalized || "desconhecido";
@@ -103,7 +112,7 @@ async function getAutomationData() {
   const supabase = createSupabaseAdminClient() as any;
   const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-  const [automations, runs, states, events] = await Promise.all([
+  const [automations, runs, states, events, settings] = await Promise.all([
     supabase
       .from("marketing_automations")
       .select("id,name,description,trigger_event,intent,priority,score_weight,score_threshold,lookback_hours,cooldown_hours,channel,status,cta_url,created_at,updated_at")
@@ -125,6 +134,7 @@ async function getAutomationData() {
       .in("event_key", ["audio_played", "premium_blocked", "tone_blocked", "checkout_started", "checkout_completed", "payment_failed"])
       .order("created_at", { ascending: false })
       .limit(5000),
+    getMarketingEngineSettings(supabase),
   ]);
 
   return {
@@ -132,7 +142,9 @@ async function getAutomationData() {
     runs: (runs.data ?? []) as AutomationRun[],
     states: (states.data ?? []) as MarketingState[],
     events: (events.data ?? []) as EventSummary[],
-    errors: [automations.error, runs.error, states.error, events.error].filter(Boolean).map((error: any) => error.message),
+    settings: settings.data,
+    settingsMissingTable: settings.missingTable,
+    errors: [automations.error, runs.error, states.error, events.error, settings.error].filter(Boolean).map((error: any) => error.message),
   };
 }
 
@@ -145,12 +157,24 @@ function summarizeEvents(events: EventSummary[]) {
 }
 
 export default async function Page() {
-  const { automations, runs, states, events, errors } = await getAutomationData();
+  async function startProduction() {
+    "use server";
+    await updateMarketingEngineSettings({ production_enabled: true, paused_reason: null });
+    revalidatePath("/admin/comunicacao/automations");
+  }
+
+  async function pauseProduction() {
+    "use server";
+    await updateMarketingEngineSettings({ production_enabled: false, paused_reason: "Produção pausada pelo admin." });
+    revalidatePath("/admin/comunicacao/automations");
+  }
+
+  const { automations, runs, states, events, settings, settingsMissingTable, errors } = await getAutomationData();
   const active = automations.filter((automation) => automation.status === "active").length;
   const eventSummary = summarizeEvents(events);
   const queued = runs.filter((run) => run.status === "queued").length;
   const skipped = runs.filter((run) => run.status === "skipped").length;
-  const failed = runs.filter((run) => run.status === "failed").length;
+  const isProductionActive = Boolean(settings.production_enabled);
 
   return (
     <CommunicationShell
@@ -163,6 +187,48 @@ export default async function Page() {
           <p className="mt-1 text-amber-100/80">{errors.join(" • ")}</p>
         </div>
       ) : null}
+
+      {settingsMissingTable ? (
+        <div className="rounded-2xl border border-rose-400/30 bg-rose-500/10 p-4 text-sm text-rose-100">
+          A tabela <strong>marketing_engine_settings</strong> ainda não existe no Supabase. Aplique a migration para ativar Play/Pause da produção.
+        </div>
+      ) : null}
+
+      <section className={`rounded-3xl border p-5 ${isProductionActive ? "border-emerald-400/30 bg-emerald-500/10" : "border-rose-400/30 bg-rose-500/10"}`}>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.25em] text-slate-300">Status do motor</p>
+            <h3 className="mt-1 text-2xl font-semibold text-white">
+              {isProductionActive ? "🟢 Produção ativa" : "🔴 Produção pausada"}
+            </h3>
+            <p className="mt-1 text-sm text-slate-300">
+              {isProductionActive
+                ? "O cron está autorizado a processar eventos, criar fila e enviar mensagens automaticamente."
+                : "Nenhuma automação será processada pelo cron enquanto a produção estiver pausada."}
+            </p>
+          </div>
+          <form action={isProductionActive ? pauseProduction : startProduction}>
+            <button className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${isProductionActive ? "border border-rose-400/30 bg-rose-500/10 text-rose-100 hover:bg-rose-500/20" : "bg-emerald-400 text-slate-950 hover:bg-emerald-300"}`} type="submit">
+              {isProductionActive ? <PauseCircle size={16} /> : <PlayCircle size={16} />}
+              {isProductionActive ? "Pausar produção" : "Iniciar produção"}
+            </button>
+          </form>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+            <p className="text-xs text-slate-400">Última execução</p>
+            <p className="mt-1 text-sm font-semibold text-white">{formatDate(settings.last_automation_run_at)}</p>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+            <p className="text-xs text-slate-400">Próxima execução estimada</p>
+            <p className="mt-1 text-sm font-semibold text-white">{nextRunLabel(settings.last_automation_run_at, settings.processing_interval_minutes)}</p>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+            <p className="text-xs text-slate-400">Intervalo</p>
+            <p className="mt-1 text-sm font-semibold text-white">{settings.processing_interval_minutes} min</p>
+          </div>
+        </div>
+      </section>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard title="Regras ativas" value={`${active}/${automations.length}`} hint="Automações prontas para rodar" icon={Bot} />
@@ -177,21 +243,14 @@ export default async function Page() {
             <div>
               <p className="text-xs uppercase tracking-[0.25em] text-cyan-300">Motor</p>
               <h3 className="mt-1 text-xl font-semibold text-white">Processamento das automações</h3>
-              <p className="mt-1 text-sm text-slate-400">Rode em teste antes de colocar para criar fila real.</p>
+              <p className="mt-1 text-sm text-slate-400">Use o teste apenas para validar regras. A produção contínua é controlada pelo Play/Pause acima.</p>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Link
-                href="/api/admin/comunicacao/automations/process?dryRun=true"
-                className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10"
-              >
-                Testar agora
-              </Link>
-              <form method="post" action="/api/admin/comunicacao/automations/process">
-                <button className="rounded-xl bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300" type="submit">
-                  Rodar produção
-                </button>
-              </form>
-            </div>
+            <Link
+              href="/api/admin/comunicacao/automations/process?dryRun=true"
+              className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10"
+            >
+              Testar agora
+            </Link>
           </div>
 
           <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -250,7 +309,7 @@ export default async function Page() {
             <p className="text-xs uppercase tracking-[0.25em] text-cyan-300">Regras</p>
             <h3 className="mt-1 text-xl font-semibold text-white">Automações configuradas</h3>
           </div>
-          <p className="text-sm text-slate-400">Ative no banco quando validar as mensagens.</p>
+          <p className="text-sm text-slate-400">Ative ou pause a produção pelo controle principal do motor.</p>
         </div>
 
         <div className="mt-5 overflow-hidden rounded-2xl border border-white/10">
