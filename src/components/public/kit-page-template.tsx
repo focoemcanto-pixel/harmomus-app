@@ -12,7 +12,7 @@ import { VoiceSelector } from "@/components/public/voice-selector";
 import { useKitAudioEngine } from "@/components/public/use-kit-audio-engine";
 import type { PublicKit, PublicKitAudioFile, PublicKitToneGroup, VoiceType } from "@/lib/data/public-kits";
 import { analyzeTargetVoiceTessitura, evaluateIndividualVoiceTessituraForTone, type GroupTessituraVoice, type IndividualVoiceTessituraRecommendation, type TargetVoiceTessituraAnalysis, type TessituraSourceFile, type VocalRangeType } from "@/lib/music/tessitura";
-import { formatToneLabel, normalizeTone, resolveToneTrack, sortTonesByChromaticOrder } from "@/lib/music/tones";
+import { formatToneLabel, getSignedSemitoneDistance, normalizeTone, resolveToneTrack, sortTonesByChromaticOrder } from "@/lib/music/tones";
 
 interface KitPageTemplateProps {
   kit: PublicKit;
@@ -59,6 +59,7 @@ type AudioFilesApiTone = {
 
 const CHROMATIC_ORDER = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"] as const;
 const VOICE_PRELOAD_ORDER: VoiceType[] = ["todos", "tenor", "contralto", "soprano"];
+const MANUAL_TESSITURA_VOICES = ["soprano", "contralto", "tenor"] as const;
 
 function normalizeAudioSource(value: unknown): AudioSource {
   return value === "generated" ? "generated" : "original";
@@ -106,7 +107,37 @@ function getMidiRange(file: PublicKitAudioFile | null) {
   return { min, max };
 }
 
-function buildTessituraSourceFiles(kit: PublicKit): TessituraSourceFile[] {
+function buildManualTessituraSourceFiles(kit: PublicKit): TessituraSourceFile[] | null {
+  if (!kit.manualTessituraRanges || !kit.originalTone) return null;
+  const originalTone = normalizeTone(kit.originalTone);
+  if (!originalTone) return null;
+
+  const availableTones = sortTonesByChromaticOrder(kit.tones.map((toneGroup) => toneGroup.tone));
+  const files: TessituraSourceFile[] = [];
+
+  for (const tone of availableTones) {
+    const normalizedTone = normalizeTone(tone);
+    if (!normalizedTone) continue;
+    const semitoneShift = getSignedSemitoneDistance(originalTone, normalizedTone);
+    if (semitoneShift === null) continue;
+
+    for (const voice of MANUAL_TESSITURA_VOICES) {
+      const range = kit.manualTessituraRanges[voice];
+      if (!range) continue;
+      files.push({
+        tone: normalizedTone,
+        voice,
+        minMidi: range.min_midi + semitoneShift,
+        maxMidi: range.max_midi + semitoneShift,
+        confidence: 1,
+      });
+    }
+  }
+
+  return files.length ? files : null;
+}
+
+function buildAnalysisTessituraSourceFiles(kit: PublicKit): TessituraSourceFile[] {
   return kit.tones.flatMap((toneGroup) => (["soprano", "contralto", "tenor"] as const).flatMap((voice) => {
     const file = toneGroup.voices[voice];
     const range = getMidiRange(file ?? null);
@@ -122,6 +153,9 @@ function buildTessituraSourceFiles(kit: PublicKit): TessituraSourceFile[] {
   }));
 }
 
+function buildTessituraSourceFiles(kit: PublicKit): TessituraSourceFile[] {
+  return buildManualTessituraSourceFiles(kit) ?? buildAnalysisTessituraSourceFiles(kit);
+}
 
 function harmomusIaStatusClass(status: IndividualVoiceTessituraRecommendation["status"]) {
   if (status === "comfortable") return "border-emerald-400/25 bg-emerald-500/10 text-emerald-100";
@@ -360,12 +394,11 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
   const selectedGroupVoice = toAnalyzableVoice(selectedVoice) as GroupTessituraVoice | null;
   const currentVoiceTessitura = useMemo(
     () =>
-      selectedGroupVoice && selectedSourceType === "generated"
+      selectedGroupVoice
         ? evaluateIndividualVoiceTessituraForTone(tessituraSourceFiles, selectedTone, selectedGroupVoice)
         : null,
     [
       selectedGroupVoice,
-      selectedSourceType,
       selectedTone,
       tessituraSourceFiles,
     ],
@@ -505,15 +538,9 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
                       onClick={() => setToneMenuOpen((value) => !value)}
                       className="min-h-[64px] rounded-2xl border border-gold-300 bg-gold-400/15 px-4 text-center text-gold-100 shadow-[0_0_24px_rgba(250,204,21,0.08)] transition hover:bg-gold-400/20"
                     >
-                      <span className="block text-xl font-bold md:text-2xl">{selectedToneOption?.label ?? formatToneLabel(selectedTone)}</span>
-                      <span className={`mt-1 inline-flex rounded-full border px-3 py-0.5 text-[11px] font-bold ${
-                        selectedToneOption?.sourceType === "original"
-                          ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-200"
-                          : "border-violet-300/30 bg-violet-500/15 text-violet-100"
-                      }`}>
-                        {selectedToneOption?.sourceLabel ?? "Selecionar tom"}
-                      </span>
-                      <span className="ml-2 align-middle text-xs text-gold-100/70">▼</span>
+                      <span className="block text-xs uppercase tracking-[0.16em] text-gold-200/80">Tom atual</span>
+                      <span className="block text-2xl font-bold">{selectedToneOption?.label ?? formatToneLabel(selectedTone)}</span>
+                      <span className="block text-[11px] text-gold-100/70">{selectedToneOption?.sourceLabel ?? "Selecione"}</span>
                     </button>
 
                     <button
@@ -527,134 +554,67 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
                   </div>
 
                   {toneMenuOpen ? (
-                    <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-30 overflow-hidden rounded-2xl border border-white/15 bg-[#090d18] shadow-[0_24px_70px_rgba(0,0,0,0.55)]">
-                      <div className="max-h-72 overflow-y-auto p-2">
-                        {toneOptions.map((option) => {
-                          const active = normalizeTone(selectedTone) === normalizeTone(option.tone);
-                          return (
-                            <button
-                              key={option.tone}
-                              type="button"
-                              onClick={() => handleSelectTone(option.tone)}
-                              className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-3 text-left transition ${
-                                active ? "bg-gold-400/15 text-gold-100" : "text-zinc-100 hover:bg-white/8"
-                              }`}
-                            >
-                              <span className="text-base font-semibold">{option.label}</span>
-                              <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-bold ${
-                                option.sourceType === "original"
-                                  ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-200"
-                                  : "border-violet-300/30 bg-violet-500/15 text-violet-100"
-                              }`}>
-                                {option.sourceLabel}
-                              </span>
-                            </button>
-                          );
-                        })}
+                    <div className="absolute z-20 mt-2 max-h-72 w-full overflow-auto rounded-2xl border border-white/10 bg-zinc-950 p-2 shadow-2xl">
+                      <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                        {toneOptions.map((option) => (
+                          <button
+                            key={option.tone}
+                            type="button"
+                            onClick={() => handleSelectTone(option.tone)}
+                            className={`rounded-xl border px-3 py-2 text-left transition ${normalizeTone(option.tone) === normalizeTone(selectedTone) ? "border-gold-300 bg-gold-400/15 text-gold-100" : "border-white/10 bg-white/5 text-zinc-100 hover:bg-white/10"}`}
+                          >
+                            <span className="block text-sm font-semibold">{option.label}</span>
+                            <span className="block text-[10px] text-zinc-400">{option.sourceLabel}</span>
+                          </button>
+                        ))}
                       </div>
                     </div>
                   ) : null}
                 </div>
+
+                <p className="mt-3 text-[11px] leading-relaxed text-zinc-500">
+                  Tons gerados pela Harmomus IA preservam o arranjo original. A tessitura usa a referência manual do tom original quando preenchida.
+                </p>
               </div>
-
-              <VoiceSelector selectedVoice={selectedVoice} onSelectVoice={handleSelectVoice} />
-              <HarmomusPlayer
-                engine={audioEngine}
-                src={selectedFile?.streamUrl ?? null}
-                title={`Tom ${formatToneLabel(selectedTone)} • Voz ${voiceLabel(selectedVoice)}`}
-                canPlay={canPlaySelected}
-                semitoneShift={0}
-                onBlocked={() => {
-                  if (accessContext.play.reason === "guest") setLoginOpen(true);
-                  else {
-                    if (!canPlaySelected || !selectedFile) {
-                      setUpgradeConfig({
-                        title: "Tom ainda não gerado para este nipe.",
-                        message: "Este tom precisa existir como arquivo real no Harmomus. Gere ou envie esse tom no painel admin para liberar a reprodução correta.",
-                        ctaLabel: "Entendi",
-                        ctaHref: "#",
-                      });
-                    } else if (accessContext.play.reason === "free_limit") {
-                      setUpgradeConfig({
-                        title: "Você atingiu seu limite gratuito de hoje.",
-                        message: "Seu plano Free permite até 3 visitas válidas a kits a cada 24 horas. Faça upgrade para continuar estudando sem interrupções.",
-                        ctaLabel: "Fazer upgrade",
-                        ctaHref: "/assinar?plan=plus",
-                      });
-                    } else {
-                      const requiredPlan = accessContext.play.requiredPlan ?? "premium";
-                      setUpgradeConfig({
-                        title: requiredPlan === "plus" ? "Kit exclusivo para Plus e Premium." : "Kit exclusivo para Premium.",
-                        message: requiredPlan === "plus" ? "Faça upgrade para desbloquear este kit e toda a biblioteca Plus." : "Faça upgrade para acessar este kit, modulação inteligente e recursos avançados.",
-                        ctaLabel: requiredPlan === "plus" ? "Conhecer plano Plus" : "Assinar Premium",
-                        ctaHref: requiredPlan === "plus" ? "/assinar?plan=plus" : "/assinar?plan=premium",
-                      });
-                    }
-                    setUpgradeOpen(true);
-                  }
-                }}
-              />
-
+              <VoiceSelector selected={selectedVoice} onChange={handleSelectVoice} />
               {currentVoiceTessitura ? (
-                <section className={`space-y-2 rounded-2xl border p-4 text-sm shadow-[0_18px_45px_rgba(0,0,0,0.22)] ${harmomusIaStatusClass(currentVoiceTessitura.status)}`}>
-                  <p><span className="font-semibold text-white">Status:</span> {currentVoiceTessitura.statusLabel}</p>
-                  <p><span className="font-semibold text-white">Motivo:</span> {currentVoiceTessitura.reason}</p>
-                  {currentVoiceTessitura.recommendation ? (
-                    <p><span className="font-semibold text-white">Recomendação:</span> {currentVoiceTessitura.recommendation}</p>
-                  ) : null}
-                </section>
+                <div className={`rounded-xl border p-3 text-sm ${harmomusIaStatusClass(currentVoiceTessitura.status)}`}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-semibold">Harmomus IA • {currentVoiceTessitura.label}</p>
+                    <span className="rounded-full border border-current/20 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em]">
+                      {currentVoiceTessitura.statusLabel}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs leading-relaxed opacity-90">{currentVoiceTessitura.reason}</p>
+                  {currentVoiceTessitura.recommendation ? <p className="mt-2 text-xs font-semibold opacity-95">{currentVoiceTessitura.recommendation}</p> : null}
+                </div>
               ) : null}
-
-              {selectedVoice === "todos" ? (
-                <div className={`rounded-xl border px-4 py-3 text-xs ${
-                  selectedIsOriginal
-                    ? "border-white/10 bg-black/20 text-zinc-400"
-                    : "border-violet-400/20 bg-violet-500/10 text-violet-100/90"
-                }`}>
-                  {selectedIsOriginal
-                    ? "A faixa “Todos” é a referência completa do arranjo. A leitura de tessitura inteligente aparece quando houver arquivos reais gerados para os demais tons."
-                    : "Harmomus IA: este tom foi gerado automaticamente a partir do arranjo original para estudo vocal. A reprodução usa arquivo real processado, não modulação em tempo real."}
+              {arrangementGuidance ? (
+                <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 p-3 text-sm text-amber-100">
+                  <p className="font-semibold">{arrangementGuidance.title}</p>
+                  <p className="mt-1 text-xs leading-relaxed text-amber-100/80">{arrangementGuidance.description}</p>
                 </div>
-              ) : selectedFile ? (
-                <div className={`rounded-xl border px-4 py-3 text-xs ${
-                  selectedIsOriginal
-                    ? "border-emerald-400/15 bg-emerald-400/5 text-emerald-100/80"
-                    : "border-violet-400/20 bg-violet-500/10 text-violet-100/90"
-                }`}>
-                  {selectedIsOriginal
-                    ? `Arquivo real original disponível para ${voiceLabel(selectedVoice)} em ${formatToneLabel(selectedTone)}.`
-                    : `Harmomus IA: ${voiceLabel(selectedVoice)} em ${formatToneLabel(selectedTone)} foi modulado inteligentemente a partir do tom original e salvo como arquivo real para estudo.`}
-                </div>
-              ) : (
-                <div className="rounded-xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-xs text-amber-100/90">
-                  Este tom ainda não possui arquivo real para {voiceLabel(selectedVoice)}. Gere o tom no admin para liberar a reprodução correta.
-                </div>
-              )}
-
-              {accessContext.effectiveSlug === "free" ? (
-                <AccessCounter value={freeAccessStats?.accessCountToday ?? accessContext.play.stats?.accessCountToday ?? 0} limit={freeAccessStats?.limit ?? accessContext.play.stats?.limit ?? 3} />
               ) : null}
             </div>
           </div>
         </div>
+        <div className="mt-8">
+          <HarmomusPlayer
+            engine={audioEngine}
+            title={`${liveKit.name} • ${voiceLabel(selectedVoice)} • Tom ${formatToneLabel(selectedTone)}`}
+            src={selectedFile?.streamUrl ?? ""}
+            canPlay={canPlaySelected}
+            semitoneShift={semitoneShift}
+            trackId={selectedFile ? buildTrackId(selectedFile.streamUrl, liveKit.name, selectedVoice, selectedTone) : ""}
+            sourceTone={sourceTone}
+            targetTone={selectedTone}
+            isOriginal={selectedIsOriginal}
+          />
+        </div>
+        <AccessCounter stats={freeAccessStats} />
       </section>
-      {liveKit.lyrics?.trim() ? (
-        <section className="mx-auto mt-8 w-full max-w-4xl md:mt-12">
-          <h2 className="mb-4 text-center text-2xl font-semibold tracking-wide text-zinc-100 md:mb-6 md:text-3xl">Letra</h2>
-          <div className="rounded-2xl border border-white/10 bg-zinc-950/70 p-6 shadow-[0_0_60px_rgba(168,85,247,0.12)] backdrop-blur-xl md:rounded-3xl md:p-10">
-            <p className="whitespace-pre-wrap text-base leading-8 text-zinc-100 md:text-lg md:leading-9">{liveKit.lyrics}</p>
-          </div>
-        </section>
-      ) : null}
       <LoginRequiredModal open={loginOpen} onClose={() => setLoginOpen(false)} />
-      <UpgradeRequiredModal
-        open={upgradeOpen}
-        title={upgradeConfig.title}
-        message={upgradeConfig.message}
-        ctaLabel={upgradeConfig.ctaLabel}
-        ctaHref={upgradeConfig.ctaHref}
-        onClose={() => setUpgradeOpen(false)}
-      />
+      <UpgradeRequiredModal open={upgradeOpen} onClose={() => setUpgradeOpen(false)} {...upgradeConfig} />
     </main>
   );
 }
