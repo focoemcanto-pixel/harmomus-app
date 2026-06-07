@@ -23,19 +23,16 @@ type CheckoutPaymentSelectorProps = {
   options: PaymentOption[];
 };
 
-const METHOD_SUMMARY: Record<PaymentMethod, { today: string; note: string; highlight: string }> = {
+const METHOD_SUMMARY: Record<PaymentMethod, { note: string; highlight: string }> = {
   card: {
-    today: "R$ 0,00",
     note: "Você começa com 7 dias grátis. Depois disso, a cobrança mensal acontece automaticamente no cartão.",
     highlight: "7 dias grátis",
   },
   pix: {
-    today: "R$ 39,00",
     note: "A cobrança Pix será gerada pelo Asaas e o acesso será liberado após a confirmação do pagamento.",
     highlight: "Pagamento instantâneo",
   },
   boleto: {
-    today: "R$ 39,00",
     note: "O boleto será gerado pelo Asaas e o acesso será liberado após a compensação bancária.",
     highlight: "Pagamento por boleto",
   },
@@ -50,6 +47,7 @@ export function CheckoutPaymentSelector({ planName, monthlyPrice, options }: Che
   const selectedOption = useMemo(() => options.find((option) => option.id === selectedMethod) ?? options[0], [options, selectedMethod]);
   const selectedSummary = METHOD_SUMMARY[selectedOption.id];
   const isAsaasMethod = selectedOption.id === "pix" || selectedOption.id === "boleto";
+  const todayAmount = selectedOption.id === "card" ? "R$ 0,00" : monthlyPrice;
 
   const selectMethod = (method: PaymentMethod) => {
     setSelectedMethod(method);
@@ -116,7 +114,7 @@ export function CheckoutPaymentSelector({ planName, monthlyPrice, options }: Che
           </div>
 
           <div className="mt-6 border-t border-white/12 pt-5">
-            <div className="flex items-center justify-between text-sm text-zinc-300"><span>Você paga hoje</span><strong className="text-2xl text-white">{selectedSummary.today}</strong></div>
+            <div className="flex items-center justify-between text-sm text-zinc-300"><span>Você paga hoje</span><strong className="text-2xl text-white">{todayAmount}</strong></div>
             <p className="mt-3 text-sm leading-6 text-zinc-300">{selectedSummary.note}</p>
           </div>
 
@@ -132,7 +130,7 @@ export function CheckoutPaymentSelector({ planName, monthlyPrice, options }: Che
 
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-slate-950/95 px-4 py-3 shadow-[0_-18px_50px_rgba(0,0,0,0.45)] backdrop-blur lg:hidden">
         <div className="mx-auto flex max-w-5xl items-center gap-3">
-          <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-white">{selectedOption.label} selecionado</p><p className="truncate text-xs text-zinc-400">Hoje: {selectedSummary.today}</p></div>
+          <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-white">{selectedOption.label} selecionado</p><p className="truncate text-xs text-zinc-400">Hoje: {todayAmount}</p></div>
           {isAsaasMethod ? null : <a href={selectedOption.href} className={mobileButtonClass}>Continuar</a>}
         </div>
       </div>
