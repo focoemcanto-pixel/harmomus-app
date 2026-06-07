@@ -4,31 +4,49 @@
 
 // @ts-expect-error .open-next/worker.js is generated during deployment.
 import openNextWorker from "./.open-next/worker.js";
+import { getMarketingEngineSettings, updateMarketingEngineSettings } from "./src/lib/communication/engine-settings";
 import { processBehaviorMarketingAutomations } from "./src/lib/communication/automation-engine";
 import { processCommunicationQueue } from "./src/lib/communication/marketing-queue";
 
 async function processCommunicationEngineFromCron() {
   console.log("Communication engine cron started.");
 
+  const settings = await getMarketingEngineSettings();
+  if (!settings.data.production_enabled) {
+    console.log("Communication engine cron skipped: production is paused.");
+    return;
+  }
+
+  const result: Record<string, unknown> = {};
+  const now = new Date().toISOString();
+
   try {
-    const automationResult = await processBehaviorMarketingAutomations({ limit: 1000 });
+    const automationResult = await processBehaviorMarketingAutomations({
+      limit: settings.data.max_automation_events_per_run || 1000,
+    });
+    result.automations = automationResult;
     console.log("Behavior automations cron processed.", JSON.stringify(automationResult));
   } catch (error) {
-    console.error(
-      "Behavior automations cron failed.",
-      error instanceof Error ? error.message : String(error),
-    );
+    const message = error instanceof Error ? error.message : String(error);
+    result.automation_error = message;
+    console.error("Behavior automations cron failed.", message);
   }
 
   try {
-    const queueResult = await processCommunicationQueue(1);
+    const queueResult = await processCommunicationQueue(settings.data.max_queue_messages_per_run || 2);
+    result.queue = queueResult;
     console.log("Communication queue cron processed.", JSON.stringify(queueResult));
   } catch (error) {
-    console.error(
-      "Communication queue cron failed.",
-      error instanceof Error ? error.message : String(error),
-    );
+    const message = error instanceof Error ? error.message : String(error);
+    result.queue_error = message;
+    console.error("Communication queue cron failed.", message);
   }
+
+  await updateMarketingEngineSettings({
+    last_automation_run_at: now,
+    last_queue_run_at: now,
+    last_result: result,
+  });
 }
 
 export default {
