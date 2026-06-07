@@ -11,7 +11,7 @@ const ALLOWED_METHODS = new Set(["pix", "boleto"]);
 const ATTRIBUTION_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "fbclid", "gclid"] as const;
 
 type ProfileRow = { id: string; email?: string | null; full_name?: string | null; phone?: string | null };
-type ExistingSubscriptionRow = { id: string; gateway?: string | null; gateway_customer_id?: string | null; status?: string | null };
+type ExistingSubscriptionRow = { id: string; gateway?: string | null; gateway_customer_id?: string | null; status?: string | null; plans?: { slug?: string | null } | null };
 
 function cleanValue(value: unknown) {
   const text = String(value ?? "").trim();
@@ -80,13 +80,15 @@ export async function GET(req: Request) {
     const supabase = createSupabaseAdminClient();
     const [{ data: profile }, { data: existingSubscriptions, error: existingError }] = await Promise.all([
       supabase.from("profiles").select("id,email,full_name,phone").eq("id", user.id).maybeSingle(),
-      supabase.from("subscriptions").select("id,gateway,gateway_customer_id,status").eq("user_id", user.id).order("updated_at", { ascending: false }).order("created_at", { ascending: false }).limit(10),
+      supabase.from("subscriptions").select("id,gateway,gateway_customer_id,status,plans(slug)").eq("user_id", user.id).order("updated_at", { ascending: false }).order("created_at", { ascending: false }).limit(10),
     ]);
     if (existingError) throw new Error(`Falha ao buscar assinatura atual: ${existingError.message}`);
 
     const typedProfile = (profile ?? null) as ProfileRow | null;
     const rows = (existingSubscriptions ?? []) as ExistingSubscriptionRow[];
     const existingAsaas = rows.find((subscription) => String(subscription.gateway ?? "").toLowerCase() === "asaas") ?? null;
+    const existingActive = rows.find((subscription) => ["active", "trialing", "overdue"].includes(String(subscription.status ?? "").toLowerCase())) ?? null;
+    const previousPlanSlug = String(existingActive?.plans?.slug ?? existingAsaas?.plans?.slug ?? "free").trim().toLowerCase() || "free";
 
     const existingAsaasCustomerId = existingAsaas?.gateway_customer_id ?? null;
     const customer = existingAsaasCustomerId
@@ -115,6 +117,23 @@ export async function GET(req: Request) {
     };
     const result = existingAsaas?.id ? await supabase.from("subscriptions").update(payload).eq("id", existingAsaas.id).eq("user_id", user.id) : await supabase.from("subscriptions").insert({ ...payload, created_at: now });
     if (result.error) throw new Error(`Falha ao salvar assinatura Asaas: ${result.error.message}`);
+
+    const { error: checkoutLogError } = await supabase.from("billing_events").insert({
+      provider: "asaas",
+      event_type: "checkout.asaas.started",
+      payload: {
+        user_id: user.id,
+        email,
+        plan_slug: plan.slug,
+        previous_plan_slug: previousPlanSlug,
+        gateway_customer_id: customer.id,
+        gateway_subscription_id: asaasSubscription.id,
+        value: plan.price_cents / 100,
+        method,
+      },
+      processed: true,
+    });
+    if (checkoutLogError) console.error("[asaas.checkout] Falha ao registrar checkout no billing_events", checkoutLogError);
 
     const payments = await listSubscriptionPayments(asaasSubscription.id, 3).catch(() => []);
     const paymentUrl = findPaymentUrl(asaasSubscription.paymentLink, payments);
