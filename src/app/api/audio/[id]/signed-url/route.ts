@@ -148,6 +148,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       defaultTone: kit.default_tone ?? kit.original_tone ?? null,
       allowPitchShift: kit.allow_pitch_shift ?? true,
       maxPitchShiftSemitones: kit.max_pitch_shift_semitones ?? 2,
+      manualTessituraRanges: {},
       category: null,
       requiredPlan,
       allowedPlanSlugs: resolveAllowedPlanSlugs(kit.allowed_plan_slugs, requiredPlan),
