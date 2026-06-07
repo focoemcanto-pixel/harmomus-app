@@ -6,6 +6,7 @@ import type { PublicKit } from "@/lib/data/public-kits";
 import { getAudioStream } from "@/lib/r2/get-audio-stream";
 import { createClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { trackMarketingEvent } from "@/lib/communications/events";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
 import { normalizeTone, sortTonesByChromaticOrder } from "@/lib/music/tones";
 
@@ -126,12 +127,49 @@ async function resolveOpeningTone(supabase: any, kit: any) {
   return sortTonesByChromaticOrder(tones)[0] ?? null;
 }
 
+function resolveAudioMarketingEventKey(payload: { status: "allowed" | "denied"; reason: string }) {
+  if (payload.status === "allowed") return "audio_played";
+  if (String(payload.reason ?? "").toLowerCase().includes("tone")) return "tone_blocked";
+  return "premium_blocked";
+}
+
+async function trackAudioMarketingEvent(
+  supabase: any,
+  payload: { user_id: string | null; kit_id: string; audio_file_id: string; status: "allowed" | "denied"; reason: string; session_id?: string | null; device_type?: string | null; plan_slug?: string | null; page_path?: string | null },
+) {
+  if (!payload.user_id) return;
+  const eventKey = resolveAudioMarketingEventKey(payload);
+
+  try {
+    await trackMarketingEvent(supabase, {
+      userId: payload.user_id,
+      eventKey,
+      eventLabel: eventKey,
+      channel: "app",
+      metadata: {
+        kit_id: payload.kit_id,
+        audio_file_id: payload.audio_file_id,
+        access_status: payload.status,
+        reason: payload.reason,
+        session_id: payload.session_id ?? null,
+        device_type: payload.device_type ?? null,
+        plan_slug: payload.plan_slug ?? null,
+        page_path: payload.page_path ?? null,
+      },
+    });
+  } catch (error) {
+    console.warn("[audio] falha ao registrar evento comportamental", error);
+  }
+}
+
 async function logAudioAccess(payload: { user_id: string | null; kit_id: string; audio_file_id: string; status: "allowed" | "denied"; reason: string; session_id?: string | null; device_type?: string | null; plan_slug?: string | null; page_path?: string | null }) {
   const supabase = createSupabaseAdminClient() as any;
   const enrichedPayload = { ...payload, accessed_at: new Date().toISOString() };
   const { error } = await supabase.from("audio_access_logs").insert(enrichedPayload);
-  if (!error) return;
-  await supabase.from("audio_access_logs").insert({ user_id: payload.user_id, kit_id: payload.kit_id, audio_file_id: payload.audio_file_id, status: payload.status, reason: payload.reason, accessed_at: enrichedPayload.accessed_at });
+  if (error) {
+    await supabase.from("audio_access_logs").insert({ user_id: payload.user_id, kit_id: payload.kit_id, audio_file_id: payload.audio_file_id, status: payload.status, reason: payload.reason, accessed_at: enrichedPayload.accessed_at });
+  }
+  await trackAudioMarketingEvent(supabase, payload);
 }
 
 function runAfterResponse(task: () => Promise<void>) {
