@@ -3,7 +3,6 @@ import { NextResponse } from "next/server";
 import { ensureUserAccess } from "@/lib/auth/ensure-user-access";
 import { trackMarketingEvent } from "@/lib/communications/events";
 import { formatPhoneBR, normalizePhoneInternational } from "@/lib/communications/phone";
-import { startStripeCheckoutForSignup } from "@/lib/data/billing";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
@@ -354,11 +353,48 @@ export async function POST(request: Request) {
 
   if (isPaidPlan(plan)) {
     try {
-      const userId = await withTimeout(createPaidCheckoutAccount({ email, password: pass, fullName, username, phone, plan, origin }), 5000, "createPaidCheckoutAccount");
-      const session = await withTimeout(startStripeCheckoutForSignup(userId, email, plan, origin, { phone, full_name: fullName, username }), 10000, "startStripeCheckoutForSignup");
-      return NextResponse.redirect(session.url, 303);
+      await withTimeout(
+        createPaidCheckoutAccount({
+          email,
+          password: pass,
+          fullName,
+          username,
+          phone,
+          plan,
+          origin,
+        }),
+        5000,
+        "createPaidCheckoutAccount",
+      );
+
+      const loginResult = await supabase.auth.signInWithPassword({
+        email,
+        password: pass,
+      });
+
+      if (loginResult.error) {
+        const loginUrl = new URL("/login", request.url);
+        loginUrl.searchParams.set("redirect", `/checkout?plan=${encodeURIComponent(plan)}`);
+        loginUrl.searchParams.set("message", "Conta criada. Entre para escolher a forma de pagamento.");
+
+        return NextResponse.redirect(loginUrl, 303);
+      }
+
+      await runSignupSideEffectsAsync({
+        supabase,
+        plan,
+        origin,
+        fullName,
+        email,
+        phone,
+        username,
+        utmSource,
+        utmCampaign,
+      });
+
+      return NextResponse.redirect(new URL(`/checkout?plan=${encodeURIComponent(plan)}`, request.url), 303);
     } catch (error) {
-      const mapped = mapSupabaseError(error instanceof Error ? error.message : "Não foi possível iniciar o checkout agora.");
+      const mapped = mapSupabaseError(error instanceof Error ? error.message : "Não foi possível preparar o checkout agora.");
       return fail(mapped.message, mapped.field);
     }
   }
