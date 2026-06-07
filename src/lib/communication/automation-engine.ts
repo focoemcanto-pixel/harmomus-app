@@ -138,9 +138,7 @@ function absoluteUrl(value?: string | null) {
 
 function normalizeRelativeLinksInMessage(message: string) {
   const base = publicSiteUrl();
-  return message.replace(/(^|\s)(\/(?:assinar|checkout|conta|planos|upgrade)(?:\?[^\s]*)?)/gi, (_match, prefix: string, path: string) => {
-    return `${prefix}${base}${path}`;
-  });
+  return message.replace(/(^|\s)(\/(?:assinar|checkout|conta|planos|upgrade)(?:\?[^\s]*)?)/gi, (_match, prefix: string, path: string) => `${prefix}${base}${path}`);
 }
 
 function renderTemplate(template: string, input: { profile: ProfileRow; automation: AutomationRow }) {
@@ -150,7 +148,6 @@ function renderTemplate(template: string, input: { profile: ProfileRow; automati
     .replace(/{{\s*email\s*}}/gi, input.profile.email ?? "")
     .replace(/{{\s*link\s*}}/gi, link)
     .replace(/{{\s*campanha\s*}}/gi, input.automation.name ?? "");
-
   return normalizeRelativeLinksInMessage(rendered);
 }
 
@@ -527,4 +524,119 @@ export async function processBehaviorMarketingAutomations(options: { dryRun?: bo
   if (!eventRows.length) return result;
 
   const eventsByUser = new Map<string, MarketingEventRow[]>();
+  for (const event of eventRows) {
+    if (!event.user_id) continue;
+    const rows = eventsByUser.get(event.user_id) ?? [];
+    rows.push(event);
+    eventsByUser.set(event.user_id, rows);
+  }
 
+  const userIds = Array.from(eventsByUser.keys());
+
+  const [{ data: profiles }, { data: subscriptions }, { data: states }] = await Promise.all([
+    admin.from("profiles").select("id,full_name,email,phone,whatsapp_opt_in,email_opt_in").in("id", userIds),
+    admin.from("subscriptions").select("user_id,status,plans(slug)").in("user_id", userIds).order("updated_at", { ascending: false }),
+    admin.from("user_marketing_state").select("*").in("user_id", userIds),
+  ]);
+
+  const profileById = new Map<string, ProfileRow>((profiles ?? []).map((profile: ProfileRow) => [profile.id, profile]));
+  const stateByUser = new Map<string, UserMarketingStateRow>((states ?? []).map((state: UserMarketingStateRow) => [state.user_id, state]));
+  const subscriptionByUser = new Map<string, SubscriptionRow>();
+  for (const subscription of (subscriptions ?? []) as SubscriptionRow[]) {
+    if (!subscriptionByUser.has(subscription.user_id)) subscriptionByUser.set(subscription.user_id, subscription);
+  }
+
+  for (const userId of userIds) {
+    const userEvents = eventsByUser.get(userId) ?? [];
+    const profile = profileById.get(userId);
+    if (!profile) continue;
+
+    const state = stateByUser.get(userId);
+    const subscription = subscriptionByUser.get(userId);
+
+    const candidates = activeAutomations
+      .map((automation) => {
+        const lookbackStart = Date.now() - Number(automation.lookback_hours || 168) * 60 * 60 * 1000;
+        const matchingEvents = userEvents.filter((event) => getEventKey(event) === normalize(automation.trigger_event) && new Date(event.created_at).getTime() >= lookbackStart);
+        const score = matchingEvents.length * Number(automation.score_weight || 1);
+        return { automation, matchingEvents, score };
+      })
+      .filter((candidate) => candidate.matchingEvents.length > 0)
+      .filter((candidate) => candidate.score >= Number(candidate.automation.score_threshold || 1))
+      .sort((a, b) => a.automation.priority - b.automation.priority || b.score - a.score);
+
+    if (!candidates.length) continue;
+
+    const winner = candidates[0];
+    const latestEvent = winner.matchingEvents.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+    const ruleSkip = shouldSkipByRule({ automation: winner.automation, events: userEvents, subscription });
+    const cooldownSkip = isInCooldown(state, winner.automation.channel);
+    const skipReason = ruleSkip ?? cooldownSkip;
+
+    try {
+      await upsertUserState({ admin, userId, automation: winner.automation, score: winner.score, event: latestEvent, sent: false });
+
+      if (skipReason) {
+        result.skipped += 1;
+        result.details.push({ user_id: userId, automation_id: winner.automation.id, status: "skipped", score: winner.score, reason: skipReason });
+        await markSkipped({ admin, automation: winner.automation, userId, event: latestEvent, score: winner.score, reason: skipReason });
+        continue;
+      }
+
+      if (options.dryRun) {
+        result.skipped += 1;
+        result.details.push({ user_id: userId, automation_id: winner.automation.id, status: "skipped", score: winner.score, reason: "dry_run" });
+        continue;
+      }
+
+      const campaignId = await getOrCreateAutomationCampaign(admin, winner.automation);
+      const scheduledAt = scheduledAtForAutomation(winner.automation);
+      const queueResult = await enqueueCommunicationJob({ admin, automation: winner.automation, campaignId, profile, score: winner.score, event: latestEvent, scheduledAt });
+
+      if (queueResult.skippedReason) {
+        result.skipped += 1;
+        result.details.push({ user_id: userId, automation_id: winner.automation.id, status: "skipped", score: winner.score, reason: queueResult.skippedReason });
+        await markSkipped({ admin, automation: winner.automation, userId, event: latestEvent, score: winner.score, reason: queueResult.skippedReason });
+        continue;
+      }
+
+      await admin.from("marketing_automation_runs").insert({
+        automation_id: winner.automation.id,
+        campaign_id: campaignId,
+        queue_id: queueResult.queueId,
+        user_id: userId,
+        trigger_event_id: latestEvent?.id ?? null,
+        trigger_event_key: latestEvent ? getEventKey(latestEvent) : winner.automation.trigger_event,
+        intent: winner.automation.intent,
+        channel: winner.automation.channel,
+        score: winner.score,
+        status: "queued",
+        scheduled_at: scheduledAt,
+        processed_at: nowIso(),
+        payload: { automation_name: winner.automation.name, scheduled_at: scheduledAt, cancel_if_conversion: shouldCancelIfCompleted(winner.automation) },
+      });
+
+      await upsertUserState({ admin, userId, automation: winner.automation, score: winner.score, event: latestEvent, campaignId, sent: true });
+      result.queued += 1;
+      result.details.push({ user_id: userId, automation_id: winner.automation.id, status: "queued", score: winner.score });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Erro desconhecido";
+      result.failed += 1;
+      result.details.push({ user_id: userId, automation_id: winner.automation.id, status: "failed", score: winner.score, reason: message });
+      await admin.from("marketing_automation_runs").insert({
+        automation_id: winner.automation.id,
+        user_id: userId,
+        trigger_event_id: latestEvent?.id ?? null,
+        trigger_event_key: latestEvent ? getEventKey(latestEvent) : winner.automation.trigger_event,
+        intent: winner.automation.intent,
+        channel: winner.automation.channel,
+        score: winner.score,
+        status: "failed",
+        error_message: message,
+        processed_at: nowIso(),
+      });
+    }
+  }
+
+  return result;
+}
