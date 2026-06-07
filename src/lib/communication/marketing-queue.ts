@@ -9,7 +9,7 @@ type CommunicationQueueJob = {
   recipient_email: string | null;
   recipient_phone: string | null;
   channel: Channel;
-  status: "pending" | "processing" | "sent" | "failed";
+  status: "pending" | "processing" | "sent" | "failed" | "canceled";
   attempts: number | null;
   scheduled_at: string | null;
   payload: Record<string, unknown> | null;
@@ -36,6 +36,7 @@ type ProcessCommunicationQueueResult = {
   sent: number;
   failed: number;
   skipped: number;
+  canceled: number;
   eligibleNow: number;
   scheduledLater: number;
 };
@@ -43,6 +44,18 @@ type ProcessCommunicationQueueResult = {
 const DEFAULT_PROCESS_LIMIT = 2;
 const MAX_PROCESS_LIMIT = 5;
 const MAX_WHATSAPP_PER_EXECUTION = 2;
+const CONVERSION_EVENTS = new Set([
+  "checkout_completed",
+  "checkout.completed",
+  "checkout.session.completed",
+  "subscription_created",
+  "subscription.created",
+  "invoice.paid",
+  "payment_succeeded",
+  "plan.plus_activated",
+  "plan.premium_activated",
+]);
+const ACTIVE_SUBSCRIPTION_STATUSES = new Set(["active", "trialing"]);
 
 function normalizeProcessLimit(limit: unknown) {
   const parsed = Math.floor(Number(limit));
@@ -52,6 +65,10 @@ function normalizeProcessLimit(limit: unknown) {
 
 function sanitizeText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function normalize(value: unknown) {
+  return String(value ?? "").trim().toLowerCase();
 }
 
 function cleanRecipientName(value: unknown) {
@@ -140,6 +157,19 @@ function safeJson(value: unknown) {
   }
 }
 
+function shouldCancelIfConversion(job: CommunicationQueueJob) {
+  return job.payload?.cancel_if_conversion === true || job.payload?.cancel_if_conversion === "true";
+}
+
+function triggerEventAt(job: CommunicationQueueJob) {
+  const value = sanitizeText(job.payload?.trigger_event_at);
+  return value || job.scheduled_at || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+}
+
+function eventKey(value: unknown) {
+  return normalize(value);
+}
+
 async function writeCommunicationLog(
   admin: any,
   input: {
@@ -160,9 +190,11 @@ async function writeCommunicationLog(
       ? "sent"
       : input.event.endsWith("failed")
         ? "failed"
-        : input.event.endsWith("processing")
-          ? "processing"
-          : input.job.status,
+        : input.event.endsWith("canceled")
+          ? "canceled"
+          : input.event.endsWith("processing")
+            ? "processing"
+            : input.job.status,
     provider_message_id:
       typeof (safeJson(input.response) as Record<string, unknown> | null)
         ?.provider_message_id === "string"
@@ -201,6 +233,61 @@ async function getActiveChannel(admin: any, channel: Channel) {
     data: data ? ({ ...data, type: channel } as CommunicationChannelRow) : null,
     error: null,
   };
+}
+
+async function hasConversionAfterTrigger(admin: any, job: CommunicationQueueJob) {
+  if (!job.user_id || !shouldCancelIfConversion(job)) return false;
+  const since = triggerEventAt(job);
+
+  const { data: events } = await admin
+    .from("marketing_events")
+    .select("id,event_key,event_type,event_label,created_at")
+    .eq("user_id", job.user_id)
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  if ((events ?? []).some((event: any) => CONVERSION_EVENTS.has(eventKey(event.event_key ?? event.event_type ?? event.event_label)))) {
+    return true;
+  }
+
+  const { data: subscription } = await admin
+    .from("subscriptions")
+    .select("status,updated_at,created_at")
+    .eq("user_id", job.user_id)
+    .in("status", Array.from(ACTIVE_SUBSCRIPTION_STATUSES))
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return Boolean(subscription?.status && ACTIVE_SUBSCRIPTION_STATUSES.has(normalize(subscription.status)));
+}
+
+async function cancelJobAfterConversion(admin: any, job: CommunicationQueueJob) {
+  const now = new Date().toISOString();
+  await admin
+    .from("communication_queue")
+    .update({
+      status: "canceled",
+      processed_at: now,
+      updated_at: now,
+      error_message: "Cancelado automaticamente: conversão detectada antes do envio.",
+    })
+    .eq("id", job.id)
+    .in("status", ["pending", "processing"]);
+
+  await writeCommunicationLog(admin, {
+    job: { ...job, status: "canceled" },
+    event: "communication.queue.canceled",
+    level: "info",
+    message: "Mensagem automática cancelada porque o usuário converteu/regularizou antes do envio.",
+    payload: {
+      job_id: job.id,
+      automation_id: job.payload?.automation_id ?? null,
+      automation_intent: job.payload?.automation_intent ?? null,
+      trigger_event_at: job.payload?.trigger_event_at ?? null,
+    },
+  });
 }
 
 async function sendViaWebhook(
@@ -414,6 +501,7 @@ export async function processCommunicationQueue(
       sent: 0,
       failed: 0,
       skipped: 0,
+      canceled: 0,
       eligibleNow: eligibleNow ?? 0,
       scheduledLater: scheduledLater ?? 0,
     };
@@ -421,6 +509,7 @@ export async function processCommunicationQueue(
   let sent = 0;
   let failed = 0;
   let skipped = 0;
+  let canceled = 0;
   let whatsappProcessed = 0;
   const channels = new Map<Channel, CommunicationChannelRow | null>();
 
@@ -433,6 +522,12 @@ export async function processCommunicationQueue(
     const locked = await markJobProcessing(admin, job);
     if (!locked) {
       skipped += 1;
+      continue;
+    }
+
+    if (await hasConversionAfterTrigger(admin, job)) {
+      await cancelJobAfterConversion(admin, job);
+      canceled += 1;
       continue;
     }
 
@@ -457,10 +552,11 @@ export async function processCommunicationQueue(
   }
 
   return {
-    processed: sent + failed,
+    processed: sent + failed + canceled,
     sent,
     failed,
     skipped,
+    canceled,
     eligibleNow: eligibleNow ?? 0,
     scheduledLater: scheduledLater ?? 0,
   };
