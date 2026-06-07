@@ -415,8 +415,8 @@ export async function processBehaviorMarketingAutomations(options: { dryRun?: bo
     admin.from("user_marketing_state").select("*").in("user_id", userIds),
   ]);
 
-  const profileById = new Map((profiles ?? []).map((profile: ProfileRow) => [profile.id, profile]));
-  const stateByUser = new Map((states ?? []).map((state: UserMarketingStateRow) => [state.user_id, state]));
+  const profileById = new Map<string, ProfileRow>(((profiles ?? []) as ProfileRow[]).map((profile) => [profile.id, profile]));
+  const stateByUser = new Map<string, UserMarketingStateRow>(((states ?? []) as UserMarketingStateRow[]).map((state) => [state.user_id, state]));
   const subscriptionByUser = new Map<string, SubscriptionRow>();
   for (const subscription of (subscriptions ?? []) as SubscriptionRow[]) {
     if (!subscriptionByUser.has(subscription.user_id)) subscriptionByUser.set(subscription.user_id, subscription);
