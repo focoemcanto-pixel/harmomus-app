@@ -53,6 +53,7 @@ export function CheckoutPaymentSelector({ planName, monthlyPrice, options }: Che
 
   const selectMethod = (method: PaymentMethod) => {
     setSelectedMethod(method);
+    if (method === "pix" || method === "boleto") return;
     window.setTimeout(() => {
       summaryRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 120);
