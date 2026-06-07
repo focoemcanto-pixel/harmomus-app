@@ -10,6 +10,7 @@ const LEVEL_BY_STATUS: Record<string, "debug" | "info" | "warning" | "error"> = 
   queued: "warning",
   pending: "warning",
   processing: "warning",
+  canceled: "warning",
   failed: "error",
   error: "error",
   falhou: "error",
@@ -17,7 +18,7 @@ const LEVEL_BY_STATUS: Record<string, "debug" | "info" | "warning" | "error"> = 
 
 function normalizeLog(row: any) {
   const details = row.details && typeof row.details === "object" ? row.details : {};
-  const event = sanitizeText(details.event) || sanitizeText(row.event_type) || `communication.${sanitizeText(row.status) || "log"}`;
+  const event = sanitizeText(details.event) || `communication.${sanitizeText(row.status) || "log"}`;
   const level = sanitizeText(details.level) || LEVEL_BY_STATUS[sanitizeText(row.status)] || "info";
   const message = sanitizeText(details.message) || sanitizeText(row.error_message) || `Registro ${sanitizeText(row.status) || "communication"}`;
   return {
@@ -44,7 +45,7 @@ export async function GET(request: Request) {
 
   let query = admin
     .from("communication_logs")
-    .select("id,created_at,campaign_id,user_id,channel,status,event_type,provider_message_id,error_message,details")
+    .select("id,created_at,campaign_id,user_id,channel,status,provider_message_id,error_message,details")
     .order("created_at", { ascending: false })
     .limit(100);
 
