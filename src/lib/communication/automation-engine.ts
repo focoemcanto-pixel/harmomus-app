@@ -80,11 +80,14 @@ const BLOCKING_COMPLETION_EVENTS = new Set([
   "checkout.session.completed",
   "subscription_created",
   "subscription.created",
+  "invoice.paid",
+  "payment_succeeded",
   "plan.plus_activated",
   "plan.premium_activated",
 ]);
 
 const DEFAULT_PUBLIC_SITE_URL = "https://harmomus.com";
+const GLOBAL_DAILY_AUTOMATION_LIMIT = 3;
 
 function nowIso() {
   return new Date().toISOString();
@@ -96,6 +99,16 @@ function hoursAgo(hours: number) {
 
 function addHours(hours: number) {
   return new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+}
+
+function addMinutes(minutes: number) {
+  return new Date(Date.now() + minutes * 60 * 1000).toISOString();
+}
+
+function startOfTodayIso() {
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  return now.toISOString();
 }
 
 function normalize(value: unknown) {
@@ -158,6 +171,23 @@ function hasCompletionAfter(events: MarketingEventRow[], since: string) {
   });
 }
 
+function delayMinutesForAutomation(automation: AutomationRow) {
+  const metadataDelay = Number(automation.metadata?.recommended_delay_minutes ?? automation.metadata?.delay_minutes);
+  if (Number.isFinite(metadataDelay) && metadataDelay >= 0) return Math.floor(metadataDelay);
+  if (automation.intent === "checkout_abandoned") return 120;
+  if (automation.intent === "payment_recovery") return 120;
+  return 0;
+}
+
+function scheduledAtForAutomation(automation: AutomationRow) {
+  const delay = delayMinutesForAutomation(automation);
+  return delay > 0 ? addMinutes(delay) : null;
+}
+
+function shouldCancelIfCompleted(automation: AutomationRow) {
+  return automation.intent === "checkout_abandoned" || automation.intent === "payment_recovery";
+}
+
 function shouldSkipByRule(input: {
   automation: AutomationRow;
   events: MarketingEventRow[];
@@ -176,6 +206,14 @@ function shouldSkipByRule(input: {
 
     if (!latestCheckoutStarted) return "checkout_started_not_found";
     if (hasCompletionAfter(input.events, latestCheckoutStarted.created_at)) return "checkout_completed_after_start";
+  }
+
+  if (input.automation.intent === "payment_recovery") {
+    const latestPaymentFailed = input.events
+      .filter((event) => getEventKey(event) === "payment_failed")
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+
+    if (latestPaymentFailed && hasCompletionAfter(input.events, latestPaymentFailed.created_at)) return "payment_recovered_after_failure";
   }
 
   if (input.automation.intent === "upgrade_premium") {
@@ -260,12 +298,55 @@ async function getOrCreateAutomationCampaign(admin: SupabaseAdmin & any, automat
   return data.id as string;
 }
 
+async function hasRecentOrPendingAutomationJob(input: {
+  admin: SupabaseAdmin & any;
+  automation: AutomationRow;
+  userId: string;
+  sinceHours?: number;
+}) {
+  const since = hoursAgo(input.sinceHours ?? Math.max(24, input.automation.cooldown_hours || 24));
+  const { data, error } = await input.admin
+    .from("communication_queue")
+    .select("id,status,created_at")
+    .eq("user_id", input.userId)
+    .eq("channel", input.automation.channel)
+    .eq("payload->>automation_id", input.automation.id)
+    .in("status", ["pending", "processing", "queued", "sent"])
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) return false;
+  return Boolean(data?.id);
+}
+
+async function reachedDailyAutomationLimit(input: {
+  admin: SupabaseAdmin & any;
+  userId: string;
+  channel: "whatsapp" | "email";
+}) {
+  const { count, error } = await input.admin
+    .from("communication_queue")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", input.userId)
+    .eq("channel", input.channel)
+    .not("payload->>automation_id", "is", null)
+    .in("status", ["pending", "processing", "queued", "sent"])
+    .gte("created_at", startOfTodayIso());
+
+  if (error) return false;
+  return Number(count ?? 0) >= GLOBAL_DAILY_AUTOMATION_LIMIT;
+}
+
 async function enqueueCommunicationJob(input: {
   admin: SupabaseAdmin & any;
   automation: AutomationRow;
   campaignId: string;
   profile: ProfileRow;
   score: number;
+  event?: MarketingEventRow | null;
+  scheduledAt?: string | null;
 }) {
   const phone = normalizePhone(input.profile.phone);
   const message = renderTemplate(input.automation.message_template, {
@@ -290,6 +371,14 @@ async function enqueueCommunicationJob(input: {
     return { queueId: null, skippedReason: "email_opt_out" };
   }
 
+  if (await reachedDailyAutomationLimit({ admin: input.admin, userId: input.profile.id, channel: input.automation.channel })) {
+    return { queueId: null, skippedReason: "daily_automation_limit_reached" };
+  }
+
+  if (await hasRecentOrPendingAutomationJob({ admin: input.admin, automation: input.automation, userId: input.profile.id })) {
+    return { queueId: null, skippedReason: "duplicate_recent_or_pending_job" };
+  }
+
   const { data, error } = await input.admin
     .from("communication_queue")
     .insert({
@@ -300,7 +389,7 @@ async function enqueueCommunicationJob(input: {
       recipient_phone: phone || null,
       channel: input.automation.channel,
       status: "pending",
-      scheduled_at: null,
+      scheduled_at: input.scheduledAt ?? null,
       payload: {
         message,
         normalized_phone: phone || null,
@@ -310,12 +399,23 @@ async function enqueueCommunicationJob(input: {
         cta_url: ctaUrl || null,
         link: ctaUrl || null,
         link_url: ctaUrl || null,
+        trigger_event_id: input.event?.id ?? null,
+        trigger_event_key: input.event ? getEventKey(input.event) : input.automation.trigger_event,
+        trigger_event_at: input.event?.created_at ?? null,
+        cancel_if_conversion: shouldCancelIfCompleted(input.automation),
       },
     })
     .select("id")
     .single();
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    const message = String(error.message ?? "").toLowerCase();
+    if (message.includes("duplicate") || error.code === "23505") {
+      return { queueId: null, skippedReason: "duplicate_queue_constraint" };
+    }
+    throw new Error(error.message);
+  }
+
   return { queueId: data.id as string, skippedReason: null };
 }
 
@@ -484,7 +584,8 @@ export async function processBehaviorMarketingAutomations(options: { dryRun?: bo
       }
 
       const campaignId = await getOrCreateAutomationCampaign(admin, winner.automation);
-      const queueResult = await enqueueCommunicationJob({ admin, automation: winner.automation, campaignId, profile, score: winner.score });
+      const scheduledAt = scheduledAtForAutomation(winner.automation);
+      const queueResult = await enqueueCommunicationJob({ admin, automation: winner.automation, campaignId, profile, score: winner.score, event: latestEvent, scheduledAt });
 
       if (queueResult.skippedReason) {
         result.skipped += 1;
@@ -504,9 +605,9 @@ export async function processBehaviorMarketingAutomations(options: { dryRun?: bo
         channel: winner.automation.channel,
         score: winner.score,
         status: "queued",
-        scheduled_at: null,
+        scheduled_at: scheduledAt,
         processed_at: nowIso(),
-        payload: { automation_name: winner.automation.name },
+        payload: { automation_name: winner.automation.name, scheduled_at: scheduledAt, cancel_if_conversion: shouldCancelIfCompleted(winner.automation) },
       });
 
       await upsertUserState({ admin, userId, automation: winner.automation, score: winner.score, event: latestEvent, campaignId, sent: true });
