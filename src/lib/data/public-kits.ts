@@ -6,6 +6,16 @@ import type { Database } from "@/types/database";
 export type UserTier = "guest" | "free" | "plus" | "premium";
 export type VoiceType = "todos" | "tenor" | "contralto" | "soprano";
 export type AudioSourceType = "original" | "generated";
+export type ManualTessituraVoice = Exclude<VoiceType, "todos">;
+
+export type ManualTessituraRange = {
+  min_midi: number;
+  max_midi: number;
+  source?: "manual";
+  notation?: "br";
+};
+
+export type ManualTessituraRanges = Partial<Record<ManualTessituraVoice, ManualTessituraRange>>;
 
 export interface PublicKitAudioFile {
   id: string;
@@ -56,6 +66,7 @@ export interface PublicKit {
   lyrics: string | null;
   originalTone: string | null;
   defaultTone: string | null;
+  manualTessituraRanges: ManualTessituraRanges | null;
   allowPitchShift: boolean;
   maxPitchShiftSemitones: number;
   category: { id: string; name: string; slug: string; description: string | null; cover_url: string | null } | null;
@@ -71,6 +82,8 @@ const VOICE_MAP: Record<string, VoiceType> = {
   contralto: "contralto",
   soprano: "soprano",
 };
+
+const MANUAL_VOICES: ManualTessituraVoice[] = ["tenor", "contralto", "soprano"];
 
 type MidiRangeJson = {
   min_midi?: number | null;
@@ -121,6 +134,22 @@ function getNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function normalizeManualTessituraRanges(value: unknown): ManualTessituraRanges | null {
+  if (!value || typeof value !== "object") return null;
+  const output: ManualTessituraRanges = {};
+
+  for (const voice of MANUAL_VOICES) {
+    const range = (value as Record<string, unknown>)[voice];
+    if (!range || typeof range !== "object") continue;
+    const min = getNumber((range as Record<string, unknown>).min_midi);
+    const max = getNumber((range as Record<string, unknown>).max_midi);
+    if (min === null || max === null || min > max) continue;
+    output[voice] = { min_midi: min, max_midi: max, source: "manual", notation: "br" };
+  }
+
+  return Object.keys(output).length ? output : null;
+}
+
 function getLatestAnalysisForFile(file: Database["public"]["Tables"]["kit_audio_files"]["Row"], analysisByFileId: Map<string, CompletedAnalysisJob>) {
   return analysisByFileId.get(file.id) ?? null;
 }
@@ -131,6 +160,7 @@ function mapKit(
     default_tone?: string | null;
     allow_pitch_shift?: boolean | null;
     max_pitch_shift_semitones?: number | null;
+    manual_tessitura_ranges?: unknown;
   },
   categoriesMap: Map<string, Database["public"]["Tables"]["categories"]["Row"]>,
   plansMap: Map<string, Database["public"]["Tables"]["plans"]["Row"]>,
@@ -203,6 +233,7 @@ function mapKit(
     lyrics: kit.lyrics,
     originalTone: normalizeTone(kit.original_tone ?? "") ?? kit.original_tone ?? null,
     defaultTone: normalizeTone(kit.default_tone ?? kit.original_tone ?? "") ?? kit.default_tone ?? kit.original_tone ?? null,
+    manualTessituraRanges: normalizeManualTessituraRanges((kit as any).manual_tessitura_ranges),
     allowPitchShift: kit.allow_pitch_shift ?? true,
     maxPitchShiftSemitones: kit.max_pitch_shift_semitones ?? 2,
     category: category ? { id: category.id, name: category.name, slug: category.slug, description: category.description, cover_url: (category as any).cover_url ?? null } : null,
