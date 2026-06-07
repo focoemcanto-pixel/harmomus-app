@@ -107,11 +107,23 @@ function externalUserId(payload: AsaasWebhookPayload) {
   return payload.subscription?.externalReference ?? payload.payment?.externalReference ?? null;
 }
 
+function normalizeLower(value: unknown) {
+  return String(value ?? "").trim().toLowerCase() || null;
+}
+
+function isConfirmedPaymentEvent(event: string, payload: AsaasWebhookPayload) {
+  const paymentStatus = normalizeLower(payload.payment?.status);
+  return (
+    event === "PAYMENT_RECEIVED" ||
+    event === "PAYMENT_CONFIRMED" ||
+    paymentStatus === "received" ||
+    paymentStatus === "confirmed"
+  );
+}
+
 function statusForEvent(event: string, payload?: AsaasWebhookPayload) {
   const paymentStatus = normalizeLower(payload?.payment?.status);
-  const subscriptionStatus = normalizeLower(payload?.subscription?.status);
-  if (event === "PAYMENT_RECEIVED" || event === "PAYMENT_CONFIRMED" || paymentStatus === "received" || paymentStatus === "confirmed") return "active";
-  if (subscriptionStatus === "active") return "active";
+  if (payload && isConfirmedPaymentEvent(event, payload)) return "active";
   if (event === "PAYMENT_OVERDUE" || paymentStatus === "overdue") return "overdue";
   if (event === "PAYMENT_DELETED" || event === "SUBSCRIPTION_DELETED" || event === "SUBSCRIPTION_INACTIVATED" || payload?.subscription?.deleted) return "canceled";
   return null;
@@ -188,11 +200,6 @@ function buildUpdatePayload(event: string, payload: AsaasWebhookPayload, freePla
   };
 }
 
-
-function normalizeLower(value: unknown) {
-  return String(value ?? "").trim().toLowerCase() || null;
-}
-
 function normalizePlanFamily(slug?: string | null) {
   if (!slug) return null;
   if (slug.startsWith("ministry")) return "ministry";
@@ -242,14 +249,7 @@ function asaasOccurredAt(payload: AsaasWebhookPayload) {
 }
 
 function isActivationEvent(event: string, payload: AsaasWebhookPayload, status: string | null) {
-  const paymentStatus = normalizeLower(payload.payment?.status);
-  const subscriptionStatus = normalizeLower(payload.subscription?.status);
-  return (
-    status === "active" ||
-    ["payment_received", "payment_confirmed"].includes(event.toLowerCase()) ||
-    ["received", "confirmed"].includes(paymentStatus ?? "") ||
-    ["active"].includes(subscriptionStatus ?? "")
-  );
+  return status === "active" && isConfirmedPaymentEvent(event, payload);
 }
 
 function isCancellationEvent(status: string | null) {
@@ -453,6 +453,10 @@ async function markEvent(
   if (error && error.code !== "23505") console.error("[asaas.webhook] Falha ao registrar billing_event", error);
 }
 
+function getPrimaryCustomerEvent(previousPlanSlug: string, nextPlanSlug: string) {
+  return getSpecificPlanTransitionEvent(previousPlanSlug, nextPlanSlug) ?? getPlanActivatedEvent(nextPlanSlug);
+}
+
 export async function POST(req: Request) {
   let payload: AsaasWebhookPayload | null = null;
   const supabase = createSupabaseAdminClient();
@@ -510,10 +514,11 @@ export async function POST(req: Request) {
       }
     }
 
+    const customerEvent = isActivationEvent(event, payload, status)
+      ? getPrimaryCustomerEvent(previousPlanSlug, nextPlanSlug)
+      : null;
     const dispatchEvents = [
-      isActivationEvent(event, payload, status) ? "payment.approved" : null,
-      isActivationEvent(event, payload, status) ? getSpecificPlanTransitionEvent(previousPlanSlug, nextPlanSlug) : null,
-      isActivationEvent(event, payload, status) ? getPlanActivatedEvent(nextPlanSlug) : null,
+      customerEvent,
       isCancellationEvent(status) ? "subscription.canceled" : null,
       isCancellationEvent(status) ? getSpecificPlanTransitionEvent(previousPlanSlug, nextPlanSlug) : null,
     ].filter(Boolean) as WebhookEvent[];
