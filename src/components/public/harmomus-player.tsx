@@ -11,11 +11,15 @@ interface HarmomusPlayerProps {
   title: string;
   canPlay: boolean;
   semitoneShift?: number;
-  onBlocked: () => void;
+  onBlocked?: () => void;
   mediaTitle?: string;
   mediaArtist?: string;
   mediaAlbum?: string;
   artworkUrl?: string | null;
+  trackId?: string;
+  sourceTone?: string | null;
+  targetTone?: string | null;
+  isOriginal?: boolean;
 }
 
 function parseTrackMeta(title: string) {
@@ -62,11 +66,12 @@ export function HarmomusPlayer({
   title,
   canPlay,
   semitoneShift = 0,
-  onBlocked,
+  onBlocked = () => undefined,
   mediaTitle,
   mediaArtist,
   mediaAlbum,
   artworkUrl,
+  trackId: providedTrackId,
 }: HarmomusPlayerProps) {
   const {
     track,
@@ -90,8 +95,8 @@ export function HarmomusPlayer({
 
   const trackMeta = useMemo(() => parseTrackMeta(title), [title]);
   const trackId = useMemo(
-    () => [src ?? "no-src", title, trackMeta.voice, trackMeta.tone, String(semitoneShift)].join("::"),
-    [src, title, trackMeta.voice, trackMeta.tone, semitoneShift],
+    () => providedTrackId || [src ?? "no-src", title, trackMeta.voice, trackMeta.tone, String(semitoneShift)].join("::"),
+    [providedTrackId, src, title, trackMeta.voice, trackMeta.tone, semitoneShift],
   );
 
   const mediaMetadata = useMemo(() => {
