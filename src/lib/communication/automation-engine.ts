@@ -84,6 +84,8 @@ const BLOCKING_COMPLETION_EVENTS = new Set([
   "plan.premium_activated",
 ]);
 
+const DEFAULT_PUBLIC_SITE_URL = "https://harmomus.com";
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -109,11 +111,24 @@ function cleanName(value?: string | null) {
   return name && !name.includes("@") ? name : "Aluno";
 }
 
+function publicSiteUrl() {
+  return String(process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.SITE_URL || DEFAULT_PUBLIC_SITE_URL).replace(/\/+$/, "");
+}
+
+function absoluteUrl(value?: string | null) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  if (/^https?:\/\//i.test(text)) return text;
+  if (text.startsWith("/")) return `${publicSiteUrl()}${text}`;
+  return text;
+}
+
 function renderTemplate(template: string, input: { profile: ProfileRow; automation: AutomationRow }) {
+  const link = absoluteUrl(input.automation.cta_url);
   return template
     .replace(/{{\s*nome\s*}}/gi, cleanName(input.profile.full_name))
     .replace(/{{\s*email\s*}}/gi, input.profile.email ?? "")
-    .replace(/{{\s*link\s*}}/gi, input.automation.cta_url ?? "")
+    .replace(/{{\s*link\s*}}/gi, link)
     .replace(/{{\s*campanha\s*}}/gi, input.automation.name ?? "");
 }
 
@@ -217,7 +232,7 @@ async function getOrCreateAutomationCampaign(admin: SupabaseAdmin & any, automat
 
   const content = {
     title: automation.name,
-    link_url: automation.cta_url ?? null,
+    link_url: absoluteUrl(automation.cta_url),
     channels: [automation.channel],
     schedule_mode: "automation",
     automation_id: automation.id,
@@ -257,6 +272,7 @@ async function enqueueCommunicationJob(input: {
     profile: input.profile,
     automation: input.automation,
   });
+  const ctaUrl = absoluteUrl(input.automation.cta_url);
 
   if (input.automation.channel === "whatsapp" && phone.length < 10) {
     return { queueId: null, skippedReason: "missing_phone" };
@@ -291,7 +307,9 @@ async function enqueueCommunicationJob(input: {
         automation_id: input.automation.id,
         automation_intent: input.automation.intent,
         score: input.score,
-        cta_url: input.automation.cta_url ?? null,
+        cta_url: ctaUrl || null,
+        link: ctaUrl || null,
+        link_url: ctaUrl || null,
       },
     })
     .select("id")
@@ -415,8 +433,8 @@ export async function processBehaviorMarketingAutomations(options: { dryRun?: bo
     admin.from("user_marketing_state").select("*").in("user_id", userIds),
   ]);
 
-  const profileById = new Map<string, ProfileRow>(((profiles ?? []) as ProfileRow[]).map((profile) => [profile.id, profile]));
-  const stateByUser = new Map<string, UserMarketingStateRow>(((states ?? []) as UserMarketingStateRow[]).map((state) => [state.user_id, state]));
+  const profileById = new Map((profiles ?? []).map((profile: ProfileRow) => [profile.id, profile]));
+  const stateByUser = new Map((states ?? []).map((state: UserMarketingStateRow) => [state.user_id, state]));
   const subscriptionByUser = new Map<string, SubscriptionRow>();
   for (const subscription of (subscriptions ?? []) as SubscriptionRow[]) {
     if (!subscriptionByUser.has(subscription.user_id)) subscriptionByUser.set(subscription.user_id, subscription);
