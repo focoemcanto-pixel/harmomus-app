@@ -22,13 +22,17 @@ function requiredMidi(note: string): number {
   return midi;
 }
 
+function brToSpn(note: string) {
+  return note.replace(/(-?\d+)$/, (octave) => String(Number(octave) + 1));
+}
+
 function createProfile(profile: Omit<VocalProfile, "absoluteMinMidi" | "absoluteMaxMidi" | "comfortMinMidi" | "comfortMaxMidi">): VocalProfile {
   return {
     ...profile,
-    absoluteMinMidi: requiredMidi(profile.absoluteMin),
-    absoluteMaxMidi: requiredMidi(profile.absoluteMax),
-    comfortMinMidi: requiredMidi(profile.comfortMin),
-    comfortMaxMidi: requiredMidi(profile.comfortMax),
+    absoluteMinMidi: requiredMidi(brToSpn(profile.absoluteMin)),
+    absoluteMaxMidi: requiredMidi(brToSpn(profile.absoluteMax)),
+    comfortMinMidi: requiredMidi(brToSpn(profile.comfortMin)),
+    comfortMaxMidi: requiredMidi(brToSpn(profile.comfortMax)),
   };
 }
 
@@ -36,29 +40,29 @@ export const VOCAL_PROFILES: Record<VocalProfileType, VocalProfile> = {
   tenor: createProfile({
     type: "tenor",
     label: "Tenor",
-    absoluteMin: "C3",
-    absoluteMax: "C5",
-    comfortMin: "D3",
-    comfortMax: "G4",
-    warningMargin: 2,
+    comfortMin: "A1",
+    comfortMax: "G3",
+    absoluteMin: "G1",
+    absoluteMax: "A3",
+    warningMargin: 0,
   }),
   contralto: createProfile({
     type: "contralto",
     label: "Contralto",
-    absoluteMin: "G2",
-    absoluteMax: "G5",
-    comfortMin: "G3",
-    comfortMax: "D5",
-    warningMargin: 2,
+    comfortMin: "E2",
+    comfortMax: "C4",
+    absoluteMin: "D2",
+    absoluteMax: "E4",
+    warningMargin: 0,
   }),
   soprano: createProfile({
     type: "soprano",
     label: "Soprano",
-    absoluteMin: "C3",
-    absoluteMax: "C6",
-    comfortMin: "C4",
-    comfortMax: "E5",
-    warningMargin: 2,
+    comfortMin: "A2",
+    comfortMax: "E4",
+    absoluteMin: "G2",
+    absoluteMax: "G4",
+    warningMargin: 0,
   }),
 };
 
