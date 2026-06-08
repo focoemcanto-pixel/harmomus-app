@@ -5,12 +5,14 @@ import { KitAudioSyncCard } from "@/components/admin/kit-audio-sync-card";
 import { KitBulkUpload } from "@/components/admin/kit-bulk-upload";
 import { KitForm } from "@/components/admin/kit-form";
 import { createKit, ensureArtistCategory, getArtistCategories, getKitFormOptions, type Kit } from "@/lib/data/kits";
+import { brazilianNoteToMidi } from "@/lib/music/brazilian-note";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const DEFAULT_ALLOWED_PLANS = ["free", "plus", "premium"];
+const TESSITURA_VOICES = ["tenor", "contralto", "soprano"] as const;
 
 type NovoKitSearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -28,6 +30,25 @@ function parseAllowedPlanSlugs(formData: FormData, validPlanSlugs: string[]) {
     .filter((value) => valid.has(value));
 
   return Array.from(new Set(selected.length ? selected : DEFAULT_ALLOWED_PLANS));
+}
+
+function parseManualTessituraRanges(formData: FormData) {
+  const ranges: Record<string, { min_midi: number; max_midi: number; source: "manual"; notation: "br" }> = {};
+
+  for (const voice of TESSITURA_VOICES) {
+    const minRaw = String(formData.get(`manual_tessitura_${voice}_min`) ?? "").trim();
+    const maxRaw = String(formData.get(`manual_tessitura_${voice}_max`) ?? "").trim();
+    if (!minRaw && !maxRaw) continue;
+    if (!minRaw || !maxRaw) continue;
+
+    const minMidi = brazilianNoteToMidi(minRaw);
+    const maxMidi = brazilianNoteToMidi(maxRaw);
+    if (typeof minMidi !== "number" || typeof maxMidi !== "number" || minMidi > maxMidi) continue;
+
+    ranges[voice] = { min_midi: minMidi, max_midi: maxMidi, source: "manual", notation: "br" };
+  }
+
+  return Object.keys(ranges).length ? ranges : null;
 }
 
 function resolveLegacyRequiredPlan(allowedPlanSlugs: string[]) {
@@ -116,7 +137,8 @@ export default async function NovoKitPage({ searchParams }: { searchParams: Novo
       default_tone: defaultTone || originalTone || null,
       allow_pitch_shift: formData.get("allow_pitch_shift") === "on",
       max_pitch_shift_semitones: parsePitchShiftLimit(formData.get("max_pitch_shift_semitones")),
-    });
+      manual_tessitura_ranges: parseManualTessituraRanges(formData),
+    } as any);
 
     revalidatePath("/admin/kits", "page");
     revalidatePath("/admin/kits/novo", "page");
@@ -141,7 +163,8 @@ export default async function NovoKitPage({ searchParams }: { searchParams: Novo
 
     const artistCategory = await ensureArtistCategoryAdmin(artist);
     const supabase = createSupabaseAdminClient() as any;
-    const payload = {
+    const manualTessituraRanges = parseManualTessituraRanges(formData);
+    const payload: Record<string, unknown> = {
       name,
       slug,
       artist,
@@ -157,6 +180,7 @@ export default async function NovoKitPage({ searchParams }: { searchParams: Novo
       allow_pitch_shift: formData.has("allow_pitch_shift"),
       max_pitch_shift_semitones: parsePitchShiftLimit(formData.get("max_pitch_shift_semitones")),
       published: formData.get("published") === "on",
+      manual_tessitura_ranges: manualTessituraRanges,
     };
 
     const { error } = await supabase.from("kits").update(payload).eq("id", importedKit.id);
@@ -164,6 +188,7 @@ export default async function NovoKitPage({ searchParams }: { searchParams: Novo
 
     revalidatePath("/admin/kits", "page");
     revalidatePath("/admin/kits/novo", "page");
+    revalidatePath(`/admin/kits/novo?importedKitId=${importedKit.id}`, "page");
     revalidatePath("/biblioteca", "page");
     revalidatePath("/todos-os-kits", "page");
     revalidatePath(`/biblioteca/${slug}`, "page");
@@ -190,7 +215,7 @@ export default async function NovoKitPage({ searchParams }: { searchParams: Novo
             Kit importado e carregado nesta página. Complete capa, letra, descrição, publicação e configurações vocais abaixo.
           </div>
           <KitForm
-            key={importedKit.id}
+            key={`${importedKit.id}-${JSON.stringify((importedKit as any).manual_tessitura_ranges ?? null)}`}
             mode="edit"
             categories={categories}
             artistCategories={artistCategories}
