@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { analyzeAudioUrlPitch } from "@/lib/audio/pitch-analysis";
 import { midiToBrazilianNote, midiToSpnNote } from "@/lib/music-notes";
 import { calculateToneRecommendation, getRecommendationPriority, type ToneRecommendation } from "@/lib/recommendation-engine";
 import { getVocalProfile, type VocalProfileType } from "@/lib/vocal-profiles";
@@ -97,21 +96,30 @@ function getAiDisplayRanges(job?: AnalysisJob | null) {
   };
 }
 
+function getFileMidiRange(file?: KitAudioFile | null) {
+  if (!file) return { min: null as number | null, max: null as number | null };
+  return {
+    min: file.minMidiNote ?? file.detectedMinMidiNote ?? null,
+    max: file.maxMidiNote ?? file.detectedMaxMidiNote ?? null,
+  };
+}
+
 function getProfileComfortRange(voice: KitAudioFile["voice"]) {
   if (voice === "todos") return "— → —";
   const profile = getVocalProfile(voice);
   return profile ? formatTechnicalRange(profile.comfortMinMidi, profile.comfortMaxMidi) : "— → —";
 }
 
-function getVoiceRecommendation(voice: KitAudioFile["voice"], job?: AnalysisJob | null) {
-  if (voice === "todos") return null;
+function getVoiceRecommendation(file: KitAudioFile, job?: AnalysisJob | null) {
+  if (file.voice === "todos") return null;
   if (job?.recommendation) return job.recommendation;
 
-  const detectedRange = job ? getJobMidiRange(job, "detected") : { min: null, max: null };
-  const comfortRange = job ? getJobMidiRange(job, "comfort") : { min: null, max: null };
+  const fileRange = getFileMidiRange(file);
+  const detectedRange = typeof fileRange.min === "number" && typeof fileRange.max === "number" ? fileRange : job ? getJobMidiRange(job, "detected") : fileRange;
+  const comfortRange = job ? getJobMidiRange(job, "comfort") : detectedRange;
 
   return calculateToneRecommendation({
-    voiceType: voice,
+    voiceType: file.voice,
     detectedMinMidi: detectedRange.min,
     detectedMaxMidi: detectedRange.max,
     comfortMinMidi: comfortRange.min,
@@ -177,7 +185,6 @@ function isGeneratedAudio(file: KitAudioFile) {
 export function KitAudioSyncCard({ kitId }: { kitId: string }) {
   const [loading, setLoading] = useState(false);
   const [loadingFiles, setLoadingFiles] = useState(false);
-  const [analyzingKey, setAnalyzingKey] = useState<string | null>(null);
   const [analyzingAll, setAnalyzingAll] = useState(false);
   const [analysisSummary, setAnalysisSummary] = useState<AnalysisSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -196,10 +203,6 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
   const allFiles = useMemo(() => tones.flatMap((tone) => tone.files), [tones]);
   const generatedFiles = useMemo(() => allFiles.filter(isGeneratedAudio), [allFiles]);
   const generatedTones = useMemo(() => tones.filter((tone) => tone.files?.some(isGeneratedAudio)), [tones]);
-  const pendingFiles = useMemo(
-    () => allFiles.filter((file) => typeof file.id === "string" && (typeof (file.minMidiNote ?? file.detectedMinMidiNote) !== "number" || typeof (file.maxMidiNote ?? file.detectedMaxMidiNote) !== "number")),
-    [allFiles],
-  );
   const filesForAiAnalysis = useMemo(() => allFiles.filter((file) => typeof file.id === "string" && file.voice !== "todos"), [allFiles]);
 
   const jobStats = useMemo(() => {
@@ -218,7 +221,7 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
   }
 
   const criticalRecommendationsByVoice = useMemo(() => {
-    const result: Array<{ voice: VocalProfileType; voiceLabel: string; tone: string; recommendation: ToneRecommendation; job: AnalysisJob | null }> = [];
+    const result: Array<{ voice: VocalProfileType; voiceLabel: string; tone: string; recommendation: ToneRecommendation; file: KitAudioFile; job: AnalysisJob | null }> = [];
 
     (["tenor", "contralto", "soprano"] as const).forEach((voice) => {
       const candidates = tones.flatMap((toneGroup) =>
@@ -226,9 +229,9 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
           .filter((file) => isGeneratedAudio(file) && file.voice === voice)
           .map((file) => {
             const job = getAnalysisJobForFile(file.id);
-            return { tone: toneGroup.tone, job, recommendation: getVoiceRecommendation(file.voice, job) };
+            return { tone: toneGroup.tone, file, job, recommendation: getVoiceRecommendation(file, job) };
           })
-          .filter((candidate): candidate is { tone: string; job: AnalysisJob | null; recommendation: ToneRecommendation } => candidate.recommendation !== null && candidate.recommendation.risk !== "incomplete"),
+          .filter((candidate): candidate is { tone: string; file: KitAudioFile; job: AnalysisJob | null; recommendation: ToneRecommendation } => candidate.recommendation !== null && candidate.recommendation.risk !== "incomplete"),
       );
 
       const best = candidates.sort((a, b) => getRecommendationPriority(b.recommendation.risk) - getRecommendationPriority(a.recommendation.risk))[0];
@@ -336,17 +339,13 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
     try {
       for (const file of filesForAiAnalysis) {
         if (!file.id) continue;
-        try {
-          const result = await enqueueAiAnalysis(file.id, { silent: true });
-          if (result === "created") created += 1;
-          if (result === "skipped") skipped += 1;
-          if (result === "failed") failed += 1;
-        } catch {
-          failed += 1;
-        }
+        const result = await enqueueAiAnalysis(file.id, { silent: true });
+        if (result === "created") created += 1;
+        if (result === "skipped") skipped += 1;
+        if (result === "failed") failed += 1;
       }
       await loadAnalysisJobs();
-      setAnalysisSubmitMessage(`análise em massa enviada • criados: ${created} • já existentes: ${skipped} • falhas: ${failed}`);
+      setAnalysisSubmitMessage(`análise IA congelada enviada • criados: ${created} • já existentes: ${skipped} • falhas: ${failed}`);
     } finally {
       setAnalyzingAll(false);
     }
@@ -401,102 +400,28 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
     }
   }
 
-  async function persistTessitura(fileId: string, result: Awaited<ReturnType<typeof analyzeAudioUrlPitch>>) {
-    const response = await fetch(`/api/audio/${fileId}/analyze-tessitura`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ detectedMinMidiNote: result.minMidiNote, detectedMaxMidiNote: result.maxMidiNote, confidence: result.confidence }),
-    });
-
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data?.error ?? "Não foi possível salvar a análise de tessitura.");
-    return { saved: !data?.migrationRequired, migrationRequired: Boolean(data?.migrationRequired) };
-  }
-
-  async function analyzeSingleFile(file: KitAudioFile) {
-    if (!file.id) throw new Error("Sincronize os áudios antes de analisar a tessitura.");
-    const result = await analyzeAudioUrlPitch(`/api/audio/${file.id}`);
-    if (typeof result.minMidiNote !== "number" || typeof result.maxMidiNote !== "number") throw new Error("Não foi possível detectar notas suficientes neste áudio.");
-    return persistTessitura(file.id, result);
-  }
-
-  async function analyzeTessitura(file: KitAudioFile) {
-    setAnalyzingKey(file.id ?? file.key);
-    setError(null);
-    setAnalysisSummary(null);
-    try {
-      const result = await analyzeSingleFile(file);
-      if (result.migrationRequired) {
-        setError("A análise rodou, mas não foi salva porque as colunas de tessitura ainda não existem no banco. Aplique a migration de tessitura no Supabase.");
-        return;
-      }
-      await loadSyncedAudios();
-    } catch (analysisError) {
-      setError(analysisError instanceof Error ? analysisError.message : "Erro inesperado ao analisar tessitura.");
-    } finally {
-      setAnalyzingKey(null);
-    }
-  }
-
-  async function analyzeAllTessituras() {
-    const filesToAnalyze = pendingFiles.length > 0 ? pendingFiles : allFiles.filter((file) => typeof file.id === "string");
-    if (filesToAnalyze.length === 0) {
-      setError("Nenhum áudio sincronizado disponível para análise.");
-      return;
-    }
-
-    setAnalyzingAll(true);
-    setError(null);
-    setAnalysisSummary({ total: filesToAnalyze.length, analyzed: 0, saved: 0, failed: 0, migrationRequired: false });
-
-    let analyzed = 0;
-    let saved = 0;
-    let failed = 0;
-    let migrationRequired = false;
-
-    for (const file of filesToAnalyze) {
-      setAnalyzingKey(file.id ?? file.key);
-      try {
-        const result = await analyzeSingleFile(file);
-        analyzed += 1;
-        if (result.saved) saved += 1;
-        if (result.migrationRequired) migrationRequired = true;
-      } catch (batchError) {
-        console.error("[KitAudioSyncCard] tessitura batch analysis failed", file, batchError);
-        failed += 1;
-      }
-      setAnalysisSummary({ total: filesToAnalyze.length, analyzed, saved, failed, migrationRequired });
-    }
-
-    setAnalyzingKey(null);
-    setAnalyzingAll(false);
-    if (migrationRequired) setError("As análises rodaram, mas uma ou mais não foram salvas porque a migration de tessitura ainda não foi aplicada no Supabase.");
-    await loadSyncedAudios();
-  }
-
   return (
     <section className="rounded-xl border border-border bg-surface p-6 shadow-premium">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold text-foreground">Áudios do R2</h2>
-          <p className="text-sm text-muted">Sincronize, carregue e analise a tessitura de cada voz por tom.</p>
-          <p className="mt-1 text-[11px] text-muted">Originais exibem leitura técnica; recomendações aparecem apenas nos tons Harmomus IA.</p>
+          <p className="text-sm text-muted">Sincronize e visualize a tessitura manual projetada por tom. A IA de tessitura fica preservada apenas para testes futuros.</p>
+          <p className="mt-1 text-[11px] text-emerald-200/80">Motor ativo: Manual por transposição matemática • Motor IA: congelado como ferramenta auxiliar.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={() => void loadSyncedAudios()} disabled={loadingFiles || loading || analyzingAll} className="rounded-lg border border-border bg-surface-muted px-4 py-2 text-sm font-medium text-muted transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60">{loadingFiles ? "Carregando..." : "Atualizar lista"}</button>
-          <button type="button" onClick={() => void analyzeAllTessituras()} disabled={loading || loadingFiles || analyzingAll || allFiles.length === 0} className="rounded-lg border border-blue-400/40 bg-blue-500/10 px-4 py-2 text-sm font-medium text-blue-200 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60">{analyzingAll ? "Analisando todas..." : `Analisar todas${pendingFiles.length > 0 ? ` (${pendingFiles.length})` : ""}`}</button>
-          <button type="button" onClick={() => void enqueueAiAnalysisBatch()} disabled={loading || loadingFiles || analyzingAll || filesForAiAnalysis.length === 0} className="rounded-lg border border-fuchsia-400/40 bg-fuchsia-500/10 px-4 py-2 text-sm font-medium text-fuchsia-100 transition hover:bg-fuchsia-500/20 disabled:cursor-not-allowed disabled:opacity-60">{analyzingAll ? "Análise IA em massa..." : `Analisar Tessitura IA em Massa${filesForAiAnalysis.length > 0 ? ` (${filesForAiAnalysis.length})` : ""}`}</button>
+          <button type="button" onClick={() => void enqueueAiAnalysisBatch()} disabled={loading || loadingFiles || analyzingAll || filesForAiAnalysis.length === 0} className="rounded-lg border border-fuchsia-400/40 bg-fuchsia-500/10 px-4 py-2 text-sm font-medium text-fuchsia-100 transition hover:bg-fuchsia-500/20 disabled:cursor-not-allowed disabled:opacity-60">{analyzingAll ? "Análise IA congelada..." : `Rodar IA congelada${filesForAiAnalysis.length > 0 ? ` (${filesForAiAnalysis.length})` : ""}`}</button>
           <button type="button" onClick={() => void syncAudios()} disabled={loading || analyzingAll} className="rounded-lg border border-gold-500/40 bg-gold-500/10 px-4 py-2 text-sm font-medium text-gold-300 transition hover:bg-gold-500/20 disabled:cursor-not-allowed disabled:opacity-60">{loading ? "Sincronizando..." : "Sincronizar áudios"}</button>
-          <button type="button" onClick={() => void generateTonesAutomatically()} disabled={jobLoading || loading || loadingFiles || allFiles.length === 0} className="rounded-lg border border-emerald-400/40 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60">{jobLoading ? "Enfileirando..." : "Gerar tons automaticamente"}</button>
+          <button type="button" onClick={() => void generateTonesAutomatically()} disabled={jobLoading || loading || allFiles.length === 0} className="rounded-lg border border-emerald-400/40 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60">{jobLoading ? "Enfileirando..." : "Gerar tons automaticamente"}</button>
         </div>
       </div>
 
-      {!hasTessituraColumns ? <p className="mb-3 rounded-lg border border-yellow-500/40 bg-yellow-500/10 px-3 py-2 text-sm text-yellow-200">As colunas de tessitura ainda não existem no banco. A lista funciona, mas a análise só será salva depois que a migration for aplicada no Supabase.</p> : null}
-      {error ? <p className="mb-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</p> : null}
-      {analysisSummary ? <p className="mb-3 rounded-lg border border-border bg-surface-muted px-3 py-2 text-sm text-muted">Progresso da análise: {analysisSummary.analyzed}/{analysisSummary.total} processadas • {analysisSummary.saved} salvas • {analysisSummary.failed} falharam</p> : null}
-      {usedPrefix ? <p className="mb-3 text-xs text-muted">Prefixo usado na sincronização: <span className="font-mono text-foreground">{usedPrefix}</span></p> : null}
-      {analysisSubmitMessage ? <p className="mb-3 rounded-lg border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-sm text-cyan-100">{analysisSubmitMessage}</p> : null}
-      {analysisSubmitError ? <p className="mb-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">{analysisSubmitError}</p> : null}
+      {!hasTessituraColumns ? <div className="mb-4 rounded-lg border border-amber-400/30 bg-amber-500/10 p-3 text-sm text-amber-100">As colunas antigas de tessitura não foram encontradas. O motor manual continua funcionando pela configuração do kit.</div> : null}
+      {error ? <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{error}</div> : null}
+      {analysisSubmitMessage ? <div className="mb-4 rounded-lg border border-cyan-400/30 bg-cyan-500/10 p-3 text-sm text-cyan-100">{analysisSubmitMessage}</div> : null}
+      {analysisSubmitError ? <div className="mb-4 rounded-lg border border-red-400/30 bg-red-500/10 p-3 text-sm text-red-100">{analysisSubmitError}</div> : null}
+      {usedPrefix ? <p className="mb-3 text-xs text-muted">Prefixo R2 utilizado: <span className="text-foreground">{usedPrefix}</span></p> : null}
+      {analysisSummary ? <div className="mb-4 rounded-lg border border-border bg-surface-muted p-3 text-xs text-muted">Resumo: {analysisSummary.analyzed}/{analysisSummary.total} analisados • {analysisSummary.saved} salvos • {analysisSummary.failed} falhas</div> : null}
 
       <div className="mb-5 overflow-hidden rounded-2xl border border-white/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] shadow-[0_18px_60px_rgba(0,0,0,0.28)]">
         <div className="border-b border-white/10 p-4">
@@ -539,17 +464,17 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
       {generatedTones.length > 0 ? <div className="mb-4 rounded-lg border border-emerald-400/20 bg-emerald-500/5 p-4"><h3 className="text-sm font-semibold text-emerald-200">Tons gerados</h3><p className="mt-1 text-xs text-emerald-100/80">{generatedTones.map((tone) => tone.tone).join(", ")}</p></div> : null}
 
       <div className="mb-4 rounded-lg border border-cyan-400/20 bg-cyan-500/5 p-4">
-        <h3 className="text-sm font-semibold text-cyan-100">Auditoria Harmomus IA por voz</h3>
-        <p className="mt-1 text-xs text-cyan-100/70">Resumo considera somente tons gerados pela Harmomus IA. Os originais são referência e não recebem sugestão de reorganização.</p>
+        <h3 className="text-sm font-semibold text-cyan-100">Auditoria manual por voz</h3>
+        <p className="mt-1 text-xs text-cyan-100/70">Resumo calculado pela tessitura oficial do tom original, transposta matematicamente para cada tom gerado.</p>
         <div className="mt-3 grid gap-2 sm:grid-cols-3">
           {(["tenor", "contralto", "soprano"] as const).map((voice) => {
             const item = criticalRecommendationsByVoice.find((recommendation) => recommendation.voice === voice);
             const voiceLabel = getVocalProfile(voice)?.label ?? voice;
-            const ranges = item ? getAiDisplayRanges(item.job) : null;
+            const range = item ? getFileMidiRange(item.file) : null;
             return (
               <div key={voice} className="rounded-xl border border-cyan-400/20 bg-black/20 p-3">
                 <span className="block text-xs text-cyan-100/70">Estado mais crítico para {voiceLabel}</span>
-                {item ? <><span className="mt-1 block text-lg font-bold text-cyan-100">Tom {item.tone}</span><span className={`mt-2 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${getRecommendationBadgeClass(item.recommendation.risk)}`}>{item.recommendation.label}</span><span className="mt-2 block text-[11px] text-cyan-100/75">Confortável detectado: {ranges?.comfortRange ?? item.recommendation.display.comfortRange}</span><span className="block text-[11px] text-cyan-100/75">Perfil vocal analisado: {getProfileComfortRange(voice)}</span><span className="mt-2 block text-[11px] text-cyan-100/80">{item.recommendation.explanation}</span>{item.recommendation.redistributionActions.length > 0 ? <ul className="mt-2 list-disc space-y-1 pl-4 text-[11px] text-cyan-50/80">{item.recommendation.redistributionActions.map((action) => <li key={`${voice}-${item.tone}-${action}`}>{action}</li>)}</ul> : null}</> : <span className="mt-2 block text-xs text-cyan-100/60">Sem alerta em tons gerados.</span>}
+                {item ? <><span className="mt-1 block text-lg font-bold text-cyan-100">Tom {item.tone}</span><span className={`mt-2 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${getRecommendationBadgeClass(item.recommendation.risk)}`}>{item.recommendation.label}</span><span className="mt-2 block text-[11px] text-cyan-100/75">Tessitura manual: {formatTechnicalRange(range?.min, range?.max)}</span><span className="block text-[11px] text-cyan-100/75">Perfil vocal analisado: {getProfileComfortRange(voice)}</span><span className="mt-2 block text-[11px] text-cyan-100/80">{item.recommendation.explanation}</span>{item.recommendation.redistributionActions.length > 0 ? <ul className="mt-2 list-disc space-y-1 pl-4 text-[11px] text-cyan-50/80">{item.recommendation.redistributionActions.map((action) => <li key={`${voice}-${item.tone}-${action}`}>{action}</li>)}</ul> : null}</> : <span className="mt-2 block text-xs text-cyan-100/60">Sem dados manuais para esta voz.</span>}
               </div>
             );
           })}
@@ -563,7 +488,7 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
               <h3 className="text-sm font-semibold text-gold-300">Tom {toneGroup.tone}</h3>
               <div className="flex flex-wrap justify-end gap-1">
                 {toneGroup.files.filter((file) => isGeneratedAudio(file) && file.voice !== "todos").map((file) => {
-                  const recommendation = getVoiceRecommendation(file.voice, getAnalysisJobForFile(file.id));
+                  const recommendation = getVoiceRecommendation(file, getAnalysisJobForFile(file.id));
                   if (!recommendation || recommendation.risk === "incomplete") return null;
                   return <span key={`${toneGroup.tone}-${file.id ?? file.key}-recommendation`} className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${getRecommendationBadgeClass(recommendation.risk)}`}>{formatProfileVoice(file.voice) ?? file.voice}: {recommendation.label}</span>;
                 })}
@@ -580,10 +505,9 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
                     <ul className="space-y-2">
                       {voiceFiles.map((file) => {
                         const confidence = formatConfidence(file);
-                        const isAnalyzing = analyzingKey === file.id;
                         const aiJob = getAnalysisJobForFile(file.id);
                         const isAiIncomplete = aiJob?.status === "completed" && !hasCompleteAiAnalysis(aiJob);
-                        const recommendation = isGeneratedAudio(file) ? getVoiceRecommendation(file.voice, aiJob) : null;
+                        const recommendation = isGeneratedAudio(file) ? getVoiceRecommendation(file, aiJob) : null;
                         const aiConfidence = formatAiConfidence(aiJob?.vocal_confidence);
                         const log = Array.isArray(aiJob?.analysis_logs) && aiJob.analysis_logs[0]?.message ? aiJob.analysis_logs[0].message : null;
                         const aiRanges = getAiDisplayRanges(aiJob);
@@ -599,19 +523,13 @@ export function KitAudioSyncCard({ kitId }: { kitId: string }) {
                               <span className="block text-foreground">{formatTessitura(file)}</span>
                               <span className="text-muted">{file.tessituraSource ? `Fonte: ${file.tessituraSource}` : "Fonte: —"}{confidence ? ` • Confiança: ${confidence}` : ""}</span>
                             </div>
-                            <button type="button" onClick={() => void analyzeTessitura(file)} disabled={Boolean(analyzingKey) || analyzingAll} className="rounded-lg border border-gold-500/30 bg-gold-500/10 px-3 py-1.5 text-xs font-medium text-gold-300 hover:bg-gold-500/20 disabled:cursor-not-allowed disabled:opacity-60">{isAnalyzing ? "Analisando..." : "Analisar tessitura"}</button>
-                            <button type="button" onClick={() => void enqueueAiAnalysis(file.id)} disabled={!file.id || Boolean(analysisLoadingFileId)} className="rounded-lg border border-cyan-400/40 bg-cyan-500/10 px-3 py-1.5 text-xs font-medium text-cyan-100 hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60">{analysisLoadingFileId === file.id ? "criando análise..." : isAiIncomplete ? "Reanalisar Tessitura IA" : "Analisar Tessitura IA"}</button>
+                            <button type="button" onClick={() => void enqueueAiAnalysis(file.id)} disabled={!file.id || Boolean(analysisLoadingFileId)} className="rounded-lg border border-cyan-400/40 bg-cyan-500/10 px-3 py-1.5 text-xs font-medium text-cyan-100 hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60">{analysisLoadingFileId === file.id ? "criando análise..." : isAiIncomplete ? "Reanalisar IA congelada" : "Rodar IA congelada"}</button>
                             <div className="min-w-[190px] text-right">
-                              {!aiJob ? <span className="text-[11px] text-cyan-100/70">IA: sem job</span> : <>
-                                <span className="block text-[11px] font-semibold uppercase tracking-wide text-cyan-100">IA: {recommendation?.risk === "incomplete" ? "análise incompleta" : aiJob.status}</span>
-                                <span className="block text-[11px] text-cyan-100/80">Tessitura detectada: {aiRanges.detectedRange}</span>
-                                <span className="block text-[11px] text-cyan-100/80">Confortável detectado: {aiRanges.comfortRange}</span>
-                                {file.voice !== "todos" ? <span className="block text-[11px] text-cyan-100/80">Perfil vocal analisado: {formatProfileVoice(file.voice) ?? "—"}</span> : null}
-                                {isGeneratedAudio(file) && recommendation ? <><span className="block text-[11px] text-cyan-100/80">Conforto do perfil: {getProfileComfortRange(file.voice)}</span><span className="block text-[11px] font-semibold text-cyan-100">Classificação: {recommendation.label} • Overflow: {recommendation.overflowSemitones} semitom{recommendation.overflowSemitones === 1 ? "" : "s"}</span><span className="block max-w-[220px] text-[11px] text-cyan-100/80">{recommendation.explanation}</span>{recommendation.redistributionActions.length ? <ul className="mt-1 max-w-[240px] list-disc space-y-0.5 pl-4 text-left text-[11px] text-cyan-50/80">{recommendation.redistributionActions.map((action) => <li key={`${file.id ?? file.key}-${action}`}>{action}</li>)}</ul> : null}<span className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${getRecommendationBadgeClass(recommendation.risk)}`}>{recommendation.label}</span></> : <span className="block max-w-[220px] text-[11px] text-emerald-100/80">Original: referência do arranjo. Sem sugestão automática de reorganização.</span>}
-                                {aiConfidence ? <span className="block text-[11px] text-cyan-100/80">Confiança: {aiConfidence}</span> : null}
-                                {aiJob.analysis_method ? <span className="block text-[11px] text-cyan-100/80">Método: {aiJob.analysis_method}</span> : null}
-                                <span className="block max-w-[220px] truncate text-[11px] text-cyan-100/70">{aiJob.error_message ?? (recommendation?.risk === "incomplete" ? "Análise incompleta — reanalisar" : log ?? "sem logs")}</span>
-                              </>}
+                              <span className="block text-[11px] font-semibold uppercase tracking-wide text-emerald-100">Manual: ativo</span>
+                              <span className="block text-[11px] text-emerald-100/80">Tessitura oficial: {formatTessitura(file)}</span>
+                              {file.voice !== "todos" ? <span className="block text-[11px] text-emerald-100/80">Perfil vocal analisado: {formatProfileVoice(file.voice) ?? "—"}</span> : null}
+                              {isGeneratedAudio(file) && recommendation ? <><span className="block text-[11px] text-emerald-100/80">Conforto do perfil: {getProfileComfortRange(file.voice)}</span><span className="block text-[11px] font-semibold text-emerald-100">Classificação: {recommendation.label} • Overflow: {recommendation.overflowSemitones} semitom{recommendation.overflowSemitones === 1 ? "" : "s"}</span><span className="block max-w-[220px] text-[11px] text-emerald-100/80">{recommendation.explanation}</span>{recommendation.redistributionActions.length ? <ul className="mt-1 max-w-[240px] list-disc space-y-0.5 pl-4 text-left text-[11px] text-emerald-50/80">{recommendation.redistributionActions.map((action) => <li key={`${file.id ?? file.key}-${action}`}>{action}</li>)}</ul> : null}<span className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${getRecommendationBadgeClass(recommendation.risk)}`}>{recommendation.label}</span></> : <span className="block max-w-[220px] text-[11px] text-emerald-100/80">Original/referência. Sem reorganização automática.</span>}
+                              {aiJob ? <span className="mt-2 block text-[11px] text-cyan-100/70">IA congelada: {aiJob.status} • {aiRanges.detectedRange} • {aiConfidence ?? "sem confiança"} • {aiJob.error_message ?? log ?? "sem logs"}</span> : null}
                             </div>
                           </li>
                         );
