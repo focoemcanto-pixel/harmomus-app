@@ -182,10 +182,24 @@ async function writeCommunicationLog(
   },
 ) {
   const now = new Date().toISOString();
-  await admin.from("communication_logs").insert({
+  const response = safeJson(input.response);
+  const payload = safeJson(input.payload) ?? {};
+  const providerMessageId = typeof (response as Record<string, unknown> | null)?.provider_message_id === "string"
+    ? String((response as Record<string, unknown>).provider_message_id)
+    : typeof (payload as Record<string, unknown> | null)?.provider_message_id === "string"
+      ? String((payload as Record<string, unknown>).provider_message_id)
+      : null;
+
+  const { error } = await admin.from("communication_logs").insert({
     campaign_id: input.job.campaign_id,
     user_id: input.job.user_id,
     channel: input.job.channel,
+    provider: sanitizeText((payload as Record<string, unknown>)?.provider) || null,
+    event: input.event,
+    level: input.level,
+    message: input.message,
+    request: payload,
+    response,
     status: input.event.endsWith("sent")
       ? "sent"
       : input.event.endsWith("failed")
@@ -195,24 +209,21 @@ async function writeCommunicationLog(
           : input.event.endsWith("processing")
             ? "processing"
             : input.job.status,
-    provider_message_id:
-      typeof (safeJson(input.response) as Record<string, unknown> | null)
-        ?.provider_message_id === "string"
-        ? String(
-            (safeJson(input.response) as Record<string, unknown>)
-              .provider_message_id,
-          )
-        : null,
     details: {
       event: input.event,
       level: input.level,
       message: input.message,
       job_id: input.job.id,
-      payload: safeJson(input.payload) ?? {},
-      response: safeJson(input.response),
+      provider_message_id: providerMessageId,
+      payload,
+      response,
       updated_at: now,
     },
   });
+
+  if (error) {
+    console.warn("[communication_queue] falha ao registrar log", error.message);
+  }
 }
 
 async function getActiveChannel(admin: any, channel: Channel) {
@@ -389,7 +400,7 @@ async function sendViaWebhook(
       response: responseBody,
       errorMessage: response.ok
         ? null
-        : `Provedor retornou HTTP ${response.status}.`,
+        : `Provedor retornou HTTP ${response.status}.",
     };
   } catch (error) {
     return {
