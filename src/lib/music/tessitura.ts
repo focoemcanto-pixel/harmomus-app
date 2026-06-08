@@ -6,6 +6,7 @@ export type TessituraStatus = "comfortable" | "extended" | "extreme" | "unsafe";
 export type VocalRiskLevel = "safe" | "attention" | "risky";
 export type GroupTessituraVoice = Exclude<VocalRangeType, "baritono">;
 export type IndividualVoiceTessituraStatus = "comfortable" | "too-high" | "too-low" | "unavailable";
+export type GroupTessituraStatus = "original" | "keep-original" | "adapt-high" | "adapt-low" | "unavailable";
 
 export interface TessituraSourceFile {
   tone: string;
@@ -25,6 +26,25 @@ export interface IndividualVoiceTessituraRecommendation {
   semitoneShift: number | null;
   recommendation: string;
   reason: string;
+}
+
+
+export interface GroupVoiceTessituraResult {
+  voice: GroupTessituraVoice;
+  label: string;
+  targetMidiRange: { min: number; max: number } | null;
+  status: IndividualVoiceTessituraStatus;
+}
+
+export interface GroupTessituraRecommendation {
+  status: GroupTessituraStatus;
+  statusLabel: "Referência oficial" | "Distribuição original" | "Adaptação do kit" | "Sem dados";
+  direction: "high" | "low" | null;
+  sourceTone: string | null;
+  semitoneShift: number | null;
+  voices: GroupVoiceTessituraResult[];
+  message: string;
+  recommendations: Record<GroupTessituraVoice, string>;
 }
 
 export interface VocalZone {
@@ -87,22 +107,22 @@ export const OFFICIAL_VOCAL_RANGES: Record<GroupTessituraVoice, OfficialVocalRan
   tenor: {
     type: "tenor",
     label: "Tenor",
-    absolute: { minMidi: 48, maxMidi: 72 },
-    comfortable: { minMidi: 48, maxMidi: 68 },
+    absolute: { minMidi: 43, maxMidi: 69 },
+    comfortable: { minMidi: 45, maxMidi: 67 },
     warningMarginSemitones: 1,
   },
   contralto: {
     type: "contralto",
     label: "Contralto",
-    absolute: { minMidi: 50, maxMidi: 79 },
-    comfortable: { minMidi: 55, maxMidi: 74 },
+    absolute: { minMidi: 50, maxMidi: 76 },
+    comfortable: { minMidi: 52, maxMidi: 72 },
     warningMarginSemitones: 1,
   },
   soprano: {
     type: "soprano",
     label: "Soprano",
-    absolute: { minMidi: 55, maxMidi: 84 },
-    comfortable: { minMidi: 60, maxMidi: 79 },
+    absolute: { minMidi: 55, maxMidi: 79 },
+    comfortable: { minMidi: 57, maxMidi: 76 },
     warningMarginSemitones: 1,
   },
 };
@@ -475,4 +495,125 @@ export function evaluateIndividualVoiceTessituraForTone(files: TessituraSourceFi
   const normalizedTone = normalizeTone(tone);
   if (!normalizedTone) return null;
   return buildIndividualVoiceRecommendation(files, voice, normalizedTone);
+}
+
+
+const GROUP_VOICES: GroupTessituraVoice[] = ["soprano", "contralto", "tenor"];
+
+function isSameTone(a: string | null | undefined, b: string | null | undefined) {
+  const normalizedA = normalizeTone(a ?? "");
+  const normalizedB = normalizeTone(b ?? "");
+  return Boolean(normalizedA && normalizedB && normalizedA === normalizedB);
+}
+
+function classifyAgainstAbsoluteRange(minMidi: number, maxMidi: number, voice: GroupTessituraVoice): IndividualVoiceTessituraStatus {
+  const range = OFFICIAL_VOCAL_RANGES[voice].absolute;
+  const highOverflow = Math.max(0, maxMidi - range.maxMidi);
+  const lowOverflow = Math.max(0, range.minMidi - minMidi);
+  if (highOverflow === 0 && lowOverflow === 0) return "comfortable";
+  return highOverflow >= lowOverflow ? "too-high" : "too-low";
+}
+
+function adaptationTextForVoice(voice: GroupTessituraVoice, direction: "high" | "low") {
+  if (direction === "high") {
+    if (voice === "soprano") return "Essa linha de soprano fica alta demais nesse tom. Recomendamos adaptar o kit: cante a linha do contralto, pois nesse tom ela passa a cumprir melhor a função de soprano.";
+    if (voice === "contralto") return "Como este tom exige adaptação do kit, cante a linha do tenor para manter o equilíbrio das três vozes.";
+    return "Como este tom exige adaptação do kit, cante a linha do soprano uma oitava abaixo para manter o arranjo completo.";
+  }
+
+  if (voice === "tenor") return "Essa linha de tenor fica grave demais nesse tom. Recomendamos adaptar o kit: cante a linha do contralto, pois nesse tom ela sustenta melhor a função de tenor.";
+  if (voice === "contralto") return "Como este tom exige adaptação do kit, cante a linha do soprano para manter o equilíbrio das três vozes.";
+  return "Como este tom exige adaptação do kit, cante a linha do tenor uma oitava acima para manter o arranjo completo.";
+}
+
+export function evaluateGroupTessituraForTone(files: TessituraSourceFile[], tone: string, originalTone?: string | null): GroupTessituraRecommendation | null {
+  if (files.length === 0) return null;
+  const normalizedTone = normalizeTone(tone);
+  if (!normalizedTone) return null;
+
+  if (isSameTone(normalizedTone, originalTone)) {
+    return {
+      status: "original",
+      statusLabel: "Referência oficial",
+      direction: null,
+      sourceTone: normalizedTone,
+      semitoneShift: 0,
+      voices: [],
+      message: "Tom original do arranjo. Referência oficial.",
+      recommendations: {
+        soprano: "Tom original do arranjo. Referência oficial.",
+        contralto: "Tom original do arranjo. Referência oficial.",
+        tenor: "Tom original do arranjo. Referência oficial.",
+      },
+    };
+  }
+
+  const voices = GROUP_VOICES.map((voice) => {
+    const source = pickBestSourceForVoice(files, voice, normalizedTone);
+    if (!source) return { voice, label: OFFICIAL_VOCAL_RANGES[voice].label, targetMidiRange: null, status: "unavailable" as IndividualVoiceTessituraStatus, sourceTone: null, semitoneShift: null };
+    const min = applySemitoneShift(source.file.minMidi, source.semitoneShift);
+    const max = applySemitoneShift(source.file.maxMidi, source.semitoneShift);
+    return {
+      voice,
+      label: OFFICIAL_VOCAL_RANGES[voice].label,
+      targetMidiRange: { min, max },
+      status: classifyAgainstAbsoluteRange(min, max, voice),
+      sourceTone: normalizeTone(source.file.tone),
+      semitoneShift: source.semitoneShift,
+    };
+  });
+
+  if (voices.some((voice) => voice.status === "unavailable")) {
+    return {
+      status: "unavailable",
+      statusLabel: "Sem dados",
+      direction: null,
+      sourceTone: null,
+      semitoneShift: null,
+      voices,
+      message: "Ainda não há tessitura oficial suficiente para calcular este tom.",
+      recommendations: {
+        soprano: "Ainda não há tessitura oficial suficiente para calcular este tom.",
+        contralto: "Ainda não há tessitura oficial suficiente para calcular este tom.",
+        tenor: "Ainda não há tessitura oficial suficiente para calcular este tom.",
+      },
+    };
+  }
+
+  const highCount = voices.filter((voice) => voice.status === "too-high").length;
+  const lowCount = voices.filter((voice) => voice.status === "too-low").length;
+  if (highCount === 0 && lowCount === 0) {
+    return {
+      status: "keep-original",
+      statusLabel: "Distribuição original",
+      direction: null,
+      sourceTone: voices[0]?.sourceTone ?? null,
+      semitoneShift: voices[0]?.semitoneShift ?? null,
+      voices,
+      message: "Este tom mantém as três vozes dentro da região aceitável. Use a distribuição original do kit.",
+      recommendations: {
+        soprano: "Este tom mantém as três vozes dentro da região aceitável. Cante a linha original de soprano.",
+        contralto: "Este tom mantém as três vozes dentro da região aceitável. Cante a linha original de contralto.",
+        tenor: "Este tom mantém as três vozes dentro da região aceitável. Cante a linha original de tenor.",
+      },
+    };
+  }
+
+  const direction: "high" | "low" = highCount >= lowCount ? "high" : "low";
+  return {
+    status: direction === "high" ? "adapt-high" : "adapt-low",
+    statusLabel: "Adaptação do kit",
+    direction,
+    sourceTone: voices[0]?.sourceTone ?? null,
+    semitoneShift: voices[0]?.semitoneShift ?? null,
+    voices,
+    message: direction === "high"
+      ? "Este tom fica alto para o arranjo completo. Recomendamos adaptar todas as vozes do kit."
+      : "Este tom fica baixo para o arranjo completo. Recomendamos adaptar todas as vozes do kit.",
+    recommendations: {
+      soprano: adaptationTextForVoice("soprano", direction),
+      contralto: adaptationTextForVoice("contralto", direction),
+      tenor: adaptationTextForVoice("tenor", direction),
+    },
+  };
 }

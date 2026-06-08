@@ -13,9 +13,21 @@ const VOICES: Array<{ key: VoiceKey; label: string; helper: string }> = [
   { key: "soprano", label: "Soprano", helper: "Ex: A2 → E4" },
 ];
 
+function normalizeRanges(ranges: unknown) {
+  if (typeof ranges === "string") {
+    try {
+      return JSON.parse(ranges) as unknown;
+    } catch {
+      return null;
+    }
+  }
+  return ranges;
+}
+
 function getRangeValue(ranges: unknown, voice: VoiceKey, side: "min" | "max") {
-  if (!ranges || typeof ranges !== "object") return "";
-  const value = (ranges as Record<string, ManualRange>)[voice]?.[side === "min" ? "min_midi" : "max_midi"];
+  const normalizedRanges = normalizeRanges(ranges);
+  if (!normalizedRanges || typeof normalizedRanges !== "object") return "";
+  const value = (normalizedRanges as Record<string, ManualRange>)[voice]?.[side === "min" ? "min_midi" : "max_midi"];
   return typeof value === "number" ? midiToBrazilianNoteName(value) : "";
 }
 
