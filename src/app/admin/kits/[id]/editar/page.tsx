@@ -34,12 +34,17 @@ function parseManualTessituraRanges(formData: FormData) {
     const minRaw = String(formData.get(`manual_tessitura_${voice}_min`) ?? "").trim();
     const maxRaw = String(formData.get(`manual_tessitura_${voice}_max`) ?? "").trim();
     if (!minRaw && !maxRaw) continue;
-    if (!minRaw || !maxRaw) throw new Error(`Preencha nota mínima e máxima para ${voice}.`);
+    if (!minRaw || !maxRaw) {
+      console.warn("[admin-kit-edit] manual tessitura incomplete", { voice, minRaw, maxRaw });
+      continue;
+    }
 
     const minMidi = brazilianNoteToMidi(minRaw);
     const maxMidi = brazilianNoteToMidi(maxRaw);
-    if (typeof minMidi !== "number" || typeof maxMidi !== "number") throw new Error(`Tessitura inválida para ${voice}. Use notas como A1, C3, F#4.`);
-    if (minMidi > maxMidi) throw new Error(`A nota mínima de ${voice} não pode ser maior que a máxima.`);
+    if (typeof minMidi !== "number" || typeof maxMidi !== "number" || minMidi > maxMidi) {
+      console.warn("[admin-kit-edit] manual tessitura ignored", { voice, minRaw, maxRaw, minMidi, maxMidi });
+      continue;
+    }
 
     ranges[voice] = { min_midi: minMidi, max_midi: maxMidi, source: "manual", notation: "br" };
   }
@@ -119,8 +124,9 @@ export default async function EditarKitPage({ params }: { params: Promise<{ id: 
     try {
       const supabase = createSupabaseAdminClient() as any;
       const artistCategory = await ensureArtistCategoryAdmin(supabase, artist);
+      const manualTessituraRanges = parseManualTessituraRanges(formData);
 
-      await updateKitWithFallback(supabase, id, {
+      const payload: Record<string, unknown> = {
         name,
         slug,
         artist,
@@ -133,11 +139,16 @@ export default async function EditarKitPage({ params }: { params: Promise<{ id: 
         allowed_plan_slugs: allowedPlanSlugs,
         original_tone: originalTone || null,
         default_tone: defaultTone || originalTone || null,
-        manual_tessitura_ranges: parseManualTessituraRanges(formData),
         allow_pitch_shift: formData.has("allow_pitch_shift"),
         max_pitch_shift_semitones: parsePitchShiftLimit(formData.get("max_pitch_shift_semitones")),
         published: formData.get("published") === "on",
-      });
+      };
+
+      if (manualTessituraRanges) {
+        payload.manual_tessitura_ranges = manualTessituraRanges;
+      }
+
+      await updateKitWithFallback(supabase, id, payload);
 
       revalidatePath("/admin/kits", "page");
       revalidatePath(`/admin/kits/${id}/editar`, "page");
