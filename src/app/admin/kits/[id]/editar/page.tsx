@@ -27,8 +27,29 @@ function parseAllowedPlanSlugs(formData: FormData, validPlanSlugs: string[]) {
   return Array.from(new Set(selected.length ? selected : DEFAULT_ALLOWED_PLANS));
 }
 
-function parseManualTessituraRanges(formData: FormData) {
+function normalizeExistingManualTessituraRanges(value: unknown) {
+  if (typeof value === "string") {
+    try {
+      return normalizeExistingManualTessituraRanges(JSON.parse(value));
+    } catch {
+      return null;
+    }
+  }
+  if (!value || typeof value !== "object") return null;
+
   const ranges: Record<string, { min_midi: number; max_midi: number; source: "manual"; notation: "br" }> = {};
+  for (const voice of TESSITURA_VOICES) {
+    const range = (value as Record<string, { min_midi?: unknown; max_midi?: unknown }>)[voice];
+    const min = range?.min_midi;
+    const max = range?.max_midi;
+    if (typeof min === "number" && typeof max === "number" && min <= max) ranges[voice] = { min_midi: min, max_midi: max, source: "manual", notation: "br" };
+  }
+
+  return Object.keys(ranges).length ? ranges : null;
+}
+
+function parseManualTessituraRanges(formData: FormData, existingRanges?: unknown) {
+  const ranges: Record<string, { min_midi: number; max_midi: number; source: "manual"; notation: "br" }> = { ...(normalizeExistingManualTessituraRanges(existingRanges) ?? {}) };
 
   for (const voice of TESSITURA_VOICES) {
     const minRaw = String(formData.get(`manual_tessitura_${voice}_min`) ?? "").trim();
@@ -124,7 +145,7 @@ export default async function EditarKitPage({ params }: { params: Promise<{ id: 
     try {
       const supabase = createSupabaseAdminClient() as any;
       const artistCategory = await ensureArtistCategoryAdmin(supabase, artist);
-      const manualTessituraRanges = parseManualTessituraRanges(formData);
+      const manualTessituraRanges = parseManualTessituraRanges(formData, (kit as any).manual_tessitura_ranges);
 
       const payload: Record<string, unknown> = {
         name,

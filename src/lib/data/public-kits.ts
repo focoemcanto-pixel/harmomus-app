@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { normalizePlan } from "@/lib/access/access-engine";
-import { normalizeTone, sortTonesByChromaticOrder } from "@/lib/music/tones";
+import { getSignedSemitoneDistance, normalizeTone, sortTonesByChromaticOrder } from "@/lib/music/tones";
 import type { Database } from "@/types/database";
 
 export type UserTier = "guest" | "free" | "plus" | "premium";
@@ -168,6 +168,8 @@ function mapKit(
   analysisByFileId = new Map<string, CompletedAnalysisJob>(),
 ): PublicKit {
   const tonesMap = new Map<string, PublicKitToneGroup>();
+  const manualRanges = normalizeManualTessituraRanges((kit as any).manual_tessitura_ranges);
+  const originalTone = normalizeTone(kit.original_tone ?? "") ?? null;
 
   for (const file of files) {
     const tone = normalizeTone(file.tone);
@@ -177,7 +179,10 @@ function mapKit(
 
     const voice = normalizeVoice(file.name);
     const source = normalizeAudioSource((file as any).source_type);
-    const analysis = getLatestAnalysisForFile(file, analysisByFileId);
+    const manualRange = voice !== "todos" && manualRanges && originalTone ? manualRanges[voice] : null;
+    const shift = manualRange ? getSignedSemitoneDistance(originalTone, tone) : null;
+    const projectedManualRange = manualRange && shift !== null ? { min_midi: manualRange.min_midi + shift, max_midi: manualRange.max_midi + shift } : null;
+    const analysis = projectedManualRange ? null : getLatestAnalysisForFile(file, analysisByFileId);
     const musicalLayers = analysis?.pitch_events_json?.musical_layers ?? null;
     const musicalRange = musicalLayers?.musical_range ?? null;
     const dominantRange = musicalLayers?.dominant_range ?? null;
@@ -198,18 +203,18 @@ function mapKit(
       source_type: source,
       source,
       isGenerated: source === "generated",
-      minMidiNote: musicalMin ?? (file as any).min_midi_note ?? null,
-      maxMidiNote: musicalMax ?? (file as any).max_midi_note ?? null,
-      detectedMinMidiNote: musicalMin ?? (file as any).detected_min_midi_note ?? null,
-      detectedMaxMidiNote: musicalMax ?? (file as any).detected_max_midi_note ?? null,
+      minMidiNote: projectedManualRange?.min_midi ?? musicalMin ?? (file as any).min_midi_note ?? null,
+      maxMidiNote: projectedManualRange?.max_midi ?? musicalMax ?? (file as any).max_midi_note ?? null,
+      detectedMinMidiNote: projectedManualRange?.min_midi ?? musicalMin ?? (file as any).detected_min_midi_note ?? null,
+      detectedMaxMidiNote: projectedManualRange?.max_midi ?? musicalMax ?? (file as any).detected_max_midi_note ?? null,
       absoluteMinMidiNote: absoluteMin,
       absoluteMaxMidiNote: absoluteMax,
       dominantMinMidiNote: getNumber(dominantRange?.min_midi),
       dominantMaxMidiNote: getNumber(dominantRange?.max_midi),
-      musicalMinMidiNote: musicalMin,
-      musicalMaxMidiNote: musicalMax,
-      tessituraConfidence: analysis?.vocal_confidence ?? (file as any).tessitura_confidence ?? null,
-      tessituraSource: analysis ? "hybrid" : (file as any).tessitura_source ?? "manual",
+      musicalMinMidiNote: projectedManualRange?.min_midi ?? musicalMin,
+      musicalMaxMidiNote: projectedManualRange?.max_midi ?? musicalMax,
+      tessituraConfidence: projectedManualRange ? 1 : analysis?.vocal_confidence ?? (file as any).tessitura_confidence ?? null,
+      tessituraSource: projectedManualRange ? "manual" : analysis ? "hybrid" : (file as any).tessitura_source ?? "manual",
     };
   }
 
@@ -233,7 +238,7 @@ function mapKit(
     lyrics: kit.lyrics,
     originalTone: normalizeTone(kit.original_tone ?? "") ?? kit.original_tone ?? null,
     defaultTone: normalizeTone(kit.default_tone ?? kit.original_tone ?? "") ?? kit.default_tone ?? kit.original_tone ?? null,
-    manualTessituraRanges: normalizeManualTessituraRanges((kit as any).manual_tessitura_ranges),
+    manualTessituraRanges: manualRanges,
     allowPitchShift: kit.allow_pitch_shift ?? true,
     maxPitchShiftSemitones: kit.max_pitch_shift_semitones ?? 2,
     category: category ? { id: category.id, name: category.name, slug: category.slug, description: category.description, cover_url: (category as any).cover_url ?? null } : null,
@@ -330,17 +335,20 @@ export async function getPublishedKitById(id: string): Promise<PublicKit | null>
   if (kitError) throw new Error(`Falha ao buscar kit: ${kitError.message}`);
   if (!kit) return null;
 
+  const hasManualTessitura = Boolean(normalizeManualTessituraRanges((kit as any).manual_tessitura_ranges));
   const [{ data: category, error: categoryError }, { data: plans, error: plansError }, { data: files, error: filesError }, { data: analyses, error: analysesError }] = await Promise.all([
     kit.category_id ? supabase.from("categories").select("*").eq("id", kit.category_id).maybeSingle() : Promise.resolve({ data: null, error: null }),
     supabase.from("plans").select("*"),
     supabase.from("kit_audio_files").select("*").eq("kit_id", kit.id).order("tone", { ascending: true }),
-    supabase
-      .from("audio_analysis_jobs")
-      .select("audio_file_id,pitch_events_json,detected_min_midi,detected_max_midi,vocal_confidence,completed_at")
-      .eq("kit_id", kit.id)
-      .eq("analysis_type", "tessitura")
-      .eq("status", "completed")
-      .order("completed_at", { ascending: false }),
+    hasManualTessitura
+      ? Promise.resolve({ data: [], error: null })
+      : supabase
+          .from("audio_analysis_jobs")
+          .select("audio_file_id,pitch_events_json,detected_min_midi,detected_max_midi,vocal_confidence,completed_at")
+          .eq("kit_id", kit.id)
+          .eq("analysis_type", "tessitura")
+          .eq("status", "completed")
+          .order("completed_at", { ascending: false }),
   ]);
 
   if (categoryError) throw new Error(`Falha ao buscar categoria: ${categoryError.message}`);

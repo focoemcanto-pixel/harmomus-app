@@ -28,7 +28,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     const originalTone = normalizeTone(kit.original_tone);
     const manualRanges = normalizeManualRanges(kit.manual_tessitura_ranges);
     const { files, hasTessituraColumns } = await getAudioFiles(supabase, id);
-    const analysisByFileId = await getLatestAnalysisByFileId(supabase, id);
+    const analysisByFileId = manualRanges ? new Map<string, AnalysisJobRow>() : await getLatestAnalysisByFileId(supabase, id);
 
     const grouped = new Map<string, any[]>();
     for (const file of files ?? []) {
@@ -78,7 +78,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       grouped.set(tone, list);
     }
 
-    return NextResponse.json({ hasTessituraColumns, tones: Array.from(grouped.entries()).map(([tone, toneFiles]) => ({ tone, files: toneFiles })) }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ hasTessituraColumns, tessituraEngine: manualRanges ? "manual" : "fallback", originalTone, tones: Array.from(grouped.entries()).map(([tone, toneFiles]) => ({ tone, files: toneFiles })) }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro inesperado ao buscar áudios.";
     return NextResponse.json({ error: message }, { status: 400 });

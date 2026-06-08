@@ -11,7 +11,7 @@ import { UpgradeRequiredModal } from "@/components/public/upgrade-required-modal
 import { VoiceSelector } from "@/components/public/voice-selector";
 import { useKitAudioEngine } from "@/components/public/use-kit-audio-engine";
 import type { PublicKit, PublicKitAudioFile, PublicKitToneGroup, VoiceType } from "@/lib/data/public-kits";
-import { analyzeTargetVoiceTessitura, evaluateIndividualVoiceTessituraForTone, type GroupTessituraVoice, type IndividualVoiceTessituraRecommendation, type TargetVoiceTessituraAnalysis, type TessituraSourceFile, type VocalRangeType } from "@/lib/music/tessitura";
+import { analyzeTargetVoiceTessitura, evaluateGroupTessituraForTone, type GroupTessituraVoice, type GroupTessituraRecommendation, type TargetVoiceTessituraAnalysis, type TessituraSourceFile, type VocalRangeType } from "@/lib/music/tessitura";
 import { formatToneLabel, getSignedSemitoneDistance, normalizeTone, resolveToneTrack, sortTonesByChromaticOrder } from "@/lib/music/tones";
 
 interface KitPageTemplateProps {
@@ -157,8 +157,8 @@ function buildTessituraSourceFiles(kit: PublicKit): TessituraSourceFile[] {
   return buildManualTessituraSourceFiles(kit) ?? buildAnalysisTessituraSourceFiles(kit);
 }
 
-function harmomusIaStatusClass(status: IndividualVoiceTessituraRecommendation["status"]) {
-  if (status === "comfortable") return "border-emerald-400/25 bg-emerald-500/10 text-emerald-100";
+function manualGroupStatusClass(status: GroupTessituraRecommendation["status"]) {
+  if (status === "original" || status === "keep-original") return "border-emerald-400/25 bg-emerald-500/10 text-emerald-100";
   if (status === "unavailable") return "border-zinc-300/20 bg-white/5 text-zinc-100";
   return "border-amber-300/25 bg-amber-400/10 text-amber-100";
 }
@@ -395,12 +395,13 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
   const currentVoiceTessitura = useMemo(
     () =>
       selectedGroupVoice
-        ? evaluateIndividualVoiceTessituraForTone(tessituraSourceFiles, selectedTone, selectedGroupVoice)
+        ? evaluateGroupTessituraForTone(tessituraSourceFiles, selectedTone, liveKit.originalTone)
         : null,
     [
       selectedGroupVoice,
       selectedTone,
       tessituraSourceFiles,
+      liveKit.originalTone,
     ],
   );
 
@@ -577,16 +578,16 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
                 </p>
               </div>
               <VoiceSelector selected={selectedVoice} onChange={handleSelectVoice} />
-              {currentVoiceTessitura ? (
-                <div className={`rounded-xl border p-3 text-sm ${harmomusIaStatusClass(currentVoiceTessitura.status)}`}>
+              {currentVoiceTessitura && selectedGroupVoice ? (
+                <div className={`rounded-xl border p-3 text-sm ${manualGroupStatusClass(currentVoiceTessitura.status)}`}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="font-semibold">Harmomus IA • {currentVoiceTessitura.label}</p>
+                    <p className="font-semibold">Tessitura oficial • {voiceLabel(selectedGroupVoice)}</p>
                     <span className="rounded-full border border-current/20 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em]">
                       {currentVoiceTessitura.statusLabel}
                     </span>
                   </div>
-                  <p className="mt-1 text-xs leading-relaxed opacity-90">{currentVoiceTessitura.reason}</p>
-                  {currentVoiceTessitura.recommendation ? <p className="mt-2 text-xs font-semibold opacity-95">{currentVoiceTessitura.recommendation}</p> : null}
+                  <p className="mt-1 text-xs leading-relaxed opacity-90">{currentVoiceTessitura.message}</p>
+                  <p className="mt-2 text-xs font-semibold opacity-95">{currentVoiceTessitura.recommendations[selectedGroupVoice]}</p>
                 </div>
               ) : null}
               {arrangementGuidance ? (
