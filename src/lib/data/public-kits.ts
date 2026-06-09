@@ -180,7 +180,7 @@ function mapKit(
     const voice = normalizeVoice(file.name);
     const source = normalizeAudioSource((file as any).source_type);
     const manualRange = voice !== "todos" && manualRanges && originalTone ? manualRanges[voice] : null;
-    const shift = manualRange ? getSignedSemitoneDistance(originalTone, tone) : null;
+    const shift = manualRange && originalTone ? getSignedSemitoneDistance(originalTone, tone) : null;
     const projectedManualRange = manualRange && shift !== null ? { min_midi: manualRange.min_midi + shift, max_midi: manualRange.max_midi + shift } : null;
     const analysis = projectedManualRange ? null : getLatestAnalysisForFile(file, analysisByFileId);
     const musicalLayers = analysis?.pitch_events_json?.musical_layers ?? null;
