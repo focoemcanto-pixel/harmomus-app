@@ -66,7 +66,7 @@ function resolveGateContent({ mode, reason, requiredPlan, stats }: PremiumKitGat
     description: isPlus
       ? "Seu plano atual não inclui acesso a este conteúdo. Faça upgrade para desbloquear este kit e toda a biblioteca Plus."
       : "Este conteúdo faz parte da biblioteca Premium do Harmomus. Faça upgrade para acessar todos os kits, modulação inteligente e recursos avançados.",
-    primaryHref: isPlus ? "/assinar?plan=plus" : "/assinar?plan=premium",
+    primaryHref: isPlus ? "/assinar?plan=plus" : "/assinar?plano=premium",
     primaryLabel: isPlus ? "Conhecer plano Plus" : "Assinar Premium",
     secondaryHref: "/assinar",
     secondaryLabel: "Comparar planos",

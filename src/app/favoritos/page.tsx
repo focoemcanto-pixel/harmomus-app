@@ -74,7 +74,7 @@ export default async function FavoritosPage() {
                     </p>
                   </div>
                 </div>
-                <Link href="/assinar?plan=premium" className="rounded-xl bg-cyan-300 px-4 py-2 text-center text-xs font-black text-slate-950 transition hover:bg-cyan-200 md:text-sm">
+                <Link href="/assinar?plano=premium" className="rounded-xl bg-cyan-300 px-4 py-2 text-center text-xs font-black text-slate-950 transition hover:bg-cyan-200 md:text-sm">
                   Liberar Premium
                 </Link>
               </div>

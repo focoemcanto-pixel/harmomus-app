@@ -60,7 +60,7 @@ export function PublicShellClient({
     title: "Upgrade necessário",
     message: "Faça upgrade para continuar.",
     ctaLabel: "Assinar Premium",
-    ctaHref: "/assinar?plan=premium",
+    ctaHref: "/assinar?plano=premium",
   });
   const menuRef = useRef<HTMLDivElement>(null);
   const searchDesktopRef = useRef<HTMLDivElement>(null);
@@ -146,7 +146,7 @@ export function PublicShellClient({
           ? "Faça upgrade para desbloquear suas playlists privadas."
           : "Desbloqueie o acesso premium completo agora.",
         ctaLabel: "Assinar Premium",
-        ctaHref: "/assinar?plan=premium",
+        ctaHref: "/assinar?plano=premium",
       });
       setUpgradeOpen(true);
       return false;

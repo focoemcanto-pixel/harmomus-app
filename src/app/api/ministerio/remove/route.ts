@@ -82,7 +82,7 @@ export async function POST(request: Request) {
         to: member.invited_email,
         invitedName: member.invited_name,
         ministryName: member.ministry?.name,
-        premiumUrl: buildAbsoluteUrl("/assinar?plan=premium", request.url),
+        premiumUrl: buildAbsoluteUrl("/assinar?plano=premium", request.url),
       });
 
       console.log("[ministerio.remove] access removed email result", {

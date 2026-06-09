@@ -20,7 +20,7 @@ export function UpgradeRequiredModal({ open, title, message, ctaLabel, ctaHref, 
         <h3 className="text-xl font-semibold text-white">{title || "Libere todos os recursos Premium"}</h3>
         <p className="mt-2 text-sm leading-relaxed text-zinc-200">{message || "Experimente 7 dias grátis e acesse todos os tons, vozes, playlists e recursos avançados do Harmomus."}</p>
         <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-          <Link href={ctaHref || "/assinar?plan=premium"} className="inline-flex flex-1 items-center justify-center rounded-lg bg-gradient-to-r from-emerald-400 to-cyan-400 px-4 py-3 text-center text-sm font-semibold text-slate-950 transition hover:brightness-105">
+          <Link href={ctaHref || "/assinar?plano=premium"} className="inline-flex flex-1 items-center justify-center rounded-lg bg-gradient-to-r from-emerald-400 to-cyan-400 px-4 py-3 text-center text-sm font-semibold text-slate-950 transition hover:brightness-105">
             {ctaLabel || "Atualizar e testar grátis por 7 dias"}
           </Link>
           <button onClick={onClose} className="rounded-lg border border-white/20 px-4 py-3 text-sm text-zinc-200 transition hover:bg-white/5">

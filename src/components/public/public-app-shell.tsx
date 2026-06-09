@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { PublicShellClient } from "@/components/public/public-shell-client";
-import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
+import { getCurrentUserAccessContext, type CurrentUserAccessContext } from "@/lib/auth/current-user";
 import { getAdminSettings } from "@/lib/data/admin-settings";
 import { getPublishedKitSearchItems } from "@/lib/data/public-kits";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -36,6 +36,43 @@ async function getRemovedMinistryNotice(userId?: string | null) {
   }
 }
 
+function hasPaymentIssue(context: CurrentUserAccessContext) {
+  if (context.isGuest || context.ministry) return false;
+
+  const subscription = context.subscription as any;
+  const status = String(subscription?.status ?? "").toLowerCase();
+  const hasCustomer = Boolean(subscription?.stripe_customer_id ?? subscription?.gateway_customer_id);
+
+  if (!hasCustomer) return false;
+
+  if (["canceled", "past_due", "unpaid", "overdue", "incomplete", "incomplete_expired"].includes(status)) {
+    return true;
+  }
+
+  return context.effectiveSlug === "free";
+}
+
+function PaymentIssueBanner() {
+  return (
+    <div className="border-b border-amber-300/25 bg-amber-400/10 px-4 py-3 text-white">
+      <div className="mx-auto flex max-w-7xl flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-amber-100">Seu pagamento não foi confirmado.</p>
+          <p className="mt-1 text-xs leading-5 text-amber-50/90 md:text-sm">
+            Seu acesso Premium foi pausado temporariamente. Atualize sua forma de pagamento para recuperar o acesso aos kits.
+          </p>
+        </div>
+        <Link
+          href="/assinatura?utm_source=app&utm_campaign=payment_failed_banner"
+          className="inline-flex w-fit shrink-0 items-center justify-center rounded-xl border border-amber-200/40 bg-amber-200 px-4 py-2 text-xs font-bold text-amber-950 transition hover:bg-amber-100 md:text-sm"
+        >
+          Regularizar assinatura
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 function RemovedMinistryUpsellBanner({ ministryName }: { ministryName: string }) {
   return (
     <div className="border-b border-amber-300/20 bg-gradient-to-r from-amber-500/15 via-fuchsia-500/10 to-cyan-500/10 px-4 py-4 text-white">
@@ -47,7 +84,7 @@ function RemovedMinistryUpsellBanner({ ministryName }: { ministryName: string })
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Link href="/assinar?plan=premium" className="rounded-xl bg-cyan-300 px-4 py-2 text-xs font-bold text-slate-950 transition hover:bg-cyan-200 md:text-sm">
+          <Link href="/assinar?plano=premium" className="rounded-xl bg-cyan-300 px-4 py-2 text-xs font-bold text-slate-950 transition hover:bg-cyan-200 md:text-sm">
             Assinar Premium individual
           </Link>
           <Link href="/todos-os-kits" className="rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-xs font-semibold text-white transition hover:bg-white/10 md:text-sm">
@@ -72,6 +109,7 @@ export async function PublicAppShell({ children }: { children: React.ReactNode }
   const removedMinistryNotice = !context.isGuest && !context.ministry && context.effectiveSlug === "free"
     ? await getRemovedMinistryNotice(context.profile?.id)
     : null;
+  const paymentIssue = hasPaymentIssue(context);
 
   const logoUrl = settings.branding.logoUrl;
   const appName = settings.branding.appName || "Harmomus";
@@ -104,7 +142,8 @@ export async function PublicAppShell({ children }: { children: React.ReactNode }
       </header>
 
       <div className="pt-20 md:pt-28">
-        {removedMinistryNotice ? <RemovedMinistryUpsellBanner ministryName={removedMinistryNotice.ministryName} /> : null}
+        {paymentIssue ? <PaymentIssueBanner /> : null}
+        {!paymentIssue && removedMinistryNotice ? <RemovedMinistryUpsellBanner ministryName={removedMinistryNotice.ministryName} /> : null}
         {children}
       </div>
     </main>
