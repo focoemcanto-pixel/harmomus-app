@@ -384,9 +384,11 @@ function classifyIndividualVoice(minMidi: number, maxMidi: number, voice: GroupT
 function evaluateCandidateLine(files: TessituraSourceFile[], singerVoice: GroupTessituraVoice, targetTone: CanonicalTone, candidate: { voice: GroupTessituraVoice; octaveShift?: 0 | -12 | 12; label: string }) {
   const source = pickBestSourceForVoice(files, candidate.voice, targetTone);
   if (!source) return null;
+  const projectedRange = projectManualRangeForTone({ min_midi: source.file.minMidi, max_midi: source.file.maxMidi }, source.file.tone, targetTone);
+  if (!projectedRange) return null;
   const octaveShift = candidate.octaveShift ?? 0;
-  const minMidi = applySemitoneShift(source.file.minMidi, source.semitoneShift, octaveShift);
-  const maxMidi = applySemitoneShift(source.file.maxMidi, source.semitoneShift, octaveShift);
+  const minMidi = projectedRange.min_midi + octaveShift;
+  const maxMidi = projectedRange.max_midi + octaveShift;
   return {
     ...candidate,
     octaveShift,
@@ -437,8 +439,23 @@ function buildIndividualVoiceRecommendation(files: TessituraSourceFile[], voice:
     };
   }
 
-  const targetMin = applySemitoneShift(source.file.minMidi, source.semitoneShift);
-  const targetMax = applySemitoneShift(source.file.maxMidi, source.semitoneShift);
+  const projectedRange = projectManualRangeForTone({ min_midi: source.file.minMidi, max_midi: source.file.maxMidi }, source.file.tone, targetTone);
+  if (!projectedRange) {
+    return {
+      voice,
+      label,
+      status: "unavailable",
+      statusLabel: individualVoiceStatusLabel("unavailable"),
+      targetMidiRange: null,
+      sourceTone: null,
+      semitoneShift: null,
+      recommendation: "",
+      reason: `Não foi possível projetar a tessitura musical salva para ${label} neste tom.`,
+    };
+  }
+
+  const targetMin = projectedRange.min_midi;
+  const targetMax = projectedRange.max_midi;
   const status = classifyIndividualVoice(targetMin, targetMax, voice);
   const { expandedRange, highOverflow, lowOverflow } = getIndividualVoiceOverflow(targetMin, targetMax, voice);
   const sourceTone = normalizeTone(source.file.tone);
@@ -506,12 +523,28 @@ function isSameTone(a: string | null | undefined, b: string | null | undefined) 
   return Boolean(normalizedA && normalizedB && normalizedA === normalizedB);
 }
 
-function classifyAgainstAbsoluteRange(minMidi: number, maxMidi: number, voice: GroupTessituraVoice): IndividualVoiceTessituraStatus {
-  const range = OFFICIAL_VOCAL_RANGES[voice].absolute;
-  const highOverflow = Math.max(0, maxMidi - range.maxMidi);
-  const lowOverflow = Math.max(0, range.minMidi - minMidi);
+export function projectManualRangeForTone(range: { min_midi: number; max_midi: number }, originalTone: string, targetTone: string) {
+  const offset = getSignedSemitoneDistance(originalTone, targetTone);
+  if (offset === null) return null;
+  return {
+    min_midi: range.min_midi + offset,
+    max_midi: range.max_midi + offset,
+  };
+}
+
+export function evaluateProjectedRange(projectedRange: { min_midi: number; max_midi: number }, globalVoiceRange: OfficialVocalRange): IndividualVoiceTessituraStatus {
+  const extensionWithMargin = {
+    minMidi: globalVoiceRange.absolute.minMidi - globalVoiceRange.warningMarginSemitones,
+    maxMidi: globalVoiceRange.absolute.maxMidi + globalVoiceRange.warningMarginSemitones,
+  };
+  const highOverflow = Math.max(0, projectedRange.max_midi - extensionWithMargin.maxMidi);
+  const lowOverflow = Math.max(0, extensionWithMargin.minMidi - projectedRange.min_midi);
   if (highOverflow === 0 && lowOverflow === 0) return "comfortable";
   return highOverflow >= lowOverflow ? "too-high" : "too-low";
+}
+
+function classifyAgainstAbsoluteRange(minMidi: number, maxMidi: number, voice: GroupTessituraVoice): IndividualVoiceTessituraStatus {
+  return evaluateProjectedRange({ min_midi: minMidi, max_midi: maxMidi }, OFFICIAL_VOCAL_RANGES[voice]);
 }
 
 function adaptationTextForVoice(voice: GroupTessituraVoice, direction: "high" | "low") {
@@ -551,8 +584,10 @@ export function evaluateGroupTessituraForTone(files: TessituraSourceFile[], tone
   const voices = GROUP_VOICES.map((voice) => {
     const source = pickBestSourceForVoice(files, voice, normalizedTone);
     if (!source) return { voice, label: OFFICIAL_VOCAL_RANGES[voice].label, targetMidiRange: null, status: "unavailable" as IndividualVoiceTessituraStatus, sourceTone: null, semitoneShift: null };
-    const min = applySemitoneShift(source.file.minMidi, source.semitoneShift);
-    const max = applySemitoneShift(source.file.maxMidi, source.semitoneShift);
+    const projectedRange = projectManualRangeForTone({ min_midi: source.file.minMidi, max_midi: source.file.maxMidi }, source.file.tone, normalizedTone);
+    if (!projectedRange) return { voice, label: OFFICIAL_VOCAL_RANGES[voice].label, targetMidiRange: null, status: "unavailable" as IndividualVoiceTessituraStatus, sourceTone: null, semitoneShift: null };
+    const min = projectedRange.min_midi;
+    const max = projectedRange.max_midi;
     return {
       voice,
       label: OFFICIAL_VOCAL_RANGES[voice].label,

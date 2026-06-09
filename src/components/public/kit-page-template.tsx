@@ -12,7 +12,7 @@ import { VoiceSelector } from "@/components/public/voice-selector";
 import { useKitAudioEngine } from "@/components/public/use-kit-audio-engine";
 import type { PublicKit, PublicKitAudioFile, PublicKitToneGroup, VoiceType } from "@/lib/data/public-kits";
 import { analyzeTargetVoiceTessitura, evaluateGroupTessituraForTone, type GroupTessituraVoice, type GroupTessituraRecommendation, type TargetVoiceTessituraAnalysis, type TessituraSourceFile, type VocalRangeType } from "@/lib/music/tessitura";
-import { formatToneLabel, getSignedSemitoneDistance, normalizeTone, resolveToneTrack, sortTonesByChromaticOrder } from "@/lib/music/tones";
+import { formatToneLabel, normalizeTone, resolveToneTrack, sortTonesByChromaticOrder } from "@/lib/music/tones";
 
 interface KitPageTemplateProps {
   kit: PublicKit;
@@ -112,26 +112,18 @@ function buildManualTessituraSourceFiles(kit: PublicKit): TessituraSourceFile[] 
   const originalTone = normalizeTone(kit.originalTone);
   if (!originalTone) return null;
 
-  const availableTones = sortTonesByChromaticOrder(kit.tones.map((toneGroup) => toneGroup.tone));
   const files: TessituraSourceFile[] = [];
 
-  for (const tone of availableTones) {
-    const normalizedTone = normalizeTone(tone);
-    if (!normalizedTone) continue;
-    const semitoneShift = getSignedSemitoneDistance(originalTone, normalizedTone);
-    if (semitoneShift === null) continue;
-
-    for (const voice of MANUAL_TESSITURA_VOICES) {
-      const range = kit.manualTessituraRanges[voice];
-      if (!range) continue;
-      files.push({
-        tone: normalizedTone,
-        voice,
-        minMidi: range.min_midi + semitoneShift,
-        maxMidi: range.max_midi + semitoneShift,
-        confidence: 1,
-      });
-    }
+  for (const voice of MANUAL_TESSITURA_VOICES) {
+    const range = kit.manualTessituraRanges[voice];
+    if (!range) continue;
+    files.push({
+      tone: originalTone,
+      voice,
+      minMidi: range.min_midi,
+      maxMidi: range.max_midi,
+      confidence: 1,
+    });
   }
 
   return files.length ? files : null;
