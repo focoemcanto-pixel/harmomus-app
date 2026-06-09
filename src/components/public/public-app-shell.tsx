@@ -83,15 +83,15 @@ export async function PublicAppShell({ children }: { children: React.ReactNode }
           <Link
             href="/"
             prefetch
-            className="flex w-[190px] shrink-0 items-center text-base font-semibold tracking-wide text-white sm:w-[240px] md:w-[310px] lg:w-[340px]"
+            className="flex min-w-[132px] shrink-0 items-center gap-3 text-base font-semibold tracking-wide text-white sm:min-w-[210px] md:min-w-[300px] md:text-xl lg:min-w-[340px]"
             aria-label={appName}
           >
             {logoUrl ? (
-              <span className="relative flex h-12 w-full items-center overflow-hidden sm:h-14 md:h-20">
+              <span className="flex h-12 w-[132px] items-center sm:h-14 sm:w-[210px] md:h-20 md:w-[300px] lg:w-[340px]">
                 <img
                   src={logoUrl}
                   alt={appName}
-                  className="h-full w-auto max-w-none origin-left scale-[2.35] object-contain object-left sm:scale-[1.9] md:scale-[1.45]"
+                  className="h-full max-h-full w-full object-contain object-left"
                 />
               </span>
             ) : (
