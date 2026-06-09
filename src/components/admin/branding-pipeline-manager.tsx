@@ -117,8 +117,15 @@ function getVisibleBounds(image: HTMLImageElement): SourceBounds {
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       const index = (y * width + x) * 4;
+      const red = data[index];
+      const green = data[index + 1];
+      const blue = data[index + 2];
       const alpha = data[index + 3];
-      if (alpha > 12) {
+      const brightness = Math.max(red, green, blue);
+      const colorSpread = Math.max(red, green, blue) - Math.min(red, green, blue);
+      const visiblePixel = alpha > 12 && (brightness > 28 || colorSpread > 18);
+
+      if (visiblePixel) {
         minX = Math.min(minX, x);
         minY = Math.min(minY, y);
         maxX = Math.max(maxX, x);
@@ -129,11 +136,13 @@ function getVisibleBounds(image: HTMLImageElement): SourceBounds {
 
   if (maxX < 0 || maxY < 0) return { sx: 0, sy: 0, sw: width, sh: height };
 
-  const padding = Math.max(6, Math.round(Math.max(maxX - minX, maxY - minY) * 0.04));
+  const visibleWidth = maxX - minX + 1;
+  const visibleHeight = maxY - minY + 1;
+  const padding = Math.max(8, Math.round(Math.max(visibleWidth, visibleHeight) * 0.06));
   const sx = Math.max(0, minX - padding);
   const sy = Math.max(0, minY - padding);
-  const sw = Math.min(width - sx, maxX - minX + 1 + padding * 2);
-  const sh = Math.min(height - sy, maxY - minY + 1 + padding * 2);
+  const sw = Math.min(width - sx, visibleWidth + padding * 2);
+  const sh = Math.min(height - sy, visibleHeight + padding * 2);
 
   return { sx, sy, sw, sh };
 }
@@ -258,7 +267,10 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
       setLoading(true);
       setError(null);
       setMessage(`Enviando ${asset.label} personalizado...`);
-      const url = await uploadGeneratedAsset(asset, file);
+      const image = await loadImage(file);
+      const canvas = drawAsset(image, asset, DEFAULT_CROPS[asset.key]);
+      const blob = await canvasToBlob(canvas, asset.mimeType, asset.quality);
+      const url = await uploadGeneratedAsset(asset, blob);
       const nextValues = { ...values, [asset.field]: url };
       setValues(nextValues);
       setMessage(`${asset.label} enviado. Agora clique em Salvar configurações.`);
@@ -325,7 +337,7 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
         <div>
           <p className="text-xs uppercase tracking-[0.25em] text-gold-300">Pipeline inteligente de identidade</p>
           <p className="mt-1 max-w-2xl text-sm text-muted">
-            Suba uma imagem matriz, envie uma imagem específica ou edite um upload já salvo. O sistema remove automaticamente margens transparentes de logo e favicon.
+            Suba uma imagem matriz, envie uma imagem específica ou edite um upload já salvo. O sistema remove automaticamente margens transparentes e fundos escuros da logo e favicon.
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
@@ -368,7 +380,7 @@ export function BrandingPipelineManager({ initial }: { initial: BrandingState })
               />
               <div className="pointer-events-none absolute inset-0 border-2 border-gold-300/40" />
             </div>
-            <p className="mt-3 text-xs text-muted">Editor visual: {selectedAsset.label} • {selectedAsset.width}x{selectedAsset.height}. Ao regerar logo/favicon, as margens transparentes são ignoradas.</p>
+            <p className="mt-3 text-xs text-muted">Editor visual: {selectedAsset.label} • {selectedAsset.width}x{selectedAsset.height}. Ao regerar logo/favicon, margens transparentes e fundo escuro são ignorados.</p>
           </div>
 
           <div className="rounded-2xl border border-border bg-black/30 p-4">
