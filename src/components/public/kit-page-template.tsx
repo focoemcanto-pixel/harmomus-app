@@ -604,6 +604,32 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
             isOriginal={selectedIsOriginal}
           />
         </div>
+        {liveKit.lyrics?.trim() ? (
+          <section className="mt-6 overflow-hidden rounded-[1.75rem] border border-white/10 bg-gradient-to-br from-[#1f2433]/90 via-[#12141d]/95 to-black/90 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
+            <div className="border-b border-white/10 px-5 py-4 md:px-7">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-200/80">
+                    Estudo vocal
+                  </p>
+                  <h2 className="mt-1 text-2xl font-black tracking-tight text-white md:text-3xl">
+                    Letra
+                  </h2>
+                </div>
+
+                <span className="rounded-full border border-emerald-300/20 bg-emerald-300/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-emerald-100">
+                  Letra oficial
+                </span>
+              </div>
+            </div>
+
+            <div className="max-h-[520px] overflow-y-auto px-5 py-6 md:px-7 md:py-8">
+              <div className="whitespace-pre-wrap font-sans text-[1.35rem] font-bold leading-[1.75] tracking-[-0.02em] text-zinc-100 md:text-[1.65rem] md:leading-[1.8]">
+                {liveKit.lyrics.trim()}
+              </div>
+            </div>
+          </section>
+        ) : null}
         <AccessCounter stats={freeAccessStats} />
       </section>
       <LoginRequiredModal open={loginOpen} onClose={() => setLoginOpen(false)} />
