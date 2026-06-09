@@ -104,7 +104,7 @@ export function HomeHeroCarousel({ banners, latestKits = [] }: { banners: Banner
               <span className="rounded-xl bg-white/10 px-3 py-2">✓ Solicitar novo tom</span>
               <span className="hidden rounded-xl bg-white/10 px-3 py-2 sm:block">✓ Playlists premium</span>
             </div>
-            <Link href="/assinar?plan=premium" prefetch className="mt-4 inline-flex rounded-xl bg-gradient-to-r from-yellow-200 to-cyan-200 px-4 py-2.5 text-xs font-black text-slate-950 shadow-[0_18px_50px_rgba(250,204,21,0.25)] transition hover:scale-[1.02] md:mt-5 md:px-5 md:py-3 md:text-sm">Tornar-se Premium</Link>
+            <Link href="/assinar?plano=premium" prefetch className="mt-4 inline-flex rounded-xl bg-gradient-to-r from-yellow-200 to-cyan-200 px-4 py-2.5 text-xs font-black text-slate-950 shadow-[0_18px_50px_rgba(250,204,21,0.25)] transition hover:scale-[1.02] md:mt-5 md:px-5 md:py-3 md:text-sm">Tornar-se Premium</Link>
           </div>
         </div>
       ),

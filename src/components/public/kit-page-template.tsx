@@ -318,7 +318,7 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
     title: "Upgrade necessário",
     message: "Faça upgrade para continuar.",
     ctaLabel: "Assinar Premium",
-    ctaHref: "/assinar?plan=premium",
+    ctaHref: "/assinar?plano=premium",
   });
 
   const availableTones = useMemo(
@@ -434,7 +434,7 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
       title: "Solicitação de novos tons é exclusiva do Premium.",
       message: "Assine o Premium para solicitar tons personalizados para qualquer kit do Harmomus.",
       ctaLabel: "Fazer upgrade para Premium",
-      ctaHref: "/assinar?plan=premium",
+      ctaHref: "/assinar?plano=premium",
     });
     setUpgradeOpen(true);
   }
@@ -448,7 +448,7 @@ export function KitPageTemplate({ kit, accessContext, favoriteButton }: KitPageT
         title: "Troca de tom é um recurso Premium.",
         message: "Experimente todos os tons, todas as vozes e acesso completo aos kits.",
         ctaLabel: "Experimentar Premium grátis por 7 dias",
-        ctaHref: "/assinar?plan=premium",
+        ctaHref: "/assinar?plano=premium",
       });
       setUpgradeOpen(true);
       setToneMenuOpen(false);

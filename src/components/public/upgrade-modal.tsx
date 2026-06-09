@@ -17,7 +17,7 @@ export function UpgradeModal({ open, requiredPlanName, onClose }: UpgradeModalPr
           Este recurso faz parte do plano <strong>{requiredPlanName}</strong>. Faça upgrade e libere todos os tons, player completo e recursos avançados para seu ministério.
         </p>
         <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-          <a href="/assinar?plan=premium" className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-cyan-300 to-fuchsia-300 px-5 py-3 text-sm font-semibold text-slate-950">
+          <a href="/assinar?plano=premium" className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-cyan-300 to-fuchsia-300 px-5 py-3 text-sm font-semibold text-slate-950">
             Quero ser Premium
           </a>
           <button onClick={onClose} className="rounded-xl border border-white/25 px-5 py-3 text-sm font-semibold text-white/90">
