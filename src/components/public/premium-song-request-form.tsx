@@ -37,7 +37,7 @@ export function PremiumSongRequestForm() {
     setIsSubmitting(false);
 
     if (!response.ok) {
-      setStatus({ type: "error", message: result.error ?? "Não foi possível enviar a solicitação." });
+      setStatus({ type: "error", message: result.error ?? "Não foi possível enviar a sugestão." });
       return;
     }
 
@@ -45,12 +45,12 @@ export function PremiumSongRequestForm() {
     setArtistName("");
     setReferenceLink("");
     setNotes("");
-    setStatus({ type: "success", message: "Solicitação de nova música enviada com sucesso. Ela entrou na fila de produção." });
+    setStatus({ type: "success", message: "Sugestão de novo kit enviada com sucesso. Ela entrou na fila de análise." });
   }
 
   return (
     <form className="rounded-[2rem] border border-emerald-400/20 bg-[#161918]/90 p-6">
-      <h3 className="mb-5 flex items-center gap-3 text-2xl font-black text-white"><Music2 />Solicitar nova música</h3>
+      <h3 className="mb-5 flex items-center gap-3 text-2xl font-black text-white"><Music2 />Sugestão de novos kits</h3>
 
       <div className="grid gap-4">
         <label className="block text-sm font-bold text-zinc-200">
@@ -82,7 +82,7 @@ export function PremiumSongRequestForm() {
 
       <button type="button" onClick={submit} disabled={isSubmitting} className="mt-5 inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-400 to-cyan-300 font-black uppercase tracking-[0.16em] text-black disabled:cursor-wait disabled:opacity-70">
         {isSubmitting ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
-        {isSubmitting ? "Enviando..." : "Enviar solicitação"}
+        {isSubmitting ? "Enviando..." : "Enviar sugestão"}
       </button>
     </form>
   );
