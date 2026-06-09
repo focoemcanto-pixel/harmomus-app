@@ -170,6 +170,12 @@ function eventKey(value: unknown) {
   return normalize(value);
 }
 
+function happenedAtOrAfter(value: unknown, since: string) {
+  const valueMs = new Date(String(value ?? "")).getTime();
+  const sinceMs = new Date(since).getTime();
+  return Number.isFinite(valueMs) && Number.isFinite(sinceMs) && valueMs >= sinceMs;
+}
+
 async function writeCommunicationLog(
   admin: any,
   input: {
@@ -271,7 +277,11 @@ async function hasConversionAfterTrigger(admin: any, job: CommunicationQueueJob)
     .limit(1)
     .maybeSingle();
 
-  return Boolean(subscription?.status && ACTIVE_SUBSCRIPTION_STATUSES.has(normalize(subscription.status)));
+  if (!subscription?.status || !ACTIVE_SUBSCRIPTION_STATUSES.has(normalize(subscription.status))) {
+    return false;
+  }
+
+  return happenedAtOrAfter(subscription.updated_at, since) || happenedAtOrAfter(subscription.created_at, since);
 }
 
 async function cancelJobAfterConversion(admin: any, job: CommunicationQueueJob) {
@@ -398,9 +408,7 @@ async function sendViaWebhook(
       providerMessageId: getProviderMessageId(responseBody),
       status: response.status,
       response: responseBody,
-      errorMessage: response.ok
-        ? null
-        : `Provedor retornou HTTP ${response.status}.",
+      errorMessage: response.ok ? null : `Provedor retornou HTTP ${response.status}.`,
     };
   } catch (error) {
     return {
