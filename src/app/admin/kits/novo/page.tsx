@@ -243,6 +243,8 @@ export default async function NovoKitPage({ searchParams }: { searchParams: Novo
             plans={plans}
             initialData={importedKit}
             action={updateImportedKitAction}
+            submitEndpoint={`/api/admin/kits/${importedKit.id}`}
+            submitMethod="PUT"
           />
           <KitAudioSyncCard key={`audio-${importedKit.id}`} kitId={importedKit.id} />
         </div>
