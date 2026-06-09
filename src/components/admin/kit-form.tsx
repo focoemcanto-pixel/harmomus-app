@@ -1,6 +1,6 @@
 "use client";
 
-import { type ChangeEvent, type PointerEvent, useMemo, useRef, useState } from "react";
+import { type ChangeEvent, type FormEvent, type PointerEvent, useMemo, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 
 import { ManualTessituraFields } from "@/components/admin/manual-tessitura-fields";
@@ -12,7 +12,9 @@ interface KitFormProps {
   artistCategories: Category[];
   plans: Plan[];
   initialData?: Kit | null;
-  action: (formData: FormData) => Promise<void>;
+  action?: (formData: FormData) => Promise<void>;
+  submitEndpoint?: string;
+  submitMethod?: "POST" | "PUT" | "PATCH";
 }
 
 type UploadStatus = "idle" | "uploading" | "success" | "error";
@@ -31,15 +33,16 @@ function slugify(value: string) {
     .replace(/(^-|-$)+/g, "");
 }
 
-function SubmitButton({ mode }: { mode: "create" | "edit" }) {
+function SubmitButton({ mode, isSubmitting = false }: { mode: "create" | "edit"; isSubmitting?: boolean }) {
   const { pending } = useFormStatus();
+  const loading = pending || isSubmitting;
   return (
     <button
       type="submit"
-      disabled={pending}
+      disabled={loading}
       className="rounded-lg border border-gold-500/40 bg-gold-500/10 px-5 py-2.5 text-sm font-medium text-gold-300 transition hover:bg-gold-500/20 disabled:cursor-not-allowed disabled:opacity-60"
     >
-      {pending ? "Salvando..." : mode === "create" ? "Criar kit" : "Salvar alterações"}
+      {loading ? "Salvando..." : mode === "create" ? "Criar kit" : "Salvar alterações"}
     </button>
   );
 }
@@ -59,7 +62,40 @@ function planHelperText(slug: string) {
   return "Libera o kit para este plano.";
 }
 
-export function KitForm({ mode, categories, artistCategories, plans, initialData, action }: KitFormProps) {
+function formDataToPayload(formData: FormData) {
+  return {
+    name: String(formData.get("name") ?? ""),
+    slug: String(formData.get("slug") ?? ""),
+    artist: String(formData.get("artist") ?? ""),
+    category_id: String(formData.get("category_id") ?? ""),
+    description: String(formData.get("description") ?? ""),
+    lyrics: String(formData.get("lyrics") ?? ""),
+    cover_url: String(formData.get("cover_url") ?? ""),
+    r2_folder: String(formData.get("r2_folder") ?? ""),
+    original_tone: String(formData.get("original_tone") ?? ""),
+    default_tone: String(formData.get("default_tone") ?? ""),
+    max_pitch_shift_semitones: String(formData.get("max_pitch_shift_semitones") ?? "2"),
+    allowed_plan_slugs: formData.getAll("allowed_plan_slugs").map((value) => String(value)),
+    allow_pitch_shift: formData.has("allow_pitch_shift"),
+    published: formData.has("published"),
+    manual_tessitura: {
+      tenor: {
+        min: String(formData.get("manual_tessitura_tenor_min") ?? ""),
+        max: String(formData.get("manual_tessitura_tenor_max") ?? ""),
+      },
+      contralto: {
+        min: String(formData.get("manual_tessitura_contralto_min") ?? ""),
+        max: String(formData.get("manual_tessitura_contralto_max") ?? ""),
+      },
+      soprano: {
+        min: String(formData.get("manual_tessitura_soprano_min") ?? ""),
+        max: String(formData.get("manual_tessitura_soprano_max") ?? ""),
+      },
+    },
+  };
+}
+
+export function KitForm({ mode, categories, artistCategories, plans, initialData, action, submitEndpoint, submitMethod = "PUT" }: KitFormProps) {
   const toneInitialData = initialData as (Kit & {
     original_tone?: string | null;
     default_tone?: string | null;
@@ -74,6 +110,8 @@ export function KitForm({ mode, categories, artistCategories, plans, initialData
   const [coverUrl, setCoverUrl] = useState(initialData?.cover_url ?? "");
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>("idle");
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isSubmittingApi, setIsSubmittingApi] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [isCropModalOpen, setIsCropModalOpen] = useState(false);
   const [sourceImageUrl, setSourceImageUrl] = useState<string | null>(null);
@@ -89,6 +127,37 @@ export function KitForm({ mode, categories, artistCategories, plans, initialData
   const orderedPlans = useMemo(() => [...plans].sort((a, b) => (a.hierarchy_level ?? 0) - (b.hierarchy_level ?? 0)), [plans]);
   const preview = useMemo(() => coverUrl.trim() || "https://placehold.co/800x800/101114/f4f4f5?text=Sem+capa", [coverUrl]);
   const uploadLabel = uploadStatus === "uploading" ? "Enviando capa..." : uploadStatus === "success" ? "Upload concluído" : "Selecionar imagem";
+
+  async function handleApiSubmit(event: FormEvent<HTMLFormElement>) {
+    if (!submitEndpoint) return;
+    event.preventDefault();
+    setSubmitError(null);
+    setIsSubmittingApi(true);
+
+    try {
+      const formData = new FormData(event.currentTarget);
+      const response = await fetch(submitEndpoint, {
+        method: submitMethod,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formDataToPayload(formData)),
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data?.error || "Não foi possível salvar o kit.");
+      }
+
+      if (data?.redirectTo) {
+        window.location.assign(String(data.redirectTo));
+        return;
+      }
+
+      window.location.reload();
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : "Erro inesperado ao salvar o kit.");
+      setIsSubmittingApi(false);
+    }
+  }
 
   async function performUpload(file: File) {
     if (file.size > MAX_FILE_SIZE) {
@@ -214,7 +283,7 @@ export function KitForm({ mode, categories, artistCategories, plans, initialData
   }
 
   return (
-    <form action={action} className="space-y-5 rounded-xl border border-border bg-surface p-6 shadow-premium">
+    <form action={submitEndpoint ? undefined : action} onSubmit={submitEndpoint ? handleApiSubmit : undefined} className="space-y-5 rounded-xl border border-border bg-surface p-6 shadow-premium">
       <input type="hidden" name="cover_url" value={coverUrl} />
 
       <div className="grid gap-4 md:grid-cols-2">
@@ -332,7 +401,8 @@ export function KitForm({ mode, categories, artistCategories, plans, initialData
         </label>
       </div>
 
-      <SubmitButton mode={mode} />
+      {submitError ? <p className="rounded-lg border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">{submitError}</p> : null}
+      <SubmitButton mode={mode} isSubmitting={isSubmittingApi} />
 
       {isCropModalOpen && sourceImageUrl ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
