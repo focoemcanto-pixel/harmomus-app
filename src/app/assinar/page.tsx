@@ -9,11 +9,12 @@ import { OFFICIAL_PLANS } from "@/lib/data/official-plans";
 
 export default async function AssinarPage({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const [plans, user, params] = await Promise.all([getPlans(), getCurrentUser(), searchParams]);
-  const selectedPlan = typeof params?.plan === "string" ? params.plan.toLowerCase() : "premium";
+  const requestedPlan = typeof params?.plano === "string" ? params.plano : typeof params?.plan === "string" ? params.plan : "premium";
+  const selectedPlan = requestedPlan.toLowerCase();
   const visiblePlans = plans.filter((p) => ["free", "plus", "premium"].includes(p.slug) && p.status === "active");
 
   if (!user) {
-    redirect(`/cadastro?plan=${encodeURIComponent(selectedPlan)}&redirect=${encodeURIComponent(`/assinar?plan=${selectedPlan}`)}`);
+    redirect(`/cadastro?plan=${encodeURIComponent(selectedPlan)}&redirect=${encodeURIComponent(`/assinar?plano=${selectedPlan}`)}`);
   }
 
   return (

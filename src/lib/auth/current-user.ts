@@ -231,16 +231,17 @@ export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessCo
     };
 
   const admin = createSupabaseAdminClient() as any;
-  const [{ data: plans }, { data: subscriptions }, profile] = await Promise.all([
+  const profile = await findProfileForUser(supabase, data.user);
+  const billingProfileId = profile?.id ?? data.user.id;
+  const [{ data: plans }, { data: subscriptions }] = await Promise.all([
     admin.from("plans").select("*"),
     admin
       .from("subscriptions")
       .select("*")
-      .eq("user_id", data.user.id)
+      .eq("user_id", billingProfileId)
       .order("updated_at", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(10),
-    findProfileForUser(supabase, data.user),
   ]);
 
   const isAdmin = isPlatformAdminRole(profile?.role);
