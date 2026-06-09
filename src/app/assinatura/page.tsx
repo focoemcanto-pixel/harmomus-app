@@ -244,8 +244,10 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
   const customerId = isStripe ? context.subscription?.stripe_customer_id ?? context.subscription?.gateway_customer_id : context.subscription?.gateway_customer_id;
   const subscriptionId = isStripe ? context.subscription?.stripe_subscription_id : context.subscription?.gateway_subscription_id;
   const cancelAtPeriodEnd = Boolean((context.subscription as any)?.cancel_at_period_end);
-  const hasStripeLink = Boolean(isStripe && customerId && subscriptionId && !isFreePlan);
+  const hasStripeLink = Boolean(isStripe && customerId && subscriptionId);
   const hasAsaasLink = Boolean(isAsaas && customerId && subscriptionId && !isFreePlan);
+  const paymentIssueStatuses = new Set(["canceled", "past_due", "unpaid", "overdue", "incomplete", "incomplete_expired"]);
+  const shouldShowPaymentIssueWarning = paymentIssueStatuses.has(status) || (isFreePlan && Boolean(customerId));
 
   let invoices: any[] = [];
   let paymentMethodLabel = isFreePlan ? EMPTY_VALUE : customerId ? "Não cadastrado" : "Não vinculado";
@@ -314,6 +316,18 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
           <h1 className="mt-3 text-3xl font-semibold md:text-4xl">Status real da sua assinatura</h1>
           {params?.message ? <p className="mt-4 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">{params.message}</p> : null}
           {params?.error ? <p className="mt-4 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">{params.error}</p> : null}
+          {shouldShowPaymentIssueWarning ? (
+            <div className="mt-6 rounded-2xl border border-amber-300/40 bg-amber-500/10 p-5 shadow-[0_20px_60px_rgba(245,158,11,0.16)]">
+              <p className="text-xs uppercase tracking-[0.2em] text-amber-200">Pagamento não confirmado</p>
+              <h2 className="mt-2 text-2xl font-semibold text-white">Pagamento não confirmado</h2>
+              <p className="mt-3 max-w-3xl text-sm leading-6 text-amber-50">Seu acesso Premium foi pausado temporariamente porque não conseguimos confirmar o pagamento da sua assinatura. Atualize o cartão ou regularize a cobrança no portal Stripe para recuperar o acesso aos kits e recursos Premium.</p>
+              {isStripe && customerId ? (
+                <form action="/api/billing/portal" method="post" className="mt-5">
+                  <button className="rounded-xl bg-gradient-to-r from-cyan-300 to-blue-400 px-5 py-3 text-sm font-semibold text-slate-900">Abrir portal Stripe</button>
+                </form>
+              ) : null}
+            </div>
+          ) : null}
           <div className="mt-8 grid gap-4 md:grid-cols-4">
             <InfoCard label="Plano atual" value={currentPlan} />
             <InfoCard label="Status da assinatura" value={isFreePlan ? "Free" : STATUS_LABELS[status] ?? status} />
@@ -334,9 +348,9 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
           <div className="mt-8 rounded-2xl border border-white/10 bg-white/[0.03] p-5">
             <h2 className="text-lg font-semibold">Gerenciar assinatura</h2>
             <div className="mt-4 flex flex-wrap gap-3">
-              {isStripe && !isFreePlan ? <form action="/api/billing/portal" method="post"><button className="rounded-xl bg-gradient-to-r from-cyan-300 to-blue-400 px-5 py-3 text-sm font-semibold text-slate-900">Abrir portal Stripe</button></form> : null}
+              {isStripe && customerId ? <form action="/api/billing/portal" method="post"><button className="rounded-xl bg-gradient-to-r from-cyan-300 to-blue-400 px-5 py-3 text-sm font-semibold text-slate-900">Abrir portal Stripe</button></form> : null}
               {isAsaas && !isFreePlan && invoices[0] ? <a href={getInvoiceUrl(invoices[0]) ?? "#"} target="_blank" rel="noreferrer" className="rounded-xl border border-cyan-300/50 bg-cyan-500/10 px-5 py-3 text-sm font-semibold text-cyan-100">Visualizar cobrança</a> : null}
-              <a href="/assinar?plan=premium" className="rounded-xl border border-fuchsia-300/50 bg-fuchsia-500/10 px-5 py-3 text-sm font-semibold text-fuchsia-100">Trocar plano</a>
+              <a href="/assinar?plano=premium" className="rounded-xl border border-fuchsia-300/50 bg-fuchsia-500/10 px-5 py-3 text-sm font-semibold text-fuchsia-100">{isFreePlan && !customerId ? "Assinar Premium" : "Trocar plano"}</a>
               {!cancelAtPeriodEnd && (hasStripeLink || hasAsaasLink) ? <form action="/api/billing/cancel" method="post"><CancelSubscriptionButton /></form> : null}
             </div>
           </div>

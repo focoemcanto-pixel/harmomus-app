@@ -83,7 +83,7 @@ values
     'whatsapp',
     'draft',
     'Oi, {{nome}}! Seu pagamento do Harmomus não foi confirmado.\n\nPara evitar bloqueio no acesso aos kits e recursos, regularize sua assinatura por aqui: {{link}}',
-    '/conta/assinatura?utm_source=crm&utm_medium=whatsapp&utm_campaign=payment_failed',
+    '/assinatura?utm_source=crm&utm_medium=whatsapp&utm_campaign=payment_failed',
     '{"statuses":["past_due","payment_failed","open"]}'::jsonb,
     '{"category":"billing","temperature":"urgent","recommended_delay_minutes":15}'::jsonb
   ),

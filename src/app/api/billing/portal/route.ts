@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getCurrentUser } from "@/lib/auth/current-user";
+import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { createPortal } from "@/lib/data/billing";
 
 function toErrorMessage(error: unknown) {
@@ -10,10 +10,14 @@ function toErrorMessage(error: unknown) {
 
 export async function POST(req: Request) {
   try {
-    const user = await getCurrentUser();
-    if (!user?.email) return NextResponse.redirect(new URL("/login?redirect=%2Fassinatura", req.url), { status: 303 });
+    const context = await getCurrentUserAccessContext();
+    const profile = context.profile;
+    if (context.isGuest || !profile?.id) return NextResponse.redirect(new URL("/login?redirect=%2Fassinatura", req.url), { status: 303 });
 
-    const portal = await createPortal(user.id, user.email, new URL(req.url).origin);
+    const email = profile.email?.trim();
+    if (!email) throw new Error("Seu perfil não possui e-mail vinculado para abrir o portal Stripe.");
+
+    const portal = await createPortal(profile.id, email, new URL(req.url).origin);
     return NextResponse.redirect(portal.url, { status: 303 });
   } catch (error) {
     const redirect = new URL("/assinatura", req.url);
