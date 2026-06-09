@@ -202,10 +202,10 @@ values
     48,
     'whatsapp',
     'draft',
-    'Oi, {{nome}}! Seu pagamento do Harmomus não foi confirmado. Para evitar bloqueio no acesso aos kits, regularize por aqui: {{link}}',
-    '/conta/assinatura?utm_source=automation&utm_campaign=payment_failed',
-    '{"statuses":["past_due","payment_failed","open"]}'::jsonb,
-    '{"category":"billing","recommended_delay_minutes":15}'::jsonb
+    'Oi, {{nome}}! Seu pagamento do Harmomus não foi confirmado. Para regularizar sua assinatura e recuperar seu acesso, acesse: {{link}}',
+    '/assinatura?utm_source=automation&utm_campaign=payment_failed',
+    '{"statuses":["past_due","payment_failed","open","canceled"]}'::jsonb,
+    '{"category":"billing","recommended_delay_minutes":0}'::jsonb
   ),
   (
     'Usuário ativo ainda Free',
@@ -219,90 +219,9 @@ values
     120,
     'whatsapp',
     'draft',
-    'Oi, {{nome}}! Você já está usando o Harmomus. Com o upgrade, você libera mais kits, tons e recursos para estudar melhor: {{link}}',
-    '/assinar?utm_source=automation&utm_campaign=free_active',
+    'Oi, {{nome}}! Vi que você já está usando o Harmomus. Se quiser liberar mais kits, tons e recursos para estudar com mais liberdade, veja os planos aqui: {{link}}',
+    '/assinar?utm_source=automation&utm_campaign=free_active_upgrade',
     '{"plans":["free"],"min_plays":4}'::jsonb,
-    '{"category":"upgrade","recommended_delay_minutes":180}'::jsonb
-  ),
-  (
-    'Plus engajado para Premium',
-    'Oferta de expansão para assinantes Plus com consumo relevante.',
-    'audio_played',
-    'plus_to_premium',
-    50,
-    2,
-    10,
-    168,
-    168,
-    'whatsapp',
-    'draft',
-    'Oi, {{nome}}! Você está usando bastante o Harmomus no Plus. O Premium libera a experiência completa para estudar sem limites: {{link}}',
-    '/assinar?plano=premium&utm_source=automation&utm_campaign=plus_to_premium',
-    '{"plans":["plus"],"min_plays":5}'::jsonb,
-    '{"category":"expansion","recommended_delay_minutes":240}'::jsonb
+    '{"category":"activation","recommended_delay_minutes":180}'::jsonb
   )
 on conflict do nothing;
-
--- 5) RLS policies: only admins/owners can manage automation rules and audit runs.
-alter table public.marketing_automations enable row level security;
-alter table public.user_marketing_state enable row level security;
-alter table public.marketing_automation_runs enable row level security;
-
-drop policy if exists "Admins can manage marketing automations" on public.marketing_automations;
-create policy "Admins can manage marketing automations"
-  on public.marketing_automations
-  for all
-  using (
-    exists (
-      select 1 from public.profiles
-      where profiles.id = auth.uid()
-        and profiles.role in ('admin', 'owner')
-    )
-  )
-  with check (
-    exists (
-      select 1 from public.profiles
-      where profiles.id = auth.uid()
-        and profiles.role in ('admin', 'owner')
-    )
-  );
-
-drop policy if exists "Admins can manage user marketing state" on public.user_marketing_state;
-create policy "Admins can manage user marketing state"
-  on public.user_marketing_state
-  for all
-  using (
-    exists (
-      select 1 from public.profiles
-      where profiles.id = auth.uid()
-        and profiles.role in ('admin', 'owner')
-    )
-  )
-  with check (
-    exists (
-      select 1 from public.profiles
-      where profiles.id = auth.uid()
-        and profiles.role in ('admin', 'owner')
-    )
-  );
-
-drop policy if exists "Admins can manage marketing automation runs" on public.marketing_automation_runs;
-create policy "Admins can manage marketing automation runs"
-  on public.marketing_automation_runs
-  for all
-  using (
-    exists (
-      select 1 from public.profiles
-      where profiles.id = auth.uid()
-        and profiles.role in ('admin', 'owner')
-    )
-  )
-  with check (
-    exists (
-      select 1 from public.profiles
-      where profiles.id = auth.uid()
-        and profiles.role in ('admin', 'owner')
-    )
-  );
-
--- Service role bypasses RLS, so API/server automation processors can still write safely via createSupabaseAdminClient().
