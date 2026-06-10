@@ -23,15 +23,8 @@ interface PlaylistPlayerClientProps {
 }
 
 type KitTrack = PlaylistKitSummary["tracks"][number];
-type PlaybackMetric = {
-  id: string;
-  src: string;
-  clickAt: number;
-  fetchStartAt?: number;
-  fetchEndAt?: number;
-  canplayAt?: number;
-  playingAt?: number;
-};
+
+const STUDY_VOICE_OPTIONS: StudyVoice[] = ["todos", "tenor", "contralto", "soprano"];
 
 function formatTime(value: number): string {
   if (!Number.isFinite(value) || value < 0) return "0:00";
@@ -66,56 +59,8 @@ function firstVoice(voices: PlaylistTrackVoice[]) {
   return voices.includes("todos") ? "todos" : voices[0] ?? "";
 }
 
-const STUDY_VOICE_OPTIONS: StudyVoice[] = ["todos", "tenor", "contralto", "soprano"];
-
 function toneStatusLabel(source: "original" | "generated" | null | undefined) {
   return source === "original" ? "Original" : "Harmomus IA";
-}
-
-function nowPerf() {
-  return typeof performance !== "undefined" ? performance.now() : Date.now();
-}
-
-function readResourceResponseEnd(src: string, fallback: number) {
-  if (typeof performance === "undefined" || typeof performance.getEntriesByName !== "function") return fallback;
-  const entries = performance.getEntriesByName(src, "resource") as PerformanceResourceTiming[];
-  const latest = entries.at(-1);
-  return latest?.responseEnd && latest.responseEnd > 0 ? latest.responseEnd : fallback;
-}
-
-function logPlaybackMetric(metric: PlaybackMetric, event: "PLAY_CLICK" | "FETCH_AUDIO_START" | "FETCH_AUDIO_END" | "AUDIO_CANPLAY" | "AUDIO_PLAYING") {
-  const fetchStartAt = metric.fetchStartAt ?? metric.clickAt;
-  const fetchEndAt = metric.fetchEndAt ?? metric.canplayAt ?? metric.playingAt;
-  const canplayAt = metric.canplayAt ?? metric.playingAt;
-  const playingAt = metric.playingAt;
-  console.info(`[PlaylistPlayer:perf] ${event}`, {
-    id: metric.id,
-    src: metric.src,
-    clickToFetchMs: Math.round(fetchStartAt - metric.clickAt),
-    fetchToResponseMs: fetchEndAt ? Math.round(fetchEndAt - fetchStartAt) : null,
-    responseToCanplayMs: fetchEndAt && canplayAt ? Math.round(canplayAt - fetchEndAt) : null,
-    canplayToPlayingMs: canplayAt && playingAt ? Math.round(playingAt - canplayAt) : null,
-    totalMs: playingAt ? Math.round(playingAt - metric.clickAt) : null,
-  });
-}
-
-function createAudioElement(preload: "metadata" | "auto") {
-  const audio = new Audio();
-  audio.preload = preload;
-  audio.setAttribute("playsinline", "true");
-  return audio;
-}
-
-function stopAudioElement(audio: HTMLAudioElement | null | undefined, options: { resetTime?: boolean; clearSource?: boolean } = {}) {
-  if (!audio) return;
-  try { audio.pause(); } catch {}
-  if (options.resetTime !== false) {
-    try { audio.currentTime = 0; } catch {}
-  }
-  if (options.clearSource) {
-    try { audio.removeAttribute("src"); } catch {}
-    try { audio.load(); } catch {}
-  }
 }
 
 function friendlyPlaybackError(error: unknown) {
@@ -131,12 +76,8 @@ function friendlyPlaybackError(error: unknown) {
 
 export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const preloadAudioRef = useRef<HTMLAudioElement | null>(null);
-  const audioCacheRef = useRef<Map<string, HTMLAudioElement>>(new Map());
-  const playbackMetricRef = useRef<PlaybackMetric | null>(null);
   const pitchControllerRef = useRef<PitchPlaybackController | null>(null);
   const pitchSessionRef = useRef(0);
-  const progressSyncTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [currentKitIndex, setCurrentKitIndex] = useState(0);
   const [selectedTone, setSelectedTone] = useState("");
@@ -156,9 +97,8 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
   const kits = playlist.kits;
   const currentKit = kits[currentKitIndex] ?? null;
 
-  const realToneOptions = useMemo(() => currentKit ? getRealToneOptions(currentKit) : [], [currentKit]);
-  const toneOptions = useMemo(() => currentKit ? getSelectableToneOptions(currentKit) : [], [currentKit]);
-
+  const realToneOptions = useMemo(() => (currentKit ? getRealToneOptions(currentKit) : []), [currentKit]);
+  const toneOptions = useMemo(() => (currentKit ? getSelectableToneOptions(currentKit) : []), [currentKit]);
   const isStudyModeEnabled = studySettings.enabled;
   const activeTone = isStudyModeEnabled && currentKit ? studySettings.tonesByItem[currentKit.id] || getDefaultStudyTone(currentKit) || selectedTone : selectedTone;
   const activeVoice = isStudyModeEnabled ? studySettings.voice : selectedVoice;
@@ -184,7 +124,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
   }, [currentKit, isStudyModeEnabled, selectedTone, selectedVoice, studySettings]);
 
   const sourceToneForVoices = toneResolution?.sourceTone ?? activeTone;
-  const voiceOptions = useMemo(() => currentKit ? getVoiceOptions(currentKit, sourceToneForVoices) : [], [currentKit, sourceToneForVoices]);
+  const voiceOptions = useMemo(() => (currentKit ? getVoiceOptions(currentKit, sourceToneForVoices) : []), [currentKit, sourceToneForVoices]);
   const currentTrack: KitTrack | null = toneResolution?.sourceTrack ?? null;
   const playableTrack = toneResolution?.isAvailable ? currentTrack : null;
   const semitoneShift = toneResolution?.isPitchShifted ? toneResolution.semitoneShift : 0;
@@ -192,60 +132,21 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
   const isSelectedToneReal = selectedSource === "original";
   const canPlaySelectedTone = Boolean(playableTrack?.streamUrl);
 
-  const nextPlayableTrack = useMemo(() => {
-    if (kits.length <= 1) return null;
-    const nextKit = kits[currentKitIndex + 1] ?? (replayAtEnd ? kits[0] : null);
-    if (!nextKit) return null;
-
-    if (isStudyModeEnabled) {
-      const resolution = resolveStudyTrackForItem(nextKit, studySettings);
-      return resolution?.isAvailable ? resolution.sourceTrack : null;
-    }
-
-    if (!selectedTone) return null;
-    const resolution = resolveToneTrack({
-      tracks: nextKit.tracks,
-      requestedTone: selectedTone,
-      allowPitchShift: nextKit.allow_pitch_shift,
-      maxPitchShiftSemitones: nextKit.max_pitch_shift_semitones,
-      pickTrack: (tracks) => tracks.find((track) => track.voice === selectedVoice) ?? tracks.find((track) => track.voice === "todos") ?? tracks[0] ?? null,
-    });
-    return resolution?.isAvailable ? resolution.sourceTrack : null;
-  }, [currentKitIndex, isStudyModeEnabled, kits, replayAtEnd, selectedTone, selectedVoice, studySettings]);
-
-  const activeTrackKey = useMemo(() => {
-    return [
-      playlist.id,
-      currentKit?.id ?? "no-kit",
-      activeTone || "no-tone",
-      activeVoice || "no-voice",
-      playableTrack?.id ?? "no-track",
-      playableTrack?.streamUrl ?? "no-src",
-      String(semitoneShift),
-    ].join("::");
-  }, [playlist.id, currentKit?.id, activeTone, activeVoice, playableTrack?.id, playableTrack?.streamUrl, semitoneShift]);
-
+  const activeTrackKey = useMemo(
+    () => [playlist.id, currentKit?.id ?? "no-kit", activeTone || "no-tone", activeVoice || "no-voice", playableTrack?.id ?? "no-track", playableTrack?.streamUrl ?? "no-src", String(semitoneShift)].join("::"),
+    [playlist.id, currentKit?.id, activeTone, activeVoice, playableTrack?.id, playableTrack?.streamUrl, semitoneShift],
+  );
 
   function ensureStudyDefaults(settings: PlaylistStudySettings): PlaylistStudySettings {
     const tonesByItem = { ...settings.tonesByItem };
     for (const kit of kits) {
-      if (!tonesByItem[kit.id]) {
-        tonesByItem[kit.id] = getDefaultStudyTone(kit) || getStudyToneOptions(kit)[0] || "";
-      }
+      if (!tonesByItem[kit.id]) tonesByItem[kit.id] = getDefaultStudyTone(kit) || getStudyToneOptions(kit)[0] || "";
     }
-
-    return {
-      enabled: settings.enabled,
-      voice: settings.voice,
-      tonesByItem,
-    };
+    return { enabled: settings.enabled, voice: settings.voice, tonesByItem };
   }
 
   function handleStudyToneChange(kitId: string, tone: string) {
-    setStudyDraft((current) => ({
-      ...current,
-      tonesByItem: { ...current.tonesByItem, [kitId]: tone },
-    }));
+    setStudyDraft((current) => ({ ...current, tonesByItem: { ...current.tonesByItem, [kitId]: tone } }));
     setStudySaveMessage(null);
   }
 
@@ -254,7 +155,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
     savePlaylistStudySettings(playlist.id, nextSettings);
     setStudySettings(nextSettings);
     setStudyDraft(nextSettings);
-    setStudySaveMessage("Modo Estudo salvo neste dispositivo.");
+    setStudySaveMessage("Modo Estudo salvo.");
     resetPlayback(playableTrack?.streamUrl ?? null);
   }
 
@@ -277,46 +178,18 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
 
   function syncProgressFromAudio(audio = audioRef.current) {
     if (!audio) return;
-    const nextTime = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
-    const nextDuration = Number.isFinite(audio.duration) ? audio.duration : 0;
-    setCurrentTime(nextTime);
-    setDuration(nextDuration);
-  }
-
-  function stopProgressSync() {
-    if (progressSyncTimerRef.current) {
-      clearInterval(progressSyncTimerRef.current);
-      progressSyncTimerRef.current = null;
-    }
-  }
-
-  function startProgressSync(audio = audioRef.current) {
-    stopProgressSync();
-    syncProgressFromAudio(audio);
-    progressSyncTimerRef.current = setInterval(() => {
-      syncProgressFromAudio(audio);
-    }, 250);
-  }
-
-  function stopAllAudio(options: { clearCurrentSource?: boolean; clearCacheSources?: boolean } = {}) {
-    stopProgressSync();
-    stopAudioElement(audioRef.current, { clearSource: options.clearCurrentSource });
-    stopAudioElement(preloadAudioRef.current, { clearSource: options.clearCacheSources });
-
-    audioCacheRef.current.forEach((audio) => {
-      stopAudioElement(audio, { clearSource: options.clearCacheSources });
-    });
+    setCurrentTime(Number.isFinite(audio.currentTime) ? audio.currentTime : 0);
+    setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
   }
 
   function resetPlayback(nextSrc?: string | null) {
     pitchSessionRef.current += 1;
     disposePitchController();
-    playbackMetricRef.current = null;
-
-    stopAllAudio({ clearCurrentSource: !nextSrc });
-
     const audio = audioRef.current;
     if (audio) {
+      try {
+        audio.pause();
+      } catch {}
       if (nextSrc) {
         const currentSrc = audio.getAttribute("src") || audio.src || "";
         if (currentSrc !== nextSrc) {
@@ -324,10 +197,12 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
           audio.load();
         }
       } else {
-        audio.removeAttribute("src");
+        try {
+          audio.removeAttribute("src");
+          audio.load();
+        } catch {}
       }
     }
-
     setPlaybackError(null);
     setCurrentTime(0);
     setDuration(0);
@@ -353,14 +228,8 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
 
   useEffect(() => {
     if (!currentKit) return;
-
-    const nextTone = pickInitialTone({
-      availableTones: realToneOptions,
-      defaultTone: currentKit.default_tone,
-      originalTone: currentKit.original_tone,
-    });
+    const nextTone = pickInitialTone({ availableTones: realToneOptions, defaultTone: currentKit.default_tone, originalTone: currentKit.original_tone });
     const voices = getVoiceOptions(currentKit, nextTone);
-
     setSelectedTone(nextTone);
     setSelectedVoice(firstVoice(voices));
     resetPlayback(null);
@@ -370,46 +239,15 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
     resetPlayback(playableTrack?.streamUrl ?? null);
     if (autoPlayNextRef.current && playableTrack?.streamUrl) {
       autoPlayNextRef.current = false;
-      window.setTimeout(() => { void startPlayback(); }, 0);
+      window.setTimeout(() => {
+        void startPlayback();
+      }, 0);
     }
   }, [activeTrackKey]);
 
   useEffect(() => {
-    const src = playableTrack?.streamUrl;
-    if (!src || semitoneShift !== 0) return;
-    let audio = audioCacheRef.current.get(activeTrackKey);
-    if (!audio) {
-      audio = createAudioElement("auto");
-      audio.src = src;
-      audioCacheRef.current.set(activeTrackKey, audio);
-    }
-    audio.preload = "auto";
-    audio.load();
-    audioRef.current = audio;
-    syncProgressFromAudio(audio);
-  }, [activeTrackKey, playableTrack?.streamUrl, semitoneShift]);
-
-  useEffect(() => {
-    const src = nextPlayableTrack?.streamUrl;
-    if (!src) return;
-    const preloadKey = `next::${nextPlayableTrack.id}::${src}`;
-    let audio = audioCacheRef.current.get(preloadKey);
-    if (!audio) {
-      audio = createAudioElement("metadata");
-      audio.src = src;
-      audioCacheRef.current.set(preloadKey, audio);
-    }
-    audio.preload = "metadata";
-    preloadAudioRef.current = audio;
-    audio.load();
-  }, [nextPlayableTrack?.id, nextPlayableTrack?.streamUrl]);
-
-  useEffect(() => {
     return () => {
       resetPlayback(null);
-      stopProgressSync();
-      stopAllAudio({ clearCurrentSource: true, clearCacheSources: true });
-      audioCacheRef.current.clear();
     };
   }, []);
 
@@ -421,7 +259,6 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
 
   function next() {
     if (kits.length === 0) return;
-
     if (currentKitIndex >= kits.length - 1) {
       if (replayAtEnd) {
         resetPlayback(null);
@@ -431,7 +268,6 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
       }
       return;
     }
-
     resetPlayback(null);
     setCurrentKitIndex((prev) => prev + 1);
   }
@@ -442,107 +278,55 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
       resetPlayback(null);
       return;
     }
-
     resetPlayback(null);
     setCurrentKitIndex((prevIndex) => prevIndex - 1);
   }
 
   async function startPlayback() {
-    let audio = audioRef.current;
     const src = playableTrack?.streamUrl ?? null;
-    if (!src || isLoadingPlayback) return;
-
-    const cachedAudio = semitoneShift === 0 ? audioCacheRef.current.get(activeTrackKey) : null;
-    if (cachedAudio) {
-      audio = cachedAudio;
-      audioRef.current = cachedAudio;
-    }
-    if (!audio) {
-      audio = createAudioElement("auto");
-      audioRef.current = audio;
-      if (semitoneShift === 0) audioCacheRef.current.set(activeTrackKey, audio);
-    }
+    const audio = audioRef.current;
+    if (!audio || !src || isLoadingPlayback) return;
 
     const currentSrc = audio.getAttribute("src") || audio.currentSrc || audio.src || "";
     if (currentSrc !== src) {
-      resetPlayback(src);
       audio.src = src;
+      audio.load();
     }
 
-
+    const session = ++pitchSessionRef.current;
     audio.onended = () => {
-      stopProgressSync();
       disposePitchController();
       if (currentKitIndex < kits.length - 1 || replayAtEnd) autoPlayNextRef.current = true;
       next();
     };
     audio.onerror = () => {
-      stopProgressSync();
       setPlaybackError("Não foi possível carregar este áudio. Tente novamente ou escolha outro tom/voz.");
       setIsPlaying(false);
       setIsLoadingPlayback(false);
     };
 
-    const metric: PlaybackMetric = { id: activeTrackKey, src, clickAt: nowPerf() };
-    playbackMetricRef.current = metric;
-    logPlaybackMetric(metric, "PLAY_CLICK");
-
-    const session = ++pitchSessionRef.current;
-    metric.fetchStartAt = nowPerf();
-    logPlaybackMetric(metric, "FETCH_AUDIO_START");
-    const onCanPlay = () => {
-      if (playbackMetricRef.current !== metric) return;
-      metric.fetchEndAt = readResourceResponseEnd(src, nowPerf());
-      metric.canplayAt = nowPerf();
-      syncProgressFromAudio(audio);
-      logPlaybackMetric(metric, "FETCH_AUDIO_END");
-      logPlaybackMetric(metric, "AUDIO_CANPLAY");
-    };
-    const onPlaying = () => {
-      if (playbackMetricRef.current !== metric) return;
-      if (!metric.canplayAt) {
-        metric.fetchEndAt = readResourceResponseEnd(src, nowPerf());
-        metric.canplayAt = nowPerf();
-      }
-      metric.playingAt = nowPerf();
-      startProgressSync(audio);
-      logPlaybackMetric(metric, "AUDIO_PLAYING");
-    };
-    audio.addEventListener("canplay", onCanPlay, { once: true });
-    audio.addEventListener("playing", onPlaying, { once: true });
-    audio.preload = "auto";
-    audio.load();
-
     try {
       setPlaybackError(null);
       setIsLoadingPlayback(true);
+      audio.preload = "auto";
 
       if (semitoneShift === 0) {
         await audio.play();
-        if (session === pitchSessionRef.current) {
-          setIsPlaying(true);
-          startProgressSync(audio);
-        }
+        if (session === pitchSessionRef.current) setIsPlaying(true);
         return;
       }
 
       disposePitchController();
       const controller = await getPitchEngine().createPlayback({ audio, semitoneShift });
-
       if (session !== pitchSessionRef.current) {
         controller.dispose();
         return;
       }
-
       pitchControllerRef.current = controller;
       await controller.play();
-      if (session === pitchSessionRef.current) {
-        setIsPlaying(true);
-        startProgressSync(audio);
-      }
+      if (session === pitchSessionRef.current) setIsPlaying(true);
     } catch (error) {
       console.error("[PlaylistPlayer] playback failed", error);
-      stopProgressSync();
       setPlaybackError(friendlyPlaybackError(error));
       setIsPlaying(false);
     } finally {
@@ -553,20 +337,19 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
   async function togglePlay() {
     const audio = audioRef.current;
     if (isPlaying) {
-      try { pitchControllerRef.current?.pause(); } catch {}
+      try {
+        pitchControllerRef.current?.pause();
+      } catch {}
       audio?.pause();
-      stopProgressSync();
       syncProgressFromAudio(audio);
       setIsPlaying(false);
       return;
     }
-
     await startPlayback();
   }
 
   function handleToneChange(tone: string) {
     if (!currentKit) return;
-
     const previewResolution = resolveToneTrack({
       tracks: currentKit.tracks,
       requestedTone: tone,
@@ -577,7 +360,6 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
         return exactVoice ?? tracks.find((track) => track.voice === "todos") ?? tracks[0] ?? null;
       },
     });
-
     const voices = getVoiceOptions(currentKit, previewResolution?.sourceTone ?? tone);
     resetPlayback(null);
     setSelectedTone(tone);
@@ -598,29 +380,18 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
       <audio
         ref={audioRef}
         preload="auto"
-        onPlay={() => {
-          setIsPlaying(true);
-          startProgressSync(audioRef.current);
-        }}
+        onPlay={() => setIsPlaying(true)}
         onPause={() => {
           setIsPlaying(false);
-          stopProgressSync();
           syncProgressFromAudio(audioRef.current);
         }}
         onEnded={() => {
-          stopProgressSync();
           disposePitchController();
           if (currentKitIndex < kits.length - 1 || replayAtEnd) autoPlayNextRef.current = true;
           next();
         }}
-        onError={() => {
-          stopProgressSync();
-          setPlaybackError("Não foi possível carregar este áudio. Tente novamente ou escolha outro tom/voz.");
-          setIsPlaying(false);
-          setIsLoadingPlayback(false);
-        }}
-        onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
-        onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
+        onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+        onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)}
         className="hidden"
       />
 
@@ -641,65 +412,34 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
                 <div className="mt-5 grid gap-3 sm:grid-cols-2">
                   <label className="block">
                     <span className="mb-2 block text-xs uppercase tracking-[0.18em] text-zinc-400">Tom</span>
-                    <select
-                      value={selectedTone}
-                      onChange={(event) => handleToneChange(event.target.value)}
-                      disabled={isStudyModeEnabled}
-                      className="h-11 w-full rounded-xl border border-white/15 bg-black/30 px-3 text-sm text-white outline-none disabled:cursor-not-allowed disabled:opacity-60"
-                    >
+                    <select value={selectedTone} onChange={(event) => handleToneChange(event.target.value)} disabled={isStudyModeEnabled} className="h-11 w-full rounded-xl border border-white/15 bg-black/30 px-3 text-sm text-white outline-none disabled:cursor-not-allowed disabled:opacity-60">
                       {toneOptions.map((tone) => {
-                        const optionResolution = currentKit ? resolveToneTrack({
-                          tracks: currentKit.tracks,
-                          requestedTone: tone,
-                          allowPitchShift: currentKit.allow_pitch_shift,
-                          maxPitchShiftSemitones: currentKit.max_pitch_shift_semitones,
-                          pickTrack: (tracks) => tracks.find((item) => item.voice === selectedVoice) ?? tracks.find((item) => item.voice === "todos") ?? tracks[0] ?? null,
-                        }) : null;
-                        const optionTrack = optionResolution?.sourceTrack ?? null;
-                        return <option key={tone} value={tone}>{tone} • {toneStatusLabel(optionTrack?.sourceType)}</option>;
+                        const optionResolution = currentKit ? resolveToneTrack({ tracks: currentKit.tracks, requestedTone: tone, allowPitchShift: currentKit.allow_pitch_shift, maxPitchShiftSemitones: currentKit.max_pitch_shift_semitones, pickTrack: (tracks) => tracks.find((item) => item.voice === selectedVoice) ?? tracks.find((item) => item.voice === "todos") ?? tracks[0] ?? null }) : null;
+                        return <option key={tone} value={tone}>{tone} • {toneStatusLabel(optionResolution?.sourceTrack?.sourceType)}</option>;
                       })}
                     </select>
                   </label>
 
                   <label className="block">
                     <span className="mb-2 block text-xs uppercase tracking-[0.18em] text-zinc-400">Voz / Nipe</span>
-                    <select
-                      value={selectedVoice}
-                      onChange={(event) => handleVoiceChange(event.target.value as PlaylistTrackVoice)}
-                      disabled={isStudyModeEnabled}
-                      className="h-11 w-full rounded-xl border border-white/15 bg-black/30 px-3 text-sm text-white outline-none disabled:cursor-not-allowed disabled:opacity-60"
-                    >
+                    <select value={selectedVoice} onChange={(event) => handleVoiceChange(event.target.value as PlaylistTrackVoice)} disabled={isStudyModeEnabled} className="h-11 w-full rounded-xl border border-white/15 bg-black/30 px-3 text-sm text-white outline-none disabled:cursor-not-allowed disabled:opacity-60">
                       {voiceOptions.map((voice) => <option key={voice} value={voice}>{voiceLabel(voice)}</option>)}
                     </select>
                   </label>
                 </div>
 
-                <p className="mt-4 text-sm text-zinc-300">
-                  Áudio selecionado: {currentTrack ? `${activeTone} • ${voiceLabel(currentTrack.voice)}` : "Indisponível"}
-                </p>
-                <p className="mt-1 text-xs text-zinc-500">
-                  Tom original: {currentKit.original_tone ?? "não informado"} • Tom inicial: {currentKit.default_tone ?? currentKit.original_tone ?? "automático"}
-                </p>
+                <p className="mt-4 text-sm text-zinc-300">Áudio selecionado: {currentTrack ? `${activeTone} • ${voiceLabel(currentTrack.voice)}` : "Indisponível"}</p>
+                <p className="mt-1 text-xs text-zinc-500">Tom original: {currentKit.original_tone ?? "não informado"} • Tom inicial: {currentKit.default_tone ?? currentKit.original_tone ?? "automático"}</p>
                 {isStudyModeEnabled ? (
-                  <p className="mt-2 rounded-xl border border-cyan-300/20 bg-cyan-300/10 px-3 py-2 text-xs text-cyan-100">
-                    Modo Estudo ativo: usando {voiceLabel(studySettings.voice)} e o tom definido para esta faixa.
-                  </p>
+                  <p className="mt-2 rounded-xl border border-cyan-300/20 bg-cyan-300/10 px-3 py-2 text-xs text-cyan-100">Modo Estudo ativo: usando {voiceLabel(studySettings.voice)} e o tom definido para esta faixa.</p>
                 ) : null}
                 {toneResolution?.isPitchShifted ? (
-                  <p className="mt-2 rounded-xl border border-gold-400/20 bg-gold-400/10 px-3 py-2 text-xs text-gold-200">
-                    Harmomus AI: usando {toneResolution.sourceTone} {toneResolution.semitoneShift > 0 ? `+${toneResolution.semitoneShift}` : toneResolution.semitoneShift} semitom(ns).
-                  </p>
+                  <p className="mt-2 rounded-xl border border-gold-400/20 bg-gold-400/10 px-3 py-2 text-xs text-gold-200">Harmomus AI: usando {toneResolution.sourceTone} {toneResolution.semitoneShift > 0 ? `+${toneResolution.semitoneShift}` : toneResolution.semitoneShift} semitom(ns).</p>
                 ) : null}
                 {!toneResolution?.isAvailable && selectedTone ? (
-                  <p className="mt-2 rounded-xl border border-red-400/20 bg-red-400/10 px-3 py-2 text-xs text-red-200">
-                    Este tom ainda não está disponível para este kit dentro do limite configurado.
-                  </p>
+                  <p className="mt-2 rounded-xl border border-red-400/20 bg-red-400/10 px-3 py-2 text-xs text-red-200">Este tom ainda não está disponível para este kit dentro do limite configurado.</p>
                 ) : null}
-                {playbackError ? (
-                  <p className="mt-2 rounded-xl border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">
-                    {playbackError}
-                  </p>
-                ) : null}
+                {playbackError ? <p className="mt-2 rounded-xl border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">{playbackError}</p> : null}
               </div>
 
               <div className="mt-6">
@@ -708,8 +448,8 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
                   min={0}
                   max={duration || 0}
                   value={currentTime}
-                  onChange={(e) => {
-                    const value = Number(e.target.value);
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
                     setCurrentTime(value);
                     if (audioRef.current) {
                       audioRef.current.currentTime = value;
@@ -729,53 +469,34 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
                     {isPlaying ? <Pause size={20} /> : <Play size={20} />}
                   </button>
                   <button onClick={next} className="rounded-full border border-white/20 p-3 text-white"><SkipForward size={18} /></button>
-                  <button onClick={() => setReplayAtEnd((value) => !value)} className={`rounded-full border px-4 py-2 text-sm ${replayAtEnd ? "border-gold-300 text-gold-300" : "border-white/20 text-zinc-200"}`}>
-                    Replay {replayAtEnd ? "ON" : "OFF"}
-                  </button>
+                  <button onClick={() => setReplayAtEnd((value) => !value)} className={`rounded-full border px-4 py-2 text-sm ${replayAtEnd ? "border-gold-300 text-gold-300" : "border-white/20 text-zinc-200"}`}>Replay {replayAtEnd ? "ON" : "OFF"}</button>
                   <span className="text-xs text-zinc-400">{isSelectedToneReal ? "Original" : "Harmomus IA"}</span>
-                  <Link
-                    href="/minhas-playlists"
-                    onClick={() => resetPlayback(null)}
-                    className="ml-auto rounded-full border border-white/20 px-4 py-2 text-sm text-zinc-100"
-                  >
-                    Sair da playlist
-                  </Link>
                 </div>
-              </div>
-            </div>
-          </div>
-        </div>
 
-        <div className="rounded-3xl border border-gold-300/20 bg-gradient-to-br from-gold-500/10 via-zinc-950/80 to-cyan-500/10 p-5 shadow-premium md:p-6 lg:col-span-2">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.22em] text-gold-200">🟢 Modo Estudo</p>
-              <h2 className="mt-1 text-xl font-semibold text-white">Estudar playlist por nipe e tom personalizados</h2>
-              <div className="mt-3 grid gap-1 text-sm text-zinc-300">
-                <span>Nipe: {voiceLabel(studyDraft.voice)}</span>
-                <span>{kits.filter((kit) => Boolean(studyDraft.tonesByItem[kit.id])).length} músicas configuradas</span>
-                <span>Status: {studyDraft.enabled ? "Ativado" : "Desativado"}</span>
-              </div>
-              {studySaveMessage ? <p className="mt-3 text-sm text-cyan-100">{studySaveMessage}</p> : null}
-            </div>
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsStudyConfigOpen(true)}
+                      className="inline-flex items-center gap-2 rounded-full border border-emerald-300/30 bg-emerald-400/10 px-4 py-2 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-400/20"
+                    >
+                      <span className={`h-2.5 w-2.5 rounded-full ${studySettings.enabled ? "bg-emerald-400 shadow-[0_0_16px_rgba(52,211,153,0.9)]" : "bg-zinc-500"}`} />
+                      Modo Estudo
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleStudyEnabledChange(!studySettings.enabled)}
+                      aria-label={studySettings.enabled ? "Desativar Modo Estudo" : "Ativar Modo Estudo"}
+                      className={`grid h-10 w-10 place-items-center rounded-full border text-sm font-black transition ${studySettings.enabled ? "border-emerald-300/40 bg-emerald-400/15 text-emerald-100" : "border-white/15 bg-white/5 text-zinc-300"}`}
+                    >
+                      {studySettings.enabled ? "✓" : "×"}
+                    </button>
+                  </div>
 
-            <div className="flex flex-wrap items-center gap-3">
-              <label className="inline-flex cursor-pointer items-center gap-3 rounded-full border border-white/15 bg-black/30 px-4 py-3 text-sm font-semibold text-white">
-                <input
-                  type="checkbox"
-                  checked={studyDraft.enabled}
-                  onChange={(event) => handleStudyEnabledChange(event.target.checked)}
-                  className="h-4 w-4 accent-gold-300"
-                />
-                {studyDraft.enabled ? "Ativado" : "Desativado"}
-              </label>
-              <button
-                type="button"
-                onClick={() => setIsStudyConfigOpen(true)}
-                className="rounded-full border border-gold-300/50 bg-gold-300/15 px-5 py-3 text-sm font-bold uppercase tracking-[0.14em] text-gold-100 transition hover:bg-gold-300/25"
-              >
-                Configurar
-              </button>
+                  <Link href="/minhas-playlists" onClick={() => resetPlayback(null)} className="rounded-full border border-white/20 px-4 py-2 text-sm text-zinc-100">Sair da playlist</Link>
+                </div>
+                {studySaveMessage ? <p className="mt-2 text-xs text-cyan-100">{studySaveMessage}</p> : null}
+              </div>
             </div>
           </div>
         </div>
@@ -788,18 +509,9 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.22em] text-gold-200">Modo Estudo</p>
                   <h2 id="study-settings-title" className="mt-1 text-2xl font-semibold text-white">Estudo sequencial da playlist</h2>
-                  <p className="mt-2 max-w-3xl text-sm text-zinc-300">
-                    Ao ativar, a playlist tocará todos os kits no nipe e tom definidos para estudo sequencial.
-                  </p>
+                  <p className="mt-2 max-w-3xl text-sm text-zinc-300">Defina o nipe global e o tom de cada música para estudar em sequência.</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setIsStudyConfigOpen(false)}
-                  className="rounded-full border border-white/10 bg-white/5 p-2 text-zinc-200 transition hover:bg-white/10"
-                  aria-label="Fechar"
-                >
-                  <X size={18} />
-                </button>
+                <button type="button" onClick={() => setIsStudyConfigOpen(false)} className="rounded-full border border-white/10 bg-white/5 p-2 text-zinc-200 transition hover:bg-white/10" aria-label="Fechar"><X size={18} /></button>
               </div>
 
               <div className="mt-5 grid gap-4 lg:grid-cols-[260px_1fr]">
@@ -813,9 +525,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
                     }}
                     className="h-11 w-full rounded-xl border border-white/15 bg-black/40 px-3 text-sm text-white outline-none"
                   >
-                    {STUDY_VOICE_OPTIONS.map((voice) => (
-                      <option key={voice} value={voice}>{voiceLabel(voice)}</option>
-                    ))}
+                    {STUDY_VOICE_OPTIONS.map((voice) => <option key={voice} value={voice}>{voiceLabel(voice)}</option>)}
                   </select>
                 </label>
 
@@ -829,11 +539,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
                         <label key={kit.id} className="grid gap-2 rounded-2xl border border-white/10 bg-black/25 p-3">
                           <span className="line-clamp-1 text-sm font-semibold text-white">{index + 1}. {kit.name}</span>
                           <span className="line-clamp-1 text-xs text-zinc-400">{kit.artist}</span>
-                          <select
-                            value={draftTone}
-                            onChange={(event) => handleStudyToneChange(kit.id, event.target.value)}
-                            className="h-10 rounded-xl border border-white/15 bg-black/40 px-3 text-sm text-white outline-none"
-                          >
+                          <select value={draftTone} onChange={(event) => handleStudyToneChange(kit.id, event.target.value)} className="h-10 rounded-xl border border-white/15 bg-black/40 px-3 text-sm text-white outline-none">
                             {studyToneOptions.map((tone) => <option key={tone} value={tone}>{tone}</option>)}
                           </select>
                         </label>
@@ -854,7 +560,6 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
                 >
                   Salvar modo estudo
                 </button>
-                {studySaveMessage ? <span className="text-sm text-cyan-100">{studySaveMessage}</span> : null}
               </div>
             </div>
           </div>
@@ -865,11 +570,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
           <p className="mt-1 text-xs text-zinc-400">A fila mostra os kits na ordem da playlist. No Modo Estudo, tom e nipe seguem as preferências salvas.</p>
           <div className="mt-4 space-y-2">
             {kits.map((kit, index) => (
-              <button
-                key={kit.id}
-                onClick={() => playKitAt(index)}
-                className={`grid w-full grid-cols-[52px_1fr] gap-3 rounded-xl p-2 text-left transition ${index === currentKitIndex ? "bg-white/15" : "bg-white/5 hover:bg-white/10"}`}
-              >
+              <button key={kit.id} onClick={() => playKitAt(index)} className={`grid w-full grid-cols-[52px_1fr] gap-3 rounded-xl p-2 text-left transition ${index === currentKitIndex ? "bg-white/15" : "bg-white/5 hover:bg-white/10"}`}>
                 <img src={kit.cover_url ?? "https://placehold.co/120x120/101114/f4f4f5?text=Kit"} alt={kit.name} className="h-12 w-12 rounded-lg object-cover" />
                 <div>
                   <p className="line-clamp-1 text-sm text-white">{kit.name}</p>
