@@ -1,9 +1,24 @@
-export type BillingStatus = "active" | "trialing" | "overdue" | "canceled" | "pending" | "expired";
+export type BillingStatus =
+  | "active"
+  | "trialing"
+  | "past_due"
+  | "unpaid"
+  | "canceled"
+  | "pending"
+  | "expired"
+  | "incomplete"
+  | "incomplete_expired"
+  | "paused"
+  | "failed";
+
 export function mapStripeStatus(status: string): BillingStatus {
   if (status === "trialing") return "trialing";
   if (status === "active") return "active";
-  if (["past_due","unpaid"].includes(status)) return "overdue";
+  if (status === "past_due") return "past_due";
+  if (status === "unpaid") return "unpaid";
   if (status === "canceled") return "canceled";
-  if (["incomplete","incomplete_expired"].includes(status)) return "pending";
+  if (status === "incomplete") return "incomplete";
+  if (status === "incomplete_expired") return "incomplete_expired";
+  if (status === "paused") return "paused";
   return "expired";
 }

@@ -1,21 +1,13 @@
 import { createClient } from "@/lib/supabase/server";
-import { normalizePlan } from "@/lib/access/access-engine";
+import { resolveEffectivePlan } from "@/lib/access/subscription-plan";
 
-const PAID_ACCESS_STATUSES = new Set(["active", "trialing"]);
-
-function resolveEffectivePlan(subscription: any) {
-  const status = String(subscription?.status ?? "none").toLowerCase();
-  const rawPlanSlug = normalizePlan(subscription?.plan?.slug);
-
-  if (!PAID_ACCESS_STATUSES.has(status)) {
-    return { planSlug: "free" as const, hierarchyLevel: 1 };
-  }
-
+function resolveEffectiveSubscriptionPlan(subscription: any) {
+  const planSlug = resolveEffectivePlan({ subscription, plan: subscription?.plan });
   const hierarchyLevel = Number(
-    subscription?.plan?.hierarchy_level ?? (rawPlanSlug === "premium" ? 3 : rawPlanSlug === "plus" ? 2 : 1),
+    planSlug === "premium" ? 3 : planSlug === "plus" ? 2 : 1,
   );
 
-  return { planSlug: rawPlanSlug, hierarchyLevel };
+  return { planSlug, hierarchyLevel };
 }
 
 export async function getCurrentSubscription() {
@@ -27,13 +19,13 @@ export async function getCurrentSubscription() {
 
   const { data: subscription } = await (supabase as any)
     .from("subscriptions")
-    .select("status, plan:plans(slug,hierarchy_level)")
+    .select("status,current_period_end,cancel_at_period_end,canceled_at,plan:plans(slug,hierarchy_level)")
     .eq("user_id", user.id)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  const { planSlug, hierarchyLevel } = resolveEffectivePlan(subscription);
+  const { planSlug, hierarchyLevel } = resolveEffectiveSubscriptionPlan(subscription);
 
   return {
     isLoggedIn: true,

@@ -95,7 +95,7 @@ export interface Database {
           user_id: string;
           plan_id: string;
           legacy_pms_subscription_id: string | null;
-          status: "active" | "trialing" | "overdue" | "canceled" | "expired" | "pending";
+          status: "active" | "trialing" | "overdue" | "past_due" | "unpaid" | "canceled" | "expired" | "pending" | "incomplete" | "incomplete_expired" | "paused" | "failed";
           starts_at: string | null;
           current_period_end: string | null;
           trial_ends_at: string | null;
@@ -108,6 +108,7 @@ export interface Database {
           stripe_price_id: string | null;
           next_billing_at: string | null;
           canceled_at: string | null;
+          cancel_at_period_end?: boolean | null;
           last_webhook_event: string | null;
           migrated_from_pms: boolean;
           original_gateway: string | null;
@@ -120,7 +121,7 @@ export interface Database {
           user_id: string;
           plan_id: string;
           legacy_pms_subscription_id?: string | null;
-          status?: "active" | "trialing" | "overdue" | "canceled" | "expired" | "pending";
+          status?: "active" | "trialing" | "overdue" | "past_due" | "unpaid" | "canceled" | "expired" | "pending" | "incomplete" | "incomplete_expired" | "paused" | "failed";
           starts_at?: string | null;
           current_period_end?: string | null;
           trial_ends_at?: string | null;
@@ -133,6 +134,7 @@ export interface Database {
           stripe_price_id?: string | null;
           next_billing_at?: string | null;
           canceled_at?: string | null;
+          cancel_at_period_end?: boolean | null;
           last_webhook_event?: string | null;
           migrated_from_pms?: boolean;
           original_gateway?: string | null;

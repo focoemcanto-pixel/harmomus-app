@@ -7,6 +7,7 @@ import { MinistryInviteCard } from "@/components/ministerio/ministry-invite-card
 import { MinistryMembersTable } from "@/components/ministerio/ministry-members-table";
 import { MinistryShell, planLabel, PremiumPanel, statusLabel } from "@/components/ministerio/ministry-ui";
 import { MinistryOnboardingModal } from "@/components/public/ministry-onboarding-modal";
+import { resolveEffectivePlan } from "@/lib/access/subscription-plan";
 import { getCurrentUserAccessContext, isMinistryManager, isMinistryOwner } from "@/lib/auth/current-user";
 import { canRequestSongsAndTones, ensureMinistryForSubscription, getMinistrySeatLimit, isMinistryPlanSlug } from "@/lib/data/ministry";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -17,10 +18,6 @@ export const revalidate = 0;
 type MinisterioSearchParams = {
   message?: string | string[];
 };
-
-function isActiveSubscription(status?: string | null) {
-  return ["active", "trialing"].includes(String(status ?? "").toLowerCase());
-}
 
 function metric(label: string, value: string | number, icon: React.ReactNode, hint?: string) {
   return (
@@ -55,7 +52,7 @@ export default async function MinisterioPage({ searchParams }: { searchParams?: 
 
   const planSlug = String(context.plan?.slug ?? "").trim().toLowerCase();
 
-  if (!context.ministry && context.profile?.id && isMinistryPlanSlug(planSlug) && isActiveSubscription(context.subscription?.status)) {
+  if (!context.ministry && context.profile?.id && isMinistryPlanSlug(planSlug) && resolveEffectivePlan({ subscription: context.subscription as any, planSlug }) === "premium") {
     await ensureMinistryForSubscription({
       userId: context.profile.id,
       planSlug,
