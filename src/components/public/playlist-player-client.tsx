@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Pause, Play, SkipBack, SkipForward } from "lucide-react";
+import { Pause, Play, SkipBack, SkipForward, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { getPitchEngine, type PitchPlaybackController } from "@/lib/audio/pitch-engine";
@@ -150,6 +150,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
   const [studySettings, setStudySettings] = useState<PlaylistStudySettings>(DEFAULT_PLAYLIST_STUDY_SETTINGS);
   const [studyDraft, setStudyDraft] = useState<PlaylistStudySettings>(DEFAULT_PLAYLIST_STUDY_SETTINGS);
   const [studySaveMessage, setStudySaveMessage] = useState<string | null>(null);
+  const [isStudyConfigOpen, setIsStudyConfigOpen] = useState(false);
   const autoPlayNextRef = useRef(false);
 
   const kits = playlist.kits;
@@ -248,13 +249,21 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
     setStudySaveMessage(null);
   }
 
-  function saveStudyMode() {
-    const nextSettings = ensureStudyDefaults(studyDraft);
+  function persistStudySettings(settings: PlaylistStudySettings) {
+    const nextSettings = ensureStudyDefaults(settings);
     savePlaylistStudySettings(playlist.id, nextSettings);
     setStudySettings(nextSettings);
     setStudyDraft(nextSettings);
     setStudySaveMessage("Modo Estudo salvo neste dispositivo.");
     resetPlayback(playableTrack?.streamUrl ?? null);
+  }
+
+  function saveStudyMode() {
+    persistStudySettings(studyDraft);
+  }
+
+  function handleStudyEnabledChange(enabled: boolean) {
+    persistStudySettings({ ...studyDraft, enabled });
   }
 
   function disposePitchController() {
@@ -740,79 +749,116 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
         <div className="rounded-3xl border border-gold-300/20 bg-gradient-to-br from-gold-500/10 via-zinc-950/80 to-cyan-500/10 p-5 shadow-premium md:p-6 lg:col-span-2">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.22em] text-gold-200">Modo Estudo</p>
-              <h2 className="mt-1 text-2xl font-semibold text-white">Estudo sequencial da playlist</h2>
-              <p className="mt-2 max-w-3xl text-sm text-zinc-300">
-                Ao ativar, a playlist tocará todos os kits no nipe e tom definidos para estudo sequencial.
-              </p>
+              <p className="text-xs font-bold uppercase tracking-[0.22em] text-gold-200">🟢 Modo Estudo</p>
+              <h2 className="mt-1 text-xl font-semibold text-white">Estudar playlist por nipe e tom personalizados</h2>
+              <div className="mt-3 grid gap-1 text-sm text-zinc-300">
+                <span>Nipe: {voiceLabel(studyDraft.voice)}</span>
+                <span>{kits.filter((kit) => Boolean(studyDraft.tonesByItem[kit.id])).length} músicas configuradas</span>
+                <span>Status: {studyDraft.enabled ? "Ativado" : "Desativado"}</span>
+              </div>
+              {studySaveMessage ? <p className="mt-3 text-sm text-cyan-100">{studySaveMessage}</p> : null}
             </div>
 
-            <label className="inline-flex cursor-pointer items-center gap-3 rounded-full border border-white/15 bg-black/30 px-4 py-3 text-sm font-semibold text-white">
-              <input
-                type="checkbox"
-                checked={studyDraft.enabled}
-                onChange={(event) => {
-                  setStudyDraft((current) => ({ ...current, enabled: event.target.checked }));
-                  setStudySaveMessage(null);
-                }}
-                className="h-4 w-4 accent-gold-300"
-              />
-              {studyDraft.enabled ? "Ativado" : "Desativado"}
-            </label>
-          </div>
-
-          <div className="mt-5 grid gap-4 lg:grid-cols-[260px_1fr]">
-            <label className="block">
-              <span className="mb-2 block text-xs uppercase tracking-[0.18em] text-zinc-400">Nipe global</span>
-              <select
-                value={studyDraft.voice}
-                onChange={(event) => {
-                  setStudyDraft((current) => ({ ...current, voice: event.target.value as StudyVoice }));
-                  setStudySaveMessage(null);
-                }}
-                className="h-11 w-full rounded-xl border border-white/15 bg-black/40 px-3 text-sm text-white outline-none"
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="inline-flex cursor-pointer items-center gap-3 rounded-full border border-white/15 bg-black/30 px-4 py-3 text-sm font-semibold text-white">
+                <input
+                  type="checkbox"
+                  checked={studyDraft.enabled}
+                  onChange={(event) => handleStudyEnabledChange(event.target.checked)}
+                  className="h-4 w-4 accent-gold-300"
+                />
+                {studyDraft.enabled ? "Ativado" : "Desativado"}
+              </label>
+              <button
+                type="button"
+                onClick={() => setIsStudyConfigOpen(true)}
+                className="rounded-full border border-gold-300/50 bg-gold-300/15 px-5 py-3 text-sm font-bold uppercase tracking-[0.14em] text-gold-100 transition hover:bg-gold-300/25"
               >
-                {STUDY_VOICE_OPTIONS.map((voice) => (
-                  <option key={voice} value={voice}>{voiceLabel(voice)}</option>
-                ))}
-              </select>
-            </label>
+                Configurar
+              </button>
+            </div>
+          </div>
+        </div>
 
-            <div>
-              <p className="mb-2 text-xs uppercase tracking-[0.18em] text-zinc-400">Tom por faixa</p>
-              <div className="grid gap-2 md:grid-cols-2">
-                {kits.map((kit, index) => {
-                  const studyToneOptions = getStudyToneOptions(kit);
-                  const draftTone = studyDraft.tonesByItem[kit.id] || getDefaultStudyTone(kit) || studyToneOptions[0] || "";
-                  return (
-                    <label key={kit.id} className="grid gap-2 rounded-2xl border border-white/10 bg-black/25 p-3">
-                      <span className="line-clamp-1 text-sm font-semibold text-white">{index + 1}. {kit.name}</span>
-                      <span className="line-clamp-1 text-xs text-zinc-400">{kit.artist}</span>
-                      <select
-                        value={draftTone}
-                        onChange={(event) => handleStudyToneChange(kit.id, event.target.value)}
-                        className="h-10 rounded-xl border border-white/15 bg-black/40 px-3 text-sm text-white outline-none"
-                      >
-                        {studyToneOptions.map((tone) => <option key={tone} value={tone}>{tone}</option>)}
-                      </select>
-                    </label>
-                  );
-                })}
+        {isStudyConfigOpen ? (
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 p-0 backdrop-blur-sm md:items-center md:p-6" role="dialog" aria-modal="true" aria-labelledby="study-settings-title">
+            <button type="button" aria-label="Fechar configurações do Modo Estudo" className="absolute inset-0 h-full w-full cursor-default" onClick={() => setIsStudyConfigOpen(false)} />
+            <div className="relative max-h-[88dvh] w-full overflow-y-auto rounded-t-3xl border border-gold-300/20 bg-zinc-950 p-5 shadow-premium md:max-w-4xl md:rounded-3xl md:p-6">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.22em] text-gold-200">Modo Estudo</p>
+                  <h2 id="study-settings-title" className="mt-1 text-2xl font-semibold text-white">Estudo sequencial da playlist</h2>
+                  <p className="mt-2 max-w-3xl text-sm text-zinc-300">
+                    Ao ativar, a playlist tocará todos os kits no nipe e tom definidos para estudo sequencial.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsStudyConfigOpen(false)}
+                  className="rounded-full border border-white/10 bg-white/5 p-2 text-zinc-200 transition hover:bg-white/10"
+                  aria-label="Fechar"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="mt-5 grid gap-4 lg:grid-cols-[260px_1fr]">
+                <label className="block">
+                  <span className="mb-2 block text-xs uppercase tracking-[0.18em] text-zinc-400">Nipe global</span>
+                  <select
+                    value={studyDraft.voice}
+                    onChange={(event) => {
+                      setStudyDraft((current) => ({ ...current, voice: event.target.value as StudyVoice }));
+                      setStudySaveMessage(null);
+                    }}
+                    className="h-11 w-full rounded-xl border border-white/15 bg-black/40 px-3 text-sm text-white outline-none"
+                  >
+                    {STUDY_VOICE_OPTIONS.map((voice) => (
+                      <option key={voice} value={voice}>{voiceLabel(voice)}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <div>
+                  <p className="mb-2 text-xs uppercase tracking-[0.18em] text-zinc-400">Tom por faixa</p>
+                  <div className="grid gap-2 md:grid-cols-2">
+                    {kits.map((kit, index) => {
+                      const studyToneOptions = getStudyToneOptions(kit);
+                      const draftTone = studyDraft.tonesByItem[kit.id] || getDefaultStudyTone(kit) || studyToneOptions[0] || "";
+                      return (
+                        <label key={kit.id} className="grid gap-2 rounded-2xl border border-white/10 bg-black/25 p-3">
+                          <span className="line-clamp-1 text-sm font-semibold text-white">{index + 1}. {kit.name}</span>
+                          <span className="line-clamp-1 text-xs text-zinc-400">{kit.artist}</span>
+                          <select
+                            value={draftTone}
+                            onChange={(event) => handleStudyToneChange(kit.id, event.target.value)}
+                            className="h-10 rounded-xl border border-white/15 bg-black/40 px-3 text-sm text-white outline-none"
+                          >
+                            {studyToneOptions.map((tone) => <option key={tone} value={tone}>{tone}</option>)}
+                          </select>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-5 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    saveStudyMode();
+                    setIsStudyConfigOpen(false);
+                  }}
+                  className="rounded-full border border-gold-300/50 bg-gold-300/15 px-5 py-3 text-sm font-bold uppercase tracking-[0.14em] text-gold-100 transition hover:bg-gold-300/25"
+                >
+                  Salvar modo estudo
+                </button>
+                {studySaveMessage ? <span className="text-sm text-cyan-100">{studySaveMessage}</span> : null}
               </div>
             </div>
           </div>
-
-          <div className="mt-5 flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={saveStudyMode}
-              className="rounded-full border border-gold-300/50 bg-gold-300/15 px-5 py-3 text-sm font-bold uppercase tracking-[0.14em] text-gold-100 transition hover:bg-gold-300/25"
-            >
-              Salvar modo estudo
-            </button>
-            {studySaveMessage ? <span className="text-sm text-cyan-100">{studySaveMessage}</span> : null}
-          </div>
-        </div>
+        ) : null}
 
         <aside className="rounded-3xl border border-white/10 bg-black/30 p-4 md:p-5">
           <h3 className="text-lg font-medium text-white">Fila</h3>
