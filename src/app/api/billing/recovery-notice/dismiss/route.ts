@@ -7,7 +7,7 @@ function appUrl(path: string, req: Request) {
   return new URL(path, process.env.NEXT_PUBLIC_APP_URL || req.url);
 }
 
-export async function POST(req: Request) {
+async function dismiss(req: Request) {
   try {
     const context = await getCurrentUserAccessContext();
     if (context.isGuest || !context.profile?.id) {
@@ -20,4 +20,12 @@ export async function POST(req: Request) {
     const message = error instanceof Error ? error.message : "Não foi possível dispensar o aviso agora.";
     return NextResponse.redirect(appUrl(`/assinatura?error=${encodeURIComponent(message)}`, req), 303);
   }
+}
+
+export async function GET(req: Request) {
+  return dismiss(req);
+}
+
+export async function POST(req: Request) {
+  return dismiss(req);
 }
