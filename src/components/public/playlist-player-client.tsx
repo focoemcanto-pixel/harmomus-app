@@ -7,6 +7,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { getPitchEngine, type PitchPlaybackController } from "@/lib/audio/pitch-engine";
 import type { PlaylistKitSummary, PlaylistTrackVoice, PublicPlaylist } from "@/lib/data/playlists";
 import { CHROMATIC_TONES_SHARP, pickInitialTone, resolveToneTrack } from "@/lib/music/tones";
+import {
+  DEFAULT_PLAYLIST_STUDY_SETTINGS,
+  getDefaultStudyTone,
+  getStudyToneOptions,
+  loadPlaylistStudySettings,
+  resolveStudyTrackForItem,
+  savePlaylistStudySettings,
+  type PlaylistStudySettings,
+  type StudyVoice,
+} from "@/lib/playlist-study-mode";
 
 interface PlaylistPlayerClientProps {
   playlist: PublicPlaylist;
@@ -28,7 +38,7 @@ function formatTime(value: number): string {
   return `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, "0")}`;
 }
 
-function voiceLabel(voice: PlaylistTrackVoice | string | null | undefined) {
+function voiceLabel(voice: PlaylistTrackVoice | StudyVoice | string | null | undefined) {
   if (!voice) return "Todos";
   const map: Record<string, string> = {
     todos: "Todos",
@@ -55,6 +65,8 @@ function getVoiceOptions(kit: PlaylistKitSummary, tone: string) {
 function firstVoice(voices: PlaylistTrackVoice[]) {
   return voices.includes("todos") ? "todos" : voices[0] ?? "";
 }
+
+const STUDY_VOICE_OPTIONS: StudyVoice[] = ["todos", "tenor", "contralto", "soprano"];
 
 function toneStatusLabel(source: "original" | "generated" | null | undefined) {
   return source === "original" ? "Original" : "Harmomus IA";
@@ -135,6 +147,10 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
   const [replayAtEnd, setReplayAtEnd] = useState(false);
   const [isLoadingPlayback, setIsLoadingPlayback] = useState(false);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
+  const [studySettings, setStudySettings] = useState<PlaylistStudySettings>(DEFAULT_PLAYLIST_STUDY_SETTINGS);
+  const [studyDraft, setStudyDraft] = useState<PlaylistStudySettings>(DEFAULT_PLAYLIST_STUDY_SETTINGS);
+  const [studySaveMessage, setStudySaveMessage] = useState<string | null>(null);
+  const autoPlayNextRef = useRef(false);
 
   const kits = playlist.kits;
   const currentKit = kits[currentKitIndex] ?? null;
@@ -142,9 +158,18 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
   const realToneOptions = useMemo(() => currentKit ? getRealToneOptions(currentKit) : [], [currentKit]);
   const toneOptions = useMemo(() => currentKit ? getSelectableToneOptions(currentKit) : [], [currentKit]);
 
-  const toneResolution = useMemo(() => {
-    if (!currentKit || !selectedTone) return null;
+  const isStudyModeEnabled = studySettings.enabled;
+  const activeTone = isStudyModeEnabled && currentKit ? studySettings.tonesByItem[currentKit.id] || getDefaultStudyTone(currentKit) || selectedTone : selectedTone;
+  const activeVoice = isStudyModeEnabled ? studySettings.voice : selectedVoice;
 
+  const toneResolution = useMemo(() => {
+    if (!currentKit) return null;
+
+    if (isStudyModeEnabled) {
+      return resolveStudyTrackForItem(currentKit, studySettings);
+    }
+
+    if (!selectedTone) return null;
     return resolveToneTrack({
       tracks: currentKit.tracks,
       requestedTone: selectedTone,
@@ -155,9 +180,9 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
         return exactVoice ?? tracks.find((track) => track.voice === "todos") ?? tracks[0] ?? null;
       },
     });
-  }, [currentKit, selectedTone, selectedVoice]);
+  }, [currentKit, isStudyModeEnabled, selectedTone, selectedVoice, studySettings]);
 
-  const sourceToneForVoices = toneResolution?.sourceTone ?? selectedTone;
+  const sourceToneForVoices = toneResolution?.sourceTone ?? activeTone;
   const voiceOptions = useMemo(() => currentKit ? getVoiceOptions(currentKit, sourceToneForVoices) : [], [currentKit, sourceToneForVoices]);
   const currentTrack: KitTrack | null = toneResolution?.sourceTrack ?? null;
   const playableTrack = toneResolution?.isAvailable ? currentTrack : null;
@@ -167,9 +192,16 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
   const canPlaySelectedTone = Boolean(playableTrack?.streamUrl);
 
   const nextPlayableTrack = useMemo(() => {
-    if (!selectedTone || kits.length <= 1) return null;
+    if (kits.length <= 1) return null;
     const nextKit = kits[currentKitIndex + 1] ?? (replayAtEnd ? kits[0] : null);
     if (!nextKit) return null;
+
+    if (isStudyModeEnabled) {
+      const resolution = resolveStudyTrackForItem(nextKit, studySettings);
+      return resolution?.isAvailable ? resolution.sourceTrack : null;
+    }
+
+    if (!selectedTone) return null;
     const resolution = resolveToneTrack({
       tracks: nextKit.tracks,
       requestedTone: selectedTone,
@@ -178,19 +210,52 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
       pickTrack: (tracks) => tracks.find((track) => track.voice === selectedVoice) ?? tracks.find((track) => track.voice === "todos") ?? tracks[0] ?? null,
     });
     return resolution?.isAvailable ? resolution.sourceTrack : null;
-  }, [currentKitIndex, kits, replayAtEnd, selectedTone, selectedVoice]);
+  }, [currentKitIndex, isStudyModeEnabled, kits, replayAtEnd, selectedTone, selectedVoice, studySettings]);
 
   const activeTrackKey = useMemo(() => {
     return [
       playlist.id,
       currentKit?.id ?? "no-kit",
-      selectedTone || "no-tone",
-      selectedVoice || "no-voice",
+      activeTone || "no-tone",
+      activeVoice || "no-voice",
       playableTrack?.id ?? "no-track",
       playableTrack?.streamUrl ?? "no-src",
       String(semitoneShift),
     ].join("::");
-  }, [playlist.id, currentKit?.id, selectedTone, selectedVoice, playableTrack?.id, playableTrack?.streamUrl, semitoneShift]);
+  }, [playlist.id, currentKit?.id, activeTone, activeVoice, playableTrack?.id, playableTrack?.streamUrl, semitoneShift]);
+
+
+  function ensureStudyDefaults(settings: PlaylistStudySettings): PlaylistStudySettings {
+    const tonesByItem = { ...settings.tonesByItem };
+    for (const kit of kits) {
+      if (!tonesByItem[kit.id]) {
+        tonesByItem[kit.id] = getDefaultStudyTone(kit) || getStudyToneOptions(kit)[0] || "";
+      }
+    }
+
+    return {
+      enabled: settings.enabled,
+      voice: settings.voice,
+      tonesByItem,
+    };
+  }
+
+  function handleStudyToneChange(kitId: string, tone: string) {
+    setStudyDraft((current) => ({
+      ...current,
+      tonesByItem: { ...current.tonesByItem, [kitId]: tone },
+    }));
+    setStudySaveMessage(null);
+  }
+
+  function saveStudyMode() {
+    const nextSettings = ensureStudyDefaults(studyDraft);
+    savePlaylistStudySettings(playlist.id, nextSettings);
+    setStudySettings(nextSettings);
+    setStudyDraft(nextSettings);
+    setStudySaveMessage("Modo Estudo salvo neste dispositivo.");
+    resetPlayback(playableTrack?.streamUrl ?? null);
+  }
 
   function disposePitchController() {
     try {
@@ -262,11 +327,20 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
   }
 
   useEffect(() => {
+    const loadedSettings = loadPlaylistStudySettings(playlist.id);
+    setStudySettings(loadedSettings);
+    setStudyDraft(ensureStudyDefaults(loadedSettings));
+    setStudySaveMessage(null);
     setCurrentKitIndex(0);
     setSelectedTone("");
     setSelectedVoice("");
     resetPlayback(null);
   }, [playlist.id]);
+
+  useEffect(() => {
+    setStudyDraft((current) => ensureStudyDefaults(current));
+    setStudySettings((current) => ensureStudyDefaults(current));
+  }, [playlist.id, kits]);
 
   useEffect(() => {
     if (!currentKit) return;
@@ -285,6 +359,10 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
 
   useEffect(() => {
     resetPlayback(playableTrack?.streamUrl ?? null);
+    if (autoPlayNextRef.current && playableTrack?.streamUrl) {
+      autoPlayNextRef.current = false;
+      window.setTimeout(() => { void startPlayback(); }, 0);
+    }
   }, [activeTrackKey]);
 
   useEffect(() => {
@@ -360,7 +438,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
     setCurrentKitIndex((prevIndex) => prevIndex - 1);
   }
 
-  async function togglePlay() {
+  async function startPlayback() {
     let audio = audioRef.current;
     const src = playableTrack?.streamUrl ?? null;
     if (!src || isLoadingPlayback) return;
@@ -382,14 +460,19 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
       audio.src = src;
     }
 
-    if (isPlaying) {
-      try { pitchControllerRef.current?.pause(); } catch {}
-      audio.pause();
+
+    audio.onended = () => {
       stopProgressSync();
-      syncProgressFromAudio(audio);
+      disposePitchController();
+      if (currentKitIndex < kits.length - 1 || replayAtEnd) autoPlayNextRef.current = true;
+      next();
+    };
+    audio.onerror = () => {
+      stopProgressSync();
+      setPlaybackError("Não foi possível carregar este áudio. Tente novamente ou escolha outro tom/voz.");
       setIsPlaying(false);
-      return;
-    }
+      setIsLoadingPlayback(false);
+    };
 
     const metric: PlaybackMetric = { id: activeTrackKey, src, clickAt: nowPerf() };
     playbackMetricRef.current = metric;
@@ -458,6 +541,20 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
     }
   }
 
+  async function togglePlay() {
+    const audio = audioRef.current;
+    if (isPlaying) {
+      try { pitchControllerRef.current?.pause(); } catch {}
+      audio?.pause();
+      stopProgressSync();
+      syncProgressFromAudio(audio);
+      setIsPlaying(false);
+      return;
+    }
+
+    await startPlayback();
+  }
+
   function handleToneChange(tone: string) {
     if (!currentKit) return;
 
@@ -504,6 +601,7 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
         onEnded={() => {
           stopProgressSync();
           disposePitchController();
+          if (currentKitIndex < kits.length - 1 || replayAtEnd) autoPlayNextRef.current = true;
           next();
         }}
         onError={() => {
@@ -537,7 +635,8 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
                     <select
                       value={selectedTone}
                       onChange={(event) => handleToneChange(event.target.value)}
-                      className="h-11 w-full rounded-xl border border-white/15 bg-black/30 px-3 text-sm text-white outline-none"
+                      disabled={isStudyModeEnabled}
+                      className="h-11 w-full rounded-xl border border-white/15 bg-black/30 px-3 text-sm text-white outline-none disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {toneOptions.map((tone) => {
                         const optionResolution = currentKit ? resolveToneTrack({
@@ -558,7 +657,8 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
                     <select
                       value={selectedVoice}
                       onChange={(event) => handleVoiceChange(event.target.value as PlaylistTrackVoice)}
-                      className="h-11 w-full rounded-xl border border-white/15 bg-black/30 px-3 text-sm text-white outline-none"
+                      disabled={isStudyModeEnabled}
+                      className="h-11 w-full rounded-xl border border-white/15 bg-black/30 px-3 text-sm text-white outline-none disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {voiceOptions.map((voice) => <option key={voice} value={voice}>{voiceLabel(voice)}</option>)}
                     </select>
@@ -566,11 +666,16 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
                 </div>
 
                 <p className="mt-4 text-sm text-zinc-300">
-                  Áudio selecionado: {currentTrack ? `${selectedTone} • ${voiceLabel(currentTrack.voice)}` : "Indisponível"}
+                  Áudio selecionado: {currentTrack ? `${activeTone} • ${voiceLabel(currentTrack.voice)}` : "Indisponível"}
                 </p>
                 <p className="mt-1 text-xs text-zinc-500">
                   Tom original: {currentKit.original_tone ?? "não informado"} • Tom inicial: {currentKit.default_tone ?? currentKit.original_tone ?? "automático"}
                 </p>
+                {isStudyModeEnabled ? (
+                  <p className="mt-2 rounded-xl border border-cyan-300/20 bg-cyan-300/10 px-3 py-2 text-xs text-cyan-100">
+                    Modo Estudo ativo: usando {voiceLabel(studySettings.voice)} e o tom definido para esta faixa.
+                  </p>
+                ) : null}
                 {toneResolution?.isPitchShifted ? (
                   <p className="mt-2 rounded-xl border border-gold-400/20 bg-gold-400/10 px-3 py-2 text-xs text-gold-200">
                     Harmomus AI: usando {toneResolution.sourceTone} {toneResolution.semitoneShift > 0 ? `+${toneResolution.semitoneShift}` : toneResolution.semitoneShift} semitom(ns).
@@ -632,9 +737,86 @@ export function PlaylistPlayerClient({ playlist }: PlaylistPlayerClientProps) {
           </div>
         </div>
 
+        <div className="rounded-3xl border border-gold-300/20 bg-gradient-to-br from-gold-500/10 via-zinc-950/80 to-cyan-500/10 p-5 shadow-premium md:p-6 lg:col-span-2">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.22em] text-gold-200">Modo Estudo</p>
+              <h2 className="mt-1 text-2xl font-semibold text-white">Estudo sequencial da playlist</h2>
+              <p className="mt-2 max-w-3xl text-sm text-zinc-300">
+                Ao ativar, a playlist tocará todos os kits no nipe e tom definidos para estudo sequencial.
+              </p>
+            </div>
+
+            <label className="inline-flex cursor-pointer items-center gap-3 rounded-full border border-white/15 bg-black/30 px-4 py-3 text-sm font-semibold text-white">
+              <input
+                type="checkbox"
+                checked={studyDraft.enabled}
+                onChange={(event) => {
+                  setStudyDraft((current) => ({ ...current, enabled: event.target.checked }));
+                  setStudySaveMessage(null);
+                }}
+                className="h-4 w-4 accent-gold-300"
+              />
+              {studyDraft.enabled ? "Ativado" : "Desativado"}
+            </label>
+          </div>
+
+          <div className="mt-5 grid gap-4 lg:grid-cols-[260px_1fr]">
+            <label className="block">
+              <span className="mb-2 block text-xs uppercase tracking-[0.18em] text-zinc-400">Nipe global</span>
+              <select
+                value={studyDraft.voice}
+                onChange={(event) => {
+                  setStudyDraft((current) => ({ ...current, voice: event.target.value as StudyVoice }));
+                  setStudySaveMessage(null);
+                }}
+                className="h-11 w-full rounded-xl border border-white/15 bg-black/40 px-3 text-sm text-white outline-none"
+              >
+                {STUDY_VOICE_OPTIONS.map((voice) => (
+                  <option key={voice} value={voice}>{voiceLabel(voice)}</option>
+                ))}
+              </select>
+            </label>
+
+            <div>
+              <p className="mb-2 text-xs uppercase tracking-[0.18em] text-zinc-400">Tom por faixa</p>
+              <div className="grid gap-2 md:grid-cols-2">
+                {kits.map((kit, index) => {
+                  const studyToneOptions = getStudyToneOptions(kit);
+                  const draftTone = studyDraft.tonesByItem[kit.id] || getDefaultStudyTone(kit) || studyToneOptions[0] || "";
+                  return (
+                    <label key={kit.id} className="grid gap-2 rounded-2xl border border-white/10 bg-black/25 p-3">
+                      <span className="line-clamp-1 text-sm font-semibold text-white">{index + 1}. {kit.name}</span>
+                      <span className="line-clamp-1 text-xs text-zinc-400">{kit.artist}</span>
+                      <select
+                        value={draftTone}
+                        onChange={(event) => handleStudyToneChange(kit.id, event.target.value)}
+                        className="h-10 rounded-xl border border-white/15 bg-black/40 px-3 text-sm text-white outline-none"
+                      >
+                        {studyToneOptions.map((tone) => <option key={tone} value={tone}>{tone}</option>)}
+                      </select>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={saveStudyMode}
+              className="rounded-full border border-gold-300/50 bg-gold-300/15 px-5 py-3 text-sm font-bold uppercase tracking-[0.14em] text-gold-100 transition hover:bg-gold-300/25"
+            >
+              Salvar modo estudo
+            </button>
+            {studySaveMessage ? <span className="text-sm text-cyan-100">{studySaveMessage}</span> : null}
+          </div>
+        </div>
+
         <aside className="rounded-3xl border border-white/10 bg-black/30 p-4 md:p-5">
           <h3 className="text-lg font-medium text-white">Fila</h3>
-          <p className="mt-1 text-xs text-zinc-400">A fila mostra apenas os kits. Tom e voz são escolhidos no player.</p>
+          <p className="mt-1 text-xs text-zinc-400">A fila mostra os kits na ordem da playlist. No Modo Estudo, tom e nipe seguem as preferências salvas.</p>
           <div className="mt-4 space-y-2">
             {kits.map((kit, index) => (
               <button
