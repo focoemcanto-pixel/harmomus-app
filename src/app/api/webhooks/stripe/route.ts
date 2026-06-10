@@ -18,6 +18,8 @@ type PreviousSubscriptionContext = {
   id: string | null;
   planId: string | null;
   planSlug: string | null;
+  customerId: string | null;
+  subscriptionId: string | null;
 };
 
 type SyncedSubscriptionContext = {
@@ -44,9 +46,15 @@ const ACCEPTED_EVENTS = new Set([
   "customer.subscription.deleted",
   "invoice.paid",
   "invoice.payment_failed",
+  "charge.failed",
+  "payment_intent.payment_failed",
   "charge.refunded",
   "charge.dispute.created",
 ]);
+
+function isStripePaymentFailureEvent(eventType: string) {
+  return ["invoice.payment_failed", "charge.failed", "payment_intent.payment_failed"].includes(eventType);
+}
 
 function verifySignature(payload: string, signature: string, secret: string) {
   const parts = Object.fromEntries(signature.split(",").map((part) => part.split("=")));
@@ -137,7 +145,7 @@ async function ensureUserIdByCustomerOrEmail(supabase: any, customerId: string |
 async function getCurrentSubscriptionForHistory(supabase: any, userId: string): Promise<PreviousSubscriptionContext> {
   const { data, error } = await supabase
     .from("subscriptions")
-    .select("id, plan_id, plans(slug)")
+    .select("id, plan_id, stripe_customer_id, gateway_customer_id, stripe_subscription_id, gateway_subscription_id, plans(slug)")
     .eq("user_id", userId)
     .order("updated_at", { ascending: false })
     .limit(1)
@@ -149,6 +157,8 @@ async function getCurrentSubscriptionForHistory(supabase: any, userId: string): 
     id: data?.id ?? null,
     planId: data?.plan_id ?? null,
     planSlug: data?.plans?.slug ?? null,
+    customerId: data?.stripe_customer_id ?? data?.gateway_customer_id ?? null,
+    subscriptionId: data?.stripe_subscription_id ?? data?.gateway_subscription_id ?? null,
   };
 }
 
@@ -203,7 +213,7 @@ function mapStripeEventToWebhookEvent(eventType: string, status: string) {
   if (eventType === "customer.subscription.created") return "subscription.created";
   if (eventType === "customer.subscription.deleted") return "subscription.canceled";
   if (eventType === "invoice.paid") return "payment.approved";
-  if (eventType === "invoice.payment_failed") return "subscription.payment_failed";
+  if (isStripePaymentFailureEvent(eventType)) return "subscription.payment_failed";
   if (eventType === "charge.refunded") return "payment.refunded";
   if (eventType === "charge.dispute.created") return "payment.chargeback";
   if (eventType === "customer.subscription.updated" && ["active", "trialing"].includes(status)) return "subscription.renewed";
@@ -267,7 +277,7 @@ function getSpecificPlanTransitionEvent(fromSlug?: string | null, toSlug?: strin
 
 function getHistoryChangeType(eventType: string, context: NonNullable<SyncedSubscriptionContext>) {
   if (eventType === "customer.subscription.deleted") return "canceled";
-  if (eventType === "invoice.payment_failed") return "payment_failed";
+  if (isStripePaymentFailureEvent(eventType)) return "payment_failed";
   if (eventType === "invoice.paid") return "renewed";
   const fromSlug = context.previousPlanSlug;
   const toSlug = context.planSlug;
@@ -335,8 +345,10 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
   const customerEmail =
     normalize(fullSubscription?.metadata?.email) ??
     normalize(object.metadata?.email) ??
-    normalize(object.customer_details?.email) ??
+    normalize(object.billing_details?.email) ??
+    normalize(object.receipt_email) ??
     normalize(object.customer_email) ??
+    normalize(object.customer_details?.email) ??
     normalize(object.email);
   const metadataUserId = normalize(fullSubscription?.metadata?.user_id) ?? normalize(object.metadata?.user_id) ?? normalize(object.subscription_details?.metadata?.user_id);
   const metadataPlanSlug = normalizeLower(fullSubscription?.metadata?.plan_slug) ?? normalizeLower(object.metadata?.plan_slug) ?? normalizeLower(object.subscription_details?.metadata?.plan_slug);
@@ -359,17 +371,20 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
   const status = mapStripeStatus(fullSubscription?.status ?? object.status ?? "active");
   const currentPeriodEnd = toIsoFromStripeSeconds(fullSubscription?.current_period_end);
   const trialEndsAt = toIsoFromStripeSeconds(fullSubscription?.trial_end);
-  const syncedSubscriptionId = getStripeId(fullSubscription?.id) ?? subscriptionId;
+  const fullSubscriptionId = String(fullSubscription?.id ?? "").startsWith("sub_") ? normalize(fullSubscription.id) : null;
+  const syncedSubscriptionId = fullSubscriptionId ?? subscriptionId;
   const previous = await getCurrentSubscriptionForHistory(supabase, userId);
+  const preservedCustomerId = customerId ?? previous.customerId;
+  const preservedSubscriptionId = syncedSubscriptionId ?? previous.subscriptionId;
 
-  if (event.type === "customer.subscription.deleted" || event.type === "invoice.payment_failed") {
+  if (event.type === "customer.subscription.deleted" || isStripePaymentFailureEvent(event.type)) {
     const downgraded = await downgradeToFree(supabase, userId, {
-      status: event.type === "invoice.payment_failed" ? "canceled" : "canceled",
+      status: "canceled",
       gateway: "stripe",
-      stripe_customer_id: customerId,
-      gateway_customer_id: customerId,
-      stripe_subscription_id: syncedSubscriptionId,
-      gateway_subscription_id: syncedSubscriptionId,
+      stripe_customer_id: preservedCustomerId,
+      gateway_customer_id: preservedCustomerId,
+      stripe_subscription_id: preservedSubscriptionId,
+      gateway_subscription_id: preservedSubscriptionId,
       stripe_price_id: stripePriceId,
       current_period_end: currentPeriodEnd,
       trial_ends_at: trialEndsAt,
@@ -385,9 +400,9 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
       planSlug: "free",
       previousPlanId: downgraded?.previous.planId ?? previous.planId,
       previousPlanSlug: metadataPreviousPlanSlug ?? downgraded?.previous.planSlug ?? previous.planSlug,
-      status: event.type === "invoice.payment_failed" ? "payment_failed" : "canceled",
-      customerId,
-      subscriptionId: syncedSubscriptionId,
+      status: isStripePaymentFailureEvent(event.type) ? "payment_failed" : "canceled",
+      customerId: preservedCustomerId,
+      subscriptionId: preservedSubscriptionId,
       localSubscriptionId: downgraded?.localSubscriptionId ?? previous.id ?? null,
       stripePriceId,
       customerEmail,
@@ -491,17 +506,32 @@ async function saveBillingInvoiceFromStripeEvent(supabase: any, event: StripeEve
 }
 
 async function trackPaymentFailedForAutomation(supabase: any, event: StripeEvent, context: SyncedSubscriptionContext) {
-  if (event.type !== "invoice.payment_failed" || !context?.userId) return;
+  if (!isStripePaymentFailureEvent(event.type) || !context?.userId) return;
+
+  const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data: existingEvent, error } = await supabase
+    .from("marketing_events")
+    .select("id")
+    .eq("event_key", "payment_failed")
+    .eq("user_id", context.userId)
+    .gte("created_at", twentyFourHoursAgo)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) console.error("[stripe.webhook] Falha ao verificar marketing_event payment_failed duplicado", error);
+  if (existingEvent?.id) return;
+
   await trackMarketingEvent(supabase, {
     userId: context.userId,
     eventKey: "payment_failed",
     eventLabel: "Pagamento falhou",
     channel: "billing",
     metadata: {
-      stripe_event_id: event.id,
       stripe_event_type: event.type,
+      stripe_event_id: event.id,
       stripe_customer_id: context.customerId,
       stripe_subscription_id: context.subscriptionId,
+      payment_failure_source: event.type,
       stripe_price_id: context.stripePriceId,
       local_subscription_id: context.localSubscriptionId,
       previous_plan: context.previousPlanSlug,
