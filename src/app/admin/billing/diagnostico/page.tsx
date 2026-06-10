@@ -2,6 +2,7 @@ import Link from "next/link";
 import { AlertTriangle, ArrowLeft, Database, ReceiptText, RefreshCw, Users } from "lucide-react";
 
 import { PageHeader } from "@/components/admin/page-header";
+import { resolveEffectivePlan } from "@/lib/access/subscription-plan";
 import { formatDateTimeBR } from "@/lib/format-date-time-br";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -20,6 +21,8 @@ type DiagnosticSubscription = {
   stripe_subscription_id?: string | null;
   current_period_end?: string | null;
   trial_ends_at?: string | null;
+  cancel_at_period_end?: boolean | null;
+  canceled_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -73,11 +76,24 @@ function normalize(value: unknown) {
   return String(value ?? "").trim().toLowerCase();
 }
 
+function planAccessLabel(subscription: DiagnosticSubscription, plan?: DiagnosticPlan | null) {
+  const effectivePlan = resolveEffectivePlan({ subscription, plan });
+  const contractedSlug = normalize(plan?.slug);
+
+  if (contractedSlug === "premium" && effectivePlan === "free") {
+    return "Premium sem acesso ativo";
+  }
+
+  if (contractedSlug === "premium") return "Premium ativo";
+  if (contractedSlug === "plus" && effectivePlan === "free") return "Plus sem acesso ativo";
+  return plan?.name ?? plan?.slug ?? subscription.plan_id ?? "—";
+}
+
 function statusBadge(status?: string | null) {
   const value = normalize(status);
   if (["active", "paid", "trialing", "processed"].includes(value)) return "border-emerald-400/25 bg-emerald-500/10 text-emerald-200";
   if (["pending", "open"].includes(value)) return "border-amber-400/25 bg-amber-500/10 text-amber-100";
-  if (["canceled", "failed", "payment_failed", "overdue"].includes(value)) return "border-rose-400/25 bg-rose-500/10 text-rose-100";
+  if (["canceled", "failed", "payment_failed", "overdue", "past_due", "unpaid", "incomplete", "incomplete_expired", "expired"].includes(value)) return "border-rose-400/25 bg-rose-500/10 text-rose-100";
   return "border-white/10 bg-white/[0.04] text-zinc-200";
 }
 
@@ -109,7 +125,7 @@ export default async function BillingDiagnosticsPage() {
   ] = await Promise.all([
     supabase
       .from("subscriptions")
-      .select("id,user_id,plan_id,status,gateway,gateway_customer_id,gateway_subscription_id,stripe_customer_id,stripe_subscription_id,current_period_end,trial_ends_at,created_at,updated_at")
+      .select("id,user_id,plan_id,status,gateway,gateway_customer_id,gateway_subscription_id,stripe_customer_id,stripe_subscription_id,current_period_end,trial_ends_at,cancel_at_period_end,canceled_at,created_at,updated_at")
       .order("updated_at", { ascending: false })
       .limit(30),
     supabase.from("subscriptions").select("id", { count: "exact", head: true }),
@@ -204,7 +220,7 @@ export default async function BillingDiagnosticsPage() {
                     <tr key={row.id} className="border-b border-white/5 last:border-none">
                       <td className="px-3 py-3"><span className={`rounded-full border px-2.5 py-1 text-xs ${statusBadge(row.status)}`}>{row.status ?? "—"}</span></td>
                       <td className="px-3 py-3 text-zinc-300">{row.gateway ?? "—"}</td>
-                      <td className="px-3 py-3 text-zinc-300">{plan?.name ?? plan?.slug ?? row.plan_id ?? "—"}</td>
+                      <td className="px-3 py-3 text-zinc-300">{planAccessLabel(row, plan)}</td>
                       <td className="px-3 py-3 font-mono text-xs text-zinc-500">{row.user_id ?? "—"}</td>
                       <td className="px-3 py-3 font-mono text-xs text-zinc-500">{row.gateway_subscription_id ?? row.stripe_subscription_id ?? "—"}</td>
                       <td className="px-3 py-3 text-zinc-400">{formatDate(row.current_period_end ?? row.trial_ends_at)}</td>

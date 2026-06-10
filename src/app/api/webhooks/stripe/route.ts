@@ -5,6 +5,7 @@ import { trackMarketingEvent } from "@/lib/communications/events";
 import { ensureMinistryForSubscription } from "@/lib/data/ministry";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getStripeSubscription } from "@/lib/stripe/client";
+import { isActiveSubscriptionStatus } from "@/lib/access/subscription-plan";
 import { mapStripeStatus } from "@/lib/stripe/status";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
 import { resolveWebhookRecipientForUser } from "@/lib/webhooks/recipient";
@@ -44,7 +45,9 @@ const ACCEPTED_EVENTS = new Set([
   "customer.subscription.created",
   "customer.subscription.updated",
   "customer.subscription.deleted",
+  "checkout.session.expired",
   "invoice.paid",
+  "invoice.payment_succeeded",
   "invoice.payment_failed",
   "charge.failed",
   "payment_intent.payment_failed",
@@ -184,16 +187,14 @@ async function saveSubscriptionByUserId(supabase: any, payload: Record<string, u
   return response;
 }
 
-async function downgradeToFree(supabase: any, userId: string, patch: Record<string, unknown>) {
-  const { data: freePlan, error } = await supabase.from("plans").select("id, slug").eq("slug", "free").single();
-  if (error) console.error("[stripe.webhook] Falha ao buscar plano free", error);
-  if (!freePlan?.id) return null;
-
+async function markSubscriptionWithoutActiveAccess(supabase: any, userId: string, patch: Record<string, unknown>, fallbackPlan?: { id?: string | null; slug?: string | null } | null) {
   const previous = await getCurrentSubscriptionForHistory(supabase, userId);
+  const planId = previous.planId ?? fallbackPlan?.id;
+  if (!planId) return null;
 
   const saveResponse = await saveSubscriptionByUserId(supabase, {
     user_id: userId,
-    plan_id: freePlan.id,
+    plan_id: planId,
     ...patch,
   });
 
@@ -202,8 +203,8 @@ async function downgradeToFree(supabase: any, userId: string, patch: Record<stri
 
   return {
     localSubscriptionId: saveResponse.data?.[0]?.id ?? previous.id ?? null,
-    freePlanId: freePlan.id as string,
-    freePlanSlug: freePlan.slug as string,
+    planId,
+    planSlug: previous.planSlug ?? fallbackPlan?.slug ?? null,
     previous,
   };
 }
@@ -212,11 +213,11 @@ function mapStripeEventToWebhookEvent(eventType: string, status: string) {
   if (eventType === "checkout.session.completed") return "checkout.completed";
   if (eventType === "customer.subscription.created") return "subscription.created";
   if (eventType === "customer.subscription.deleted") return "subscription.canceled";
-  if (eventType === "invoice.paid") return "payment.approved";
+  if (["invoice.paid", "invoice.payment_succeeded"].includes(eventType)) return "payment.approved";
   if (isStripePaymentFailureEvent(eventType)) return "subscription.payment_failed";
   if (eventType === "charge.refunded") return "payment.refunded";
   if (eventType === "charge.dispute.created") return "payment.chargeback";
-  if (eventType === "customer.subscription.updated" && ["active", "trialing"].includes(status)) return "subscription.renewed";
+  if (eventType === "customer.subscription.updated" && isActiveSubscriptionStatus(status)) return "subscription.renewed";
   return null;
 }
 
@@ -246,12 +247,12 @@ function getCheckoutCompletedEvent(planSlug?: string | null) {
 }
 
 function shouldDispatchPlanActivated(eventType: string, context: NonNullable<SyncedSubscriptionContext>) {
-  if (!["active", "trialing"].includes(context.status)) return false;
+  if (!isActiveSubscriptionStatus(context.status)) return false;
   const currentPlan = normalizePlanFamily(context.planSlug);
   const previousPlan = normalizePlanFamily(context.previousPlanSlug);
   if (!currentPlan || currentPlan === "free") return false;
   if (["checkout.session.completed", "customer.subscription.created"].includes(eventType)) return true;
-  if (eventType === "invoice.paid") return previousPlan !== currentPlan;
+  if (["invoice.paid", "invoice.payment_succeeded"].includes(eventType)) return previousPlan !== currentPlan;
   return eventType === "customer.subscription.updated" && previousPlan !== currentPlan;
 }
 
@@ -278,7 +279,7 @@ function getSpecificPlanTransitionEvent(fromSlug?: string | null, toSlug?: strin
 function getHistoryChangeType(eventType: string, context: NonNullable<SyncedSubscriptionContext>) {
   if (eventType === "customer.subscription.deleted") return "canceled";
   if (isStripePaymentFailureEvent(eventType)) return "payment_failed";
-  if (eventType === "invoice.paid") return "renewed";
+  if (["invoice.paid", "invoice.payment_succeeded"].includes(eventType)) return "renewed";
   const fromSlug = context.previousPlanSlug;
   const toSlug = context.planSlug;
   if (!fromSlug && toSlug) return "created";
@@ -377,9 +378,23 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
   const preservedCustomerId = customerId ?? previous.customerId;
   const preservedSubscriptionId = syncedSubscriptionId ?? previous.subscriptionId;
 
-  if (event.type === "customer.subscription.deleted" || isStripePaymentFailureEvent(event.type)) {
-    const downgraded = await downgradeToFree(supabase, userId, {
-      status: "canceled",
+  const plan = await getPlanByStripePriceId(supabase, stripePriceId, metadataPlanSlug);
+  if (!plan?.id && !previous.planId) {
+    console.error("[stripe.webhook] Plano não encontrado para evento Stripe", { eventId: event.id, stripePriceId, metadataPlanSlug });
+    return null;
+  }
+
+  if (["customer.subscription.deleted", "checkout.session.expired"].includes(event.type) || isStripePaymentFailureEvent(event.type)) {
+    const inactiveStatus = event.type === "customer.subscription.deleted"
+      ? "canceled"
+      : event.type === "checkout.session.expired"
+        ? "expired"
+        : isActiveSubscriptionStatus(status)
+          ? "past_due"
+          : status;
+    const inactiveAt = ["customer.subscription.deleted", "checkout.session.expired"].includes(event.type) ? new Date().toISOString() : null;
+    const inactiveSubscription = await markSubscriptionWithoutActiveAccess(supabase, userId, {
+      status: inactiveStatus,
       gateway: "stripe",
       stripe_customer_id: preservedCustomerId,
       gateway_customer_id: preservedCustomerId,
@@ -389,21 +404,22 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
       current_period_end: currentPeriodEnd,
       trial_ends_at: trialEndsAt,
       next_billing_at: null,
-      canceled_at: new Date().toISOString(),
+      canceled_at: inactiveAt,
+      auto_renew: false,
       last_webhook_event: event.type,
       updated_at: new Date().toISOString(),
-    });
+    }, plan ?? null);
 
     return {
       userId,
-      planId: downgraded?.freePlanId ?? null,
-      planSlug: "free",
-      previousPlanId: downgraded?.previous.planId ?? previous.planId,
-      previousPlanSlug: metadataPreviousPlanSlug ?? downgraded?.previous.planSlug ?? previous.planSlug,
-      status: isStripePaymentFailureEvent(event.type) ? "payment_failed" : "canceled",
+      planId: inactiveSubscription?.planId ?? previous.planId ?? plan?.id ?? null,
+      planSlug: inactiveSubscription?.planSlug ?? previous.planSlug ?? plan?.slug ?? null,
+      previousPlanId: inactiveSubscription?.previous.planId ?? previous.planId,
+      previousPlanSlug: metadataPreviousPlanSlug ?? inactiveSubscription?.previous.planSlug ?? previous.planSlug,
+      status: isStripePaymentFailureEvent(event.type) ? "payment_failed" : inactiveStatus,
       customerId: preservedCustomerId,
       subscriptionId: preservedSubscriptionId,
-      localSubscriptionId: downgraded?.localSubscriptionId ?? previous.id ?? null,
+      localSubscriptionId: inactiveSubscription?.localSubscriptionId ?? previous.id ?? null,
       stripePriceId,
       customerEmail,
       currentPeriodEnd,
@@ -412,7 +428,6 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
     };
   }
 
-  const plan = await getPlanByStripePriceId(supabase, stripePriceId, metadataPlanSlug);
   if (!plan?.id) {
     console.error("[stripe.webhook] Plano não encontrado para evento Stripe", { eventId: event.id, stripePriceId, metadataPlanSlug });
     return null;
@@ -430,8 +445,10 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
     stripe_price_id: stripePriceId,
     current_period_end: currentPeriodEnd,
     trial_ends_at: trialEndsAt,
-    next_billing_at: currentPeriodEnd,
-    auto_renew: !Boolean(fullSubscription?.cancel_at_period_end),
+    next_billing_at: isActiveSubscriptionStatus(status) ? currentPeriodEnd : null,
+    auto_renew: !Boolean(fullSubscription?.cancel_at_period_end) && isActiveSubscriptionStatus(status),
+    cancel_at_period_end: Boolean(fullSubscription?.cancel_at_period_end),
+    canceled_at: status === "canceled" ? new Date().toISOString() : null,
     last_webhook_event: event.type,
     updated_at: new Date().toISOString(),
   });
@@ -464,7 +481,7 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
 }
 
 async function saveBillingInvoiceFromStripeEvent(supabase: any, event: StripeEvent, context: SyncedSubscriptionContext) {
-  if (!["invoice.paid", "invoice.payment_failed"].includes(event.type)) return;
+  if (!["invoice.paid", "invoice.payment_succeeded", "invoice.payment_failed"].includes(event.type)) return;
   const invoice = event.data?.object ?? {};
   const providerInvoiceId = normalize(invoice.id);
   if (!providerInvoiceId) return;
@@ -475,8 +492,8 @@ async function saveBillingInvoiceFromStripeEvent(supabase: any, event: StripeEve
   const userId = context?.userId ?? (await ensureUserIdByCustomerOrEmail(supabase, stripeCustomerId, customerEmail));
   const plan = await getPlanByStripePriceId(supabase, stripePriceId, null);
   const period = invoice.lines?.data?.[0]?.period ?? {};
-  const status = normalizeLower(invoice.status) ?? (event.type === "invoice.paid" ? "paid" : "payment_failed");
-  const paidAt = toIsoFromStripeSeconds(invoice.status_transitions?.paid_at) ?? (event.type === "invoice.paid" ? toIsoFromStripeSeconds(invoice.created) : null);
+  const status = normalizeLower(invoice.status) ?? (["invoice.paid", "invoice.payment_succeeded"].includes(event.type) ? "paid" : "payment_failed");
+  const paidAt = toIsoFromStripeSeconds(invoice.status_transitions?.paid_at) ?? (["invoice.paid", "invoice.payment_succeeded"].includes(event.type) ? toIsoFromStripeSeconds(invoice.created) : null);
   const payload = {
     provider: "stripe",
     provider_invoice_id: providerInvoiceId,
@@ -491,7 +508,7 @@ async function saveBillingInvoiceFromStripeEvent(supabase: any, event: StripeEve
     status,
     currency: normalizeLower(invoice.currency) ?? "brl",
     amount_due_cents: cents(invoice.amount_due),
-    amount_paid_cents: event.type === "invoice.paid" ? cents(invoice.amount_paid) : 0,
+    amount_paid_cents: ["invoice.paid", "invoice.payment_succeeded"].includes(event.type) ? cents(invoice.amount_paid) : 0,
     amount_remaining_cents: cents(invoice.amount_remaining),
     invoice_url: normalize(invoice.invoice_pdf),
     hosted_invoice_url: normalize(invoice.hosted_invoice_url),

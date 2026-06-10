@@ -5,6 +5,7 @@ import {
   getMinistrySeatLimit,
   isMinistryPlanSlug,
 } from "@/lib/data/ministry";
+import { resolveEffectivePlan, isActiveSubscriptionStatus } from "@/lib/access/subscription-plan";
 import type { Database } from "@/types/database";
 
 export type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -106,7 +107,8 @@ function isSubscriptionUsable(
 ) {
   if (!subscription) return false;
   const status = String(subscription.status ?? "").toLowerCase();
-  if (!["active", "trialing"].includes(status)) return false;
+  const effectivePlan = resolveEffectivePlan({ subscription: subscription as any, planSlug });
+  if (effectivePlan === "free") return false;
 
   const isLegacyPms = isLegacyPmsSubscription(subscription);
   if (
@@ -117,10 +119,7 @@ function isSubscriptionUsable(
     return false;
   }
 
-  const periodEnd = (subscription as any).current_period_end
-    ? new Date((subscription as any).current_period_end).getTime()
-    : Number.POSITIVE_INFINITY;
-  return periodEnd > Date.now();
+  return true;
 }
 
 function normalizeEffectivePlanSlug(value: unknown): EffectivePlanSlug {
@@ -145,7 +144,7 @@ function subscriptionRank(subscription: Subscription, plans: Plan[] | null | und
   const status = String(subscription.status ?? "").toLowerCase();
   const gateway = String((subscription as any).gateway ?? "").toLowerCase();
   const planWeight = isMinistryPlanSlug(slug) || slug === "premium" ? 300 : slug === "plus" ? 200 : 0;
-  const statusWeight = status === "active" ? 40 : status === "trialing" ? 35 : 0;
+  const statusWeight = isActiveSubscriptionStatus(status) ? (status === "active" ? 40 : 35) : 0;
   const gatewayWeight = gateway === "stripe" ? 3 : gateway === "asaas" ? 2 : 1;
   return planWeight + statusWeight + gatewayWeight;
 }
@@ -167,9 +166,7 @@ function buildMinistryContextFromRows(
 ): MinistryAccessContext | null {
   const ministryActive =
     ministry &&
-    ["active", "trialing"].includes(
-      String(ministry.status ?? "").toLowerCase(),
-    );
+    isActiveSubscriptionStatus(ministry.status);
   if (!membership || !ministryActive) return null;
 
   const planType = String(ministry.plan_type ?? "");
@@ -204,9 +201,7 @@ async function getActiveMinistryMembership(admin: any, userId: string) {
 
     if (
       ministry &&
-      ["active", "trialing"].includes(
-        String(ministry.status ?? "").toLowerCase(),
-      )
+      isActiveSubscriptionStatus(ministry.status)
     ) {
       return { ...membership, ministry };
     }
@@ -251,7 +246,7 @@ export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessCo
   const rawPlanSlug = String(plan?.slug ?? "")
     .trim()
     .toLowerCase();
-  const paidPlanSlug = normalizeEffectivePlanSlug(rawPlanSlug);
+  const paidPlanSlug = normalizeEffectivePlanSlug(resolveEffectivePlan({ subscription: typedSubscription as any, planSlug: rawPlanSlug }));
   const usableSubscription = isSubscriptionUsable(
     typedSubscription,
     rawPlanSlug,

@@ -5,6 +5,7 @@ import { EmailConfirmationState } from "@/components/auth/email-confirmation-sta
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { getCheckoutSession, getStripeSubscription } from "@/lib/stripe/client";
+import { isActiveSubscriptionStatus } from "@/lib/access/subscription-plan";
 import { mapStripeStatus } from "@/lib/stripe/status";
 
 const WHATSAPP_PREMIUM_URL = "https://chat.whatsapp.com/FNU6Xl5t6qD0VfGA2EQ0IW?mode=gi_t";
@@ -206,8 +207,10 @@ async function syncCheckoutSession(sessionId?: string): Promise<SyncCheckoutResu
       stripe_price_id: priceId,
       current_period_end: currentPeriodEnd,
       trial_ends_at: trialEndsAt,
-      next_billing_at: currentPeriodEnd,
-      auto_renew: !Boolean(subscription.cancel_at_period_end),
+      next_billing_at: isActiveSubscriptionStatus(status) ? currentPeriodEnd : null,
+      auto_renew: !Boolean(subscription.cancel_at_period_end) && isActiveSubscriptionStatus(status),
+      cancel_at_period_end: Boolean(subscription.cancel_at_period_end),
+      canceled_at: status === "canceled" ? now : null,
       ...attribution,
       last_webhook_event: "checkout.success_page_sync",
       updated_at: now,
