@@ -13,7 +13,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     <div className="min-h-screen bg-background">
       <div className="mx-auto flex max-w-[1600px]">
         <Sidebar />
-        <main className="w-full p-4 sm:p-6 lg:p-8">
+        <main className="w-full px-3 pb-28 pt-3 sm:p-6 lg:p-8">
           <Topbar />
           {children}
         </main>
