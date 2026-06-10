@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 
+import { MobileBottomNav } from "@/components/admin/mobile-bottom-nav";
 import { Sidebar } from "@/components/admin/sidebar";
 import { Topbar } from "@/components/admin/topbar";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
@@ -18,6 +19,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           {children}
         </main>
       </div>
+      <MobileBottomNav />
     </div>
   );
 }
