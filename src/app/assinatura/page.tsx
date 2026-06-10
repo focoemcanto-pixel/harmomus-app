@@ -9,7 +9,7 @@ import {
   listCustomerInvoices,
 } from "@/lib/stripe/client";
 import { listSubscriptionPayments } from "@/lib/asaas/subscriptions";
-import { getPlans } from "@/lib/data/plans";
+import { getBillingRecoveryNotice, type BillingRecoveryNotice } from "@/lib/data/billing-recovery-notices";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const EMPTY_VALUE = "-- --";
@@ -26,6 +26,37 @@ const STATUS_LABELS: Record<string, string> = {
   incomplete: "Incompleta",
   incomplete_expired: "Expirada",
 };
+
+const PAYMENT_ISSUE_STATUSES = new Set(["canceled", "past_due", "unpaid", "overdue", "incomplete", "incomplete_expired"]);
+
+const RECOVERY_REASON_LABELS: Record<string, string> = {
+  payment_failed: "Pagamento não confirmado",
+  invoice_overdue: "Cobrança vencida",
+  subscription_canceled: "Assinatura cancelada",
+  subscription_unpaid: "Assinatura não paga",
+  subscription_past_due: "Pagamento em atraso",
+  payment_issue_dismissed: "Aviso dispensado anteriormente",
+};
+
+function recoveryReasonLabel(reason?: string | null, status?: string | null) {
+  const normalizedReason = String(reason ?? "").trim().toLowerCase();
+  if (normalizedReason) return RECOVERY_REASON_LABELS[normalizedReason] ?? reason ?? "Não informado";
+
+  const normalizedStatus = String(status ?? "").trim().toLowerCase();
+  if (normalizedStatus === "past_due") return "Pagamento em atraso";
+  if (normalizedStatus === "unpaid") return "Assinatura não paga";
+  if (normalizedStatus === "overdue") return "Cobrança vencida";
+  if (normalizedStatus === "canceled") return "Assinatura cancelada";
+  if (normalizedStatus === "incomplete" || normalizedStatus === "incomplete_expired") return "Pagamento não concluído";
+
+  return "Não informado";
+}
+
+function shouldShowRecoveryBlock(input: { isEligible: boolean; notice: BillingRecoveryNotice | null; status: string }) {
+  if (!input.isEligible) return false;
+  if (input.notice) return !input.notice.dismissed_at;
+  return PAYMENT_ISSUE_STATUSES.has(input.status);
+}
 
 function formatDate(value?: string | null, fallback = "Não informado") {
   if (!value) return fallback;
@@ -233,7 +264,6 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
     );
   }
 
-  const plans = await getPlans();
   const currentPlan = effectivePlanLabel(context.effectiveSlug, context.plan?.name);
   const currentPlanSlug = effectivePlanSlug(context.effectiveSlug);
   const isFreePlan = currentPlanSlug === "free";
@@ -246,8 +276,18 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
   const cancelAtPeriodEnd = Boolean((context.subscription as any)?.cancel_at_period_end);
   const hasStripeLink = Boolean(isStripe && customerId && subscriptionId);
   const hasAsaasLink = Boolean(isAsaas && customerId && subscriptionId && !isFreePlan);
-  const paymentIssueStatuses = new Set(["canceled", "past_due", "unpaid", "overdue", "incomplete", "incomplete_expired"]);
-  const shouldShowPaymentIssueWarning = paymentIssueStatuses.has(status) || (isFreePlan && Boolean(customerId));
+  const isBillingRecoveryEligible = Boolean(!context.isAdmin && !context.ministry && context.profile?.id);
+  const billingRecoveryNotice = isBillingRecoveryEligible
+    ? await getBillingRecoveryNotice(context.profile?.id)
+    : null;
+  const shouldShowPaymentIssueWarning = shouldShowRecoveryBlock({
+    isEligible: isBillingRecoveryEligible,
+    notice: billingRecoveryNotice,
+    status,
+  });
+  const recoveryStatusLabel = context.subscription?.status ? STATUS_LABELS[status] ?? status : currentPlan;
+  const recoveryReason = recoveryReasonLabel(billingRecoveryNotice?.reason, status);
+  const recoveryLastPaymentDate = formatDate(billingRecoveryNotice?.last_payment_at, "Não informado");
 
   let invoices: any[] = [];
   let paymentMethodLabel = isFreePlan ? EMPTY_VALUE : customerId ? "Não cadastrado" : "Não vinculado";
@@ -319,13 +359,23 @@ export default async function AssinaturaPage({ searchParams }: { searchParams?: 
           {shouldShowPaymentIssueWarning ? (
             <div className="mt-6 rounded-2xl border border-amber-300/40 bg-amber-500/10 p-5 shadow-[0_20px_60px_rgba(245,158,11,0.16)]">
               <p className="text-xs uppercase tracking-[0.2em] text-amber-200">Pagamento não confirmado</p>
-              <h2 className="mt-2 text-2xl font-semibold text-white">Pagamento não confirmado</h2>
-              <p className="mt-3 max-w-3xl text-sm leading-6 text-amber-50">Seu acesso Premium foi pausado temporariamente porque não conseguimos confirmar o pagamento da sua assinatura. Atualize o cartão ou regularize a cobrança no portal Stripe para recuperar o acesso aos kits e recursos Premium.</p>
-              {isStripe && customerId ? (
-                <form action="/api/billing/portal" method="post" className="mt-5">
-                  <button className="rounded-xl bg-gradient-to-r from-cyan-300 to-blue-400 px-5 py-3 text-sm font-semibold text-slate-900">Abrir portal Stripe</button>
-                </form>
-              ) : null}
+              <h2 className="mt-2 text-2xl font-semibold text-white">Seu pagamento não foi confirmado</h2>
+              <p className="mt-3 max-w-3xl text-sm leading-6 text-amber-50">Seu acesso Premium foi pausado temporariamente.</p>
+              <div className="mt-5 grid gap-3 md:grid-cols-3">
+                <InfoCard label="Última data paga" value={recoveryLastPaymentDate} />
+                <InfoCard label="Motivo" value={recoveryReason} />
+                <InfoCard label="Status atual" value={recoveryStatusLabel} />
+              </div>
+              <div className="mt-5 flex flex-wrap gap-3">
+                {isStripe && customerId ? (
+                  <form action="/api/billing/portal" method="post">
+                    <button className="rounded-xl bg-gradient-to-r from-cyan-300 to-blue-400 px-5 py-3 text-sm font-semibold text-slate-900">Abrir portal Stripe</button>
+                  </form>
+                ) : (
+                  <a href="/assinar?plano=premium" className="rounded-xl bg-gradient-to-r from-cyan-300 to-blue-400 px-5 py-3 text-sm font-semibold text-slate-900">Assinar Premium</a>
+                )}
+                <a href="/api/billing/recovery-notice/dismiss" className="rounded-xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/10">Continuar no plano gratuito</a>
+              </div>
             </div>
           ) : null}
           <div className="mt-8 grid gap-4 md:grid-cols-4">
