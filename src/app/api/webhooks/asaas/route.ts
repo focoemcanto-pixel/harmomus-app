@@ -486,6 +486,27 @@ async function trackAsaasCheckoutStarted(input: {
       occurred_at: asaasOccurredAt(input.payload),
     },
   });
+
+  await trackMarketingEvent(input.supabase, {
+    userId: input.subscription.user_id,
+    eventKey: "checkout_abandoned",
+    eventLabel: "Checkout abandonado",
+    channel: "billing",
+    source: "asaas",
+    metadata: {
+      provider: "asaas",
+      asaas_event_id: asaasExternalEventId(input.payload),
+      asaas_event_type: input.payload.event,
+      asaas_customer_id: gatewayCustomerId(input.payload),
+      asaas_payment_id: asaasPaymentId(input.payload),
+      asaas_subscription_id: gatewaySubscriptionId(input.payload) ?? input.subscription.gateway_subscription_id ?? null,
+      local_subscription_id: input.subscription.id,
+      plan_slug: input.planSlug,
+      amount: input.payload.payment?.value ?? null,
+      due_date: input.payload.payment?.dueDate ?? null,
+      occurred_at: asaasOccurredAt(input.payload),
+    },
+  });
 }
 
 async function trackAsaasPaymentConversion(input: {
