@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { InstallAppBanner } from "@/components/public/install-app-banner";
 import { PublicShellClient } from "@/components/public/public-shell-client";
 import { getCurrentUserAccessContext, type CurrentUserAccessContext } from "@/lib/auth/current-user";
 import { getAdminSettings } from "@/lib/data/admin-settings";
@@ -23,14 +24,11 @@ async function getRemovedMinistryNotice(userId?: string | null) {
       .maybeSingle();
 
     if (!data?.id) return null;
-
     const { data: ministry } = data.ministry_id
       ? await admin.from("ministries").select("id,name").eq("id", data.ministry_id).maybeSingle()
       : { data: null };
 
-    return {
-      ministryName: ministry?.name || "seu ministério",
-    };
+    return { ministryName: ministry?.name || "seu ministério" };
   } catch (error) {
     console.error("[PublicAppShell] failed to load removed ministry notice", error);
     return null;
@@ -80,21 +78,13 @@ function PaymentIssueBanner({ notice, href }: { notice: BillingRecoveryNotice | 
         <div className="min-w-0">
           <p className="text-sm font-semibold text-amber-100">Seu pagamento não foi confirmado</p>
           <p className="mt-1 text-xs leading-5 text-amber-50/90 md:text-sm">Seu acesso Premium foi pausado temporariamente.</p>
-          {lastPaymentDate ? (
-            <p className="mt-1 text-xs leading-5 text-amber-50/80 md:text-sm">Último pagamento confirmado: {lastPaymentDate}</p>
-          ) : null}
+          {lastPaymentDate ? <p className="mt-1 text-xs leading-5 text-amber-50/80 md:text-sm">Último pagamento confirmado: {lastPaymentDate}</p> : null}
         </div>
         <div className="flex flex-wrap gap-2">
-          <Link
-            href={href}
-            className="inline-flex w-fit shrink-0 items-center justify-center rounded-xl border border-amber-200/40 bg-amber-200 px-4 py-2 text-xs font-bold text-amber-950 transition hover:bg-amber-100 md:text-sm"
-          >
+          <Link href={href} className="inline-flex w-fit shrink-0 items-center justify-center rounded-xl border border-amber-200/40 bg-amber-200 px-4 py-2 text-xs font-bold text-amber-950 transition hover:bg-amber-100 md:text-sm">
             Regularizar assinatura
           </Link>
-          <a
-            href="/api/billing/recovery-notice/dismiss"
-            className="inline-flex w-fit shrink-0 items-center justify-center rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-xs font-semibold text-white transition hover:bg-white/10 md:text-sm"
-          >
+          <a href="/api/billing/recovery-notice/dismiss" className="inline-flex w-fit shrink-0 items-center justify-center rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-xs font-semibold text-white transition hover:bg-white/10 md:text-sm">
             Continuar no plano gratuito
           </a>
         </div>
@@ -136,15 +126,10 @@ export async function PublicAppShell({ children }: { children: React.ReactNode }
     getAdminSettings(),
   ]);
 
-  const billingRecoveryNotice = isBillingRecoveryEligible(context)
-    ? await getBillingRecoveryNotice(context.profile?.id)
-    : null;
-  const removedMinistryNotice = !context.isGuest && !context.ministry && context.effectiveSlug === "free"
-    ? await getRemovedMinistryNotice(context.profile?.id)
-    : null;
+  const billingRecoveryNotice = isBillingRecoveryEligible(context) ? await getBillingRecoveryNotice(context.profile?.id) : null;
+  const removedMinistryNotice = !context.isGuest && !context.ministry && context.effectiveSlug === "free" ? await getRemovedMinistryNotice(context.profile?.id) : null;
   const paymentIssue = shouldShowPaymentIssueBanner(context, billingRecoveryNotice);
   const paymentIssueHref = recoveryCtaHref(context);
-
   const logoUrl = settings.branding.logoUrl;
   const appName = settings.branding.appName || "Harmomus";
 
@@ -152,19 +137,10 @@ export async function PublicAppShell({ children }: { children: React.ReactNode }
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,#1f2840_0%,#06070c_40%)] text-white">
       <header className="fixed inset-x-0 top-0 z-40 border-b border-white/10 bg-black/50 backdrop-blur-xl">
         <div className="mx-auto flex h-16 w-full max-w-7xl items-center gap-3 px-3 md:h-24 md:gap-5 md:px-8">
-          <Link
-            href="/"
-            prefetch
-            className="flex min-w-[132px] shrink-0 items-center gap-3 text-base font-semibold tracking-wide text-white sm:min-w-[210px] md:min-w-[300px] md:text-xl lg:min-w-[340px]"
-            aria-label={appName}
-          >
+          <Link href="/" prefetch className="flex min-w-[132px] shrink-0 items-center gap-3 text-base font-semibold tracking-wide text-white sm:min-w-[210px] md:min-w-[300px] md:text-xl lg:min-w-[340px]" aria-label={appName}>
             {logoUrl ? (
               <span className="flex h-12 w-[132px] items-center sm:h-14 sm:w-[210px] md:h-20 md:w-[300px] lg:w-[340px]">
-                <img
-                  src={logoUrl}
-                  alt={appName}
-                  className="h-full max-h-full w-full object-contain object-left"
-                />
+                <img src={logoUrl} alt={appName} className="h-full max-h-full w-full object-contain object-left" />
               </span>
             ) : (
               <span className="text-xl font-bold md:text-2xl">{appName}</span>
@@ -178,6 +154,7 @@ export async function PublicAppShell({ children }: { children: React.ReactNode }
       <div className="pt-20 md:pt-28">
         {paymentIssue ? <PaymentIssueBanner notice={billingRecoveryNotice} href={paymentIssueHref} /> : null}
         {!paymentIssue && removedMinistryNotice ? <RemovedMinistryUpsellBanner ministryName={removedMinistryNotice.ministryName} /> : null}
+        {!paymentIssue && !removedMinistryNotice ? <InstallAppBanner isGuest={context.isGuest} profileCreatedAt={context.profile?.created_at} /> : null}
         {children}
       </div>
     </main>
