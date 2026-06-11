@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { InstallAppBanner } from "@/components/public/install-app-banner";
+import { OnboardingChecklistSlot } from "@/components/public/onboarding-checklist-slot";
 import { PublicShellClient } from "@/components/public/public-shell-client";
 import { getCurrentUserAccessContext, type CurrentUserAccessContext } from "@/lib/auth/current-user";
 import { getAdminSettings } from "@/lib/data/admin-settings";
@@ -155,6 +156,7 @@ export async function PublicAppShell({ children }: { children: React.ReactNode }
         {paymentIssue ? <PaymentIssueBanner notice={billingRecoveryNotice} href={paymentIssueHref} /> : null}
         {!paymentIssue && removedMinistryNotice ? <RemovedMinistryUpsellBanner ministryName={removedMinistryNotice.ministryName} /> : null}
         {!paymentIssue && !removedMinistryNotice ? <InstallAppBanner isGuest={context.isGuest} profileCreatedAt={context.profile?.created_at} /> : null}
+        <OnboardingChecklistSlot isGuest={context.isGuest} />
         {children}
       </div>
     </main>

@@ -299,6 +299,27 @@ export default async function CheckoutSucesso({ searchParams }: CheckoutSuccessP
           </div>
         ) : null}
 
+        {accessReady ? (
+          <div className="mt-8 rounded-2xl border border-cyan-300/20 bg-gradient-to-br from-cyan-400/10 via-violet-500/10 to-fuchsia-500/10 p-5">
+            <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
+              <div className="flex gap-4">
+                <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-white/15 bg-white/10 text-2xl">
+                  📱
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold text-cyan-100">Instale o Harmomus como aplicativo</h2>
+                  <p className="mt-2 text-sm leading-6 text-zinc-300">
+                    Coloque o Harmomus na tela inicial e acesse seus kits Premium com apenas um toque.
+                  </p>
+                </div>
+              </div>
+              <Link href="/instalar" className="inline-flex w-full shrink-0 items-center justify-center rounded-xl bg-cyan-300 px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-cyan-200 md:w-auto">
+                Ver tutorial
+              </Link>
+            </div>
+          </div>
+        ) : null}
+
         <div className="mt-8 rounded-2xl border border-zinc-700 bg-zinc-950/70 p-5">
           <h2 className="text-lg font-semibold text-emerald-200">
             {accessReady ? (firstSignupFlow ? "Depois de confirmar o e-mail" : "Benefícios liberados agora") : "Próximos passos"}
