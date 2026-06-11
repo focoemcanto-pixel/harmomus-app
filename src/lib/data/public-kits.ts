@@ -69,6 +69,9 @@ export interface PublicKit {
   manualTessituraRanges: ManualTessituraRanges | null;
   allowPitchShift: boolean;
   maxPitchShiftSemitones: number;
+  previewAudioFileId: string | null;
+  previewStartSeconds: number;
+  previewDurationSeconds: number;
   category: { id: string; name: string; slug: string; description: string | null; cover_url: string | null } | null;
   requiredPlan: { id: string; name: string; slug: string } | null;
   allowedPlanSlugs: string[];
@@ -134,6 +137,12 @@ function getNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function clampPreviewSeconds(value: unknown, fallback: number, min: number, max: number) {
+  const numeric = getNumber(value);
+  if (numeric === null) return fallback;
+  return Math.max(min, Math.min(max, Math.round(numeric)));
+}
+
 function normalizeManualTessituraRanges(value: unknown): ManualTessituraRanges | null {
   if (!value || typeof value !== "object") return null;
   const output: ManualTessituraRanges = {};
@@ -152,6 +161,16 @@ function normalizeManualTessituraRanges(value: unknown): ManualTessituraRanges |
 
 function getLatestAnalysisForFile(file: Database["public"]["Tables"]["kit_audio_files"]["Row"], analysisByFileId: Map<string, CompletedAnalysisJob>) {
   return analysisByFileId.get(file.id) ?? null;
+}
+
+function resolvePreviewAudioFileId(kit: any, tonesMap: Map<string, PublicKitToneGroup>) {
+  const explicit = typeof kit.preview_audio_file_id === "string" && kit.preview_audio_file_id.trim() ? kit.preview_audio_file_id.trim() : null;
+  if (explicit) return explicit;
+
+  const preferredTone = normalizeTone(kit.default_tone ?? kit.original_tone ?? "");
+  const sortedTones = sortTonesByChromaticOrder(Array.from(tonesMap.keys()));
+  const toneGroup = (preferredTone ? tonesMap.get(preferredTone) : null) ?? tonesMap.get(sortedTones[0] ?? "");
+  return toneGroup?.voices.todos?.audioFileId ?? null;
 }
 
 function mapKit(
@@ -241,6 +260,9 @@ function mapKit(
     manualTessituraRanges: manualRanges,
     allowPitchShift: kit.allow_pitch_shift ?? true,
     maxPitchShiftSemitones: kit.max_pitch_shift_semitones ?? 2,
+    previewAudioFileId: resolvePreviewAudioFileId(kit as any, tonesMap),
+    previewStartSeconds: clampPreviewSeconds((kit as any).preview_start_seconds, 0, 0, 60 * 60 * 3),
+    previewDurationSeconds: clampPreviewSeconds((kit as any).preview_duration_seconds, 10, 3, 30),
     category: category ? { id: category.id, name: category.name, slug: category.slug, description: category.description, cover_url: (category as any).cover_url ?? null } : null,
     requiredPlan: requiredPlan ? { id: requiredPlan.id, name: requiredPlan.name, slug: requiredPlan.slug } : null,
     allowedPlanSlugs,
