@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 
+import { trackMarketingEvent } from "@/lib/communications/events";
 import { ensureMinistryForSubscription } from "@/lib/data/ministry";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
@@ -457,6 +458,66 @@ function getPrimaryCustomerEvent(previousPlanSlug: string, nextPlanSlug: string)
   return getSpecificPlanTransitionEvent(previousPlanSlug, nextPlanSlug) ?? getPlanActivatedEvent(nextPlanSlug);
 }
 
+async function trackAsaasCheckoutStarted(input: {
+  supabase: ReturnType<typeof createSupabaseAdminClient>;
+  payload: AsaasWebhookPayload;
+  subscription: SubscriptionRow;
+  planSlug: string;
+}) {
+  if (input.payload.event !== "PAYMENT_CREATED") return;
+
+  await trackMarketingEvent(input.supabase, {
+    userId: input.subscription.user_id,
+    eventKey: "checkout_started",
+    eventLabel: "Checkout iniciado",
+    channel: "billing",
+    source: "asaas",
+    metadata: {
+      provider: "asaas",
+      asaas_event_id: asaasExternalEventId(input.payload),
+      asaas_event_type: input.payload.event,
+      asaas_customer_id: gatewayCustomerId(input.payload),
+      asaas_payment_id: asaasPaymentId(input.payload),
+      asaas_subscription_id: gatewaySubscriptionId(input.payload) ?? input.subscription.gateway_subscription_id ?? null,
+      local_subscription_id: input.subscription.id,
+      plan_slug: input.planSlug,
+      amount: input.payload.payment?.value ?? null,
+      due_date: input.payload.payment?.dueDate ?? null,
+      occurred_at: asaasOccurredAt(input.payload),
+    },
+  });
+}
+
+async function trackAsaasPaymentConversion(input: {
+  supabase: ReturnType<typeof createSupabaseAdminClient>;
+  payload: AsaasWebhookPayload;
+  subscription: SubscriptionRow;
+  planSlug: string;
+}) {
+  if (!input.payload.event || !isConfirmedPaymentEvent(input.payload.event, input.payload)) return;
+
+  await trackMarketingEvent(input.supabase, {
+    userId: input.subscription.user_id,
+    eventKey: "payment_succeeded",
+    eventLabel: "Pagamento confirmado",
+    channel: "billing",
+    source: "asaas",
+    metadata: {
+      provider: "asaas",
+      asaas_event_id: asaasExternalEventId(input.payload),
+      asaas_event_type: input.payload.event,
+      asaas_customer_id: gatewayCustomerId(input.payload),
+      asaas_payment_id: asaasPaymentId(input.payload),
+      asaas_subscription_id: gatewaySubscriptionId(input.payload) ?? input.subscription.gateway_subscription_id ?? null,
+      local_subscription_id: input.subscription.id,
+      plan_slug: input.planSlug,
+      amount: input.payload.payment?.value ?? null,
+      payment_date: input.payload.payment?.paymentDate ?? input.payload.payment?.clientPaymentDate ?? null,
+      occurred_at: asaasOccurredAt(input.payload),
+    },
+  });
+}
+
 export async function POST(req: Request) {
   let payload: AsaasWebhookPayload | null = null;
   const supabase = createSupabaseAdminClient();
@@ -513,6 +574,9 @@ export async function POST(req: Request) {
         console.error("[asaas.webhook] Falha ao sincronizar central ministerial", ministryError);
       }
     }
+
+    await trackAsaasCheckoutStarted({ supabase, payload, subscription, planSlug: nextPlanSlug });
+    await trackAsaasPaymentConversion({ supabase, payload, subscription, planSlug: nextPlanSlug });
 
     const customerEvent = isActivationEvent(event, payload, status)
       ? getPrimaryCustomerEvent(previousPlanSlug, nextPlanSlug)

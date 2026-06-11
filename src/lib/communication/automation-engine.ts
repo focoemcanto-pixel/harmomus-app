@@ -82,6 +82,9 @@ const BLOCKING_COMPLETION_EVENTS = new Set([
   "subscription.created",
   "invoice.paid",
   "payment_succeeded",
+  "payment.approved",
+  "payment_confirmed",
+  "payment_received",
   "plan.plus_activated",
   "plan.premium_activated",
 ]);
@@ -206,12 +209,12 @@ function shouldSkipByRule(input: {
   if (plans.length && !plans.includes(currentPlan)) return `plan_not_allowed:${currentPlan}`;
 
   if (input.automation.intent === "checkout_abandoned") {
-    const latestCheckoutStarted = input.events
-      .filter((event) => getEventKey(event) === "checkout_started")
+    const latestCheckoutAbandonment = input.events
+      .filter((event) => ["checkout_abandoned", "checkout_abandoned_candidate", "checkout_started"].includes(getEventKey(event)))
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
 
-    if (!latestCheckoutStarted) return "checkout_started_not_found";
-    if (hasCompletionAfter(input.events, latestCheckoutStarted.created_at)) return "checkout_completed_after_start";
+    if (!latestCheckoutAbandonment) return "checkout_abandonment_event_not_found";
+    if (hasCompletionAfter(input.events, latestCheckoutAbandonment.created_at)) return "checkout_completed_after_abandonment";
   }
 
   if (input.automation.intent === "payment_recovery") {
