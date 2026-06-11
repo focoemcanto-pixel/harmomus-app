@@ -100,7 +100,6 @@ export function KitPreviewButton({ audioUrl, startSeconds, durationSeconds, labe
 
     const audio = new Audio(audioUrl);
     audio.preload = "auto";
-    audio.playsInline = true;
     audioRef.current = audio;
     preparedUrlRef.current = audioUrl;
 
