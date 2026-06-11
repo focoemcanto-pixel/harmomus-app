@@ -9,7 +9,7 @@ type KitPreviewButtonProps = {
   label?: string;
 };
 
-type PreviewState = "idle" | "loading" | "playing";
+type PreviewState = "idle" | "loading" | "playing" | "error";
 
 let activeAudio: HTMLAudioElement | null = null;
 let activeStopTimer: number | null = null;
@@ -25,9 +25,7 @@ function clearActiveTimers() {
 
 function resetActiveAudio() {
   clearActiveTimers();
-  if (activeAudio) {
-    activeAudio.pause();
-  }
+  if (activeAudio) activeAudio.pause();
   activeAudio = null;
   activeReset?.();
   activeReset = null;
@@ -69,9 +67,11 @@ export function KitPreviewButton({ audioUrl, startSeconds, durationSeconds, labe
   const [progress, setProgress] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const preparedUrlRef = useRef<string | null>(null);
+  const errorResetTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     return () => {
+      if (errorResetTimerRef.current) window.clearTimeout(errorResetTimerRef.current);
       if (activeAudio === audioRef.current) resetActiveAudio();
     };
   }, []);
@@ -80,7 +80,7 @@ export function KitPreviewButton({ audioUrl, startSeconds, durationSeconds, labe
     if (!audioUrl || preparedUrlRef.current === audioUrl) return;
     if (audioRef.current && activeAudio !== audioRef.current) {
       audioRef.current.pause();
-      audioRef.current.src = "";
+      audioRef.current.removeAttribute("src");
       audioRef.current.load();
     }
     audioRef.current = null;
@@ -93,17 +93,18 @@ export function KitPreviewButton({ audioUrl, startSeconds, durationSeconds, labe
 
   const isLoading = state === "loading";
   const isPlaying = state === "playing";
+  const hasError = state === "error";
 
   function prepareAudio() {
     if (!audioUrl) return null;
     if (audioRef.current && preparedUrlRef.current === audioUrl) return audioRef.current;
 
-    const audio = new Audio(audioUrl);
-    audio.preload = "auto";
+    const audio = new Audio();
+    audio.preload = "metadata";
+    audio.playsInline = true;
+    audio.src = audioUrl;
     audioRef.current = audio;
     preparedUrlRef.current = audioUrl;
-
-    // Força o navegador a começar a buscar metadados em hover/touch antes do clique.
     audio.load();
     return audio;
   }
@@ -113,12 +114,16 @@ export function KitPreviewButton({ audioUrl, startSeconds, durationSeconds, labe
     setProgress(0);
   }
 
+  function showErrorBriefly() {
+    setState("error");
+    setProgress(0);
+    if (errorResetTimerRef.current) window.clearTimeout(errorResetTimerRef.current);
+    errorResetTimerRef.current = window.setTimeout(() => setState("idle"), 1200);
+  }
+
   function stopThisPreview() {
-    if (activeAudio === audioRef.current) {
-      resetActiveAudio();
-    } else {
-      resetThisButton();
-    }
+    if (activeAudio === audioRef.current) resetActiveAudio();
+    else resetThisButton();
   }
 
   function startProgressTimer(duration: number) {
@@ -146,7 +151,7 @@ export function KitPreviewButton({ audioUrl, startSeconds, durationSeconds, labe
 
     const audio = prepareAudio();
     if (!audio) {
-      resetThisButton();
+      showErrorBriefly();
       return;
     }
 
@@ -161,21 +166,28 @@ export function KitPreviewButton({ audioUrl, startSeconds, durationSeconds, labe
     };
 
     audio.addEventListener("ended", finalize, { once: true });
-    audio.addEventListener("error", finalize, { once: true });
+    audio.addEventListener("error", () => {
+      if (activeAudio === audio) {
+        resetActiveAudio();
+        showErrorBriefly();
+      }
+    }, { once: true });
 
     try {
+      // Em alguns browsers mobile, setar currentTime=0 antes dos metadados faz o play falhar.
+      // Por isso só fazemos seek quando o início escolhido é maior que zero.
       if (start > 0) {
         await waitForMetadata(audio);
         if (canSeek(audio) && audio.duration > start) audio.currentTime = start;
-      } else {
-        audio.currentTime = 0;
       }
 
       await audio.play();
       setState("playing");
       startProgressTimer(duration);
-    } catch {
+    } catch (error) {
+      console.warn("[kit-preview] playback failed", error);
       resetActiveAudio();
+      showErrorBriefly();
     }
   }
 
@@ -192,11 +204,14 @@ export function KitPreviewButton({ audioUrl, startSeconds, durationSeconds, labe
     >
       {isLoading ? (
         <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+      ) : hasError ? (
+        <span className="relative z-10 text-xs font-black leading-none">!</span>
       ) : (
         <span className="relative z-10 text-sm font-black leading-none">{isPlaying ? "❚❚" : "▶"}</span>
       )}
       {isPlaying ? <span className="absolute inset-x-0 bottom-0 h-1 bg-cyan-300/80" style={{ width: `${progress}%` }} /> : null}
       {isLoading ? <span className="absolute inset-0 animate-pulse bg-cyan-300/10" /> : null}
+      {hasError ? <span className="absolute inset-0 bg-red-500/25" /> : null}
     </button>
   );
 }
