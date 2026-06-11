@@ -50,10 +50,33 @@ export default async function CadastroSucessoPage({ searchParams }: Props) {
             </div>
           </div>
 
-
           <div className="px-6 pt-6 md:px-10">
             <EmailConfirmationState variant="free" email={email} allowEmailEdit allowResend />
           </div>
+
+          <div className="px-6 pt-6 md:px-10">
+            <div className="relative overflow-hidden rounded-3xl border border-cyan-300/20 bg-gradient-to-br from-cyan-400/10 via-violet-500/10 to-fuchsia-500/10 p-6">
+              <div className="absolute right-[-60px] top-[-60px] h-44 w-44 rounded-full bg-cyan-400/10 blur-3xl" />
+              <div className="relative z-10 flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
+                <div className="flex gap-4">
+                  <div className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl border border-white/15 bg-white/10 text-3xl">
+                    📱
+                  </div>
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[0.24em] text-cyan-200">Acesso rápido</p>
+                    <h2 className="mt-2 text-2xl font-black text-white">Transforme o Harmomus em um aplicativo</h2>
+                    <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-200">
+                      Instale no Android ou iPhone e acesse seus kits e estudos com apenas um toque na tela inicial.
+                    </p>
+                  </div>
+                </div>
+                <Link href="/instalar" className="inline-flex h-13 w-full shrink-0 items-center justify-center rounded-2xl bg-gradient-to-r from-cyan-300 to-violet-400 px-6 py-4 text-sm font-black text-slate-950 transition hover:brightness-110 md:w-auto md:min-w-[180px]">
+                  Ver tutorial
+                </Link>
+              </div>
+            </div>
+          </div>
+
           <div className="grid gap-6 p-6 md:grid-cols-[1.1fr_0.9fr] md:p-10">
             <div className="rounded-3xl border border-white/10 bg-black/25 p-6">
               <div className="flex items-center justify-between gap-3">
