@@ -136,7 +136,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     }
 
     const requiredPlan = resolveRequiredPlan(plans, kit.required_plan);
-    const accessKit = {
+    const accessKit: PublicKit = {
       id: kit.id,
       slug: kit.slug,
       name: kit.name,
@@ -148,12 +148,15 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       defaultTone: kit.default_tone ?? kit.original_tone ?? null,
       allowPitchShift: kit.allow_pitch_shift ?? true,
       maxPitchShiftSemitones: kit.max_pitch_shift_semitones ?? 2,
+      previewAudioFileId: null,
+      previewStartSeconds: 0,
+      previewDurationSeconds: 10,
       manualTessituraRanges: {},
       category: null,
       requiredPlan,
       allowedPlanSlugs: resolveAllowedPlanSlugs(kit.allowed_plan_slugs, requiredPlan),
       tones: [],
-    } as PublicKit;
+    };
 
     const access = await resolveKitAccess(context, accessKit);
     if (!access.play.allowed) {
