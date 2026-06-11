@@ -101,7 +101,6 @@ export function KitPreviewButton({ audioUrl, startSeconds, durationSeconds, labe
 
     const audio = new Audio();
     audio.preload = "metadata";
-    audio.playsInline = true;
     audio.src = audioUrl;
     audioRef.current = audio;
     preparedUrlRef.current = audioUrl;
@@ -166,12 +165,16 @@ export function KitPreviewButton({ audioUrl, startSeconds, durationSeconds, labe
     };
 
     audio.addEventListener("ended", finalize, { once: true });
-    audio.addEventListener("error", () => {
-      if (activeAudio === audio) {
-        resetActiveAudio();
-        showErrorBriefly();
-      }
-    }, { once: true });
+    audio.addEventListener(
+      "error",
+      () => {
+        if (activeAudio === audio) {
+          resetActiveAudio();
+          showErrorBriefly();
+        }
+      },
+      { once: true },
+    );
 
     try {
       // Em alguns browsers mobile, setar currentTime=0 antes dos metadados faz o play falhar.
