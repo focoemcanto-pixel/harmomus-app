@@ -12,7 +12,7 @@ import {
   Users,
 } from "lucide-react";
 
-import { DeleteMemberButton } from "@/components/admin/delete-member-button";
+import { MembersMobileCardList } from "@/components/admin/members-mobile-card-list";
 import { PageHeader } from "@/components/admin/page-header";
 import { getMemberOperationalSummaries, getMembers } from "@/lib/data/members";
 import { formatDateTimeBR } from "@/lib/format-date-time-br";
@@ -169,12 +169,12 @@ const operationalFilters = [
 
 function StatCard({ label, value, detail, icon: Icon }: { label: string; value: string; detail: string; icon: any }) {
   return (
-    <article className="rounded-3xl border border-white/10 bg-gradient-to-br from-surface via-surface to-background p-5 shadow-premium">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <p className="text-xs uppercase tracking-[0.22em] text-muted">{label}</p>
+    <article className="min-w-[165px] rounded-3xl border border-white/10 bg-gradient-to-br from-surface via-surface to-background p-4 shadow-premium sm:p-5">
+      <div className="mb-3 flex items-center justify-between gap-3 sm:mb-4">
+        <p className="text-[11px] uppercase tracking-[0.18em] text-muted sm:text-xs sm:tracking-[0.22em]">{label}</p>
         <span className="rounded-2xl border border-gold-400/20 bg-gold-500/10 p-2 text-gold-200"><Icon className="h-4 w-4" /></span>
       </div>
-      <p className="text-3xl font-semibold text-white">{value}</p>
+      <p className="text-2xl font-semibold text-white sm:text-3xl">{value}</p>
       <p className="mt-1 text-xs text-muted">{detail}</p>
     </article>
   );
@@ -217,30 +217,52 @@ export default async function AdminMembrosPage({ searchParams }: { searchParams:
     { key: "risk", label: "Risco / churn", count: risk.length, href: "/admin/comunicacao/campaigns?segment=risk" },
   ];
 
+  const mobileMembers = journeys.map(({ member, journey }) => {
+    const stripeCustomer = member.subscription?.stripe_customer_id ?? (member.subscription as any)?.gateway_customer_id;
+    const stripeSub = member.subscription?.stripe_subscription_id ?? (member.subscription as any)?.gateway_subscription_id;
+    return {
+      id: member.profile.id,
+      name: member.profile.full_name ?? null,
+      email: member.profile.email ?? null,
+      createdAt: member.profile.created_at ?? null,
+      planName: member.plan?.name ?? null,
+      status: member.subscription?.status ?? null,
+      gateway: member.subscription?.gateway ?? null,
+      nextBillingAt: member.subscription?.next_billing_at ?? member.subscription?.current_period_end ?? null,
+      journeyLabel: journey.label,
+      journeyDescription: journey.description,
+      journeyStage: journey.stage,
+      journeyHealth: journey.health,
+      nextAction: journey.nextAction,
+      actionHref: journey.actionHref,
+      stripeLinked: Boolean(stripeCustomer || stripeSub),
+    };
+  });
+
   return (
-    <section className="space-y-6">
+    <section className="space-y-4 sm:space-y-6">
       <PageHeader title="Central de Membros" description="Jornada do lead ao assinante: origem, plano, cobrança, risco e intervenção em uma visão executiva." />
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Base rastreada" value={String(total)} detail="Perfis sincronizados com Auth + Profiles" icon={Users} />
-        <StatCard label="Pagantes ativos" value={String(paidActive.length)} detail={`MRR estimado ${formatMoney(estimatedMrr)}`} icon={CreditCard} />
-        <StatCard label="Conversão da base" value={`${conversion}%`} detail={`${freeActive.length} usuários free em nutrição`} icon={TrendingUp} />
-        <StatCard label="Intervenções" value={String(pending.length + risk.length)} detail="Pendentes, risco ou churn para campanha" icon={Target} />
+      <div className="-mx-3 flex gap-3 overflow-x-auto px-3 pb-1 md:mx-0 md:grid md:grid-cols-2 md:px-0 xl:grid-cols-4">
+        <StatCard label="Base rastreada" value={String(total)} detail="Perfis sincronizados" icon={Users} />
+        <StatCard label="Pagantes ativos" value={String(paidActive.length)} detail={`MRR ${formatMoney(estimatedMrr)}`} icon={CreditCard} />
+        <StatCard label="Conversão" value={`${conversion}%`} detail={`${freeActive.length} usuários free`} icon={TrendingUp} />
+        <StatCard label="Intervenções" value={String(pending.length + risk.length)} detail="Pendentes, risco ou churn" icon={Target} />
       </div>
 
-      <div className="rounded-3xl border border-border bg-surface p-5 shadow-premium">
-        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="rounded-3xl border border-border bg-surface p-4 shadow-premium sm:p-5">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-white">Pipeline de jornada</h2>
-            <p className="text-sm text-muted">Clique em uma etapa para iniciar uma campanha segmentada.</p>
+            <p className="text-xs text-muted sm:text-sm">Clique em uma etapa para iniciar uma campanha segmentada.</p>
           </div>
-          <Link href="/admin/comunicacao/campaigns" className="inline-flex items-center gap-2 rounded-2xl border border-gold-400/30 bg-gold-500/10 px-4 py-2 text-sm font-medium text-gold-200 transition hover:bg-gold-500/20">
+          <Link href="/admin/comunicacao/campaigns" className="inline-flex items-center justify-center gap-2 rounded-2xl border border-gold-400/30 bg-gold-500/10 px-4 py-2 text-sm font-medium text-gold-200 transition hover:bg-gold-500/20">
             <MailPlus className="h-4 w-4" /> Criar campanha
           </Link>
         </div>
-        <div className="grid gap-3 md:grid-cols-4">
+        <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-1 md:mx-0 md:grid md:grid-cols-4 md:px-0">
           {pipeline.map((step, index) => (
-            <Link key={step.key} href={step.href} className="group rounded-2xl border border-white/10 bg-background/60 p-4 transition hover:border-gold-400/40 hover:bg-gold-500/10">
+            <Link key={step.key} href={step.href} className="group min-w-[165px] rounded-2xl border border-white/10 bg-background/60 p-4 transition hover:border-gold-400/40 hover:bg-gold-500/10">
               <div className="mb-3 flex items-center justify-between">
                 <span className="flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/5 text-sm text-white">{index + 1}</span>
                 <ArrowRight className="h-4 w-4 text-muted transition group-hover:text-gold-200" />
@@ -252,7 +274,7 @@ export default async function AdminMembrosPage({ searchParams }: { searchParams:
         </div>
       </div>
 
-      <form className="grid gap-3 rounded-3xl border border-border bg-surface p-4 shadow-premium md:grid-cols-[1.2fr_1fr_1fr_1fr_auto]">
+      <form className="grid gap-2 rounded-3xl border border-border bg-surface p-3 shadow-premium sm:p-4 md:grid-cols-[1.2fr_1fr_1fr_1fr_auto]">
         <label className="relative block">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
           <input name="q" placeholder="Buscar por nome/email" defaultValue={params.q} className="w-full rounded-2xl border border-border bg-background py-3 pl-10 pr-3 text-sm outline-none transition focus:border-gold-400/50" />
@@ -272,19 +294,21 @@ export default async function AdminMembrosPage({ searchParams }: { searchParams:
       </form>
 
       <div className="overflow-hidden rounded-3xl border border-border bg-surface shadow-premium">
-        <div className="border-b border-border/70 bg-gradient-to-br from-surface-muted to-background p-5">
+        <div className="border-b border-border/70 bg-gradient-to-br from-surface-muted to-background p-4 sm:p-5">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-lg font-semibold text-white">Mapa dos membros</h2>
-              <p className="text-sm text-muted">A saúde operacional foi movida para dentro do diagnóstico para deixar a lista mais limpa.</p>
+              <p className="text-xs text-muted sm:text-sm">Lista otimizada no celular e diagnóstico completo no desktop.</p>
             </div>
-            <span className="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-500/10 px-3 py-1 text-xs text-cyan-100">
+            <span className="inline-flex w-fit items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-500/10 px-3 py-1 text-xs text-cyan-100">
               <Sparkles className="h-3.5 w-3.5" /> Jornada enriquecida
             </span>
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <MembersMobileCardList items={mobileMembers} />
+
+        <div className="hidden overflow-x-auto lg:block">
           <table className="w-full min-w-[1220px] text-sm">
             <thead className="text-left text-xs uppercase tracking-wide text-muted">
               <tr className="border-b border-border/70">
@@ -342,11 +366,6 @@ export default async function AdminMembrosPage({ searchParams }: { searchParams:
                         <Link href={journey.actionHref} className="inline-flex items-center justify-center rounded-xl border border-gold-400/30 bg-gold-500/10 px-3 py-2 text-xs font-medium text-gold-200 transition hover:bg-gold-500/20">
                           {journey.nextAction}
                         </Link>
-                        <DeleteMemberButton
-                          memberId={member.profile.id}
-                          memberLabel={member.profile.email ?? member.profile.full_name ?? member.profile.id}
-                          className="inline-flex w-full items-center justify-center gap-1 rounded-xl border border-red-400/35 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-200 transition hover:bg-red-500/20"
-                        />
                       </div>
                     </td>
                   </tr>
