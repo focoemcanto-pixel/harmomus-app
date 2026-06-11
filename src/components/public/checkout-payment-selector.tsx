@@ -20,6 +20,7 @@ type PaymentOption = {
 type CheckoutPaymentSelectorProps = {
   planName: string;
   monthlyPrice: string;
+  requiresPhoneUpdate?: boolean;
   options: PaymentOption[];
 };
 
@@ -41,7 +42,7 @@ const METHOD_SUMMARY: Record<PaymentMethod, { note: string; highlight: string }>
 const primaryButtonClass = "mt-6 block rounded-2xl bg-gradient-to-r from-cyan-300 to-fuchsia-300 px-5 py-4 text-center text-sm font-bold text-slate-950 transition hover:opacity-90";
 const mobileButtonClass = "shrink-0 rounded-2xl bg-gradient-to-r from-cyan-300 to-fuchsia-300 px-5 py-3 text-sm font-bold text-slate-950";
 
-export function CheckoutPaymentSelector({ planName, monthlyPrice, options }: CheckoutPaymentSelectorProps) {
+export function CheckoutPaymentSelector({ planName, monthlyPrice, requiresPhoneUpdate = false, options }: CheckoutPaymentSelectorProps) {
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>("card");
   const summaryRef = useRef<HTMLElement>(null);
   const selectedOption = useMemo(() => options.find((option) => option.id === selectedMethod) ?? options[0], [options, selectedMethod]);
@@ -68,6 +69,12 @@ export function CheckoutPaymentSelector({ planName, monthlyPrice, options }: Che
               <p className="mt-2 text-sm leading-6 text-zinc-300">Cartão tem teste grátis. Pix e boleto liberam o acesso após confirmação do pagamento.</p>
             </div>
           </div>
+
+          {requiresPhoneUpdate ? (
+            <div className="mb-5 rounded-2xl border border-amber-300/25 bg-amber-400/10 p-4 text-sm leading-6 text-amber-100">
+              Para evitar falha na cobrança, confirme seu telefone no perfil depois de finalizar a assinatura.
+            </div>
+          ) : null}
 
           <div className="space-y-3">
             {options.map((option) => {
