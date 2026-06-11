@@ -57,26 +57,25 @@ export function MembersMobileCardList({ items }: { items: MobileMemberItem[] }) 
             <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-medium ${stagePillClass(item.journeyStage)}`}>{item.journeyLabel}</span>
           </div>
 
-          <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-2.5">
-              <p className="text-[10px] uppercase tracking-[0.14em] text-muted">Plano</p>
-              <p className="mt-1 truncate font-medium text-white">{item.planName ?? "Sem plano"}</p>
-              <p className="mt-0.5 text-muted">{item.status ?? "none"}</p>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-2.5">
-              <p className="text-[10px] uppercase tracking-[0.14em] text-muted">Gateway</p>
-              <p className="mt-1 truncate font-medium text-white">{item.gateway ?? "—"}</p>
-              <p className="mt-0.5 text-muted">Cob.: {safeDate(item.nextBillingAt)}</p>
-            </div>
+          <div className="mt-3 flex flex-wrap gap-1.5 text-[11px]">
+            <span className="inline-flex max-w-full items-center rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-zinc-200">
+              <span className="truncate">{item.planName ?? "Sem plano"}</span>
+              <span className="ml-1 text-zinc-500">• {item.status ?? "none"}</span>
+            </span>
+            <span className="inline-flex max-w-full items-center rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-zinc-300">
+              <span className="truncate">{item.gateway ?? "Gateway —"}</span>
+            </span>
+            <span className="inline-flex max-w-full items-center rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-zinc-400">
+              <span className="truncate">Cob. {safeDate(item.nextBillingAt)}</span>
+            </span>
           </div>
 
-          <div className={`mt-2 rounded-2xl border p-2.5 ${healthClass(item.journeyHealth)}`}>
-            <div className="flex items-start gap-2">
-              {item.journeyHealth === "success" ? <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0" /> : <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />}
-              <div className="min-w-0">
-                <p className="text-xs font-semibold">{item.nextAction}</p>
-                <p className="mt-0.5 line-clamp-1 text-[11px] opacity-80">{item.journeyDescription}</p>
-                <p className="mt-1 truncate text-[10px] opacity-70">Stripe: {item.stripeLinked ? "vinculado" : "sem vínculo visível"}</p>
+          <div className={`mt-2 rounded-2xl border px-2.5 py-2 ${healthClass(item.journeyHealth)}`}>
+            <div className="flex items-center gap-2">
+              {item.journeyHealth === "success" ? <BadgeCheck className="h-4 w-4 shrink-0" /> : <AlertTriangle className="h-4 w-4 shrink-0" />}
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-semibold">{item.nextAction}</p>
+                <p className="mt-0.5 truncate text-[10px] opacity-70">Stripe: {item.stripeLinked ? "vinculado" : "sem vínculo visível"}</p>
               </div>
             </div>
           </div>
