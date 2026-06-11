@@ -156,7 +156,7 @@ export async function PublicAppShell({ children }: { children: React.ReactNode }
         {paymentIssue ? <PaymentIssueBanner notice={billingRecoveryNotice} href={paymentIssueHref} /> : null}
         {!paymentIssue && removedMinistryNotice ? <RemovedMinistryUpsellBanner ministryName={removedMinistryNotice.ministryName} /> : null}
         {!paymentIssue && !removedMinistryNotice ? <InstallAppBanner isGuest={context.isGuest} profileCreatedAt={context.profile?.created_at} /> : null}
-        <OnboardingChecklistSlot isGuest={context.isGuest} />
+        <OnboardingChecklistSlot />
         {children}
       </div>
     </main>
