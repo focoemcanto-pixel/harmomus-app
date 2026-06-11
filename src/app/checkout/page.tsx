@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { CheckoutPaymentSelector } from "@/components/public/checkout-payment-selector";
 import { PublicAppShell } from "@/components/public/public-app-shell";
+import { getCurrentProfile } from "@/lib/auth/current-user";
 import { getPlans } from "@/lib/data/plans";
 
 const PAID_PLAN_SLUGS = new Set(["plus", "premium", "ministry_10", "ministry_20", "ministry_40"]);
@@ -25,8 +26,15 @@ function buildHref(path: string, planSlug: string, params: Record<string, string
   return `${path}?${query.toString()}`;
 }
 
+function hasValidPhone(value?: string | null) {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  if (!digits) return false;
+  const normalized = digits.startsWith("55") ? digits : `55${digits}`;
+  return normalized.length === 12 || normalized.length === 13;
+}
+
 export default async function CheckoutPage({ searchParams }: CheckoutPageProps) {
-  const [params, plans] = await Promise.all([searchParams, getPlans()]);
+  const [params, plans, profile] = await Promise.all([searchParams, getPlans(), getCurrentProfile()]);
   const selectedPlan = String(getStringParam(params, "plan") ?? "premium").trim().toLowerCase();
   const plan = plans.find((item) => item.slug.toLowerCase() === selectedPlan && PAID_PLAN_SLUGS.has(item.slug));
 
@@ -35,6 +43,7 @@ export default async function CheckoutPage({ searchParams }: CheckoutPageProps) 
   const price = typeof plan?.price_cents === "number"
     ? new Intl.NumberFormat("pt-BR", { style: "currency", currency: plan.currency || "BRL" }).format(plan.price_cents / 100)
     : null;
+  const requiresPhoneUpdate = Boolean(profile?.id) && !hasValidPhone((profile as any)?.phone);
 
   return (
     <PublicAppShell>
@@ -56,6 +65,7 @@ export default async function CheckoutPage({ searchParams }: CheckoutPageProps) 
           <CheckoutPaymentSelector
             planName={planName}
             monthlyPrice={price ?? "R$39,00/mês"}
+            requiresPhoneUpdate={requiresPhoneUpdate}
             options={[
               {
                 id: "card",
