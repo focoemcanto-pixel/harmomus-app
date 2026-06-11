@@ -262,6 +262,12 @@ export function PublicShellClient({
                 >
                   Cadastre-se
                 </Link>
+                <Link
+                  href="/instalar"
+                  className="block rounded-lg px-3 py-2 text-sm text-cyan-100 hover:bg-white/5"
+                >
+                  📱 Instalar Aplicativo
+                </Link>
               </>
             ) : (
               <>
@@ -302,6 +308,12 @@ export function PublicShellClient({
                   className="block rounded-lg px-3 py-2 text-sm hover:bg-white/5"
                 >
                   Assinatura
+                </Link>
+                <Link
+                  href="/instalar"
+                  className="block rounded-lg px-3 py-2 text-sm font-semibold text-cyan-100 hover:bg-white/5"
+                >
+                  📱 Instalar Aplicativo
                 </Link>
                 <Link
                   href="/minhas-playlists"
