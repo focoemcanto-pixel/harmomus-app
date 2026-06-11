@@ -10,8 +10,8 @@ type KitPreviewButtonProps = {
 };
 
 let activeAudio: HTMLAudioElement | null = null;
-let activeStopTimer: ReturnType<typeof window.setTimeout> | null = null;
-let activeProgressTimer: ReturnType<typeof window.setInterval> | null = null;
+let activeStopTimer: number | null = null;
+let activeProgressTimer: number | null = null;
 let activeReset: (() => void) | null = null;
 
 function clearActiveTimers() {
