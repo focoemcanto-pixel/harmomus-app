@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { KitAudioSyncCard } from "@/components/admin/kit-audio-sync-card";
 import { KitForm } from "@/components/admin/kit-form";
 import { KitLaunchCampaignCard } from "@/components/admin/kit-launch-campaign-card";
+import { KitPreviewCard } from "@/components/admin/kit-preview-card";
 import { getArtistCategories, getKitById, getKitFormOptions } from "@/lib/data/kits";
 import { brazilianNoteToMidi } from "@/lib/music/brazilian-note";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -12,13 +13,29 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const DEFAULT_ALLOWED_PLANS = ["free", "plus", "premium"];
-const OPTIONAL_KIT_COLUMNS = ["allowed_plan_slugs", "original_tone", "default_tone", "allow_pitch_shift", "max_pitch_shift_semitones", "manual_tessitura_ranges"] as const;
+const OPTIONAL_KIT_COLUMNS = [
+  "allowed_plan_slugs",
+  "original_tone",
+  "default_tone",
+  "allow_pitch_shift",
+  "max_pitch_shift_semitones",
+  "manual_tessitura_ranges",
+  "preview_audio_file_id",
+  "preview_start_seconds",
+  "preview_duration_seconds",
+] as const;
 const TESSITURA_VOICES = ["tenor", "contralto", "soprano"] as const;
 
 function parsePitchShiftLimit(value: FormDataEntryValue | null) {
   const parsed = Number(value ?? 2);
   if (!Number.isFinite(parsed)) return 2;
   return Math.max(1, Math.min(3, Math.round(parsed)));
+}
+
+function parsePreviewSeconds(value: FormDataEntryValue | null, fallback: number, min: number, max: number) {
+  const parsed = Number(value ?? fallback);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(parsed)));
 }
 
 function parseAllowedPlanSlugs(formData: FormData, validPlanSlugs: string[]) {
@@ -122,9 +139,26 @@ async function updateKitWithFallback(supabase: any, kitId: string, payload: Reco
   throw new Error(`Falha ao atualizar kit: ${error.message}`);
 }
 
+async function getPreviewAudioFiles(kitId: string) {
+  const supabase = createSupabaseAdminClient() as any;
+  const { data, error } = await supabase
+    .from("kit_audio_files")
+    .select("id,name,tone,file_type")
+    .eq("kit_id", kitId)
+    .order("tone", { ascending: true })
+    .order("name", { ascending: true });
+
+  if (error) {
+    console.warn("[admin-kit-edit] failed to load preview audio files", error.message);
+    return [];
+  }
+
+  return (data ?? []) as { id: string; name: string | null; tone: string | null; file_type: string | null }[];
+}
+
 export default async function EditarKitPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [kit, { categories, plans }, artistCategories] = await Promise.all([getKitById(id), getKitFormOptions(), getArtistCategories()]);
+  const [kit, { categories, plans }, artistCategories, previewAudioFiles] = await Promise.all([getKitById(id), getKitFormOptions(), getArtistCategories(), getPreviewAudioFiles(id)]);
   if (!kit) notFound();
 
   async function updateKitAction(formData: FormData) {
@@ -184,9 +218,45 @@ export default async function EditarKitPage({ params }: { params: Promise<{ id: 
     redirect(`/admin/kits/${id}/editar?savedAt=${Date.now()}`);
   }
 
+  async function updatePreviewAction(formData: FormData) {
+    "use server";
+
+    const previewAudioFileId = String(formData.get("preview_audio_file_id") ?? "").trim() || null;
+    const previewStartSeconds = parsePreviewSeconds(formData.get("preview_start_seconds"), 0, 0, 60 * 60 * 3);
+    const previewDurationSeconds = parsePreviewSeconds(formData.get("preview_duration_seconds"), 10, 3, 30);
+
+    try {
+      const supabase = createSupabaseAdminClient() as any;
+      await updateKitWithFallback(supabase, id, {
+        preview_audio_file_id: previewAudioFileId,
+        preview_start_seconds: previewStartSeconds,
+        preview_duration_seconds: previewDurationSeconds,
+      });
+
+      revalidatePath("/", "page");
+      revalidatePath("/admin/kits", "page");
+      revalidatePath(`/admin/kits/${id}/editar`, "page");
+      revalidatePath("/biblioteca", "page");
+      revalidatePath("/todos-os-kits", "page");
+      revalidatePath(`/biblioteca/${kit.slug}`, "page");
+    } catch (error) {
+      console.error("[admin-kit-preview] failed", error);
+      redirect(`/admin/kits/${id}/editar?previewError=1`);
+    }
+
+    redirect(`/admin/kits/${id}/editar?previewSavedAt=${Date.now()}`);
+  }
+
   return (
     <div className="space-y-6">
       <KitForm mode="edit" categories={categories} artistCategories={artistCategories} plans={plans} initialData={kit} action={updateKitAction} />
+      <KitPreviewCard
+        audioFiles={previewAudioFiles}
+        initialAudioFileId={(kit as any).preview_audio_file_id ?? null}
+        initialStartSeconds={(kit as any).preview_start_seconds ?? 0}
+        initialDurationSeconds={(kit as any).preview_duration_seconds ?? 10}
+        action={updatePreviewAction}
+      />
       <KitAudioSyncCard kitId={kit.id} />
       <KitLaunchCampaignCard kitId={kit.id} published={Boolean(kit.published)} />
     </div>
