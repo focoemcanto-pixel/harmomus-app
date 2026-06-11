@@ -98,7 +98,7 @@ export default async function HomePage() {
             <div className="relative min-w-0 overflow-hidden rounded-[2rem]">
               <HomeHeroCarousel
                 banners={homeBanners.length ? homeBanners : latestKits.slice(0, 1).map((kit, index) => ({ id: `fallback-${index}`, title: kit.name, subtitle: resolveKitArtist(kit), button_label: "Ver kit", button_href: `/biblioteca/${kit.slug}`, image_url: kit.coverUrl ?? "", mobile_image_url: null }))}
-                latestKits={latestKits.map((kit) => ({ id: kit.id, slug: kit.slug, name: kit.name, artist: resolveKitArtist(kit), coverUrl: kit.coverUrl }))}
+                latestKits={latestKits.map((kit) => ({ id: kit.id, slug: kit.slug, name: kit.name, artist: resolveKitArtist(kit), coverUrl: kit.coverUrl, previewAudioFileId: kit.previewAudioFileId, previewStartSeconds: kit.previewStartSeconds, previewDurationSeconds: kit.previewDurationSeconds }))}
               />
             </div>
           </div>
@@ -119,9 +119,9 @@ export default async function HomePage() {
                   <div className="relative overflow-hidden">
                     <span className="absolute left-3 top-3 z-10 rounded-full bg-fuchsia-500/90 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-white">Novo</span>
                     {kit.coverUrl ? <img src={kit.coverUrl} alt={kit.name} className={`aspect-square w-full object-cover transition duration-500 group-hover:scale-105 ${locked ? "opacity-65" : ""}`} /> : <div className="aspect-square w-full bg-gradient-to-br from-zinc-900 to-[#141828]" />}
-                    {!locked && kit.previewAudioFileId ? (
+                    {kit.previewAudioFileId ? (
                       <KitPreviewButton
-                        audioUrl={`/api/audio/${kit.previewAudioFileId}`}
+                        audioUrl={`/api/audio/${kit.previewAudioFileId}/preview`}
                         startSeconds={kit.previewStartSeconds}
                         durationSeconds={kit.previewDurationSeconds}
                         label={`Ouvir preview de ${kit.name}`}
