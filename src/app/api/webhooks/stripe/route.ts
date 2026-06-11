@@ -211,6 +211,7 @@ async function markSubscriptionWithoutActiveAccess(supabase: any, userId: string
 
 function mapStripeEventToWebhookEvent(eventType: string, status: string) {
   if (eventType === "checkout.session.completed") return "checkout.completed";
+  if (eventType === "checkout.session.expired") return "checkout.abandoned";
   if (eventType === "customer.subscription.created") return "subscription.created";
   if (eventType === "customer.subscription.deleted") return "subscription.canceled";
   if (["invoice.paid", "invoice.payment_succeeded"].includes(eventType)) return "payment.approved";
@@ -243,6 +244,13 @@ function getCheckoutCompletedEvent(planSlug?: string | null) {
   const family = normalizePlanFamily(planSlug);
   if (family === "plus") return "checkout.plus.completed";
   if (family === "premium") return "checkout.premium.completed";
+  return null;
+}
+
+function getCheckoutAbandonedEvent(planSlug?: string | null) {
+  const family = normalizePlanFamily(planSlug);
+  if (family === "plus") return "checkout.plus.abandoned";
+  if (family === "premium") return "checkout.premium.abandoned";
   return null;
 }
 
@@ -412,8 +420,8 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
 
     return {
       userId,
-      planId: inactiveSubscription?.planId ?? previous.planId ?? plan?.id ?? null,
-      planSlug: inactiveSubscription?.planSlug ?? previous.planSlug ?? plan?.slug ?? null,
+      planId: event.type === "checkout.session.expired" ? plan?.id ?? inactiveSubscription?.planId ?? previous.planId ?? null : inactiveSubscription?.planId ?? previous.planId ?? plan?.id ?? null,
+      planSlug: event.type === "checkout.session.expired" ? plan?.slug ?? inactiveSubscription?.planSlug ?? previous.planSlug ?? null : inactiveSubscription?.planSlug ?? previous.planSlug ?? plan?.slug ?? null,
       previousPlanId: inactiveSubscription?.previous.planId ?? previous.planId,
       previousPlanSlug: metadataPreviousPlanSlug ?? inactiveSubscription?.previous.planSlug ?? previous.planSlug,
       status: isStripePaymentFailureEvent(event.type) ? "payment_failed" : inactiveStatus,
@@ -522,6 +530,29 @@ async function saveBillingInvoiceFromStripeEvent(supabase: any, event: StripeEve
   if (error) console.error("[stripe.webhook] Falha ao salvar billing_invoice", error);
 }
 
+async function trackCheckoutAbandonedForAutomation(supabase: any, event: StripeEvent, context: SyncedSubscriptionContext) {
+  if (event.type !== "checkout.session.expired" || !context?.userId) return;
+
+  await trackMarketingEvent(supabase, {
+    userId: context.userId,
+    eventKey: "checkout_abandoned",
+    eventLabel: "Checkout abandonado",
+    channel: "billing",
+    source: "stripe",
+    metadata: {
+      stripe_event_id: event.id,
+      stripe_customer_id: context.customerId,
+      plan_slug: context.planSlug,
+      stripe_event_type: event.type,
+      stripe_subscription_id: context.subscriptionId,
+      stripe_price_id: context.stripePriceId,
+      local_subscription_id: context.localSubscriptionId,
+      previous_plan: context.previousPlanSlug,
+      status: context.status,
+    },
+  });
+}
+
 async function trackPaymentFailedForAutomation(supabase: any, event: StripeEvent, context: SyncedSubscriptionContext) {
   if (!isStripePaymentFailureEvent(event.type) || !context?.userId) return;
 
@@ -565,7 +596,7 @@ async function dispatchStripeWebhookEvent(supabase: any, event: StripeEvent, con
   const missingPhoneDiagnostic = recipient.phone ? null : "missing_phone_for_paid_webhook";
   if (missingPhoneDiagnostic) console.warn("[stripe.webhook] missing_phone_for_paid_webhook", { eventId: event.id, eventType: event.type, userId: context.userId });
   const data = { stripe_event_id: event.id, stripe_event_type: event.type, user_id: context.userId, plan: context.planSlug, previous_plan: context.previousPlanSlug, status: context.status, stripe_customer_id: context.customerId, stripe_subscription_id: context.subscriptionId, stripe_price_id: context.stripePriceId, current_period_end: context.currentPeriodEnd, trial_ends_at: context.trialEndsAt, email: recipient.email, phone: recipient.phone, phone_source: recipient.phone_source, diagnostic: missingPhoneDiagnostic };
-  const extraEvents = [event.type === "checkout.session.completed" ? getCheckoutCompletedEvent(context.planSlug) : null, getSpecificPlanTransitionEvent(context.previousPlanSlug, context.planSlug), shouldDispatchPlanActivated(event.type, context) ? getPlanActivatedEvent(context.planSlug) : null].filter(Boolean) as WebhookEvent[];
+  const extraEvents = [event.type === "checkout.session.completed" ? getCheckoutCompletedEvent(context.planSlug) : null, event.type === "checkout.session.expired" ? getCheckoutAbandonedEvent(context.planSlug) : null, getSpecificPlanTransitionEvent(context.previousPlanSlug, context.planSlug), shouldDispatchPlanActivated(event.type, context) ? getPlanActivatedEvent(context.planSlug) : null].filter(Boolean) as WebhookEvent[];
   const events = Array.from(new Set([webhookEvent as WebhookEvent, ...extraEvents]));
   await Promise.allSettled(events.map((eventName) => dispatchWebhookEvent({ event: eventName, source: "stripe", recipient, data })));
 }
@@ -598,6 +629,7 @@ export async function POST(req: Request) {
     await recordSubscriptionHistoryFromStripe(supabase, event, context);
     await saveBillingInvoiceFromStripeEvent(supabase, event, context);
     await trackPaymentFailedForAutomation(supabase, event, context);
+    await trackCheckoutAbandonedForAutomation(supabase, event, context);
     await dispatchStripeWebhookEvent(supabase, event, context);
   }
   const billingEventId = billingEventResponse.data?.[0]?.id ?? existingBillingEvent?.id;

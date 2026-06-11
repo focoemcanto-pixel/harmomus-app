@@ -52,6 +52,9 @@ const CONVERSION_EVENTS = new Set([
   "subscription.created",
   "invoice.paid",
   "payment_succeeded",
+  "payment.approved",
+  "payment_confirmed",
+  "payment_received",
   "plan.plus_activated",
   "plan.premium_activated",
 ]);
