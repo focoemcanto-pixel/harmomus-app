@@ -44,75 +44,10 @@ function stopAudioElement(audio: HTMLAudioElement | null | undefined, options: {
   }
 }
 
-const MAX_AUDIO_CACHE_SIZE = 12;
-const HAVE_CURRENT_DATA = 2;
-const HAVE_FUTURE_DATA = 3;
-const NETWORK_EMPTY = 0;
-const NETWORK_LOADING = 2;
-
-type PlaybackMetric = {
-  id: string;
-  src: string;
-  clickAt: number;
-  fetchStartAt?: number;
-  fetchEndAt?: number;
-  canplayAt?: number;
-  playingAt?: number;
-};
-
-function nowPerf() {
-  return typeof performance !== "undefined" ? performance.now() : Date.now();
-}
-
-function logPlaybackMetric(metric: PlaybackMetric, event: "PLAY_CLICK" | "FETCH_AUDIO_START" | "FETCH_AUDIO_END" | "AUDIO_CANPLAY" | "AUDIO_PLAYING") {
-  const fetchStartAt = metric.fetchStartAt ?? metric.clickAt;
-  const fetchEndAt = metric.fetchEndAt ?? metric.canplayAt ?? metric.playingAt;
-  const canplayAt = metric.canplayAt ?? metric.playingAt;
-  const playingAt = metric.playingAt;
-  console.info(`[HarmomusPlayer:perf] ${event}`, {
-    id: metric.id,
-    src: metric.src,
-    clickToFetchMs: Math.round(fetchStartAt - metric.clickAt),
-    fetchToResponseMs: fetchEndAt ? Math.round(fetchEndAt - fetchStartAt) : null,
-    responseToCanplayMs: fetchEndAt && canplayAt ? Math.round(canplayAt - fetchEndAt) : null,
-    canplayToPlayingMs: canplayAt && playingAt ? Math.round(playingAt - canplayAt) : null,
-    totalMs: playingAt ? Math.round(playingAt - metric.clickAt) : null,
-  });
-}
-
-function readResourceResponseEnd(src: string, fallback: number) {
-  if (typeof performance === "undefined" || typeof performance.getEntriesByName !== "function") return fallback;
-  const entries = performance.getEntriesByName(src, "resource") as PerformanceResourceTiming[];
-  const latest = entries.at(-1);
-  return latest?.responseEnd && latest.responseEnd > 0 ? latest.responseEnd : fallback;
-}
-
 function normalizePlaybackError(error: unknown) {
   const message = error instanceof Error ? error.message : "";
-  if (/operation is not supported|not supported source|no supported source|media resource/i.test(message)) {
-    return "Não foi possível iniciar este áudio. Tente clicar novamente.";
-  }
   if (/play\(\) request was interrupted|aborted/i.test(message)) return null;
   return message || "Não foi possível reproduzir este áudio agora.";
-}
-
-function shouldWarmAudio(audio: HTMLAudioElement) {
-  if (!audio.src) return false;
-  if (audio.readyState >= HAVE_CURRENT_DATA) return false;
-  if (audio.networkState === NETWORK_LOADING) return false;
-  return true;
-}
-
-function shouldReloadBeforePlay(audio: HTMLAudioElement) {
-  if (!audio.src) return false;
-  if (audio.readyState >= HAVE_FUTURE_DATA) return false;
-  if (audio.networkState === NETWORK_LOADING && audio.readyState >= HAVE_CURRENT_DATA) return false;
-  return audio.networkState === NETWORK_EMPTY || audio.readyState < HAVE_CURRENT_DATA;
-}
-
-function warmAudio(audio: HTMLAudioElement) {
-  if (!shouldWarmAudio(audio)) return;
-  try { audio.load(); } catch {}
 }
 
 function artworkFromTrack(track: KitTrack) {
@@ -161,88 +96,11 @@ export function useKitAudioEngine() {
   const trackRef = useRef<KitTrack | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const preloaderRef = useRef<HTMLAudioElement | null>(null);
-  const preloadedSrcRef = useRef<string | null>(null);
   const pitchControllerRef = useRef<PitchPlaybackController | null>(null);
   const rafIdRef = useRef<number | null>(null);
-  const sessionIdRef = useRef<string | null>(null);
-  const activeIdentityRef = useRef<string>("");
-  const transitionLockRef = useRef<Promise<void>>(Promise.resolve());
-  const abortRef = useRef<AbortController | null>(null);
+  const requestSerialRef = useRef(0);
   const volumeRef = useRef(1);
   const loopRef = useRef(false);
-  const requestSerialRef = useRef(0);
-  const audioCacheRef = useRef<Map<string, HTMLAudioElement>>(new Map());
-  const playbackMetricRef = useRef<PlaybackMetric | null>(null);
-
-  const ensureAudio = useCallback(() => {
-    if (!audioRef.current) audioRef.current = createAudioElement("auto");
-    if (!preloaderRef.current) preloaderRef.current = createAudioElement("auto");
-    audioRef.current.volume = volumeRef.current;
-    audioRef.current.loop = loopRef.current;
-    return audioRef.current;
-  }, []);
-
-  const syncAudioState = useCallback((audio: HTMLAudioElement) => {
-    setCurrentTime(audio.currentTime || 0);
-    setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
-    setIsPlaying(!audio.paused && !audio.ended);
-  }, []);
-
-  const attachAudioStateListeners = useCallback((audio: HTMLAudioElement, isStillCurrent: () => boolean, signal: AbortSignal) => {
-    const sync = () => {
-      if (!isStillCurrent()) return;
-      syncAudioState(audio);
-    };
-    const markEnded = () => {
-      if (!isStillCurrent()) return;
-      syncAudioState(audio);
-      setIsPlaying(false);
-      setIsPreparing(false);
-    };
-
-    audio.addEventListener("timeupdate", sync, { signal });
-    audio.addEventListener("loadedmetadata", sync, { signal });
-    audio.addEventListener("durationchange", sync, { signal });
-    audio.addEventListener("playing", sync, { signal });
-    audio.addEventListener("pause", sync, { signal });
-    audio.addEventListener("ended", markEnded, { signal });
-    sync();
-  }, [syncAudioState]);
-
-  const stopAllAudioElements = useCallback((options: { resetTime?: boolean; clearSources?: boolean } = {}) => {
-    stopAudioElement(audioRef.current, { resetTime: options.resetTime, clearSource: options.clearSources });
-    stopAudioElement(preloaderRef.current, { resetTime: options.resetTime, clearSource: options.clearSources });
-    audioCacheRef.current.forEach((cachedAudio) => {
-      stopAudioElement(cachedAudio, { resetTime: options.resetTime, clearSource: options.clearSources });
-    });
-  }, []);
-
-  const trimAudioCache = useCallback((keepIdentity?: string) => {
-    if (audioCacheRef.current.size <= MAX_AUDIO_CACHE_SIZE) return;
-    for (const [key, cachedAudio] of audioCacheRef.current) {
-      if (audioCacheRef.current.size <= MAX_AUDIO_CACHE_SIZE) break;
-      if (key === keepIdentity) continue;
-      if (cachedAudio === audioRef.current || cachedAudio === preloaderRef.current) continue;
-      stopAudioElement(cachedAudio, { clearSource: true });
-      audioCacheRef.current.delete(key);
-    }
-  }, []);
-
-  const getCachedAudio = useCallback((identity: string, src: string, preload: "metadata" | "auto") => {
-    const fastSrc = resolveFastAudioUrl(src);
-    const cached = audioCacheRef.current.get(identity);
-    if (cached) {
-      cached.preload = preload;
-      if (!cached.src) cached.src = fastSrc;
-      return cached;
-    }
-
-    const audio = createAudioElement(preload);
-    audio.src = fastSrc;
-    audioCacheRef.current.set(identity, audio);
-    trimAudioCache(identity);
-    return audio;
-  }, [trimAudioCache]);
 
   const cancelRaf = useCallback(() => {
     if (rafIdRef.current !== null) {
@@ -251,46 +109,17 @@ export function useKitAudioEngine() {
     }
   }, []);
 
-  const hardInvalidatePlayback = useCallback(() => {
-    requestSerialRef.current += 1;
-    sessionIdRef.current = null;
-    activeIdentityRef.current = "";
-    abortRef.current?.abort("hard-invalidate");
-    abortRef.current = null;
-    cancelRaf();
-
-    try { pitchControllerRef.current?.dispose(); } catch {}
-    pitchControllerRef.current = null;
-
-    stopAllAudioElements({ resetTime: true });
-
-    setIsPlaying(false);
-    setIsPreparing(false);
-    setCurrentTime(0);
-    setDuration(0);
-    setErrorMessage(null);
-    setTrack(null);
-    trackRef.current = null;
-  }, [cancelRaf, stopAllAudioElements]);
-
-  const disposePlaybackSession = useCallback(async () => {
-    hardInvalidatePlayback();
-    stopAllAudioElements({ resetTime: true, clearSources: true });
-    audioCacheRef.current.clear();
-    preloadedSrcRef.current = null;
-  }, [hardInvalidatePlayback, stopAllAudioElements]);
-
-  const runTransition = useCallback(async (operation: () => Promise<void>) => {
-    const queued = transitionLockRef.current.catch(() => undefined).then(operation);
-    transitionLockRef.current = queued.catch(() => undefined);
-    await queued;
+  const syncAudioState = useCallback((audio: HTMLAudioElement) => {
+    setCurrentTime(audio.currentTime || 0);
+    setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
+    setIsPlaying(!audio.paused && !audio.ended);
   }, []);
 
-  const startRafLoop = useCallback((sessionId: string, requestSerial: number, identity: string) => {
+  const startRafLoop = useCallback((serial: number) => {
     cancelRaf();
     const update = () => {
       const audio = audioRef.current;
-      if (!audio || sessionIdRef.current !== sessionId || requestSerialRef.current !== requestSerial || activeIdentityRef.current !== identity) return;
+      if (!audio || requestSerialRef.current !== serial) return;
       setCurrentTime(audio.currentTime || 0);
       setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
       rafIdRef.current = requestAnimationFrame(update);
@@ -298,185 +127,153 @@ export function useKitAudioEngine() {
     rafIdRef.current = requestAnimationFrame(update);
   }, [cancelRaf]);
 
+  const stopPlayback = useCallback(() => {
+    requestSerialRef.current += 1;
+    cancelRaf();
+    try { pitchControllerRef.current?.dispose(); } catch {}
+    pitchControllerRef.current = null;
+    stopAudioElement(audioRef.current, { resetTime: true });
+    stopAudioElement(preloaderRef.current, { resetTime: true });
+    setIsPlaying(false);
+    setIsPreparing(false);
+    setCurrentTime(0);
+    setDuration(0);
+    setErrorMessage(null);
+    setTrack(null);
+    trackRef.current = null;
+  }, [cancelRaf]);
+
+  const disposePlaybackSession = useCallback(async () => {
+    stopPlayback();
+    stopAudioElement(audioRef.current, { resetTime: true, clearSource: true });
+    stopAudioElement(preloaderRef.current, { resetTime: true, clearSource: true });
+    audioRef.current = null;
+    preloaderRef.current = null;
+  }, [stopPlayback]);
+
+  const ensureAudio = useCallback(() => {
+    if (!audioRef.current) audioRef.current = createAudioElement("auto");
+    audioRef.current.volume = volumeRef.current;
+    audioRef.current.loop = loopRef.current;
+    return audioRef.current;
+  }, []);
+
   const preloadTrack = useCallback((nextTrack: KitTrack, mode: "metadata" | "auto" = "auto") => {
     const fastTrack = normalizeTrackSource(nextTrack);
-    if ((fastTrack.semitoneShift ?? 0) !== 0 || !fastTrack.src) return;
-    const identity = getTrackIdentity(fastTrack);
-    const cachedAudio = getCachedAudio(identity, fastTrack.src, mode);
-
-    if (audioRef.current !== cachedAudio && preloadedSrcRef.current !== fastTrack.src) {
-      preloaderRef.current = cachedAudio;
-      preloadedSrcRef.current = fastTrack.src;
-    }
-
-    cachedAudio.preload = mode;
-    if (!cachedAudio.src) cachedAudio.src = fastTrack.src;
-    warmAudio(cachedAudio);
-  }, [getCachedAudio]);
+    if (!fastTrack.src || (fastTrack.semitoneShift ?? 0) !== 0) return;
+    const audio = preloaderRef.current ?? createAudioElement(mode);
+    preloaderRef.current = audio;
+    audio.preload = mode;
+    if (audio.src !== fastTrack.src) audio.src = fastTrack.src;
+    try { audio.load(); } catch {}
+  }, []);
 
   const playTrack = useCallback(async (nextTrack: KitTrack) => {
     const fastTrack = normalizeTrackSource(nextTrack);
     if (!fastTrack.src) return;
 
+    const serial = requestSerialRef.current + 1;
+    requestSerialRef.current = serial;
+    cancelRaf();
     setIsPreparing(true);
-    const identity = getTrackIdentity(fastTrack);
-    const clickAt = nowPerf();
-    const metric: PlaybackMetric = { id: identity, src: fastTrack.src, clickAt };
-    playbackMetricRef.current = metric;
-    logPlaybackMetric(metric, "PLAY_CLICK");
-    const canReusePreloader = (fastTrack.semitoneShift ?? 0) === 0 && preloadedSrcRef.current === fastTrack.src && preloaderRef.current?.src;
+    setIsPlaying(false);
+    setErrorMessage(null);
 
-    hardInvalidatePlayback();
-    setIsPreparing(true);
-    const requestSerial = requestSerialRef.current;
+    try { pitchControllerRef.current?.dispose(); } catch {}
+    pitchControllerRef.current = null;
+    stopAudioElement(audioRef.current, { resetTime: true });
 
-    await runTransition(async () => {
-      if (requestSerialRef.current !== requestSerial) return;
+    const audio = ensureAudio();
+    audio.src = fastTrack.src;
+    audio.volume = volumeRef.current;
+    audio.loop = loopRef.current;
+    audio.onloadedmetadata = () => syncAudioState(audio);
+    audio.ondurationchange = () => syncAudioState(audio);
+    audio.ontimeupdate = () => syncAudioState(audio);
+    audio.onended = () => {
+      if (requestSerialRef.current !== serial) return;
+      setIsPlaying(false);
+      setIsPreparing(false);
+      syncAudioState(audio);
+    };
+    audio.onpause = () => {
+      if (requestSerialRef.current !== serial) return;
+      syncAudioState(audio);
+    };
+    audio.onplaying = () => {
+      if (requestSerialRef.current !== serial) return;
+      setIsPreparing(false);
+      setIsPlaying(true);
+      syncAudioState(audio);
+    };
 
-      let audio = ensureAudio();
-      const sessionId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-      sessionIdRef.current = sessionId;
-      activeIdentityRef.current = identity;
-      setErrorMessage(null);
-      setTrack(fastTrack);
-      trackRef.current = fastTrack;
-      updateMediaSessionMetadata(fastTrack);
-      setMediaSessionActionHandlers({
-        play: () => { void playTrack(fastTrack); },
-        pause: () => {
-          abortRef.current?.abort("media-session-pause");
-          try { pitchControllerRef.current?.pause(); } catch {}
-          stopAllAudioElements({ resetTime: false });
-          setIsPlaying(false);
-          setIsPreparing(false);
-        },
-        seekbackward: () => {
-          const currentAudio = audioRef.current;
-          if (currentAudio) currentAudio.currentTime = Math.max(0, currentAudio.currentTime - 10);
-        },
-        seekforward: () => {
-          const currentAudio = audioRef.current;
-          if (currentAudio) currentAudio.currentTime = currentAudio.currentTime + 10;
-        },
-      });
+    setTrack(fastTrack);
+    trackRef.current = fastTrack;
+    updateMediaSessionMetadata(fastTrack);
 
-      const abortController = new AbortController();
-      abortRef.current = abortController;
-
-      let reusedPreloader = false;
-      if ((fastTrack.semitoneShift ?? 0) === 0) {
-        audio = getCachedAudio(identity, fastTrack.src, "auto");
-        audioRef.current = audio;
-        reusedPreloader = Boolean(canReusePreloader);
-        if (preloaderRef.current === audio) preloadedSrcRef.current = null;
-      } else if (canReusePreloader && preloaderRef.current) {
-        audioRef.current = preloaderRef.current;
-        audio = audioRef.current;
-        preloaderRef.current = createAudioElement("auto");
-        preloadedSrcRef.current = null;
-        reusedPreloader = true;
-      } else {
-        audio.src = fastTrack.src;
-      }
-
-      const isStillCurrent = () => (
-        !abortController.signal.aborted &&
-        sessionIdRef.current === sessionId &&
-        requestSerialRef.current === requestSerial &&
-        activeIdentityRef.current === identity &&
-        getTrackIdentity(trackRef.current) === identity
-      );
-
-      metric.fetchStartAt = nowPerf();
-      logPlaybackMetric(metric, "FETCH_AUDIO_START");
-
-      audio.volume = volumeRef.current;
-      audio.loop = loopRef.current;
-      attachAudioStateListeners(audio, isStillCurrent, abortController.signal);
-
-      const onCanPlay = () => {
-        if (playbackMetricRef.current !== metric) return;
-        metric.fetchEndAt = readResourceResponseEnd(fastTrack.src, nowPerf());
-        metric.canplayAt = nowPerf();
-        logPlaybackMetric(metric, "FETCH_AUDIO_END");
-        logPlaybackMetric(metric, "AUDIO_CANPLAY");
-      };
-      const onPlaying = () => {
-        if (playbackMetricRef.current !== metric) return;
-        if (!metric.canplayAt) {
-          metric.fetchEndAt = readResourceResponseEnd(fastTrack.src, nowPerf());
-          metric.canplayAt = nowPerf();
-        }
-        metric.playingAt = nowPerf();
-        logPlaybackMetric(metric, "AUDIO_PLAYING");
-      };
-      audio.addEventListener("canplay", onCanPlay, { once: true, signal: abortController.signal });
-      audio.addEventListener("playing", onPlaying, { once: true, signal: abortController.signal });
-      if (shouldReloadBeforePlay(audio)) audio.load();
-
-      try {
-        const shift = fastTrack.semitoneShift ?? 0;
-        if (shift === 0) {
-          if (!isStillCurrent()) return;
-          try {
-            await audio.play();
-          } catch (firstPlayError) {
-            if (!reusedPreloader || !isStillCurrent()) throw firstPlayError;
-
-            const fallbackAudio = getCachedAudio(`${identity}::fallback`, fastTrack.src, "auto");
-            fallbackAudio.volume = volumeRef.current;
-            fallbackAudio.loop = loopRef.current;
-            audioRef.current = fallbackAudio;
-            audio = fallbackAudio;
-            attachAudioStateListeners(fallbackAudio, isStillCurrent, abortController.signal);
-            if (shouldReloadBeforePlay(fallbackAudio)) fallbackAudio.load();
-            await fallbackAudio.play();
-          }
-        } else {
-          if (!isStillCurrent()) return;
-          const pitchController = await getPitchEngine().createPlayback({ audio, semitoneShift: shift, signal: abortController.signal });
-          if (!isStillCurrent()) {
-            pitchController.dispose();
-            return;
-          }
-          pitchControllerRef.current = pitchController;
-          await pitchController.play();
-        }
-
-        if (!isStillCurrent()) return;
-        syncAudioState(audio);
-        setIsPreparing(false);
-        setIsPlaying(true);
-        startRafLoop(sessionId, requestSerial, identity);
-      } catch (error) {
-        if (!isStillCurrent()) return;
-        setIsPreparing(false);
+    setMediaSessionActionHandlers({
+      play: () => { void playTrack(fastTrack); },
+      pause: () => {
+        try { pitchControllerRef.current?.pause(); } catch {}
+        stopAudioElement(audioRef.current, { resetTime: false });
         setIsPlaying(false);
-        setErrorMessage(normalizePlaybackError(error));
-      }
+        setIsPreparing(false);
+      },
+      seekbackward: () => {
+        const currentAudio = audioRef.current;
+        if (currentAudio) currentAudio.currentTime = Math.max(0, currentAudio.currentTime - 10);
+      },
+      seekforward: () => {
+        const currentAudio = audioRef.current;
+        if (currentAudio) currentAudio.currentTime = currentAudio.currentTime + 10;
+      },
     });
-  }, [attachAudioStateListeners, ensureAudio, getCachedAudio, hardInvalidatePlayback, runTransition, startRafLoop, stopAllAudioElements, syncAudioState]);
+
+    try {
+      const shift = fastTrack.semitoneShift ?? 0;
+      if (shift === 0) {
+        await audio.play();
+      } else {
+        const pitchController = await getPitchEngine().createPlayback({ audio, semitoneShift: shift });
+        if (requestSerialRef.current !== serial) {
+          pitchController.dispose();
+          return;
+        }
+        pitchControllerRef.current = pitchController;
+        await pitchController.play();
+      }
+
+      if (requestSerialRef.current !== serial) return;
+      setIsPreparing(false);
+      setIsPlaying(true);
+      syncAudioState(audio);
+      startRafLoop(serial);
+    } catch (error) {
+      if (requestSerialRef.current !== serial) return;
+      setIsPreparing(false);
+      setIsPlaying(false);
+      setErrorMessage(normalizePlaybackError(error));
+    }
+  }, [cancelRaf, ensureAudio, startRafLoop, syncAudioState]);
 
   const togglePlay = useCallback(async () => {
     const audio = audioRef.current;
     if (!audio || !trackRef.current) return;
 
     if (isPlaying) {
-      abortRef.current?.abort("pause");
       try { pitchControllerRef.current?.pause(); } catch {}
-      stopAllAudioElements({ resetTime: false });
+      stopAudioElement(audio, { resetTime: false });
       setIsPlaying(false);
       setIsPreparing(false);
       return;
     }
 
     await playTrack(trackRef.current);
-  }, [isPlaying, playTrack, stopAllAudioElements]);
+  }, [isPlaying, playTrack]);
 
   const seekTo = useCallback((seconds: number) => {
     const audio = audioRef.current;
-    const sessionId = sessionIdRef.current;
-    if (!audio || !sessionId) return;
+    if (!audio) return;
     const next = Math.max(0, Math.min(seconds, Number.isFinite(audio.duration) ? audio.duration : seconds));
     audio.currentTime = next;
     setCurrentTime(next);
@@ -494,9 +291,6 @@ export function useKitAudioEngine() {
     setVolume(next);
     if (audioRef.current) audioRef.current.volume = next;
     if (preloaderRef.current) preloaderRef.current.volume = next;
-    audioCacheRef.current.forEach((cachedAudio) => {
-      cachedAudio.volume = next;
-    });
   }, []);
 
   const setLoopValue = useCallback((value: boolean) => {
@@ -508,20 +302,9 @@ export function useKitAudioEngine() {
   useEffect(() => {
     ensureAudio();
     return () => {
-      void runTransition(disposePlaybackSession);
+      void disposePlaybackSession();
     };
-  }, [disposePlaybackSession, ensureAudio, runTransition]);
-
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-
-    const handleVisibilityChange = () => {
-      if (document.hidden) hardInvalidatePlayback();
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
-  }, [hardInvalidatePlayback]);
+  }, [disposePlaybackSession, ensureAudio]);
 
   return {
     audioRef,
@@ -541,8 +324,8 @@ export function useKitAudioEngine() {
     skipBy,
     setVolumeValue,
     setLoopValue,
-    stopPlayback: hardInvalidatePlayback,
-    disposePlaybackSession: () => runTransition(disposePlaybackSession),
+    stopPlayback,
+    disposePlaybackSession,
     isCurrentTrack: (trackToCheck: KitTrack) => getTrackIdentity(trackRef.current) === getTrackIdentity(trackToCheck),
   };
 }
