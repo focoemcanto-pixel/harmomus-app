@@ -12,6 +12,7 @@ import { getActiveHomePoll } from "@/lib/data/home-polls";
 import { HomePollSection } from "@/components/public/home-poll-section";
 import { OFFICIAL_PLANS } from "@/lib/data/official-plans";
 import { SubscribeButton } from "@/components/public/subscribe-button";
+import { KitPreviewButton } from "@/components/public/kit-preview-button";
 import { canAccessKit } from "@/lib/access/access-engine";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { LegacyBillingNotice } from "@/components/public/legacy-billing-notice";
@@ -118,6 +119,14 @@ export default async function HomePage() {
                   <div className="relative overflow-hidden">
                     <span className="absolute left-3 top-3 z-10 rounded-full bg-fuchsia-500/90 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-white">Novo</span>
                     {kit.coverUrl ? <img src={kit.coverUrl} alt={kit.name} className={`aspect-square w-full object-cover transition duration-500 group-hover:scale-105 ${locked ? "opacity-65" : ""}`} /> : <div className="aspect-square w-full bg-gradient-to-br from-zinc-900 to-[#141828]" />}
+                    {!locked && kit.previewAudioFileId ? (
+                      <KitPreviewButton
+                        audioUrl={`/api/audio/${kit.previewAudioFileId}`}
+                        startSeconds={kit.previewStartSeconds}
+                        durationSeconds={kit.previewDurationSeconds}
+                        label={`Ouvir preview de ${kit.name}`}
+                      />
+                    ) : null}
                     {locked ? <><div className="absolute inset-0 bg-black/30" /><div className="absolute right-3 top-3 z-20 rounded-full border border-gold-300/50 bg-black/75 px-3 py-1 text-[11px] font-bold tracking-[0.14em] text-gold-100 shadow-lg">🔒 {lockedPlan}</div><div className="absolute bottom-3 left-3 right-3 rounded-xl border border-white/15 bg-black/75 px-3 py-2 text-center backdrop-blur"><p className="text-xs font-semibold text-white">{lockedText}</p><p className="mt-0.5 text-[11px] text-zinc-300">Faça upgrade para desbloquear</p></div></> : null}
                   </div>
                   <div className="p-4"><p className="truncate text-lg font-semibold text-white">{kit.name}</p><p className="truncate text-sm text-zinc-300">{resolveKitArtist(kit)}</p></div>
