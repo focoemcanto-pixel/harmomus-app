@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { KitAudioSyncCard } from "@/components/admin/kit-audio-sync-card";
 import { KitBulkUpload } from "@/components/admin/kit-bulk-upload";
 import { KitForm } from "@/components/admin/kit-form";
+import { KitPreviewCard } from "@/components/admin/kit-preview-card";
 import { createKit, ensureArtistCategory, getArtistCategories, getKitFormOptions, type Kit } from "@/lib/data/kits";
 import { brazilianNoteToMidi } from "@/lib/music/brazilian-note";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -20,6 +21,12 @@ function parsePitchShiftLimit(value: FormDataEntryValue | null) {
   const parsed = Number(value ?? 2);
   if (!Number.isFinite(parsed)) return 2;
   return Math.max(1, Math.min(3, Math.round(parsed)));
+}
+
+function parsePreviewSeconds(value: FormDataEntryValue | null, fallback: number, min: number, max: number) {
+  const parsed = Number(value ?? fallback);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(parsed)));
 }
 
 function parseAllowedPlanSlugs(formData: FormData, validPlanSlugs: string[]) {
@@ -118,14 +125,33 @@ async function getImportedKitById(id?: string | null): Promise<Kit | null> {
   return (data as Kit | null) ?? null;
 }
 
+async function getPreviewAudioFiles(kitId?: string | null) {
+  if (!kitId) return [];
+  const supabase = createSupabaseAdminClient() as any;
+  const { data, error } = await supabase
+    .from("kit_audio_files")
+    .select("id,name,tone,file_type")
+    .eq("kit_id", kitId)
+    .order("tone", { ascending: true })
+    .order("name", { ascending: true });
+
+  if (error) {
+    console.warn("[admin-kit-new] failed to load preview audio files", error.message);
+    return [];
+  }
+
+  return (data ?? []) as { id: string; name: string | null; tone: string | null; file_type: string | null }[];
+}
+
 export default async function NovoKitPage({ searchParams }: { searchParams: NovoKitSearchParams }) {
   const resolvedSearchParams = await searchParams;
   const importedKitId = getSingleParam(resolvedSearchParams.importedKitId);
 
-  const [{ categories, plans }, artistCategories, importedKit] = await Promise.all([
+  const [{ categories, plans }, artistCategories, importedKit, previewAudioFiles] = await Promise.all([
     getKitFormOptions(),
     getArtistCategories(),
     getImportedKitById(importedKitId),
+    getPreviewAudioFiles(importedKitId),
   ]);
 
   async function createKitAction(formData: FormData) {
@@ -216,6 +242,37 @@ export default async function NovoKitPage({ searchParams }: { searchParams: Novo
     redirect(`/admin/kits/novo?importedKitId=${importedKit.id}&savedAt=${Date.now()}#kit-editor`);
   }
 
+  async function updateImportedPreviewAction(formData: FormData) {
+    "use server";
+
+    if (!importedKit) throw new Error("Kit importado não encontrado para configurar preview.");
+
+    const previewAudioFileId = String(formData.get("preview_audio_file_id") ?? "").trim() || null;
+    const previewStartSeconds = parsePreviewSeconds(formData.get("preview_start_seconds"), 0, 0, 60 * 60 * 3);
+    const previewDurationSeconds = parsePreviewSeconds(formData.get("preview_duration_seconds"), 10, 3, 30);
+
+    const supabase = createSupabaseAdminClient() as any;
+    const { error } = await supabase
+      .from("kits")
+      .update({
+        preview_audio_file_id: previewAudioFileId,
+        preview_start_seconds: previewStartSeconds,
+        preview_duration_seconds: previewDurationSeconds,
+      })
+      .eq("id", importedKit.id);
+
+    if (error) throw new Error(`Falha ao salvar preview do kit importado: ${error.message}`);
+
+    revalidatePath("/", "page");
+    revalidatePath("/admin/kits", "page");
+    revalidatePath("/admin/kits/novo", "page");
+    revalidatePath(`/admin/kits/novo?importedKitId=${importedKit.id}`, "page");
+    revalidatePath("/biblioteca", "page");
+    revalidatePath("/todos-os-kits", "page");
+    revalidatePath(`/biblioteca/${importedKit.slug}`, "page");
+    redirect(`/admin/kits/novo?importedKitId=${importedKit.id}&previewSavedAt=${Date.now()}#preview-editor`);
+  }
+
   const editorLabel = importedKit ? "Editor do kit importado" : "Cadastro manual";
 
   return (
@@ -246,6 +303,15 @@ export default async function NovoKitPage({ searchParams }: { searchParams: Novo
             submitEndpoint={`/api/admin/kits/${importedKit.id}`}
             submitMethod="PUT"
           />
+          <div id="preview-editor">
+            <KitPreviewCard
+              audioFiles={previewAudioFiles}
+              initialAudioFileId={(importedKit as any).preview_audio_file_id ?? null}
+              initialStartSeconds={(importedKit as any).preview_start_seconds ?? 0}
+              initialDurationSeconds={(importedKit as any).preview_duration_seconds ?? 10}
+              action={updateImportedPreviewAction}
+            />
+          </div>
           <KitAudioSyncCard key={`audio-${importedKit.id}`} kitId={importedKit.id} />
         </div>
       ) : (
