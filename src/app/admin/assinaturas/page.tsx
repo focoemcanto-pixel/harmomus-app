@@ -2,6 +2,7 @@ import Link from "next/link";
 import { AlertTriangle, ArrowRight, BadgeCheck, Crown, RefreshCw, TrendingDown, TrendingUp, UserRoundCheck, Users, WalletCards } from "lucide-react";
 
 import { PageHeader } from "@/components/admin/page-header";
+import { SubscriptionsMobileCardList } from "@/components/admin/subscriptions-mobile-card-list";
 import { formatDateTimeBR } from "@/lib/format-date-time-br";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -19,9 +20,8 @@ type SubscriptionRow = {
   current_period_end?: string | null;
   trial_ends_at?: string | null;
   canceled_at?: string | null;
-  auto_renew?: boolean | null;
   profiles?: { full_name?: string | null; email?: string | null; role?: string | null } | null;
-  plans?: { id?: string | null; name?: string | null; slug?: string | null; price_cents?: number | null; hierarchy_level?: number | null } | null;
+  plans?: { id?: string | null; name?: string | null; slug?: string | null; price_cents?: number | null } | null;
 };
 
 type InvoiceRow = {
@@ -31,7 +31,6 @@ type InvoiceRow = {
   amount_due_cents?: number | null;
   paid_at?: string | null;
   created_at?: string | null;
-  hosted_invoice_url?: string | null;
   customer_email?: string | null;
   profiles?: { full_name?: string | null; email?: string | null; role?: string | null } | null;
   plans?: { name?: string | null; slug?: string | null } | null;
@@ -66,8 +65,7 @@ function formatDate(value?: string | null) {
 }
 
 function percent(value: number, base: number) {
-  if (!base) return 0;
-  return Math.round((value / base) * 100);
+  return base ? Math.round((value / base) * 100) : 0;
 }
 
 function statusLabel(status?: string | null) {
@@ -108,12 +106,12 @@ function StatCard({ title, value, caption, tone = "cyan", icon: Icon }: { title:
   };
 
   return (
-    <article className={`rounded-3xl border bg-gradient-to-br ${tones[tone]} p-5 shadow-2xl shadow-black/20`}>
+    <article className={`min-w-[190px] rounded-3xl border bg-gradient-to-br ${tones[tone]} p-4 shadow-2xl shadow-black/20 sm:p-5`}>
       <div className="mb-3 flex items-center justify-between gap-3">
-        <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">{title}</p>
+        <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500 sm:text-xs">{title}</p>
         <Icon className="h-4 w-4 text-white/70" />
       </div>
-      <p className="text-3xl font-semibold tracking-tight text-white">{typeof value === "number" ? formatCount(value) : value}</p>
+      <p className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">{typeof value === "number" ? formatCount(value) : value}</p>
       <p className="mt-1 text-xs text-zinc-500">{caption}</p>
     </article>
   );
@@ -125,29 +123,18 @@ async function getSubscriptionCenterData() {
   const [subscriptionsResult, invoicesResult] = await Promise.all([
     supabase
       .from("subscriptions")
-      .select("id,user_id,plan_id,status,gateway,created_at,updated_at,current_period_end,trial_ends_at,canceled_at,auto_renew,profiles(full_name,email,role),plans(id,name,slug,price_cents,hierarchy_level)")
+      .select("id,user_id,plan_id,status,gateway,created_at,updated_at,current_period_end,trial_ends_at,canceled_at,profiles(full_name,email,role),plans(id,name,slug,price_cents)")
       .order("updated_at", { ascending: false })
       .limit(500),
     supabase
       .from("billing_invoices")
-      .select("id,status,amount_paid_cents,amount_due_cents,paid_at,created_at,hosted_invoice_url,customer_email,profiles(full_name,email,role),plans(name,slug)")
+      .select("id,status,amount_paid_cents,amount_due_cents,paid_at,created_at,customer_email,profiles(full_name,email,role),plans(name,slug)")
       .order("created_at", { ascending: false })
       .limit(200),
   ]);
 
-  if (subscriptionsResult.error) {
-    console.error("[admin.assinaturas] Falha ao carregar subscriptions", subscriptionsResult.error);
-  }
-  if (invoicesResult.error) {
-    console.error("[admin.assinaturas] Falha ao carregar billing_invoices", invoicesResult.error);
-  }
-
-  const subscriptions = subscriptionsResult.error
-    ? []
-    : ((subscriptionsResult.data ?? []) as SubscriptionRow[]).filter((row) => !isOwner(row.profiles));
-  const invoices = invoicesResult.error
-    ? []
-    : ((invoicesResult.data ?? []) as InvoiceRow[]).filter((row) => !isOwner(row.profiles));
+  const subscriptions = subscriptionsResult.error ? [] : ((subscriptionsResult.data ?? []) as SubscriptionRow[]).filter((row) => !isOwner(row.profiles));
+  const invoices = invoicesResult.error ? [] : ((invoicesResult.data ?? []) as InvoiceRow[]).filter((row) => !isOwner(row.profiles));
 
   return {
     subscriptions,
@@ -194,54 +181,56 @@ export default async function AdminSubscriptionsPage() {
   const recoveryQueue = [...overdue, ...canceled.slice(0, 10)].slice(0, 12);
   const premiumMix = active.length ? Math.round((premiumLike.length / active.length) * 100) : 0;
 
+  const mobileSubscriptions = recentSubscriptions.map((row) => ({
+    id: row.id,
+    user: row.profiles?.full_name ?? row.profiles?.email ?? "Usuário sem nome",
+    email: row.profiles?.email ?? "—",
+    plan: row.plans?.name ?? planFamily(row.plans?.slug),
+    status: statusLabel(row.status),
+    gateway: row.gateway ?? "—",
+    renewsAt: formatDate(row.current_period_end ?? row.trial_ends_at),
+    updatedAt: formatDate(row.updated_at ?? row.created_at),
+  }));
+
   return (
-    <section className="space-y-6 text-zinc-100">
+    <section className="space-y-4 text-zinc-100 sm:space-y-6">
       <PageHeader title="Central de Assinaturas" description="Cockpit comercial para receita, assinantes, upgrades e recuperação do Harmomus." />
 
-      <div className="rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(168,85,247,0.18),transparent_32%),rgba(9,9,11,0.84)] p-6 shadow-2xl shadow-black/30">
-        <div className="flex flex-wrap items-start justify-between gap-5">
+      <div className="rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(168,85,247,0.18),transparent_32%),rgba(9,9,11,0.84)] p-4 shadow-2xl shadow-black/30 sm:p-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.32em] text-amber-200/80">Revenue OS</p>
-            <h1 className="mt-2 text-3xl font-bold tracking-tight text-white">Assinaturas, upgrades e recuperação</h1>
-            <p className="mt-2 max-w-3xl text-sm text-zinc-400">Esta central usa `subscriptions`, `plans` e `billing_invoices`. Assinantes em teste contam como ativos.</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-200/80 sm:tracking-[0.32em]">Revenue OS</p>
+            <h1 className="mt-2 text-2xl font-bold tracking-tight text-white sm:text-3xl">Assinaturas, upgrades e recuperação</h1>
+            <p className="mt-2 max-w-3xl text-sm text-zinc-400">Assinantes em teste contam como ativos.</p>
           </div>
-          <Link href="/admin/billing" className="inline-flex items-center gap-2 rounded-2xl border border-cyan-400/30 bg-cyan-500/10 px-4 py-2.5 text-sm font-medium text-cyan-100 hover:bg-cyan-500/15">
-            Abrir Billing técnico <ArrowRight className="h-4 w-4" />
+          <Link href="/admin/billing" className="inline-flex w-fit items-center gap-2 rounded-2xl border border-cyan-400/30 bg-cyan-500/10 px-4 py-2.5 text-sm font-medium text-cyan-100 hover:bg-cyan-500/15">
+            Abrir Billing <ArrowRight className="h-4 w-4" />
           </Link>
         </div>
-        {(subscriptionError || invoiceError) ? (
-          <div className="mt-5 rounded-2xl border border-amber-400/25 bg-amber-500/10 p-3 text-sm text-amber-100">
-            {subscriptionError ? `subscriptions: ${subscriptionError}. ` : ""}{invoiceError ? `billing_invoices: ${invoiceError}.` : ""}
-          </div>
-        ) : null}
+        {(subscriptionError || invoiceError) ? <div className="mt-5 rounded-2xl border border-amber-400/25 bg-amber-500/10 p-3 text-sm text-amber-100">{subscriptionError ? `subscriptions: ${subscriptionError}. ` : ""}{invoiceError ? `billing_invoices: ${invoiceError}.` : ""}</div> : null}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+      <div className="-mx-3 flex gap-3 overflow-x-auto px-3 pb-1 sm:mx-0 sm:grid sm:grid-cols-2 sm:px-0 xl:grid-cols-6">
         <StatCard title="MRR estimado" value={formatMoney(estimatedMrr)} caption={`${paidActive.length} pagantes ativos/teste`} tone="emerald" icon={WalletCards} />
         <StatCard title="Receita 30d" value={formatMoney(revenue30d)} caption="Faturas pagas salvas" tone="cyan" icon={TrendingUp} />
         <StatCard title="Assinantes" value={active.length} caption={`${free.length} Free · ${plus.length} Plus · ${premiumLike.length} Premium`} icon={Users} />
-        <StatCard title="Em teste" value={trialing.length} caption="Trialing já conta como ativo" tone="violet" icon={Crown} />
-        <StatCard title="Receita perdida" value={formatMoney(lostRevenue)} caption={`${failedInvoices.length} falhas · ${canceled30d.length} cancelados 30d`} tone={lostRevenue ? "rose" : "emerald"} icon={TrendingDown} />
-        <StatCard title="Churn 30d" value={`${churnRate}%`} caption="Cancelados recentes sobre base + cancelados" tone={churnRate ? "rose" : "emerald"} icon={AlertTriangle} />
+        <StatCard title="Em teste" value={trialing.length} caption="Trialing ativo" tone="violet" icon={Crown} />
+        <StatCard title="Receita perdida" value={formatMoney(lostRevenue)} caption={`${failedInvoices.length} falhas · ${canceled30d.length} cancelados`} tone={lostRevenue ? "rose" : "emerald"} icon={TrendingDown} />
+        <StatCard title="Churn 30d" value={`${churnRate}%`} caption="Cancelados recentes" tone={churnRate ? "rose" : "emerald"} icon={AlertTriangle} />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
-        <div className="rounded-3xl border border-white/10 bg-zinc-950/60 p-5 shadow-2xl shadow-black/20">
+        <div className="rounded-3xl border border-white/10 bg-zinc-950/60 p-4 shadow-2xl shadow-black/20 sm:p-5">
           <h2 className="text-lg font-semibold text-white">Mapa de planos</h2>
-          <p className="mt-1 text-sm text-zinc-500">Distribuição da base por plano e status.</p>
+          <p className="mt-1 text-sm text-zinc-500">Distribuição da base por plano e status. Mix premium: {premiumMix}%.</p>
           <div className="mt-5 space-y-3">
-            {planStats.map((item) => (
-              <div key={item.label}>
-                <div className="mb-1.5 flex justify-between text-xs"><span className="text-zinc-400">{item.label}</span><span className="font-medium text-white">{formatCount(item.count)}</span></div>
-                <div className="h-2 rounded-full bg-white/10"><div className={`h-2 rounded-full ${item.tone}`} style={{ width: `${Math.max((item.count / maxPlanCount) * 100, item.count ? 5 : 2)}%` }} /></div>
-              </div>
-            ))}
+            {planStats.map((item) => <div key={item.label}><div className="mb-1.5 flex justify-between text-xs"><span className="text-zinc-400">{item.label}</span><span className="font-medium text-white">{formatCount(item.count)}</span></div><div className="h-2 rounded-full bg-white/10"><div className={`h-2 rounded-full ${item.tone}`} style={{ width: `${Math.max((item.count / maxPlanCount) * 100, item.count ? 5 : 2)}%` }} /></div></div>)}
           </div>
         </div>
 
-        <div className="rounded-3xl border border-white/10 bg-zinc-950/60 p-5 shadow-2xl shadow-black/20">
+        <div className="rounded-3xl border border-white/10 bg-zinc-950/60 p-4 shadow-2xl shadow-black/20 sm:p-5">
           <h2 className="text-lg font-semibold text-white">Churn & perda</h2>
-          <p className="mt-1 text-sm text-zinc-500">Leitura operacional usando cancelamentos e faturas com falha.</p>
+          <p className="mt-1 text-sm text-zinc-500">Cancelamentos e faturas com falha.</p>
           <div className="mt-5 grid gap-3 sm:grid-cols-3">
             <div className="rounded-2xl border border-rose-400/20 bg-rose-500/10 p-4"><p className="text-xs text-rose-200/70">Cancelados 30d</p><p className="mt-2 text-2xl font-semibold text-white">{canceled30d.length}</p></div>
             <div className="rounded-2xl border border-amber-400/20 bg-amber-500/10 p-4"><p className="text-xs text-amber-200/70">Faturas falhas</p><p className="mt-2 text-2xl font-semibold text-white">{failedInvoices.length}</p></div>
@@ -250,52 +239,39 @@ export default async function AdminSubscriptionsPage() {
         </div>
       </div>
 
-      <div className="rounded-3xl border border-white/10 bg-zinc-950/60 p-5 shadow-2xl shadow-black/20">
+      <div className="rounded-3xl border border-white/10 bg-zinc-950/60 p-4 shadow-2xl shadow-black/20 sm:p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h2 className="flex items-center gap-2 text-lg font-semibold text-white"><UserRoundCheck className="h-4 w-4 text-emerald-300" /> Assinantes recentes</h2>
-          <span className="rounded-full border border-cyan-400/25 bg-cyan-500/10 px-3 py-1 text-xs text-cyan-100">{subscriptions.length} registros carregados</span>
+          <span className="rounded-full border border-cyan-400/25 bg-cyan-500/10 px-3 py-1 text-xs text-cyan-100">{subscriptions.length} registros</span>
         </div>
-        <div className="overflow-x-auto">
+
+        <SubscriptionsMobileCardList items={mobileSubscriptions} />
+
+        <div className="hidden overflow-x-auto lg:block">
           <table className="min-w-[920px] w-full text-sm">
-            <thead className="text-left text-xs uppercase tracking-wide text-zinc-500">
-              <tr className="border-b border-white/10"><th className="px-3 py-2">Usuário</th><th className="px-3 py-2">Plano</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Gateway</th><th className="px-3 py-2">Renova/expira</th><th className="px-3 py-2">Atualizado</th></tr>
-            </thead>
+            <thead className="text-left text-xs uppercase tracking-wide text-zinc-500"><tr className="border-b border-white/10"><th className="px-3 py-2">Usuário</th><th className="px-3 py-2">Plano</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Gateway</th><th className="px-3 py-2">Renova/expira</th><th className="px-3 py-2">Atualizado</th></tr></thead>
             <tbody>
-              {recentSubscriptions.map((row) => (
-                <tr key={row.id} className="border-b border-white/5 last:border-none">
-                  <td className="px-3 py-3"><p className="font-medium text-white">{row.profiles?.full_name ?? row.profiles?.email ?? "Usuário sem nome"}</p><p className="text-xs text-zinc-500">{row.profiles?.email ?? "—"}</p></td>
-                  <td className="px-3 py-3 text-zinc-300">{row.plans?.name ?? planFamily(row.plans?.slug)}</td>
-                  <td className="px-3 py-3"><span className={`rounded-full border px-2.5 py-1 text-xs ${statusClass(row.status)}`}>{statusLabel(row.status)}</span></td>
-                  <td className="px-3 py-3 text-zinc-400">{row.gateway ?? "—"}</td>
-                  <td className="px-3 py-3 text-zinc-400">{formatDate(row.current_period_end ?? row.trial_ends_at)}</td>
-                  <td className="px-3 py-3 text-zinc-400">{formatDate(row.updated_at ?? row.created_at)}</td>
-                </tr>
-              ))}
+              {recentSubscriptions.map((row) => <tr key={row.id} className="border-b border-white/5 last:border-none"><td className="px-3 py-3"><p className="font-medium text-white">{row.profiles?.full_name ?? row.profiles?.email ?? "Usuário sem nome"}</p><p className="text-xs text-zinc-500">{row.profiles?.email ?? "—"}</p></td><td className="px-3 py-3 text-zinc-300">{row.plans?.name ?? planFamily(row.plans?.slug)}</td><td className="px-3 py-3"><span className={`rounded-full border px-2.5 py-1 text-xs ${statusClass(row.status)}`}>{statusLabel(row.status)}</span></td><td className="px-3 py-3 text-zinc-400">{row.gateway ?? "—"}</td><td className="px-3 py-3 text-zinc-400">{formatDate(row.current_period_end ?? row.trial_ends_at)}</td><td className="px-3 py-3 text-zinc-400">{formatDate(row.updated_at ?? row.created_at)}</td></tr>)}
             </tbody>
           </table>
-          {recentSubscriptions.length === 0 ? <div className="rounded-2xl border border-dashed border-white/10 p-8 text-center text-sm text-zinc-500">Nenhuma assinatura encontrada. Se houver erro acima, ele está impedindo a leitura da tabela.</div> : null}
+          {recentSubscriptions.length === 0 ? <div className="rounded-2xl border border-dashed border-white/10 p-8 text-center text-sm text-zinc-500">Nenhuma assinatura encontrada.</div> : null}
         </div>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
-        <aside className="rounded-3xl border border-white/10 bg-zinc-950/60 p-5 shadow-2xl shadow-black/20">
+        <aside className="rounded-3xl border border-white/10 bg-zinc-950/60 p-4 shadow-2xl shadow-black/20 sm:p-5">
           <h2 className="flex items-center gap-2 text-lg font-semibold text-white"><RefreshCw className="h-4 w-4 text-rose-300" /> Recuperação</h2>
           <p className="mt-1 text-sm text-zinc-500">Assinaturas com maior risco operacional/comercial.</p>
           <div className="mt-5 space-y-3">
-            {recoveryQueue.map((row) => (
-              <div key={row.id} className="rounded-2xl border border-white/10 bg-black/20 p-3">
-                <div className="flex items-center justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-medium text-white">{row.profiles?.full_name ?? row.profiles?.email ?? "Usuário sem nome"}</p><p className="truncate text-xs text-zinc-500">{row.plans?.name ?? "Plano não informado"}</p></div><span className={`shrink-0 rounded-full border px-2 py-1 text-[10px] ${statusClass(row.status)}`}>{statusLabel(row.status)}</span></div>
-                <p className="mt-2 text-xs text-zinc-500">Renova/expira: {formatDate(row.current_period_end ?? row.trial_ends_at)}</p>
-              </div>
-            ))}
+            {recoveryQueue.map((row) => <div key={row.id} className="rounded-2xl border border-white/10 bg-black/20 p-3"><div className="flex items-center justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-medium text-white">{row.profiles?.full_name ?? row.profiles?.email ?? "Usuário sem nome"}</p><p className="truncate text-xs text-zinc-500">{row.plans?.name ?? "Plano não informado"}</p></div><span className={`shrink-0 rounded-full border px-2 py-1 text-[10px] ${statusClass(row.status)}`}>{statusLabel(row.status)}</span></div><p className="mt-2 text-xs text-zinc-500">Renova/expira: {formatDate(row.current_period_end ?? row.trial_ends_at)}</p></div>)}
             {recoveryQueue.length === 0 ? <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/10 p-4 text-sm text-emerald-100">Nenhuma recuperação crítica agora.</div> : null}
           </div>
         </aside>
 
-        <div className="rounded-3xl border border-white/10 bg-zinc-950/60 p-5 shadow-2xl shadow-black/20">
+        <div className="rounded-3xl border border-white/10 bg-zinc-950/60 p-4 shadow-2xl shadow-black/20 sm:p-5">
           <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-white"><BadgeCheck className="h-4 w-4 text-cyan-300" /> Faturas recentes</h2>
           <div className="space-y-3">
-            {invoices.slice(0, 12).map((invoice) => (<article key={invoice.id} className="rounded-2xl border border-white/10 bg-black/20 p-3 text-sm"><div className="flex items-center justify-between gap-3"><div><p className="font-medium text-white">{invoice.profiles?.full_name ?? invoice.customer_email ?? "Cliente sem nome"}</p><p className="text-xs text-zinc-500">{invoice.plans?.name ?? "Plano não informado"} · {formatDate(invoice.paid_at ?? invoice.created_at)}</p></div><div className="text-right"><p className="font-semibold text-emerald-300">{formatMoney(Number(invoice.amount_paid_cents ?? invoice.amount_due_cents ?? 0))}</p><span className={`mt-1 inline-flex rounded-full border px-2 py-1 text-[10px] ${normalize(invoice.status) === "paid" ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-200" : "border-amber-400/25 bg-amber-500/10 text-amber-100"}`}>{normalize(invoice.status) || "sem status"}</span></div></div></article>))}
+            {invoices.slice(0, 12).map((invoice) => <article key={invoice.id} className="rounded-2xl border border-white/10 bg-black/20 p-3 text-sm"><div className="flex items-center justify-between gap-3"><div className="min-w-0"><p className="truncate font-medium text-white">{invoice.profiles?.full_name ?? invoice.customer_email ?? "Cliente sem nome"}</p><p className="text-xs text-zinc-500">{invoice.plans?.name ?? "Plano não informado"} · {formatDate(invoice.paid_at ?? invoice.created_at)}</p></div><div className="shrink-0 text-right"><p className="font-semibold text-emerald-300">{formatMoney(Number(invoice.amount_paid_cents ?? invoice.amount_due_cents ?? 0))}</p><span className={`mt-1 inline-flex rounded-full border px-2 py-1 text-[10px] ${normalize(invoice.status) === "paid" ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-200" : "border-amber-400/25 bg-amber-500/10 text-amber-100"}`}>{normalize(invoice.status) || "sem status"}</span></div></div></article>)}
             {invoices.length === 0 ? <div className="rounded-2xl border border-dashed border-white/10 p-8 text-center text-sm text-zinc-500">Nenhuma fatura salva ainda.</div> : null}
           </div>
         </div>
