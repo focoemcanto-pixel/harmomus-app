@@ -136,7 +136,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     }
 
     const requiredPlan = resolveRequiredPlan(plans, kit.required_plan);
-    const accessKit: PublicKit = {
+    const accessKit = {
       id: kit.id,
       slug: kit.slug,
       name: kit.name,
@@ -153,7 +153,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       requiredPlan,
       allowedPlanSlugs: resolveAllowedPlanSlugs(kit.allowed_plan_slugs, requiredPlan),
       tones: [],
-    };
+    } as PublicKit;
 
     const access = await resolveKitAccess(context, accessKit);
     if (!access.play.allowed) {
