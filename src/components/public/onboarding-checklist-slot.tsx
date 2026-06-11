@@ -198,15 +198,15 @@ export function OnboardingChecklistSlot({ isGuest }: OnboardingChecklistSlotProp
 
   return (
     <div className="fixed inset-0 z-[80] pointer-events-none">
-      <div className="absolute inset-0 bg-black/55 backdrop-blur-[1px]" />
+      <div className="absolute inset-0 bg-black/35" />
 
       <div
-        className="absolute rounded-2xl border-2 border-cyan-300/80 bg-white/5 shadow-[0_0_0_9999px_rgba(0,0,0,0.55),0_0_38px_rgba(34,211,238,0.62)] transition-all duration-200"
+        className="absolute rounded-2xl border-2 border-cyan-300/80 bg-transparent shadow-[0_0_0_9999px_rgba(0,0,0,0.35),0_0_38px_rgba(34,211,238,0.62)] transition-all duration-200"
         style={spotlight}
       />
 
       <div
-        className="pointer-events-auto absolute rounded-[1.5rem] border border-white/15 bg-[#111827]/95 p-5 text-white shadow-[0_25px_90px_rgba(0,0,0,0.45)] backdrop-blur-xl transition-all duration-200"
+        className="pointer-events-auto absolute rounded-[1.5rem] border border-white/15 bg-[#111827]/95 p-5 text-white shadow-[0_25px_90px_rgba(0,0,0,0.45)] transition-all duration-200"
         style={{ top: popoverTop, left: popoverLeft, width: popoverWidth }}
       >
         <div className="absolute -top-3 left-1/2 h-6 w-6 -translate-x-1/2 rotate-45 border-l border-t border-white/15 bg-[#111827]" />
