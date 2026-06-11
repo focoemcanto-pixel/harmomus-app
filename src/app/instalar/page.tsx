@@ -84,6 +84,27 @@ export default function InstalarPage() {
           </div>
         </section>
 
+        <section className="grid gap-4 md:grid-cols-2">
+          <div className="rounded-[2rem] border border-cyan-300/20 bg-cyan-400/10 p-5 md:p-6">
+            <p className="text-xs font-black uppercase tracking-[0.24em] text-cyan-200">Android / Chrome</p>
+            <h2 className="mt-2 text-xl font-black text-white">Procure pelo botão nativo</h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-200">
+              Em alguns aparelhos Android, o Chrome mostra automaticamente um botão ou aviso de &quot;Instalar aplicativo&quot;. Se ele aparecer, toque nele para instalar em poucos segundos.
+            </p>
+          </div>
+          <div className="rounded-[2rem] border border-violet-300/20 bg-violet-400/10 p-5 md:p-6">
+            <p className="text-xs font-black uppercase tracking-[0.24em] text-violet-200">iPhone / Safari</p>
+            <h2 className="mt-2 text-xl font-black text-white">Use Compartilhar → Adicionar à Tela de Início</h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-200">
+              No iPhone, abra pelo Safari, toque em Compartilhar e escolha &quot;Adicionar à Tela de Início&quot; para criar o atalho do Harmomus.
+            </p>
+          </div>
+        </section>
+
+        <div className="rounded-2xl border border-amber-300/20 bg-amber-400/10 p-4 text-sm leading-6 text-amber-50">
+          No iPhone, abra pelo Safari. No Chrome do iPhone, a instalação pode não aparecer.
+        </div>
+
         <div className="grid gap-5 lg:grid-cols-2">
           <TutorialCard
             icon="🤖"

@@ -18,7 +18,6 @@ export async function generateMetadata(): Promise<Metadata> {
   const settings = await getAdminSettings();
   const appName = settings.branding.appName || "Harmomus";
   const description = settings.home.subheadline || "Kits vocais premium para equipes de louvor.";
-  const faviconUrl = withVersion(settings.branding.faviconUrl || settings.branding.logoUrl || undefined);
   const ogImageUrl = withVersion(settings.branding.ogImageUrl || settings.branding.heroImageUrl || settings.branding.logoUrl || undefined);
   const appUrl = settings.urls.appUrl || process.env.NEXT_PUBLIC_APP_URL || undefined;
 
@@ -36,17 +35,30 @@ export async function generateMetadata(): Promise<Metadata> {
     formatDetection: {
       telephone: false,
     },
-    icons: faviconUrl
-      ? {
-          icon: [{ url: faviconUrl, type: "image/png" }],
-          shortcut: [{ url: faviconUrl }],
-          apple: [{ url: faviconUrl }],
-        }
-      : {
-          icon: [{ url: "/favicon.ico" }],
-          shortcut: [{ url: "/favicon.ico" }],
-          apple: [{ url: "/favicon.ico" }],
+    icons: {
+      icon: [
+        {
+          url: "/favicon-32x32.png",
+          sizes: "32x32",
+          type: "image/png",
         },
+        {
+          url: "/favicon-16x16.png",
+          sizes: "16x16",
+          type: "image/png",
+        },
+        {
+          url: "/favicon.ico",
+        },
+      ],
+      apple: [
+        {
+          url: "/apple-touch-icon.png",
+          sizes: "180x180",
+          type: "image/png",
+        },
+      ],
+    },
     openGraph: {
       title: appName,
       description,
