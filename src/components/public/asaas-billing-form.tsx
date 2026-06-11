@@ -6,6 +6,7 @@ type AsaasBillingFormProps = {
   href: string;
   className?: string;
   children: React.ReactNode;
+  onBeforeContinue?: (href: string) => void;
 };
 
 function onlyDigits(value: string) {
@@ -14,20 +15,15 @@ function onlyDigits(value: string) {
 
 function formatCpfCnpj(value: string) {
   const digits = onlyDigits(value).slice(0, 14);
-  if (digits.length <= 11) {
-    return digits
-      .replace(/(\d{3})(\d)/, "$1.$2")
-      .replace(/(\d{3})(\d)/, "$1.$2")
-      .replace(/(\d{3})(\d{1,2})$/, "$1-$2");
-  }
-  return digits
-    .replace(/(\d{2})(\d)/, "$1.$2")
-    .replace(/(\d{3})(\d)/, "$1.$2")
-    .replace(/(\d{3})(\d)/, "$1/$2")
-    .replace(/(\d{4})(\d{1,2})$/, "$1-$2");
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) return `${digits.slice(0, 3)}.${digits.slice(3)}`;
+  if (digits.length <= 9) return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6)}`;
+  if (digits.length <= 11) return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
+  if (digits.length <= 2) return digits;
+  return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`;
 }
 
-export function AsaasBillingForm({ href, className, children }: AsaasBillingFormProps) {
+export function AsaasBillingForm({ href, className, children, onBeforeContinue }: AsaasBillingFormProps) {
   const [name, setName] = useState("");
   const [documentNumber, setDocumentNumber] = useState("");
   const formRef = useRef<HTMLDivElement>(null);
@@ -51,6 +47,8 @@ export function AsaasBillingForm({ href, className, children }: AsaasBillingForm
     return url.toString();
   }, [href, name, documentDigits, isValid]);
 
+  const continueClassName = `${className ?? ""} ${isValid ? "" : "pointer-events-none opacity-60"}`;
+
   return (
     <div ref={formRef} className="mt-6 rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-4">
       <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-100">Dados para cobrança</p>
@@ -64,7 +62,13 @@ export function AsaasBillingForm({ href, className, children }: AsaasBillingForm
       </label>
       <p className="mt-2 text-xs text-zinc-400">Necessário para emissão da cobrança pelo Asaas.</p>
       {!isValid ? <p className="mt-3 text-xs text-amber-200">Preencha seu nome e CPF/CNPJ para gerar a cobrança.</p> : null}
-      <a href={checkoutHref} aria-disabled={!isValid} className={`${className ?? ""} ${isValid ? "" : "pointer-events-none opacity-60"}`}>{children}</a>
+      {onBeforeContinue ? (
+        <button type="button" disabled={!isValid} onClick={() => onBeforeContinue(checkoutHref)} className={`w-full ${continueClassName}`}>
+          {children}
+        </button>
+      ) : (
+        <a href={checkoutHref} aria-disabled={!isValid} className={continueClassName}>{children}</a>
+      )}
     </div>
   );
 }
