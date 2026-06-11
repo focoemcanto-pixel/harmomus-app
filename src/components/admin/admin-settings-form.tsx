@@ -5,6 +5,9 @@ import { useState } from "react";
 import { BrandingPipelineManager } from "@/components/admin/branding-pipeline-manager";
 import type { AdminSettings } from "@/lib/data/admin-settings";
 
+const inputClass = "h-11 rounded-xl border border-border bg-background px-3 text-sm text-white outline-none transition focus:border-gold-500/50";
+const labelClass = "grid gap-1.5 text-xs font-medium text-muted";
+
 export function AdminSettingsForm({ settings }: { settings: AdminSettings }) {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -86,50 +89,124 @@ export function AdminSettingsForm({ settings }: { settings: AdminSettings }) {
         </div>
       ) : null}
 
-      <form onSubmit={handleSubmit} className="grid gap-3 rounded-xl border border-border bg-surface p-6 text-sm shadow-premium md:grid-cols-2">
-        <BrandingPipelineManager
-          initial={{
-            logoUrl: settings.branding.logoUrl,
-            faviconUrl: settings.branding.faviconUrl,
-            loginImageUrl: settings.branding.loginImageUrl ?? "",
-            heroImageUrl: settings.branding.heroImageUrl ?? "",
-            ogImageUrl: settings.branding.ogImageUrl ?? "",
-          }}
-        />
+      <form onSubmit={handleSubmit} className="space-y-4 rounded-3xl border border-border bg-surface p-3 text-sm shadow-premium sm:p-5">
+        <SettingsSection title="Branding" description="Identidade visual, imagens públicas e cor principal.">
+          <div className="rounded-2xl border border-border bg-background/45 p-3 sm:p-4">
+            <BrandingPipelineManager
+              initial={{
+                logoUrl: settings.branding.logoUrl,
+                faviconUrl: settings.branding.faviconUrl,
+                loginImageUrl: settings.branding.loginImageUrl ?? "",
+                heroImageUrl: settings.branding.heroImageUrl ?? "",
+                ogImageUrl: settings.branding.ogImageUrl ?? "",
+              }}
+            />
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className={labelClass}>Nome do app
+              <input name="appName" defaultValue={settings.branding.appName} className={inputClass} placeholder="Nome do app" />
+            </label>
+            <label className={labelClass}>Cor principal
+              <input name="primaryColor" defaultValue={settings.branding.primaryColor} className={inputClass} placeholder="#D4AF37" />
+            </label>
+          </div>
+        </SettingsSection>
 
-        <input name="appName" defaultValue={settings.branding.appName} className="rounded border border-border bg-background px-3 py-2" placeholder="Nome do app" />
-        <input name="primaryColor" defaultValue={settings.branding.primaryColor} className="rounded border border-border bg-background px-3 py-2" placeholder="Cor principal" />
-        <input name="appUrl" defaultValue={settings.urls.appUrl} className="rounded border border-border bg-background px-3 py-2" placeholder="NEXT_PUBLIC_APP_URL" />
-        <input name="socialLinks" defaultValue={settings.urls.socialLinks} className="rounded border border-border bg-background px-3 py-2" placeholder="Links sociais" />
-        <input name="courseLink" defaultValue={settings.urls.courseLink} className="rounded border border-border bg-background px-3 py-2" placeholder="Link curso" />
+        <SettingsSection title="URLs" description="Links públicos, app e curso.">
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className={labelClass}>URL do app
+              <input name="appUrl" defaultValue={settings.urls.appUrl} className={inputClass} placeholder="NEXT_PUBLIC_APP_URL" />
+            </label>
+            <label className={labelClass}>Link do curso
+              <input name="courseLink" defaultValue={settings.urls.courseLink} className={inputClass} placeholder="Link curso" />
+            </label>
+            <label className={`${labelClass} md:col-span-2`}>Links sociais
+              <input name="socialLinks" defaultValue={settings.urls.socialLinks} className={inputClass} placeholder="Links sociais" />
+            </label>
+          </div>
+        </SettingsSection>
 
-        <label className="flex items-center gap-2">
-          <input type="checkbox" name="stripeConfigured" defaultChecked={settings.payments.stripeConfigured} />
-          Stripe configurado
-        </label>
+        <SettingsSection title="Pagamentos" description="Stripe, modo de cobrança e Price IDs.">
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="flex h-11 items-center gap-3 rounded-xl border border-border bg-background px-3 text-sm text-muted">
+              <input type="checkbox" name="stripeConfigured" defaultChecked={settings.payments.stripeConfigured} />
+              Stripe configurado
+            </label>
+            <label className={labelClass}>Modo
+              <select name="mode" defaultValue={settings.payments.mode} className={inputClass}>
+                <option value="test">test</option>
+                <option value="production">production</option>
+              </select>
+            </label>
+            <label className={labelClass}>Stripe Plus Price ID
+              <input name="stripePlusPriceId" defaultValue={settings.payments.stripePlusPriceId} className={inputClass} placeholder="price_..." />
+            </label>
+            <label className={labelClass}>Stripe Premium Price ID
+              <input name="stripePremiumPriceId" defaultValue={settings.payments.stripePremiumPriceId} className={inputClass} placeholder="price_..." />
+            </label>
+          </div>
+        </SettingsSection>
 
-        <input name="stripePlusPriceId" defaultValue={settings.payments.stripePlusPriceId} className="rounded border border-border bg-background px-3 py-2" placeholder="Stripe Plus Price ID" />
-        <input name="stripePremiumPriceId" defaultValue={settings.payments.stripePremiumPriceId} className="rounded border border-border bg-background px-3 py-2" placeholder="Stripe Premium Price ID" />
+        <SettingsSection title="Storage" description="Cloudflare R2 e status de conexão.">
+          <div className="grid gap-3 md:grid-cols-3">
+            <label className={labelClass}>R2 bucket
+              <input name="r2Bucket" defaultValue={settings.storage.r2Bucket} className={inputClass} placeholder="R2 bucket" />
+            </label>
+            <label className={labelClass}>R2 public URL
+              <input name="r2PublicUrl" defaultValue={settings.storage.r2PublicUrl} className={inputClass} placeholder="R2 public URL" />
+            </label>
+            <label className={labelClass}>Status
+              <input name="connectionStatus" defaultValue={settings.storage.connectionStatus} className={inputClass} placeholder="Status de conexão" />
+            </label>
+          </div>
+        </SettingsSection>
 
-        <select name="mode" defaultValue={settings.payments.mode} className="rounded border border-border bg-background px-3 py-2">
-          <option value="test">test</option>
-          <option value="production">production</option>
-        </select>
+        <SettingsSection title="Home" description="Textos principais da página pública.">
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className={`${labelClass} md:col-span-2`}>Headline
+              <input name="headline" defaultValue={settings.home.headline} className={inputClass} placeholder="Headline" />
+            </label>
+            <label className={`${labelClass} md:col-span-2`}>Subheadline
+              <input name="subheadline" defaultValue={settings.home.subheadline} className={inputClass} placeholder="Subheadline" />
+            </label>
+            <label className={labelClass}>CTA primário
+              <input name="primaryCta" defaultValue={settings.home.primaryCta} className={inputClass} placeholder="CTA primário" />
+            </label>
+            <label className={labelClass}>CTA secundário
+              <input name="secondaryCta" defaultValue={settings.home.secondaryCta} className={inputClass} placeholder="CTA secundário" />
+            </label>
+          </div>
+        </SettingsSection>
 
-        <input name="r2Bucket" defaultValue={settings.storage.r2Bucket} className="rounded border border-border bg-background px-3 py-2" placeholder="R2 bucket" />
-        <input name="r2PublicUrl" defaultValue={settings.storage.r2PublicUrl} className="rounded border border-border bg-background px-3 py-2" placeholder="R2 public URL" />
-        <input name="connectionStatus" defaultValue={settings.storage.connectionStatus} className="rounded border border-border bg-background px-3 py-2" placeholder="Status de conexão" />
-        <input name="headline" defaultValue={settings.home.headline} className="rounded border border-border bg-background px-3 py-2" placeholder="Headline" />
-        <input name="subheadline" defaultValue={settings.home.subheadline} className="rounded border border-border bg-background px-3 py-2" placeholder="Subheadline" />
-        <input name="primaryCta" defaultValue={settings.home.primaryCta} className="rounded border border-border bg-background px-3 py-2" placeholder="CTA primário" />
-        <input name="secondaryCta" defaultValue={settings.home.secondaryCta} className="rounded border border-border bg-background px-3 py-2" placeholder="CTA secundário" />
-        <input name="supportPhone" defaultValue={settings.whatsapp.supportPhone} className="rounded border border-border bg-background px-3 py-2" placeholder="WhatsApp suporte" />
-        <input name="webhook" defaultValue={settings.whatsapp.webhook} className="rounded border border-border bg-background px-3 py-2" placeholder="Webhook reservado" />
+        <SettingsSection title="WhatsApp" description="Suporte e webhook reservado.">
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className={labelClass}>WhatsApp suporte
+              <input name="supportPhone" defaultValue={settings.whatsapp.supportPhone} className={inputClass} placeholder="WhatsApp suporte" />
+            </label>
+            <label className={labelClass}>Webhook reservado
+              <input name="webhook" defaultValue={settings.whatsapp.webhook} className={inputClass} placeholder="Webhook reservado" />
+            </label>
+          </div>
+        </SettingsSection>
 
-        <button type="submit" disabled={saving} className="rounded bg-gold-500/20 px-4 py-2 text-gold-300 transition hover:bg-gold-500/30 disabled:opacity-60 md:col-span-2">
-          {saving ? "Salvando..." : "Salvar configurações"}
-        </button>
+        <div className="sticky bottom-24 z-10 rounded-2xl border border-gold-500/25 bg-surface/95 p-2 backdrop-blur lg:static lg:border-0 lg:bg-transparent lg:p-0">
+          <button type="submit" disabled={saving} className="w-full rounded-2xl border border-gold-500/30 bg-gold-500/15 px-4 py-3 text-sm font-semibold text-gold-200 transition hover:bg-gold-500/25 disabled:opacity-60">
+            {saving ? "Salvando..." : "Salvar configurações"}
+          </button>
+        </div>
       </form>
     </>
+  );
+}
+
+function SettingsSection({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-3xl border border-border/80 bg-background/35 p-3 sm:p-4">
+      <div className="mb-3 border-b border-border/70 pb-3">
+        <h2 className="text-base font-semibold text-white">{title}</h2>
+        <p className="mt-1 text-xs leading-5 text-muted">{description}</p>
+      </div>
+      <div className="space-y-3">{children}</div>
+    </section>
   );
 }
