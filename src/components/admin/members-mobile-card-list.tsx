@@ -41,47 +41,47 @@ function stagePillClass(stage: MobileMemberItem["journeyStage"]) {
 
 export function MembersMobileCardList({ items }: { items: MobileMemberItem[] }) {
   if (!items.length) {
-    return <p className="p-6 text-center text-sm text-muted lg:hidden">Nenhum membro encontrado para os filtros atuais.</p>;
+    return <p className="p-5 text-center text-sm text-muted lg:hidden">Nenhum membro encontrado para os filtros atuais.</p>;
   }
 
   return (
-    <div className="grid gap-3 p-3 lg:hidden">
+    <div className="grid gap-2 p-3 lg:hidden">
       {items.map((item) => (
-        <article key={item.id} className="rounded-3xl border border-border bg-background/60 p-4">
+        <article key={item.id} className="rounded-3xl border border-border bg-background/60 p-3">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="truncate font-semibold text-white">{item.name ?? "Sem nome"}</p>
-              <p className="mt-1 truncate text-xs text-muted">{item.email ?? "Sem e-mail"}</p>
-              <p className="mt-2 text-[11px] text-zinc-500">Criado: {safeDate(item.createdAt)}</p>
+              <p className="truncate text-base font-semibold text-white">{item.name ?? "Sem nome"}</p>
+              <p className="mt-0.5 truncate text-xs text-muted">{item.email ?? "Sem e-mail"}</p>
+              <p className="mt-1 text-[10px] text-zinc-500">Criado: {safeDate(item.createdAt)}</p>
             </div>
-            <span className={`shrink-0 rounded-full border px-3 py-1 text-[11px] font-medium ${stagePillClass(item.journeyStage)}`}>{item.journeyLabel}</span>
+            <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-medium ${stagePillClass(item.journeyStage)}`}>{item.journeyLabel}</span>
           </div>
 
-          <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-              <p className="uppercase tracking-[0.14em] text-muted">Plano</p>
+          <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-2.5">
+              <p className="text-[10px] uppercase tracking-[0.14em] text-muted">Plano</p>
               <p className="mt-1 truncate font-medium text-white">{item.planName ?? "Sem plano"}</p>
-              <p className="mt-1 text-muted">{item.status ?? "none"}</p>
+              <p className="mt-0.5 text-muted">{item.status ?? "none"}</p>
             </div>
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-              <p className="uppercase tracking-[0.14em] text-muted">Gateway</p>
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-2.5">
+              <p className="text-[10px] uppercase tracking-[0.14em] text-muted">Gateway</p>
               <p className="mt-1 truncate font-medium text-white">{item.gateway ?? "—"}</p>
-              <p className="mt-1 text-muted">Cob.: {safeDate(item.nextBillingAt)}</p>
+              <p className="mt-0.5 text-muted">Cob.: {safeDate(item.nextBillingAt)}</p>
             </div>
           </div>
 
-          <div className={`mt-3 rounded-2xl border p-3 ${healthClass(item.journeyHealth)}`}>
+          <div className={`mt-2 rounded-2xl border p-2.5 ${healthClass(item.journeyHealth)}`}>
             <div className="flex items-start gap-2">
               {item.journeyHealth === "success" ? <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0" /> : <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />}
               <div className="min-w-0">
                 <p className="text-xs font-semibold">{item.nextAction}</p>
-                <p className="mt-1 text-[11px] opacity-80">{item.journeyDescription}</p>
-                <p className="mt-2 truncate text-[11px] opacity-70">Stripe: {item.stripeLinked ? "vinculado" : "sem vínculo visível"}</p>
+                <p className="mt-0.5 line-clamp-1 text-[11px] opacity-80">{item.journeyDescription}</p>
+                <p className="mt-1 truncate text-[10px] opacity-70">Stripe: {item.stripeLinked ? "vinculado" : "sem vínculo visível"}</p>
               </div>
             </div>
           </div>
 
-          <div className="mt-3 grid grid-cols-2 gap-2">
+          <div className="mt-2 grid grid-cols-2 gap-2">
             <Link href={`/admin/membros/${item.id}`} className="inline-flex items-center justify-center rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-zinc-200 transition hover:border-gold-400/40 hover:text-gold-200">
               Diagnóstico
             </Link>
