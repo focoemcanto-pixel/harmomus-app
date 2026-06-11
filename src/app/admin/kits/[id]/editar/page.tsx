@@ -160,6 +160,7 @@ export default async function EditarKitPage({ params }: { params: Promise<{ id: 
   const { id } = await params;
   const [kit, { categories, plans }, artistCategories, previewAudioFiles] = await Promise.all([getKitById(id), getKitFormOptions(), getArtistCategories(), getPreviewAudioFiles(id)]);
   if (!kit) notFound();
+  const currentKit = kit;
 
   async function updateKitAction(formData: FormData) {
     "use server";
@@ -179,7 +180,7 @@ export default async function EditarKitPage({ params }: { params: Promise<{ id: 
     try {
       const supabase = createSupabaseAdminClient() as any;
       const artistCategory = await ensureArtistCategoryAdmin(supabase, artist);
-      const manualTessituraRanges = parseManualTessituraRanges(formData, (kit as any).manual_tessitura_ranges);
+      const manualTessituraRanges = parseManualTessituraRanges(formData, (currentKit as any).manual_tessitura_ranges);
 
       const payload: Record<string, unknown> = {
         name,
@@ -238,7 +239,7 @@ export default async function EditarKitPage({ params }: { params: Promise<{ id: 
       revalidatePath(`/admin/kits/${id}/editar`, "page");
       revalidatePath("/biblioteca", "page");
       revalidatePath("/todos-os-kits", "page");
-      revalidatePath(`/biblioteca/${kit.slug}`, "page");
+      revalidatePath(`/biblioteca/${currentKit.slug}`, "page");
     } catch (error) {
       console.error("[admin-kit-preview] failed", error);
       redirect(`/admin/kits/${id}/editar?previewError=1`);
@@ -249,16 +250,16 @@ export default async function EditarKitPage({ params }: { params: Promise<{ id: 
 
   return (
     <div className="space-y-6">
-      <KitForm mode="edit" categories={categories} artistCategories={artistCategories} plans={plans} initialData={kit} action={updateKitAction} />
+      <KitForm mode="edit" categories={categories} artistCategories={artistCategories} plans={plans} initialData={currentKit} action={updateKitAction} />
       <KitPreviewCard
         audioFiles={previewAudioFiles}
-        initialAudioFileId={(kit as any).preview_audio_file_id ?? null}
-        initialStartSeconds={(kit as any).preview_start_seconds ?? 0}
-        initialDurationSeconds={(kit as any).preview_duration_seconds ?? 10}
+        initialAudioFileId={(currentKit as any).preview_audio_file_id ?? null}
+        initialStartSeconds={(currentKit as any).preview_start_seconds ?? 0}
+        initialDurationSeconds={(currentKit as any).preview_duration_seconds ?? 10}
         action={updatePreviewAction}
       />
-      <KitAudioSyncCard kitId={kit.id} />
-      <KitLaunchCampaignCard kitId={kit.id} published={Boolean(kit.published)} />
+      <KitAudioSyncCard kitId={currentKit.id} />
+      <KitLaunchCampaignCard kitId={currentKit.id} published={Boolean(currentKit.published)} />
     </div>
   );
 }
