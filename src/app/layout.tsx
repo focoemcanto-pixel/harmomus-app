@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { AttributionCapture } from "@/components/analytics/attribution-capture";
 import { MetaPixel } from "@/components/analytics/meta-pixel";
 import { FlashToastProvider } from "@/components/feedback/flash-toast-provider";
+import { PhoneRequiredModal } from "@/components/profile/phone-required-modal";
 import { getAdminSettings } from "@/lib/data/admin-settings";
 import "./globals.css";
 
@@ -91,6 +92,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <AttributionCapture />
         <MetaPixel />
         {children}
+        <PhoneRequiredModal />
         <FlashToastProvider />
       </body>
     </html>
