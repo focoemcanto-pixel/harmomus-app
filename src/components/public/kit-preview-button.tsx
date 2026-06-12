@@ -120,45 +120,38 @@ export function KitPreviewButton({ audioUrl, startSeconds, durationSeconds, labe
     errorResetTimerRef.current = window.setTimeout(() => setState("idle"), 1200);
   }
 
-  function stopThisPreview() {
-    if (activeAudio === audioRef.current) resetActiveAudio();
-    else resetThisButton();
-  }
-
   function startProgressTimer(duration: number) {
     const startedAt = performance.now();
     activeProgressTimer = window.setInterval(() => {
       const elapsed = (performance.now() - startedAt) / 1000;
       setProgress(Math.min(100, (elapsed / duration) * 100));
     }, 80);
-    activeStopTimer = window.setTimeout(resetActiveAudio, duration * 1000);
+    activeStopTimer = window.setTimeout(() => {
+      const audio = audioRef.current;
+      const start = clampNumber(startSeconds, 0, 0, 60 * 60 * 3);
+      if (activeAudio === audio && audio) {
+        audio.pause();
+        try {
+          audio.currentTime = start;
+        } catch {
+          // alguns browsers podem bloquear seek sem metadados; o próximo clique corrige após metadata
+        }
+        resetActiveAudio();
+      }
+    }, duration * 1000);
   }
 
-  async function handleClick(event: MouseEvent<HTMLButtonElement>) {
-    event.preventDefault();
-    event.stopPropagation();
-
-    if (!audioUrl) return;
-    if (isPlaying || isLoading) {
-      stopThisPreview();
-      return;
-    }
-
-    resetActiveAudio();
-    setState("loading");
-    setProgress(0);
-
-    const audio = prepareAudio();
-    if (!audio) {
-      showErrorBriefly();
-      return;
-    }
-
-    activeAudio = audio;
-    activeReset = resetThisButton;
+  async function playFromPreviewStart(audio: HTMLAudioElement) {
+    clearActiveTimers();
+    audio.pause();
 
     const start = clampNumber(startSeconds, 0, 0, 60 * 60 * 3);
     const duration = clampNumber(durationSeconds, 10, 3, 30);
+
+    setState("loading");
+    setProgress(0);
+    activeAudio = audio;
+    activeReset = resetThisButton;
 
     const finalize = () => {
       if (activeAudio === audio) resetActiveAudio();
@@ -177,11 +170,11 @@ export function KitPreviewButton({ audioUrl, startSeconds, durationSeconds, labe
     );
 
     try {
-      // Em alguns browsers mobile, setar currentTime=0 antes dos metadados faz o play falhar.
-      // Por isso só fazemos seek quando o início escolhido é maior que zero.
-      if (start > 0) {
-        await waitForMetadata(audio);
-        if (canSeek(audio) && audio.duration > start) audio.currentTime = start;
+      await waitForMetadata(audio);
+      if (canSeek(audio) && audio.duration > start) {
+        audio.currentTime = start;
+      } else if (start === 0) {
+        audio.currentTime = 0;
       }
 
       await audio.play();
@@ -192,6 +185,24 @@ export function KitPreviewButton({ audioUrl, startSeconds, durationSeconds, labe
       resetActiveAudio();
       showErrorBriefly();
     }
+  }
+
+  async function handleClick(event: MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!audioUrl) return;
+
+    const audio = prepareAudio();
+    if (!audio) {
+      showErrorBriefly();
+      return;
+    }
+
+    // Em preview público, clique repetido não deve pausar nem continuar a faixa.
+    // Ele sempre reinicia o trecho salvo de 10s.
+    if (activeAudio && activeAudio !== audio) resetActiveAudio();
+    await playFromPreviewStart(audio);
   }
 
   return (
