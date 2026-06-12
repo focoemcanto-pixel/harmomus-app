@@ -1,6 +1,6 @@
 "use client";
 
-import { type PointerEvent, useMemo, useRef, useState } from "react";
+import { type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type PreviewAudioFile = {
   id: string;
@@ -51,11 +51,30 @@ export function KitPreviewCard({ audioFiles, initialAudioFileId, initialStartSec
   const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const scrubberRef = useRef<HTMLDivElement | null>(null);
+  const stopTimerRef = useRef<number | null>(null);
 
   const selectedFile = audioFiles.find((file) => file.id === audioFileId) ?? fallbackFile;
   const bars = useMemo(() => buildBars(audioFileId), [audioFileId]);
   const maxStart = Math.max(0, audioDuration - durationSeconds);
   const startPercent = maxStart > 0 ? (startSeconds / maxStart) * 100 : 0;
+
+  useEffect(() => {
+    return () => {
+      if (stopTimerRef.current) window.clearTimeout(stopTimerRef.current);
+      audioRef.current?.pause();
+    };
+  }, []);
+
+  function clearPreviewTimer() {
+    if (stopTimerRef.current) window.clearTimeout(stopTimerRef.current);
+    stopTimerRef.current = null;
+  }
+
+  function stopPreview() {
+    clearPreviewTimer();
+    if (audioRef.current) audioRef.current.pause();
+    setIsPlaying(false);
+  }
 
   function setStartFromPointer(event: PointerEvent<HTMLDivElement>) {
     const rect = scrubberRef.current?.getBoundingClientRect();
@@ -78,19 +97,25 @@ export function KitPreviewCard({ audioFiles, initialAudioFileId, initialStartSec
   }
 
   async function playPreview() {
-    if (!audioRef.current || !audioFileId) return;
-    if (isPlaying) {
-      audioRef.current.pause();
-      setIsPlaying(false);
-      return;
-    }
-    audioRef.current.currentTime = startSeconds;
-    await audioRef.current.play().catch(() => undefined);
+    const audio = audioRef.current;
+    if (!audio || !audioFileId) return;
+
+    clearPreviewTimer();
+    audio.pause();
+
+    const safeStart = Math.max(0, Math.min(startSeconds, Math.max(0, audioDuration - 1)));
+    audio.currentTime = safeStart;
     setIsPlaying(true);
-    window.setTimeout(() => {
-      if (!audioRef.current) return;
-      audioRef.current.pause();
+
+    await audio.play().catch(() => {
       setIsPlaying(false);
+    });
+
+    stopTimerRef.current = window.setTimeout(() => {
+      audio.pause();
+      audio.currentTime = safeStart;
+      setIsPlaying(false);
+      stopTimerRef.current = null;
     }, durationSeconds * 1000);
   }
 
@@ -112,7 +137,7 @@ export function KitPreviewCard({ audioFiles, initialAudioFileId, initialStartSec
 
           <label className="block space-y-2 text-sm">
             <span className="text-muted">Arquivo do preview</span>
-            <select value={audioFileId} onChange={(event) => { setAudioFileId(event.target.value); setStartSeconds(0); }} className="w-full rounded-lg border border-border bg-surface-muted px-3 py-2 text-foreground">
+            <select value={audioFileId} onChange={(event) => { stopPreview(); setAudioFileId(event.target.value); setStartSeconds(0); }} className="w-full rounded-lg border border-border bg-surface-muted px-3 py-2 text-foreground">
               {audioFiles.map((file) => <option key={file.id} value={file.id}>{resolveAudioLabel(file)}</option>)}
             </select>
           </label>
@@ -134,14 +159,14 @@ export function KitPreviewCard({ audioFiles, initialAudioFileId, initialStartSec
           <div className="grid gap-3 md:grid-cols-[1fr_auto_auto] md:items-end">
             <label className="space-y-2 text-sm">
               <span className="text-muted">Duração</span>
-              <select value={durationSeconds} onChange={(event) => setDurationSeconds(Number(event.target.value))} className="w-full rounded-lg border border-border bg-surface-muted px-3 py-2 text-foreground">
+              <select value={durationSeconds} onChange={(event) => { stopPreview(); setDurationSeconds(Number(event.target.value)); }} className="w-full rounded-lg border border-border bg-surface-muted px-3 py-2 text-foreground">
                 <option value={5}>5 segundos</option>
                 <option value={10}>10 segundos</option>
                 <option value={15}>15 segundos</option>
                 <option value={20}>20 segundos</option>
               </select>
             </label>
-            <button type="button" onClick={() => void playPreview()} className="rounded-lg border border-white/15 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20">{isPlaying ? "Pausar" : "Testar preview"}</button>
+            <button type="button" onClick={() => void playPreview()} className="rounded-lg border border-white/15 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20">{isPlaying ? "Reiniciar preview" : "Testar preview"}</button>
             <button type="submit" className="rounded-lg border border-cyan-300/50 bg-cyan-300/15 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-300/25">Salvar preview</button>
           </div>
         </form>
