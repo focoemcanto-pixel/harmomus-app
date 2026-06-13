@@ -36,8 +36,29 @@ type ScaleAssignment = {
   notes: string | null;
 };
 
-function memberLabel(member: any) {
+type MinistryMemberRow = {
+  id: string;
+  invited_name?: string | null;
+  invited_email?: string | null;
+  role?: string | null;
+  status?: string | null;
+  profile?: {
+    full_name?: string | null;
+    email?: string | null;
+  } | null;
+};
+
+type TeamTemplateRow = {
+  id: string;
+  name: string;
+} | null;
+
+function memberLabel(member?: MinistryMemberRow | null) {
   return member?.invited_name || member?.profile?.full_name || member?.invited_email || member?.profile?.email || "Integrante";
+}
+
+function memberEmail(member?: MinistryMemberRow | null) {
+  return member?.invited_email || member?.profile?.email || "";
 }
 
 function studyModeLabel(value?: string | null) {
@@ -99,8 +120,10 @@ export default async function RepertoireDetailPage({ params }: { params: Promise
 
   const repertoireItems = (items ?? []) as RepertoireItem[];
   const scaleAssignments = (assignments ?? []) as ScaleAssignment[];
-  const membersById = new Map((members ?? []).map((member: any) => [member.id, member]));
+  const memberRows = (members ?? []) as MinistryMemberRow[];
+  const membersById = new Map<string, MinistryMemberRow>(memberRows.map((member) => [member.id, member]));
   const coordinator = repertoire.coordinator_member_id ? membersById.get(repertoire.coordinator_member_id) : null;
+  const selectedTeamTemplate = teamTemplate as TeamTemplateRow;
 
   return (
     <MinistryShell>
@@ -145,7 +168,7 @@ export default async function RepertoireDetailPage({ params }: { params: Promise
             </div>
             <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
               <p className="text-xs uppercase tracking-[0.14em] text-zinc-500">Equipe/template</p>
-              <p className="mt-1 text-base font-semibold text-white">{teamTemplate?.name || "Sem template"}</p>
+              <p className="mt-1 text-base font-semibold text-white">{selectedTeamTemplate?.name || "Sem template"}</p>
             </div>
             {repertoire.general_notes ? (
               <div className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-4 text-cyan-50">
@@ -174,7 +197,7 @@ export default async function RepertoireDetailPage({ params }: { params: Promise
                   <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                     <div>
                       <h3 className="text-lg font-semibold text-white">{memberLabel(member)}</h3>
-                      <p className="mt-1 text-xs text-zinc-500">{member?.invited_email || member?.profile?.email}</p>
+                      <p className="mt-1 text-xs text-zinc-500">{memberEmail(member)}</p>
                       <div className="mt-4 flex flex-wrap gap-2 text-xs">
                         <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-zinc-200">Função: {assignment.assigned_role || "—"}</span>
                         <span className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1 text-cyan-100">Voz: {assignment.assigned_voice || "—"}</span>
