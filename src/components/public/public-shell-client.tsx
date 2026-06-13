@@ -15,13 +15,8 @@ interface SearchItem {
   searchText: string;
 }
 
-const COMMUNITY_WHATSAPP_URL =
-  "https://chat.whatsapp.com/JOjA61Zsoj54nnLnJ0ziq5?mode=gi_t";
-const MINISTRY_PLAN_SLUGS = new Set([
-  "ministry_10",
-  "ministry_20",
-  "ministry_40",
-]);
+const COMMUNITY_WHATSAPP_URL = "https://chat.whatsapp.com/JOjA61Zsoj54nnLnJ0ziq5?mode=gi_t";
+const MINISTRY_PLAN_SLUGS = new Set(["ministry_10", "ministry_20", "ministry_40"]);
 
 function resolveSearchArtist(item: Pick<SearchItem, "artist">) {
   return item.artist?.trim() || "Harmomus";
@@ -32,14 +27,6 @@ function UserSilhouetteIcon() {
     <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 text-zinc-100">
       <path fill="currentColor" d="M12 12c2.76 0 5-2.24 5-5s-2.24-5-5-5 2.24-5 5 2.24 5 5 5 5Zm0 2c-3.87 0-8 2.03-8 5v1c0 .55.45 1 1 1h14c.55 0 1-.45 1-1v-1c0-2.97-4.13-5-8-5Z" />
     </svg>
-  );
-}
-
-function CrownSeal() {
-  return (
-    <span className="absolute -right-1 -top-1 grid h-4 w-4 place-items-center rounded-full border border-yellow-200 bg-yellow-300 text-[9px] leading-none text-black shadow-[0_0_14px_rgba(250,204,21,0.75)] md:h-5 md:w-5 md:text-[10px]" aria-label="Premium">
-      ★
-    </span>
   );
 }
 
@@ -119,10 +106,10 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
   const fallbackInitial = (context.profile?.full_name ?? context.profile?.email ?? "U").slice(0, 1).toUpperCase();
   const showAvatar = !context.isGuest && Boolean(liveAvatar);
   const avatarClassName = isPremiumUser
-    ? "relative flex h-8 w-8 items-center justify-center overflow-visible rounded-full border-2 border-yellow-300 bg-white/5 text-xs font-semibold shadow-[0_0_12px_rgba(250,204,21,0.55)] md:h-9 md:w-9"
+    ? "flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border-2 border-yellow-300 bg-white/5 text-xs font-semibold shadow-[0_0_12px_rgba(250,204,21,0.55)] md:h-9 md:w-9"
     : isPlusUser
-      ? "relative flex h-8 w-8 items-center justify-center overflow-visible rounded-full border-2 border-yellow-500/80 bg-white/5 text-xs font-semibold shadow-[0_0_8px_rgba(234,179,8,0.35)] md:h-9 md:w-9"
-      : "relative flex h-8 w-8 items-center justify-center overflow-visible rounded-full border border-white/20 bg-white/5 text-xs font-semibold md:h-9 md:w-9";
+      ? "flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border-2 border-yellow-500/80 bg-white/5 text-xs font-semibold shadow-[0_0_8px_rgba(234,179,8,0.35)] md:h-9 md:w-9"
+      : "flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border border-white/20 bg-white/5 text-xs font-semibold md:h-9 md:w-9";
 
   return (
     <>
@@ -139,10 +126,7 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
       <Link href="/todos-os-kits" className="hidden whitespace-nowrap rounded-lg border border-white/20 px-3 py-2 text-sm text-zinc-100 md:inline-flex">Todos os Kits</Link>
       <div className="relative" ref={menuRef}>
         <button onClick={() => setMenuOpen((v) => !v)} className={avatarClassName} title={isPremiumUser ? "Assinante Premium" : isPlusUser ? "Assinante Plus" : "Menu do usuário"}>
-          <span className="h-full w-full overflow-hidden rounded-full">
-            {showAvatar ? <img src={liveAvatar!} alt="avatar" className="h-full w-full object-cover" /> : context.isGuest ? <span className="grid h-full w-full place-items-center"><UserSilhouetteIcon /></span> : <span className="grid h-full w-full place-items-center">{fallbackInitial}</span>}
-          </span>
-          {isPremiumUser ? <CrownSeal /> : null}
+          {showAvatar ? <img src={liveAvatar!} alt="avatar" className="h-full w-full object-cover" /> : context.isGuest ? <UserSilhouetteIcon /> : fallbackInitial}
         </button>
         {menuOpen ? (
           <div className="absolute right-0 top-11 z-50 min-w-60 rounded-xl border border-white/10 bg-[#0d1220] p-2 shadow-premium">
@@ -154,7 +138,7 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
               </>
             ) : (
               <>
-                {isPremiumUser ? <div className="mb-2 rounded-xl border border-yellow-300/25 bg-yellow-300/10 px-3 py-2 text-xs text-yellow-100"><p className="font-semibold">★ Premium ativo</p><p className="mt-1 text-yellow-100/70">Seu selo aparece enquanto a assinatura estiver ativa.</p></div> : null}
+                {isPremiumUser ? <div className="mb-2 rounded-xl border border-yellow-300/25 bg-yellow-300/10 px-3 py-2 text-xs text-yellow-100"><p className="font-semibold">Premium ativo</p><p className="mt-1 text-yellow-100/70">Sua borda dourada aparece enquanto a assinatura estiver ativa.</p></div> : null}
                 {isMinistryUser ? <div className="mb-2 rounded-xl border border-cyan-300/20 bg-cyan-400/10 px-3 py-2 text-xs text-cyan-100"><p className="font-semibold">Premium via Ministério</p><p className="mt-1 text-cyan-100/70">{canOpenMinistryCentral ? "Responsável ministerial" : "Membro convidado"}</p></div> : null}
                 <MenuLink href="/perfil">Perfil</MenuLink>
                 {canOpenMemberRepertoires ? <MenuLink href="/meus-repertorios" className="font-semibold text-cyan-100">Minha Escala</MenuLink> : null}
