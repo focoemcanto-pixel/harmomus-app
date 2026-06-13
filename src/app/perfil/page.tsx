@@ -43,7 +43,7 @@ export default async function PerfilPage() {
     avatarUrl={context.profile?.avatar_url ?? null}
     planName={context.plan?.name ?? "Free"}
     subscriptionStatus={context.subscription?.status ?? "inactive"}
-    emailConfirmed={Boolean((authUser as any)?.email_confirmed_at ?? (authUser as any)?.confirmed_at)}
+    emailConfirmed={Boolean((authUser as any)?.email_confirmed_at)}
     stats={{ playlists, favorites, history, kitsToday }}
   /></PublicAppShell>;
 }
