@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
-const PHRASE = "EXCLUIR MINHA CONTA";
+const PHRASE = "ENCERRAR";
 const ACTIVE_STATUSES = ["active", "trialing"];
 
 function text(value: unknown) {
@@ -44,7 +44,7 @@ export async function POST(request: Request) {
 
     const admin = createSupabaseAdminClient() as any;
     if (await hasPaidAccess(admin, userId)) {
-      return NextResponse.json({ error: "Você possui uma assinatura ativa. Cancele a assinatura antes de solicitar o encerramento da conta." }, { status: 409 });
+      return NextResponse.json({ error: "Você possui uma assinatura ativa. Cancele a assinatura antes de solicitar o encerramento." }, { status: 409 });
     }
 
     const now = new Date();
