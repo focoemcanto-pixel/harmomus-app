@@ -11,7 +11,16 @@ const ALLOWED_METHODS = new Set(["pix", "boleto"]);
 const ATTRIBUTION_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "fbclid", "gclid"] as const;
 
 type ProfileRow = { id: string; email?: string | null; full_name?: string | null; phone?: string | null };
-type ExistingSubscriptionRow = { id: string; gateway?: string | null; gateway_customer_id?: string | null; status?: string | null; plans?: { slug?: string | null } | null };
+type ExistingSubscriptionRow = {
+  id: string;
+  user_id?: string | null;
+  gateway?: string | null;
+  gateway_customer_id?: string | null;
+  status?: string | null;
+  plans?: { slug?: string | null } | null;
+  updated_at?: string | null;
+  created_at?: string | null;
+};
 
 function cleanValue(value: unknown) {
   const text = String(value ?? "").trim();
@@ -52,6 +61,20 @@ function findPaymentUrl(subscriptionUrl?: string | null, payments?: Awaited<Retu
   const payment = payments?.find((item) => item.invoiceUrl || item.bankSlipUrl || item.transactionReceiptUrl) ?? payments?.[0];
   return payment?.invoiceUrl || payment?.bankSlipUrl || subscriptionUrl || payment?.transactionReceiptUrl || null;
 }
+function subscriptionTime(subscription: ExistingSubscriptionRow) {
+  const value = subscription.updated_at ?? subscription.created_at ?? "";
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+function isReusableSubscription(subscription: ExistingSubscriptionRow) {
+  const status = String(subscription.status ?? "").trim().toLowerCase();
+  return !["canceled", "cancelled", "expired"].includes(status);
+}
+function pickSubscriptionToUpdate(rows: ExistingSubscriptionRow[]) {
+  const reusable = rows.filter(isReusableSubscription).sort((a, b) => subscriptionTime(b) - subscriptionTime(a));
+  if (!reusable.length) return null;
+  return reusable.find((subscription) => String(subscription.gateway ?? "").toLowerCase() === "asaas") ?? reusable[0];
+}
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -78,32 +101,47 @@ export async function GET(req: Request) {
     if (!plan?.id || typeof plan.price_cents !== "number" || plan.price_cents <= 0) return NextResponse.redirect(appUrl(req, "/assinar?error=Plano%20inv%C3%A1lido"), { status: 303 });
 
     const supabase = createSupabaseAdminClient();
-    const [{ data: profile }, { data: existingSubscriptions, error: existingError }] = await Promise.all([
-      supabase.from("profiles").select("id,email,full_name,phone").eq("id", user.id).maybeSingle(),
-      supabase.from("subscriptions").select("id,gateway,gateway_customer_id,status,plans(slug)").eq("user_id", user.id).order("updated_at", { ascending: false }).order("created_at", { ascending: false }).limit(10),
-    ]);
-    if (existingError) throw new Error(`Falha ao buscar assinatura atual: ${existingError.message}`);
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("id,email,full_name,phone")
+      .or(`id.eq.${user.id},email.ilike.${email}`)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     const typedProfile = (profile ?? null) as ProfileRow | null;
+    const billingUserId = typedProfile?.id ?? user.id;
+    const userIds = Array.from(new Set([user.id, billingUserId].filter(Boolean)));
+
+    const { data: existingSubscriptions, error: existingError } = await supabase
+      .from("subscriptions")
+      .select("id,user_id,gateway,gateway_customer_id,status,updated_at,created_at,plans(slug)")
+      .in("user_id", userIds)
+      .order("updated_at", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(10);
+
+    if (existingError) throw new Error(`Falha ao buscar assinatura atual: ${existingError.message}`);
+
     const rows = (existingSubscriptions ?? []) as ExistingSubscriptionRow[];
+    const subscriptionToUpdate = pickSubscriptionToUpdate(rows);
     const existingAsaas = rows.find((subscription) => String(subscription.gateway ?? "").toLowerCase() === "asaas") ?? null;
-    const existingActive = rows.find((subscription) => ["active", "trialing", "overdue"].includes(String(subscription.status ?? "").toLowerCase())) ?? null;
-    const previousPlanSlug = String(existingActive?.plans?.slug ?? existingAsaas?.plans?.slug ?? "free").trim().toLowerCase() || "free";
+    const previousPlanSlug = String(subscriptionToUpdate?.plans?.slug ?? existingAsaas?.plans?.slug ?? "free").trim().toLowerCase() || "free";
 
     const existingAsaasCustomerId = existingAsaas?.gateway_customer_id ?? null;
     const customer = existingAsaasCustomerId
-      ? await updateCustomer(existingAsaasCustomerId, { name: customerName(email, typedProfile, billingName), email, externalReference: user.id, phone: billingPhone || cleanValue(typedProfile?.phone), cpfCnpj: billingDocument })
+      ? await updateCustomer(existingAsaasCustomerId, { name: customerName(email, typedProfile, billingName), email, externalReference: billingUserId, phone: billingPhone || cleanValue(typedProfile?.phone), cpfCnpj: billingDocument })
       : (await findCustomerByEmail(email))
-        ? await updateCustomer((await findCustomerByEmail(email))!.id, { name: customerName(email, typedProfile, billingName), email, externalReference: user.id, phone: billingPhone || cleanValue(typedProfile?.phone), cpfCnpj: billingDocument })
-        : await createCustomer({ name: customerName(email, typedProfile, billingName), email, externalReference: user.id, phone: billingPhone || cleanValue(typedProfile?.phone), cpfCnpj: billingDocument });
+        ? await updateCustomer((await findCustomerByEmail(email))!.id, { name: customerName(email, typedProfile, billingName), email, externalReference: billingUserId, phone: billingPhone || cleanValue(typedProfile?.phone), cpfCnpj: billingDocument })
+        : await createCustomer({ name: customerName(email, typedProfile, billingName), email, externalReference: billingUserId, phone: billingPhone || cleanValue(typedProfile?.phone), cpfCnpj: billingDocument });
 
     const billingType = billingTypeFromMethod(method);
     if (!billingType) throw new Error("Método de pagamento inválido.");
 
-    const asaasSubscription = await createSubscription({ customerId: customer.id, billingType, value: plan.price_cents / 100, nextDueDate: nextDueDate(), description: `Harmomus ${plan.name}`, externalReference: user.id });
+    const asaasSubscription = await createSubscription({ customerId: customer.id, billingType, value: plan.price_cents / 100, nextDueDate: nextDueDate(), description: `Harmomus ${plan.name}`, externalReference: billingUserId });
     const now = new Date().toISOString();
     const payload = {
-      user_id: user.id,
+      user_id: billingUserId,
       plan_id: plan.id,
       status: "pending",
       gateway: "asaas",
@@ -115,17 +153,21 @@ export async function GET(req: Request) {
       updated_at: now,
       ...attributionFromUrl(url),
     };
-    const result = existingAsaas?.id ? await supabase.from("subscriptions").update(payload).eq("id", existingAsaas.id).eq("user_id", user.id) : await supabase.from("subscriptions").insert({ ...payload, created_at: now });
+    const result = subscriptionToUpdate?.id
+      ? await supabase.from("subscriptions").update(payload).eq("id", subscriptionToUpdate.id)
+      : await supabase.from("subscriptions").insert({ ...payload, created_at: now });
     if (result.error) throw new Error(`Falha ao salvar assinatura Asaas: ${result.error.message}`);
 
     const { error: checkoutLogError } = await supabase.from("billing_events").insert({
       provider: "asaas",
       event_type: "checkout.asaas.started",
       payload: {
-        user_id: user.id,
+        user_id: billingUserId,
+        auth_user_id: user.id,
         email,
         plan_slug: plan.slug,
         previous_plan_slug: previousPlanSlug,
+        reused_subscription_id: subscriptionToUpdate?.id ?? null,
         gateway_customer_id: customer.id,
         gateway_subscription_id: asaasSubscription.id,
         value: plan.price_cents / 100,
