@@ -7,8 +7,8 @@ import { PublicAppShell } from "@/components/public/public-app-shell";
 import { PremiumToneRequestForm } from "@/components/public/premium-tone-request-form";
 import { getCurrentUser, getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { canSubmitPremiumRequests } from "@/lib/auth/ministry-access";
-import { getGlobalTopKits, getRecommendedKits, getUserPlayStreak, getUserRecentActivities, type TopKit } from "@/lib/data/premium-analytics";
-import { getPublishedKits } from "@/lib/data/public-kits";
+import { getGlobalTopKits, getRecommendedKits, getUserPlayStreak, getUserRecentActivities, type RecentActivity, type TopKit } from "@/lib/data/premium-analytics";
+import { getPublishedKits, type PublicKit } from "@/lib/data/public-kits";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +22,11 @@ type DashboardKit = {
   cover_url: string | null;
   metric?: string;
   badge?: string;
+};
+
+type PlaylistStats = {
+  count: number;
+  previews: string[];
 };
 
 function firstName(name?: string | null, email?: string | null) {
@@ -107,8 +112,8 @@ async function getGlobalFavoriteKits(limit = 5): Promise<DashboardKit[]> {
     .map(({ count, kit }) => toDashboardKit(kit, { metric: `${count} favoritos` }));
 }
 
-async function getPlaylistStats(userId: string) {
-  if (!userId) return { count: 0, previews: [] as string[] };
+async function getPlaylistStats(userId: string): Promise<PlaylistStats> {
+  if (!userId) return { count: 0, previews: [] };
   const supabase = createSupabaseAdminClient() as any;
   const { data } = await supabase
     .from("playlists")
@@ -118,7 +123,7 @@ async function getPlaylistStats(userId: string) {
     .limit(4);
   return {
     count: data?.length ?? 0,
-    previews: (data ?? []).map((item: any) => item.name).filter(Boolean),
+    previews: ((data ?? []) as Array<{ name?: string | null }>).map((item) => item.name).filter((name): name is string => Boolean(name)),
   };
 }
 
@@ -138,11 +143,11 @@ export default async function AreaPremiumPage({ searchParams }: { searchParams?:
   const monthStart = startOfMonthIso();
 
   const [topSite, recommendedKits, activities, playStreak, allKits, premiumRequestsResponse, monthlySongRequestCountResponse, favoriteKits, globalFavoriteKits, playlistStats] = await Promise.all([
-    getGlobalTopKits(5).catch(() => []),
-    profileId ? getRecommendedKits(profileId, 6).catch(() => []) : Promise.resolve([]),
-    profileId ? getUserRecentActivities(profileId, 12).catch(() => []) : Promise.resolve([]),
+    getGlobalTopKits(5).catch(() => [] as TopKit[]),
+    profileId ? getRecommendedKits(profileId, 6).catch(() => [] as TopKit[]) : Promise.resolve([] as TopKit[]),
+    profileId ? getUserRecentActivities(profileId, 12).catch(() => [] as RecentActivity[]) : Promise.resolve([] as RecentActivity[]),
     profileId ? getUserPlayStreak(profileId).catch(() => 0) : Promise.resolve(0),
-    getPublishedKits().catch(() => []),
+    getPublishedKits().catch(() => [] as PublicKit[]),
     profileId
       ? supabaseAdmin
           .from("premium_requests")
@@ -241,7 +246,7 @@ export default async function AreaPremiumPage({ searchParams }: { searchParams?:
               <div className="rounded-3xl border border-white/10 bg-white/[0.035] p-5">
                 <p className="text-4xl font-black text-cyan-300">{playlistStats.count}</p>
                 <p className="mt-1 text-sm uppercase tracking-[0.16em] text-zinc-400">playlists criadas</p>
-                {playlistStats.previews.length ? <div className="mt-4 flex flex-wrap gap-2">{playlistStats.previews.map((item) => <span key={item} className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-xs text-cyan-100">{item}</span>)}</div> : <p className="mt-4 text-sm text-zinc-400">Monte listas para culto, ensaio, aquecimento ou repertório.</p>}
+                {playlistStats.previews.length ? <div className="mt-4 flex flex-wrap gap-2">{playlistStats.previews.map((item: string) => <span key={item} className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-xs text-cyan-100">{item}</span>)}</div> : <p className="mt-4 text-sm text-zinc-400">Monte listas para culto, ensaio, aquecimento ou repertório.</p>}
                 <Link href="/minhas-playlists" className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-cyan-300 to-emerald-300 px-4 py-3 text-sm font-black uppercase tracking-[0.12em] text-black"><RotateCw size={16} /> Abrir modo estudo</Link>
               </div>
             </PremiumPanel>
