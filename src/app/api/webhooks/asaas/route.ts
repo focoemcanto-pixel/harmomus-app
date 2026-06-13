@@ -122,10 +122,15 @@ function isConfirmedPaymentEvent(event: string, payload: AsaasWebhookPayload) {
   );
 }
 
+function isPaymentOverdueEvent(event: string, payload: AsaasWebhookPayload) {
+  const paymentStatus = normalizeLower(payload.payment?.status);
+  return event === "PAYMENT_OVERDUE" || paymentStatus === "overdue";
+}
+
 function statusForEvent(event: string, payload?: AsaasWebhookPayload) {
   const paymentStatus = normalizeLower(payload?.payment?.status);
   if (payload && isConfirmedPaymentEvent(event, payload)) return "active";
-  if (event === "PAYMENT_OVERDUE" || paymentStatus === "overdue") return "overdue";
+  if (payload && isPaymentOverdueEvent(event, payload)) return "overdue";
   if (event === "PAYMENT_DELETED" || event === "SUBSCRIPTION_DELETED" || event === "SUBSCRIPTION_INACTIVATED" || payload?.subscription?.deleted) return "canceled";
   return null;
 }
@@ -251,6 +256,10 @@ function asaasOccurredAt(payload: AsaasWebhookPayload) {
 
 function isActivationEvent(event: string, payload: AsaasWebhookPayload, status: string | null) {
   return status === "active" && isConfirmedPaymentEvent(event, payload);
+}
+
+function isPaymentFailureEvent(event: string, payload: AsaasWebhookPayload, status: string | null) {
+  return status === "overdue" && isPaymentOverdueEvent(event, payload);
 }
 
 function isCancellationEvent(status: string | null) {
@@ -539,6 +548,49 @@ async function trackAsaasPaymentConversion(input: {
   });
 }
 
+async function trackAsaasPaymentFailure(input: {
+  supabase: ReturnType<typeof createSupabaseAdminClient>;
+  payload: AsaasWebhookPayload;
+  subscription: SubscriptionRow;
+  planSlug: string;
+}) {
+  if (!input.payload.event || !isPaymentOverdueEvent(input.payload.event, input.payload)) return;
+
+  const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data: existingEvent, error } = await input.supabase
+    .from("marketing_events")
+    .select("id")
+    .eq("event_key", "payment_failed")
+    .eq("user_id", input.subscription.user_id)
+    .gte("created_at", twentyFourHoursAgo)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) console.error("[asaas.webhook] Falha ao verificar marketing_event payment_failed duplicado", error);
+  if (existingEvent?.id) return;
+
+  await trackMarketingEvent(input.supabase, {
+    userId: input.subscription.user_id,
+    eventKey: "payment_failed",
+    eventLabel: "Pagamento falhou",
+    channel: "billing",
+    source: "asaas",
+    metadata: {
+      provider: "asaas",
+      asaas_event_id: asaasExternalEventId(input.payload),
+      asaas_event_type: input.payload.event,
+      asaas_customer_id: gatewayCustomerId(input.payload),
+      asaas_payment_id: asaasPaymentId(input.payload),
+      asaas_subscription_id: gatewaySubscriptionId(input.payload) ?? input.subscription.gateway_subscription_id ?? null,
+      local_subscription_id: input.subscription.id,
+      plan_slug: input.planSlug,
+      amount: input.payload.payment?.value ?? null,
+      due_date: input.payload.payment?.dueDate ?? null,
+      occurred_at: asaasOccurredAt(input.payload),
+    },
+  });
+}
+
 export async function POST(req: Request) {
   let payload: AsaasWebhookPayload | null = null;
   const supabase = createSupabaseAdminClient();
@@ -598,14 +650,19 @@ export async function POST(req: Request) {
 
     await trackAsaasCheckoutStarted({ supabase, payload, subscription, planSlug: nextPlanSlug });
     await trackAsaasPaymentConversion({ supabase, payload, subscription, planSlug: nextPlanSlug });
+    await trackAsaasPaymentFailure({ supabase, payload, subscription, planSlug: nextPlanSlug });
 
-    const customerEvent = isActivationEvent(event, payload, status)
+    const activationEvent = isActivationEvent(event, payload, status)
       ? getPrimaryCustomerEvent(previousPlanSlug, nextPlanSlug)
       : null;
+    const paymentFailedEvent = isPaymentFailureEvent(event, payload, status) ? "subscription.payment_failed" : null;
+    const cancellationEvent = isCancellationEvent(status) ? "subscription.canceled" : null;
+    const cancellationTransitionEvent = isCancellationEvent(status) ? getSpecificPlanTransitionEvent(previousPlanSlug, nextPlanSlug) : null;
     const dispatchEvents = [
-      customerEvent,
-      isCancellationEvent(status) ? "subscription.canceled" : null,
-      isCancellationEvent(status) ? getSpecificPlanTransitionEvent(previousPlanSlug, nextPlanSlug) : null,
+      activationEvent,
+      paymentFailedEvent,
+      cancellationEvent,
+      cancellationTransitionEvent,
     ].filter(Boolean) as WebhookEvent[];
 
     await dispatchAsaasWebhookEvents({
