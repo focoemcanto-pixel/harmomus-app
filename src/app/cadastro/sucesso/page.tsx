@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { EmailConfirmationState } from "@/components/auth/email-confirmation-state";
 import { MetaFunnelEvent } from "@/components/analytics/meta-funnel-event";
 import { createClient } from "@/lib/supabase/server";
 
@@ -45,13 +44,18 @@ export default async function CadastroSucessoPage({ searchParams }: Props) {
               </h1>
 
               <p className="mx-auto mt-5 max-w-2xl text-lg leading-relaxed text-zinc-300 md:text-xl">
-                Sua conta gratuita já está ativa. Agora você pode começar seus estudos vocais com uma experiência premium e organizada como Spotify + YouTube Music.
+                Sua conta gratuita já está ativa. Você já pode acessar a plataforma e começar seus estudos vocais agora.
               </p>
             </div>
           </div>
 
           <div className="px-6 pt-6 md:px-10">
-            <EmailConfirmationState variant="free" email={email} allowEmailEdit allowResend />
+            <div className="rounded-3xl border border-emerald-300/20 bg-emerald-400/10 p-5 text-sm text-emerald-50">
+              <p className="font-bold">Acesso liberado</p>
+              <p className="mt-2 text-emerald-50/85">
+                Não precisa procurar e-mail de confirmação para entrar. A confirmação poderá ser feita depois pelo seu perfil apenas como reforço de segurança.
+              </p>
+            </div>
           </div>
 
           <div className="px-6 pt-6 md:px-10">
