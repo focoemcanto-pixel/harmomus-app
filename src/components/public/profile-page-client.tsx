@@ -53,6 +53,15 @@ function isPendingSubscription(status: string) {
   return ["pending", "incomplete", "past_due"].includes(normalized);
 }
 
+function StatCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-3xl border border-white/10 bg-white/[0.045] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+      <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">{label}</p>
+      <p className="mt-2 break-words text-2xl font-black text-white">{value}</p>
+    </div>
+  );
+}
+
 export function ProfilePageClient({ initialName, email, username, planName, subscriptionStatus, avatarUrl, userId: _userId, emailConfirmed = false, stats }: ProfilePageClientProps) {
   const [name, setName] = useState(initialName);
   const [avatar, setAvatar] = useState<string | null>(avatarUrl);
@@ -225,10 +234,7 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
 
   function moveDrag(clientX: number, clientY: number) {
     if (!dragRef.current) return;
-    setPosition({
-      x: dragRef.current.ox + clientX - dragRef.current.sx,
-      y: dragRef.current.oy + clientY - dragRef.current.sy,
-    });
+    setPosition({ x: dragRef.current.ox + clientX - dragRef.current.sx, y: dragRef.current.oy + clientY - dragRef.current.sy });
   }
 
   function endGesture() {
@@ -266,92 +272,93 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
   }
 
   const editorImageStyle = imageSrc
-    ? {
-        transform: `translate(calc(-50% + ${position.x}px), calc(-50% + ${position.y}px)) rotate(${rotation}deg) scale(${zoom})`,
-      }
+    ? { transform: `translate(calc(-50% + ${position.x}px), calc(-50% + ${position.y}px)) rotate(${rotation}deg) scale(${zoom})` }
     : undefined;
 
-  return <main className="bg-gradient-to-b from-[#06070d] to-[#0f1523] p-3 text-white md:p-6">
+  return <main className="min-h-screen overflow-x-hidden bg-[#06080d] px-3 py-6 text-white md:px-6 md:py-10">
     <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={handleFileChange} />
 
-    <section className="mx-auto w-full max-w-5xl rounded-3xl border border-white/15 bg-white/5 p-4 shadow-2xl backdrop-blur-xl md:p-6">
-      <div className="mb-6"><Link href="/" className="inline-flex rounded-xl border border-cyan-300/30 bg-cyan-400/10 px-4 py-2 text-sm font-medium text-cyan-100 hover:bg-cyan-300/20">← Voltar para Home</Link></div>
+    <section className="relative mx-auto w-full max-w-6xl overflow-hidden rounded-[1.8rem] border border-emerald-400/20 bg-gradient-to-br from-zinc-950 via-[#121720] to-violet-950/40 p-4 shadow-[0_0_120px_rgba(16,185,129,0.1)] md:rounded-[2.4rem] md:p-8">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_10%,rgba(34,197,94,0.16),transparent_35%),radial-gradient(circle_at_85%_20%,rgba(168,85,247,0.18),transparent_32%)]" />
+      <div className="relative z-10">
+        <Link href="/" className="inline-flex rounded-2xl border border-cyan-300/30 bg-cyan-400/10 px-4 py-2 text-sm font-medium text-cyan-100 hover:bg-cyan-300/20">← Voltar para Home</Link>
 
-      <div className="grid gap-5 md:grid-cols-[auto_1fr_auto] md:items-center">
-        <div className="flex justify-center md:justify-start">
-          <button type="button" onClick={() => fileInputRef.current?.click()} className="group relative block h-28 w-28 overflow-hidden rounded-full border border-cyan-300/40 bg-black/30 shadow-[0_0_30px_rgba(56,189,248,0.2)] md:h-24 md:w-24">
-            {avatar ? <img src={avatar} className="h-full w-full object-cover" alt="avatar" /> : <span className="flex h-full items-center justify-center text-3xl font-semibold">{nameInitial}</span>}
-            <span className="absolute inset-x-0 bottom-0 bg-black/70 py-1 text-[10px] font-semibold text-cyan-100 opacity-0 transition group-hover:opacity-100">Alterar</span>
-          </button>
-        </div>
-
-        <div className="min-w-0 space-y-3">
-          <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-            <input className="min-w-0 rounded-xl bg-white/5 px-4 py-3 text-base outline-none ring-cyan-300/30 focus:ring" value={name} onChange={(e)=>setName(e.target.value)} />
-            <button onClick={saveProfileName} disabled={savingName} className="rounded-xl border border-cyan-300/30 bg-cyan-400/10 px-4 py-3 text-sm font-medium text-cyan-100 hover:bg-cyan-300/20 disabled:opacity-60">
-              {savingName ? "Salvando..." : "Salvar"}
+        <div className="mt-8 grid gap-6 lg:grid-cols-[320px_1fr] lg:items-start">
+          <aside className="rounded-[2rem] border border-white/10 bg-white/[0.045] p-5 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+            <button type="button" onClick={() => fileInputRef.current?.click()} className="group relative mx-auto block h-36 w-36 overflow-hidden rounded-full border-2 border-cyan-300/50 bg-black/30 shadow-[0_0_40px_rgba(34,211,238,0.18)]">
+              {avatar ? <img src={avatar} className="h-full w-full object-cover" alt="avatar" /> : <span className="flex h-full items-center justify-center text-5xl font-black">{nameInitial}</span>}
+              <span className="absolute inset-x-0 bottom-0 bg-black/75 py-2 text-xs font-semibold text-cyan-100 opacity-0 transition group-hover:opacity-100">Alterar foto</span>
             </button>
-          </div>
-          <div className="min-w-0 text-center md:text-left">
-            <p className="truncate text-zinc-300">@{username}</p>
-            <p className="break-all text-sm text-zinc-400">{email}</p>
-          </div>
-        </div>
-
-        <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className="w-full rounded-xl border border-white/25 bg-white/10 px-4 py-3 transition hover:bg-white/20 disabled:opacity-60 md:w-auto">
-          {uploading ? "Carregando..." : "Alterar foto"}
-        </button>
-      </div>
-
-      <div className={`mt-5 rounded-2xl border p-4 text-sm ${emailConfirmed ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-100" : "border-amber-300/30 bg-amber-400/10 text-amber-100"}`}>
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p className="font-semibold">{emailConfirmed ? "E-mail confirmado" : "E-mail não confirmado"}</p>
-            <p className="mt-1 opacity-90">
-              {emailConfirmed
-                ? "Sua conta está protegida e pronta para recuperação de senha."
-                : "Confirme seu e-mail para proteger sua conta e facilitar a recuperação de senha."}
-            </p>
-          </div>
-          {!emailConfirmed ? (
-            <button
-              type="button"
-              onClick={requestEmailConfirmation}
-              disabled={emailConfirmationState === "sending"}
-              className="rounded-xl border border-amber-200/30 bg-amber-200 px-4 py-2 text-sm font-black text-slate-950 transition hover:bg-amber-100 disabled:cursor-wait disabled:opacity-70"
-            >
-              {emailConfirmationState === "sending" ? "Enviando..." : "Enviar confirmação"}
+            <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className="mt-5 w-full rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold transition hover:bg-white/15 disabled:opacity-60">
+              {uploading ? "Carregando..." : "Alterar foto"}
             </button>
-          ) : null}
+            <p className="mt-4 text-xs leading-5 text-zinc-400">Use uma foto nítida para personalizar seu perfil e seu selo no topo do app.</p>
+          </aside>
+
+          <div className="min-w-0 space-y-5">
+            <div className="rounded-[2rem] border border-white/10 bg-black/20 p-5 md:p-6">
+              <p className="text-xs font-black uppercase tracking-[0.22em] text-emerald-300">Meu perfil</p>
+              <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]">
+                <input className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-4 text-base outline-none ring-cyan-300/30 focus:ring" value={name} onChange={(e)=>setName(e.target.value)} />
+                <button onClick={saveProfileName} disabled={savingName} className="rounded-2xl border border-cyan-300/30 bg-cyan-400/10 px-6 py-4 text-sm font-black text-cyan-100 hover:bg-cyan-300/20 disabled:opacity-60">
+                  {savingName ? "Salvando..." : "Salvar"}
+                </button>
+              </div>
+              <div className="mt-4 min-w-0">
+                <p className="truncate text-lg font-semibold text-zinc-200">@{username}</p>
+                <p className="break-all text-sm text-zinc-400">{email}</p>
+              </div>
+            </div>
+
+            <div className={`rounded-[2rem] border p-5 text-sm ${emailConfirmed ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-100" : "border-yellow-300/30 bg-yellow-300/10 text-yellow-50"}`}>
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="text-base font-black">{emailConfirmed ? "E-mail confirmado" : "Confirmação de e-mail pendente"}</p>
+                  <p className="mt-1 opacity-90">
+                    {emailConfirmed
+                      ? "Sua conta está protegida e pronta para recuperação de senha."
+                      : "Você pode usar o Harmomus normalmente. Confirme seu e-mail apenas para aumentar a segurança e facilitar a recuperação de senha."}
+                  </p>
+                </div>
+                {!emailConfirmed ? (
+                  <button type="button" onClick={requestEmailConfirmation} disabled={emailConfirmationState === "sending"} className="shrink-0 rounded-2xl bg-yellow-300 px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-yellow-200 disabled:cursor-wait disabled:opacity-70">
+                    {emailConfirmationState === "sending" ? "Enviando..." : "Enviar confirmação"}
+                  </button>
+                ) : null}
+              </div>
+              {emailConfirmationMessage ? <p className={`mt-3 text-xs ${emailConfirmationState === "error" ? "text-rose-100" : "text-emerald-100"}`}>{emailConfirmationMessage}</p> : null}
+            </div>
+
+            {pendingSubscription ? (
+              <div className="rounded-[2rem] border border-amber-300/30 bg-amber-400/10 p-5 text-sm text-amber-100">
+                <p className="font-semibold">Assinatura pendente</p>
+                <p className="mt-1 text-amber-100/85">Seu perfil mostra o plano {planName}, mas a assinatura ainda está como {readableStatus}. Conclua o pagamento ou aguarde a confirmação para liberar o acesso completo.</p>
+              </div>
+            ) : null}
+
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <StatCard label="Plano" value={planName} />
+              <StatCard label="Assinatura" value={readableStatus} />
+              <StatCard label="Kits hoje" value={String(stats.kitsToday)} />
+              <StatCard label="Histórico" value={String(stats.history)} />
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-3">
+              <StatCard label="Playlists" value={String(stats.playlists)} />
+              <StatCard label="Favoritos" value={String(stats.favorites)} />
+              <div className="rounded-3xl border border-white/10 bg-white/[0.045] p-4">
+                <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">Segurança</p>
+                <button type="button" onClick={requestPasswordReset} disabled={passwordResetState === "sending"} className="mt-2 w-full text-left text-lg font-black text-cyan-100 disabled:opacity-60">
+                  {passwordResetState === "sending" ? "Enviando link..." : "Alterar senha"}
+                </button>
+                {passwordResetMessage ? <p className={`mt-2 text-xs ${passwordResetState === "error" ? "text-rose-200" : "text-emerald-200"}`}>{passwordResetMessage}</p> : null}
+              </div>
+            </div>
+
+            <a href="/logout" className="inline-flex rounded-2xl border border-rose-300/40 px-5 py-3 text-sm font-semibold text-rose-200 hover:bg-rose-500/10">Sair da conta</a>
+          </div>
         </div>
-        {emailConfirmationMessage ? (
-          <p className={`mt-3 text-xs ${emailConfirmationState === "error" ? "text-rose-100" : "text-emerald-100"}`}>{emailConfirmationMessage}</p>
-        ) : null}
       </div>
-
-      {pendingSubscription ? (
-        <div className="mt-5 rounded-2xl border border-amber-300/30 bg-amber-400/10 p-4 text-sm text-amber-100">
-          <p className="font-semibold">Assinatura pendente</p>
-          <p className="mt-1 text-amber-100/85">Seu perfil mostra o plano {planName}, mas a assinatura ainda está como {readableStatus}. Conclua o pagamento ou aguarde a confirmação para liberar o acesso completo.</p>
-        </div>
-      ) : null}
-
-      <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {[["Plano", planName],["Assinatura", readableStatus],["Kits hoje", String(stats.kitsToday)],["Histórico", String(stats.history)]].map(([k,v]) => <div key={k} className="rounded-2xl border border-white/10 bg-black/20 p-4"><p className="text-xs text-zinc-400">{k}</p><p className="mt-1 text-lg font-medium">{v}</p></div>)}
-      </div>
-
-      <div className="mt-6 grid gap-3 md:grid-cols-3">
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">Playlists: <span className="text-zinc-200">{stats.playlists}</span></div>
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">Favoritos: <span className="text-zinc-200">{stats.favorites}</span></div>
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-          <button type="button" onClick={requestPasswordReset} disabled={passwordResetState === "sending"} className="w-full text-left font-medium text-cyan-100 disabled:opacity-60">
-            🔐 {passwordResetState === "sending" ? "Enviando link..." : "Alterar senha"}
-          </button>
-          {passwordResetMessage ? <p className={`mt-2 text-xs ${passwordResetState === "error" ? "text-rose-200" : "text-emerald-200"}`}>{passwordResetMessage}</p> : null}
-        </div>
-      </div>
-
-      <a href="/logout" className="mt-8 inline-block rounded-lg border border-rose-300/40 px-4 py-2 text-rose-200">Logout</a>
     </section>
 
     {open ? <div className="fixed inset-0 z-50 bg-black/95 text-white backdrop-blur-md md:grid md:place-items-center md:p-6">
@@ -366,35 +373,15 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
 
         <div className="flex flex-1 items-center justify-center overflow-hidden px-4 py-6">
           {imageSrc ? (
-            <div
-              className="relative h-[320px] w-[320px] max-w-full touch-none overflow-hidden rounded-3xl bg-black/40"
-              onMouseDown={handleMouseDown}
-              onMouseMove={handleMouseMove}
-              onMouseUp={endGesture}
-              onMouseLeave={endGesture}
-              onDoubleClick={resetEditor}
-              onTouchStart={handleTouchStart}
-              onTouchMove={handleTouchMove}
-              onTouchEnd={endGesture}
-            >
+            <div className="relative h-[320px] w-[320px] max-w-full touch-none overflow-hidden rounded-3xl bg-black/40" onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={endGesture} onMouseLeave={endGesture} onDoubleClick={resetEditor} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={endGesture}>
               <img src={imageSrc} alt="Prévia" draggable={false} className="absolute left-1/2 top-1/2 max-h-full max-w-full select-none" style={editorImageStyle} />
               <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0_49%,rgba(0,0,0,0.68)_50%)]" />
               <div className="pointer-events-none absolute inset-0 rounded-full border-2 border-cyan-200/75 shadow-[0_0_30px_rgba(34,211,238,0.22)]" />
               <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-black/60 px-3 py-1 text-[11px] text-zinc-200">Pinça para ampliar • arraste para mover</div>
             </div>
           ) : (
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              onDragOver={(event) => { event.preventDefault(); setDragOver(true); }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={(event) => { event.preventDefault(); setDragOver(false); const file = event.dataTransfer.files?.[0]; if (file) void onPick(file); }}
-              className={`grid min-h-[320px] w-full place-items-center rounded-3xl border border-dashed p-8 text-center transition ${dragOver ? "border-cyan-300 bg-cyan-300/10" : "border-white/20 bg-white/[0.03] hover:bg-white/[0.06]"}`}
-            >
-              <span>
-                <span className="block text-lg font-semibold">Escolher imagem</span>
-                <span className="mt-2 block text-sm text-zinc-400">JPG, PNG ou WEBP. Você poderá ajustar antes de salvar.</span>
-              </span>
+            <button type="button" onClick={() => fileInputRef.current?.click()} onDragOver={(event) => { event.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={(event) => { event.preventDefault(); setDragOver(false); const file = event.dataTransfer.files?.[0]; if (file) void onPick(file); }} className={`grid min-h-[320px] w-full place-items-center rounded-3xl border border-dashed p-8 text-center transition ${dragOver ? "border-cyan-300 bg-cyan-300/10" : "border-white/20 bg-white/[0.03] hover:bg-white/[0.06]"}`}>
+              <span><span className="block text-lg font-semibold">Escolher imagem</span><span className="mt-2 block text-sm text-zinc-400">JPG, PNG ou WEBP. Você poderá ajustar antes de salvar.</span></span>
             </button>
           )}
         </div>
