@@ -68,8 +68,9 @@ export default async function MinistryTeamDetailPage({ params }: { params: Promi
   if (teamMembersError) throw new Error(teamMembersError.message);
   if (!template?.id) notFound();
 
-  const membersById = new Map((members ?? []).map((member: MinistryMember) => [member.id, member]));
-  const coordinator = template.coordinator_member_id ? membersById.get(template.coordinator_member_id) : null;
+  const activeMembers = (members ?? []) as MinistryMember[];
+  const membersById = new Map<string, MinistryMember>(activeMembers.map((member) => [member.id, member]));
+  const coordinator: MinistryMember | null = template.coordinator_member_id ? (membersById.get(template.coordinator_member_id) ?? null) : null;
   const rows = (teamMembers ?? []) as TeamMember[];
 
   return (
@@ -95,7 +96,7 @@ export default async function MinistryTeamDetailPage({ params }: { params: Promi
 
         <div className="mt-6 grid gap-3">
           {rows.length ? rows.map((item) => {
-            const member = membersById.get(item.member_id);
+            const member: MinistryMember | null = membersById.get(item.member_id) ?? null;
             return (
               <div key={item.id} className="rounded-3xl border border-white/10 bg-black/20 p-5">
                 <h3 className="text-xl font-semibold text-white">{getMemberName(member)}</h3>
