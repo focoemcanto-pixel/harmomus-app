@@ -24,6 +24,22 @@ function normalizeOtpType(raw: string | null): OtpType {
   return "signup";
 }
 
+function getStringMetadata(metadata: Record<string, unknown> | null | undefined, keys: string[]) {
+  for (const key of keys) {
+    const value = metadata?.[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+function resolveAuthPhone(user: any) {
+  const metadata = (user?.user_metadata ?? {}) as Record<string, unknown>;
+  return (
+    getStringMetadata(metadata, ["phone", "whatsapp", "mobile", "phone_number", "billing_phone"]) ||
+    (typeof user?.phone === "string" && user.phone.trim() ? user.phone.trim() : null)
+  );
+}
+
 function callbackErrorUrl(request: Request, type: OtpType, reason = "callback") {
   if (type === "recovery") {
     const url = new URL("/redefinir-senha", request.url);
@@ -71,6 +87,7 @@ export async function GET(request: Request) {
       id: user.id,
       email: user.email,
       fullName: String(user.user_metadata?.full_name ?? "").trim() || user.email || "",
+      phone: resolveAuthPhone(user),
     });
 
     await syncProfileOnboardingAfterAuth({ userId: user.id, authUser: user as any });
