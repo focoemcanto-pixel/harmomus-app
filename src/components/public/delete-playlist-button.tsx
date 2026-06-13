@@ -9,56 +9,39 @@ type DeletePlaylistButtonProps = {
   deletePlaylistAction: (formData: FormData) => Promise<void>;
 };
 
-function SubmitButton({ isConfirming, onRequestConfirm }: { isConfirming: boolean; onRequestConfirm: () => void }) {
+function SubmitButton() {
   const { pending } = useFormStatus();
-
-  if (!isConfirming) {
-    return (
-      <button
-        type="button"
-        onClick={onRequestConfirm}
-        className="rounded-lg border border-red-500/20 bg-red-500/10 px-2 py-1 text-[11px] font-medium text-red-300 transition hover:bg-red-500/20"
-      >
-        Excluir
-      </button>
-    );
-  }
 
   return (
     <button
       type="submit"
       disabled={pending}
-      className="rounded-lg border border-red-400/30 bg-red-500/20 px-2 py-1 text-[11px] font-semibold text-red-100 transition hover:bg-red-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+      className="rounded-lg border border-red-500/20 bg-red-500/10 px-2 py-1 text-[11px] font-medium text-red-300 transition hover:bg-red-500/20 disabled:cursor-wait disabled:opacity-60"
     >
-      {pending ? "Excluindo..." : "Confirmar"}
+      {pending ? "Excluindo..." : "Excluir"}
     </button>
   );
 }
 
 export function DeletePlaylistButton({ playlistId, playlistName, deletePlaylistAction }: DeletePlaylistButtonProps) {
-  const [isConfirming, setIsConfirming] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
 
   return (
-    <form action={deletePlaylistAction} className="flex items-center gap-2">
+    <form
+      action={deletePlaylistAction}
+      className="flex items-center gap-2"
+      onSubmit={(event) => {
+        if (confirmed) return;
+        const ok = window.confirm(`Tem certeza que deseja excluir a playlist "${playlistName}"? Essa ação não pode ser desfeita.`);
+        if (!ok) {
+          event.preventDefault();
+          return;
+        }
+        setConfirmed(true);
+      }}
+    >
       <input type="hidden" name="playlistId" value={playlistId} />
-
-      {isConfirming ? (
-        <span className="max-w-[140px] truncate text-[11px] text-red-200/80" title={`Excluir ${playlistName}?`}>
-          Excluir mesmo?
-        </span>
-      ) : null}
-
-      <SubmitButton isConfirming={isConfirming} onRequestConfirm={() => setIsConfirming(true)} />
-
-      {isConfirming ? (
-        <button
-          type="button"
-          onClick={() => setIsConfirming(false)}
-          className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-medium text-zinc-300 transition hover:bg-white/10"
-        >
-          Cancelar
-        </button>
-      ) : null}
+      <SubmitButton />
     </form>
   );
 }
