@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getCheckoutSession } from "@/lib/stripe/client";
 import { sendEmail } from "@/lib/email/send-email";
+import { getAdminSettings } from "@/lib/data/admin-settings";
 
 function normalizeEmail(value: unknown) {
   return String(value ?? "").trim().toLowerCase();
@@ -17,6 +18,29 @@ function appBaseUrl(request: Request) {
 
 function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function escapeHtml(value: string) {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+}
+
+function absoluteUrl(request: Request, value?: string | null) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  if (/^https?:\/\//i.test(text)) return text;
+  return `${appBaseUrl(request)}${text.startsWith("/") ? text : `/${text}`}`;
+}
+
+async function getEmailBranding(request: Request) {
+  try {
+    const settings = await getAdminSettings();
+    return {
+      appName: settings.branding.appName || "Harmomus",
+      logoUrl: absoluteUrl(request, settings.branding.logoUrl),
+    };
+  } catch {
+    return { appName: "Harmomus", logoUrl: "" };
+  }
 }
 
 async function getStripeContext(sessionId: string) {
@@ -95,17 +119,35 @@ async function resendMigrationPasswordSetupEmail(supabase: any, request: Request
   return supabase.auth.resetPasswordForEmail(email, { redirectTo: callbackUrl.toString() });
 }
 
-function confirmationHtml(link: string, email: string) {
-  return `
-  <div style="font-family:Arial,sans-serif;background:#06080d;color:#fff;padding:32px">
-    <div style="max-width:560px;margin:0 auto;background:#111827;border:1px solid rgba(255,255,255,.12);border-radius:24px;padding:28px">
-      <h1 style="margin:0 0 12px;font-size:26px">Confirme seu e-mail</h1>
-      <p style="color:#d1d5db;line-height:1.6">Recebemos uma solicitação para confirmar este e-mail no Harmomus:</p>
-      <p style="color:#67e8f9;font-weight:700">${email}</p>
-      <a href="${link}" style="display:inline-block;margin-top:18px;background:#22d3ee;color:#020617;text-decoration:none;font-weight:800;padding:14px 20px;border-radius:14px">Confirmar e-mail</a>
-      <p style="margin-top:24px;color:#9ca3af;font-size:12px;line-height:1.5">Este link expira em 24 horas. Se você não pediu isso, ignore esta mensagem.</p>
+function confirmationHtml(input: { link: string; email: string; appName: string; logoUrl: string }) {
+  const appName = escapeHtml(input.appName || "Harmomus");
+  const email = escapeHtml(input.email);
+  const link = escapeHtml(input.link);
+  const logo = input.logoUrl
+    ? `<img src="${escapeHtml(input.logoUrl)}" alt="${appName}" width="220" style="display:block;width:220px;max-width:80%;height:auto;margin:0 auto 22px auto;border:0;" />`
+    : `<div style="font-size:30px;font-weight:800;color:#ffffff;margin-bottom:22px;">${appName}</div>`;
+
+  return `<!doctype html><html><body style="margin:0;background:#05070c;font-family:Arial,Helvetica,sans-serif;color:#ffffff;">
+  <div style="padding:32px 16px;background:#05070c;">
+    <div style="max-width:620px;margin:0 auto;text-align:center;">
+      ${logo}
+      <div style="background:#0f172a;border:1px solid rgba(103,232,249,.22);border-radius:28px;padding:34px 28px;text-align:left;">
+        <div style="display:inline-block;background:rgba(34,211,238,.12);border:1px solid rgba(103,232,249,.25);border-radius:999px;padding:8px 12px;color:#a5f3fc;font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;">Segurança da conta</div>
+        <h1 style="margin:22px 0 12px 0;color:#ffffff;font-size:34px;line-height:1.08;font-weight:900;letter-spacing:-.04em;">Confirme seu e-mail</h1>
+        <p style="margin:0;color:#d4d4d8;font-size:16px;line-height:1.65;">Recebemos uma solicitação para confirmar este endereço no ${appName}.</p>
+        <div style="margin:24px 0;border-radius:18px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);padding:16px 18px;">
+          <p style="margin:0 0 6px 0;color:#a1a1aa;font-size:12px;text-transform:uppercase;letter-spacing:.12em;font-weight:800;">E-mail solicitado</p>
+          <p style="margin:0;color:#67e8f9;font-size:17px;font-weight:800;word-break:break-word;">${email}</p>
+        </div>
+        <div style="text-align:center;margin:28px 0;">
+          <a href="${link}" style="display:inline-block;background:#22d3ee;color:#020617;text-decoration:none;font-size:16px;font-weight:900;padding:16px 28px;border-radius:16px;">Confirmar e-mail</a>
+        </div>
+        <p style="margin:0;color:#a1a1aa;font-size:13px;line-height:1.65;text-align:center;">Este link expira em 24 horas. Se você não pediu essa confirmação, ignore esta mensagem.</p>
+      </div>
+      <p style="margin:22px 0 0 0;color:#71717a;font-size:12px;line-height:1.5;">© ${new Date().getFullYear()} ${appName}</p>
     </div>
-  </div>`;
+  </div>
+  </body></html>`;
 }
 
 async function sendCustomConfirmation(admin: any, request: Request, profile: any, email: string) {
@@ -127,6 +169,7 @@ async function sendCustomConfirmation(admin: any, request: Request, profile: any
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
   const confirmationUrl = new URL("/confirmar-email", appBaseUrl(request));
   confirmationUrl.searchParams.set("code", code);
+  const branding = await getEmailBranding(request);
 
   const { error: updateError } = await admin
     .from("profiles")
@@ -145,7 +188,7 @@ async function sendCustomConfirmation(admin: any, request: Request, profile: any
   const result = await sendEmail({
     to: targetEmail,
     subject: "Confirme seu e-mail no Harmomus",
-    html: confirmationHtml(confirmationUrl.toString(), targetEmail),
+    html: confirmationHtml({ link: confirmationUrl.toString(), email: targetEmail, ...branding }),
     text: `Confirme seu e-mail no Harmomus: ${confirmationUrl.toString()}`,
   });
 
