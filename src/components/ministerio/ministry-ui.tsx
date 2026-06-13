@@ -13,6 +13,7 @@ import {
 
 const navItems = [
   { href: "/ministerio", label: "Visão Geral", icon: LayoutDashboard },
+  { href: "/ministerio/equipes", label: "Equipes", icon: Users },
   { href: "/ministerio#integrantes", label: "Integrantes", icon: Users },
   { href: "/ministerio#convites", label: "Convites", icon: UserPlus },
   { href: "/ministerio/repertorios", label: "Minha Escala", icon: ListMusic },
