@@ -1,6 +1,6 @@
 "use client";
 
-import { type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type PointerEvent, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 type PreviewAudioFile = {
   id: string;
@@ -49,30 +49,57 @@ export function KitPreviewCard({ audioFiles, initialAudioFileId, initialStartSec
   const [durationSeconds, setDurationSeconds] = useState(clamp(Number(initialDurationSeconds ?? 10) || 10, 3, 30));
   const [audioDuration, setAudioDuration] = useState(180);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [playheadSeconds, setPlayheadSeconds] = useState(Math.max(0, Number(initialStartSeconds ?? 0) || 0));
+  const [isPending, startTransition] = useTransition();
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const scrubberRef = useRef<HTMLDivElement | null>(null);
   const stopTimerRef = useRef<number | null>(null);
+  const rafRef = useRef<number | null>(null);
 
   const selectedFile = audioFiles.find((file) => file.id === audioFileId) ?? fallbackFile;
   const bars = useMemo(() => buildBars(audioFileId), [audioFileId]);
   const maxStart = Math.max(0, audioDuration - durationSeconds);
   const startPercent = maxStart > 0 ? (startSeconds / maxStart) * 100 : 0;
+  const previewEndSeconds = Math.min(audioDuration, startSeconds + durationSeconds);
+  const previewProgress = durationSeconds > 0 ? clamp(((playheadSeconds - startSeconds) / durationSeconds) * 100, 0, 100) : 0;
+  const playheadPercent = audioDuration > 0 ? clamp((playheadSeconds / audioDuration) * 100, 0, 100) : 0;
+  const previewRangeLeft = audioDuration > 0 ? clamp((startSeconds / audioDuration) * 100, 0, 100) : 0;
+  const previewRangeWidth = audioDuration > 0 ? clamp(((previewEndSeconds - startSeconds) / audioDuration) * 100, 0, 100) : 0;
+
+  useEffect(() => {
+    setPlayheadSeconds(startSeconds);
+  }, [startSeconds, audioFileId]);
 
   useEffect(() => {
     return () => {
       if (stopTimerRef.current) window.clearTimeout(stopTimerRef.current);
+      if (rafRef.current) window.cancelAnimationFrame(rafRef.current);
       audioRef.current?.pause();
     };
   }, []);
 
   function clearPreviewTimer() {
     if (stopTimerRef.current) window.clearTimeout(stopTimerRef.current);
+    if (rafRef.current) window.cancelAnimationFrame(rafRef.current);
     stopTimerRef.current = null;
+    rafRef.current = null;
   }
 
-  function stopPreview() {
+  function syncPlayhead() {
+    const audio = audioRef.current;
+    if (!audio) return;
+    setPlayheadSeconds(audio.currentTime);
+    rafRef.current = window.requestAnimationFrame(syncPlayhead);
+  }
+
+  function stopPreview(resetToStart = false) {
     clearPreviewTimer();
-    if (audioRef.current) audioRef.current.pause();
+    const audio = audioRef.current;
+    if (audio) {
+      audio.pause();
+      if (resetToStart) audio.currentTime = startSeconds;
+    }
+    setPlayheadSeconds(resetToStart ? startSeconds : audio?.currentTime ?? startSeconds);
     setIsPlaying(false);
   }
 
@@ -82,11 +109,13 @@ export function KitPreviewCard({ audioFiles, initialAudioFileId, initialStartSec
     const ratio = clamp((event.clientX - rect.left) / rect.width, 0, 1);
     const nextStart = Math.round(ratio * maxStart);
     setStartSeconds(nextStart);
+    setPlayheadSeconds(nextStart);
     if (audioRef.current) audioRef.current.currentTime = nextStart;
   }
 
   function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
     event.preventDefault();
+    stopPreview(false);
     event.currentTarget.setPointerCapture(event.pointerId);
     setStartFromPointer(event);
   }
@@ -105,18 +134,30 @@ export function KitPreviewCard({ audioFiles, initialAudioFileId, initialStartSec
 
     const safeStart = Math.max(0, Math.min(startSeconds, Math.max(0, audioDuration - 1)));
     audio.currentTime = safeStart;
+    setPlayheadSeconds(safeStart);
     setIsPlaying(true);
 
     await audio.play().catch(() => {
       setIsPlaying(false);
     });
 
-    stopTimerRef.current = window.setTimeout(() => {
-      audio.pause();
-      audio.currentTime = safeStart;
-      setIsPlaying(false);
-      stopTimerRef.current = null;
-    }, durationSeconds * 1000);
+    if (!audio.paused) {
+      rafRef.current = window.requestAnimationFrame(syncPlayhead);
+      stopTimerRef.current = window.setTimeout(() => {
+        clearPreviewTimer();
+        audio.pause();
+        audio.currentTime = safeStart;
+        setPlayheadSeconds(safeStart);
+        setIsPlaying(false);
+      }, durationSeconds * 1000);
+    }
+  }
+
+  function submitPreview(formData: FormData) {
+    stopPreview(true);
+    startTransition(() => {
+      void action(formData);
+    });
   }
 
   return (
@@ -126,32 +167,37 @@ export function KitPreviewCard({ audioFiles, initialAudioFileId, initialStartSec
           <p className="text-sm font-semibold text-cyan-100">Preview do kit</p>
           <p className="mt-1 text-xs text-muted">Escolha o áudio e arraste o marcador para definir o trecho que aparece nas capas da Home.</p>
         </div>
-        <span className="rounded-full border border-white/10 bg-black/30 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-100">10s premium</span>
+        <span className="rounded-full border border-white/10 bg-black/30 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-100">{durationSeconds}s premium</span>
       </div>
 
       {audioFiles.length ? (
-        <form action={action} className="mt-5 space-y-4">
+        <form action={submitPreview} className="mt-5 space-y-4">
           <input type="hidden" name="preview_audio_file_id" value={audioFileId} />
           <input type="hidden" name="preview_start_seconds" value={String(Math.round(startSeconds))} />
           <input type="hidden" name="preview_duration_seconds" value={String(durationSeconds)} />
 
           <label className="block space-y-2 text-sm">
             <span className="text-muted">Arquivo do preview</span>
-            <select value={audioFileId} onChange={(event) => { stopPreview(); setAudioFileId(event.target.value); setStartSeconds(0); }} className="w-full rounded-lg border border-border bg-surface-muted px-3 py-2 text-foreground">
+            <select value={audioFileId} onChange={(event) => { stopPreview(true); setAudioFileId(event.target.value); setStartSeconds(0); setPlayheadSeconds(0); }} className="w-full rounded-lg border border-border bg-surface-muted px-3 py-2 text-foreground">
               {audioFiles.map((file) => <option key={file.id} value={file.id}>{resolveAudioLabel(file)}</option>)}
             </select>
           </label>
 
-          <audio ref={audioRef} src={audioFileId ? `/api/audio/${audioFileId}` : undefined} preload="metadata" onLoadedMetadata={(event) => setAudioDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 180)} onEnded={() => setIsPlaying(false)} />
+          <audio ref={audioRef} src={audioFileId ? `/api/audio/${audioFileId}` : undefined} preload="metadata" onLoadedMetadata={(event) => { const duration = Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 180; setAudioDuration(duration); setPlayheadSeconds(startSeconds); }} onTimeUpdate={(event) => { if (isPlaying) setPlayheadSeconds(event.currentTarget.currentTime); }} onEnded={() => { stopPreview(true); }} />
 
           <div>
             <div ref={scrubberRef} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} className="relative flex h-28 touch-none cursor-ew-resize items-center gap-1 overflow-hidden rounded-2xl border border-white/10 bg-black/35 px-4">
-              {bars.map((height, index) => <span key={index} className="flex-1 rounded-full bg-cyan-200/35" style={{ height: `${height}%` }} />)}
+              <div className="pointer-events-none absolute inset-y-0 bg-cyan-300/10" style={{ left: `${previewRangeLeft}%`, width: `${previewRangeWidth}%` }} />
+              <div className="pointer-events-none absolute inset-y-0 bg-cyan-300/25 transition-[width] duration-75" style={{ left: `${previewRangeLeft}%`, width: `${(previewRangeWidth * previewProgress) / 100}%` }} />
+              {bars.map((height, index) => <span key={index} className="relative z-10 flex-1 rounded-full bg-cyan-200/35" style={{ height: `${height}%` }} />)}
               <div className="pointer-events-none absolute inset-y-3 w-1 rounded-full bg-white shadow-[0_0_24px_rgba(34,211,238,0.9)]" style={{ left: `calc(${startPercent}% - 2px)` }} />
-              <div className="pointer-events-none absolute bottom-3 rounded-full bg-cyan-300 px-2 py-1 text-[10px] font-bold text-slate-950 shadow-lg" style={{ left: `min(calc(${startPercent}% + 8px), calc(100% - 72px))` }}>{formatTime(startSeconds)}</div>
+              <div className="pointer-events-none absolute inset-y-3 w-1 rounded-full bg-cyan-300 shadow-[0_0_24px_rgba(34,211,238,0.75)]" style={{ left: `calc(${playheadPercent}% - 2px)` }} />
+              <div className="pointer-events-none absolute bottom-3 rounded-full bg-cyan-300 px-2 py-1 text-[10px] font-bold text-slate-950 shadow-lg" style={{ left: `min(calc(${playheadPercent}% + 8px), calc(100% - 72px))` }}>{formatTime(playheadSeconds)}</div>
             </div>
-            <div className="mt-2 flex items-center justify-between text-xs text-muted">
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
               <span>Início: <strong className="text-cyan-100">{formatTime(startSeconds)}</strong></span>
+              <span>Agora: <strong className="text-cyan-100">{formatTime(playheadSeconds)}</strong></span>
+              <span>Fim: <strong className="text-cyan-100">{formatTime(previewEndSeconds)}</strong></span>
               <span>Arquivo: <strong className="text-cyan-100">{selectedFile ? resolveAudioLabel(selectedFile) : "—"}</strong></span>
             </div>
           </div>
@@ -159,16 +205,17 @@ export function KitPreviewCard({ audioFiles, initialAudioFileId, initialStartSec
           <div className="grid gap-3 md:grid-cols-[1fr_auto_auto] md:items-end">
             <label className="space-y-2 text-sm">
               <span className="text-muted">Duração</span>
-              <select value={durationSeconds} onChange={(event) => { stopPreview(); setDurationSeconds(Number(event.target.value)); }} className="w-full rounded-lg border border-border bg-surface-muted px-3 py-2 text-foreground">
+              <select value={durationSeconds} onChange={(event) => { stopPreview(true); setDurationSeconds(Number(event.target.value)); }} className="w-full rounded-lg border border-border bg-surface-muted px-3 py-2 text-foreground">
                 <option value={5}>5 segundos</option>
                 <option value={10}>10 segundos</option>
                 <option value={15}>15 segundos</option>
                 <option value={20}>20 segundos</option>
               </select>
             </label>
-            <button type="button" onClick={() => void playPreview()} className="rounded-lg border border-white/15 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20">{isPlaying ? "Reiniciar preview" : "Testar preview"}</button>
-            <button type="submit" className="rounded-lg border border-cyan-300/50 bg-cyan-300/15 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-300/25">Salvar preview</button>
+            <button type="button" disabled={isPending} onClick={() => void playPreview()} className="rounded-lg border border-white/15 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60">{isPlaying ? "Reiniciar preview" : "Testar preview"}</button>
+            <button type="submit" disabled={isPending} className="rounded-lg border border-cyan-300/50 bg-cyan-300/15 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-300/25 disabled:cursor-not-allowed disabled:opacity-70">{isPending ? "Salvando..." : "Salvar preview"}</button>
           </div>
+          {isPending ? <p className="text-xs text-cyan-100">Salvando o trecho selecionado e atualizando a vitrine...</p> : null}
         </form>
       ) : (
         <div className="mt-5 rounded-xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-100">Sincronize os áudios do kit antes de definir o preview.</div>
