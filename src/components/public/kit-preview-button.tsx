@@ -15,6 +15,7 @@ let activeAudio: HTMLAudioElement | null = null;
 let activeStopTimer: number | null = null;
 let activeProgressTimer: number | null = null;
 let activeReset: (() => void) | null = null;
+let activeToken = 0;
 
 function clearActiveTimers() {
   if (activeStopTimer) window.clearTimeout(activeStopTimer);
@@ -25,6 +26,7 @@ function clearActiveTimers() {
 
 function resetActiveAudio() {
   clearActiveTimers();
+  activeToken += 1;
   if (activeAudio) activeAudio.pause();
   activeAudio = null;
   activeReset?.();
@@ -68,11 +70,45 @@ export function KitPreviewButton({ audioUrl, startSeconds, durationSeconds, labe
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const preparedUrlRef = useRef<string | null>(null);
   const errorResetTimerRef = useRef<number | null>(null);
+  const localTokenRef = useRef(0);
+  const startedAtRef = useRef<number | null>(null);
+  const previewStartRef = useRef(0);
+  const previewDurationRef = useRef(10);
+  const isPlayingRef = useRef(false);
 
   useEffect(() => {
     return () => {
       if (errorResetTimerRef.current) window.clearTimeout(errorResetTimerRef.current);
       if (activeAudio === audioRef.current) resetActiveAudio();
+    };
+  }, []);
+
+  useEffect(() => {
+    function enforcePreviewWindow() {
+      const audio = audioRef.current;
+      if (!audio || activeAudio !== audio || !isPlayingRef.current) return;
+
+      const startedAt = startedAtRef.current;
+      const elapsed = startedAt ? (performance.now() - startedAt) / 1000 : 0;
+      const start = previewStartRef.current;
+      const duration = previewDurationRef.current;
+
+      if (elapsed >= duration || audio.currentTime >= start + duration + 0.15) {
+        audio.pause();
+        try {
+          audio.currentTime = start;
+        } catch {
+          // ignore seek failures after OS media-session resume
+        }
+        resetActiveAudio();
+      }
+    }
+
+    document.addEventListener("visibilitychange", enforcePreviewWindow);
+    window.addEventListener("focus", enforcePreviewWindow);
+    return () => {
+      document.removeEventListener("visibilitychange", enforcePreviewWindow);
+      window.removeEventListener("focus", enforcePreviewWindow);
     };
   }, []);
 
@@ -87,6 +123,7 @@ export function KitPreviewButton({ audioUrl, startSeconds, durationSeconds, labe
     preparedUrlRef.current = null;
     setState("idle");
     setProgress(0);
+    isPlayingRef.current = false;
   }, [audioUrl]);
 
   if (!audioUrl) return null;
@@ -111,34 +148,61 @@ export function KitPreviewButton({ audioUrl, startSeconds, durationSeconds, labe
   function resetThisButton() {
     setState("idle");
     setProgress(0);
+    isPlayingRef.current = false;
+    startedAtRef.current = null;
+  }
+
+  function stopCurrentPreview(resetToStart = true) {
+    const audio = audioRef.current;
+    clearActiveTimers();
+    activeToken += 1;
+    if (audio) {
+      audio.pause();
+      if (resetToStart) {
+        try {
+          audio.currentTime = previewStartRef.current;
+        } catch {
+          // ignore
+        }
+      }
+    }
+    if (activeAudio === audio) activeAudio = null;
+    activeReset = null;
+    resetThisButton();
   }
 
   function showErrorBriefly() {
     setState("error");
     setProgress(0);
+    isPlayingRef.current = false;
     if (errorResetTimerRef.current) window.clearTimeout(errorResetTimerRef.current);
     errorResetTimerRef.current = window.setTimeout(() => setState("idle"), 1200);
   }
 
-  function startProgressTimer(duration: number) {
-    const startedAt = performance.now();
+  function finishPreview(audio: HTMLAudioElement, token: number, start: number) {
+    if (localTokenRef.current !== token || activeAudio !== audio) return;
+    clearActiveTimers();
+    audio.pause();
+    try {
+      audio.currentTime = start;
+    } catch {
+      // ignore
+    }
+    resetActiveAudio();
+  }
+
+  function startProgressTimer(audio: HTMLAudioElement, token: number, start: number, duration: number) {
+    startedAtRef.current = performance.now();
     activeProgressTimer = window.setInterval(() => {
-      const elapsed = (performance.now() - startedAt) / 1000;
+      if (localTokenRef.current !== token || activeAudio !== audio) return;
+      const elapsed = startedAtRef.current ? (performance.now() - startedAtRef.current) / 1000 : 0;
       setProgress(Math.min(100, (elapsed / duration) * 100));
-    }, 80);
-    activeStopTimer = window.setTimeout(() => {
-      const audio = audioRef.current;
-      const start = clampNumber(startSeconds, 0, 0, 60 * 60 * 3);
-      if (activeAudio === audio && audio) {
-        audio.pause();
-        try {
-          audio.currentTime = start;
-        } catch {
-          // alguns browsers podem bloquear seek sem metadados; o próximo clique corrige após metadata
-        }
-        resetActiveAudio();
+
+      if (elapsed >= duration || audio.currentTime >= start + duration + 0.15) {
+        finishPreview(audio, token, start);
       }
-    }, duration * 1000);
+    }, 100);
+    activeStopTimer = window.setTimeout(() => finishPreview(audio, token, start), duration * 1000);
   }
 
   async function playFromPreviewStart(audio: HTMLAudioElement) {
@@ -147,21 +211,25 @@ export function KitPreviewButton({ audioUrl, startSeconds, durationSeconds, labe
 
     const start = clampNumber(startSeconds, 0, 0, 60 * 60 * 3);
     const duration = clampNumber(durationSeconds, 10, 3, 30);
+    const token = activeToken + 1;
+    activeToken = token;
+    localTokenRef.current = token;
+    previewStartRef.current = start;
+    previewDurationRef.current = duration;
 
     setState("loading");
     setProgress(0);
+    isPlayingRef.current = false;
     activeAudio = audio;
     activeReset = resetThisButton;
 
-    const finalize = () => {
-      if (activeAudio === audio) resetActiveAudio();
-    };
+    const finalize = () => finishPreview(audio, token, start);
 
     audio.addEventListener("ended", finalize, { once: true });
     audio.addEventListener(
       "error",
       () => {
-        if (activeAudio === audio) {
+        if (localTokenRef.current === token && activeAudio === audio) {
           resetActiveAudio();
           showErrorBriefly();
         }
@@ -171,6 +239,8 @@ export function KitPreviewButton({ audioUrl, startSeconds, durationSeconds, labe
 
     try {
       await waitForMetadata(audio);
+      if (localTokenRef.current !== token) return;
+
       if (canSeek(audio) && audio.duration > start) {
         audio.currentTime = start;
       } else if (start === 0) {
@@ -178,8 +248,10 @@ export function KitPreviewButton({ audioUrl, startSeconds, durationSeconds, labe
       }
 
       await audio.play();
+      if (localTokenRef.current !== token) return;
+      isPlayingRef.current = true;
       setState("playing");
-      startProgressTimer(duration);
+      startProgressTimer(audio, token, start, duration);
     } catch (error) {
       console.warn("[kit-preview] playback failed", error);
       resetActiveAudio();
@@ -199,8 +271,12 @@ export function KitPreviewButton({ audioUrl, startSeconds, durationSeconds, labe
       return;
     }
 
-    // Em preview público, clique repetido não deve pausar nem continuar a faixa.
-    // Ele sempre reinicia o trecho salvo de 10s.
+    // Clique enquanto está tocando ou carregando deve parar completamente.
+    if ((isPlaying || isLoading) && activeAudio === audio) {
+      stopCurrentPreview(true);
+      return;
+    }
+
     if (activeAudio && activeAudio !== audio) resetActiveAudio();
     await playFromPreviewStart(audio);
   }
