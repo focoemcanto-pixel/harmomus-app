@@ -10,6 +10,7 @@ type TouchPoint = { clientX: number; clientY: number };
 type ProfilePageClientProps = {
   initialName: string;
   email: string;
+  pendingEmail?: string | null;
   username: string;
   planName: string;
   subscriptionStatus: string;
@@ -62,9 +63,13 @@ function StatCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function ProfilePageClient({ initialName, email, username, planName, subscriptionStatus, avatarUrl, userId: _userId, emailConfirmed = false, stats }: ProfilePageClientProps) {
+export function ProfilePageClient({ initialName, email, pendingEmail, username, planName, subscriptionStatus, avatarUrl, userId: _userId, emailConfirmed = false, stats }: ProfilePageClientProps) {
   const [name, setName] = useState(initialName);
   const [avatar, setAvatar] = useState<string | null>(avatarUrl);
+  const [currentEmail, setCurrentEmail] = useState(email);
+  const [currentPendingEmail, setCurrentPendingEmail] = useState<string | null>(pendingEmail ?? null);
+  const [showWrongEmailForm, setShowWrongEmailForm] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
   const [savingName, setSavingName] = useState(false);
   const [passwordResetState, setPasswordResetState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [passwordResetMessage, setPasswordResetMessage] = useState("");
@@ -82,7 +87,8 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
   const dragRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
   const pinchRef = useRef<{ distance: number; zoom: number } | null>(null);
 
-  const nameInitial = useMemo(() => (name || email || "U").slice(0, 1).toUpperCase(), [name, email]);
+  const displayEmail = currentPendingEmail || currentEmail;
+  const nameInitial = useMemo(() => (name || currentEmail || "U").slice(0, 1).toUpperCase(), [name, currentEmail]);
   const readableStatus = formatSubscriptionStatus(subscriptionStatus);
   const pendingSubscription = isPendingSubscription(subscriptionStatus);
 
@@ -118,19 +124,24 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
     }
   }
 
-  async function requestEmailConfirmation() {
+  async function requestEmailConfirmation(overrideEmail?: string) {
     try {
+      const correctedEmail = String(overrideEmail ?? "").trim().toLowerCase();
       setEmailConfirmationState("sending");
       setEmailConfirmationMessage("");
       const response = await fetch("/api/auth/email-confirmation/resend", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify(correctedEmail ? { email: displayEmail, newEmail: correctedEmail } : { email: displayEmail }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data?.error || "Não foi possível reenviar a confirmação.");
       setEmailConfirmationState("sent");
-      setEmailConfirmationMessage("Enviamos um novo link de confirmação para seu e-mail.");
+      setCurrentPendingEmail(data?.email || correctedEmail || displayEmail);
+      if (correctedEmail) setCurrentEmail(correctedEmail);
+      setShowWrongEmailForm(false);
+      setNewEmail("");
+      setEmailConfirmationMessage(`Enviamos um novo link de confirmação para ${data?.email || correctedEmail || displayEmail}.`);
     } catch (error) {
       setEmailConfirmationState("error");
       setEmailConfirmationMessage(error instanceof Error ? error.message : "Erro ao reenviar confirmação.");
@@ -149,7 +160,6 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
       alert("Envie uma imagem válida.");
       return;
     }
-
     setUploading(true);
     try {
       const url = URL.createObjectURL(file);
@@ -174,13 +184,11 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
       img.onload = res;
       img.onerror = rej;
     });
-
     const canvas = document.createElement("canvas");
     canvas.width = AVATAR_SIZE;
     canvas.height = AVATAR_SIZE;
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("Não foi possível preparar a imagem.");
-
     ctx.fillStyle = "#090b12";
     ctx.fillRect(0, 0, AVATAR_SIZE, AVATAR_SIZE);
     ctx.save();
@@ -189,17 +197,14 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
     ctx.clip();
     ctx.translate(AVATAR_SIZE / 2, AVATAR_SIZE / 2);
     ctx.rotate((rotation * Math.PI) / 180);
-
     const baseScale = Math.min(CROP_SIZE / img.width, CROP_SIZE / img.height);
     const exportScale = AVATAR_SIZE / CROP_SIZE;
     const drawW = img.width * baseScale * zoom * exportScale;
     const drawH = img.height * baseScale * zoom * exportScale;
     const drawX = -drawW / 2 + position.x * exportScale;
     const drawY = -drawH / 2 + position.y * exportScale;
-
     ctx.drawImage(img, drawX, drawY, drawW, drawH);
     ctx.restore();
-
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/webp", 0.92));
     if (!blob) throw new Error("Falha ao otimizar a imagem.");
     return blob;
@@ -231,26 +236,21 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
   function startDrag(clientX: number, clientY: number) {
     dragRef.current = { sx: clientX, sy: clientY, ox: position.x, oy: position.y };
   }
-
   function moveDrag(clientX: number, clientY: number) {
     if (!dragRef.current) return;
     setPosition({ x: dragRef.current.ox + clientX - dragRef.current.sx, y: dragRef.current.oy + clientY - dragRef.current.sy });
   }
-
   function endGesture() {
     dragRef.current = null;
     pinchRef.current = null;
   }
-
   function handleMouseDown(event: MouseEvent<HTMLDivElement>) {
     event.preventDefault();
     startDrag(event.clientX, event.clientY);
   }
-
   function handleMouseMove(event: MouseEvent<HTMLDivElement>) {
     moveDrag(event.clientX, event.clientY);
   }
-
   function handleTouchStart(event: TouchEvent<HTMLDivElement>) {
     if (event.touches.length === 2) {
       pinchRef.current = { distance: distance(event.touches[0], event.touches[1]), zoom };
@@ -259,7 +259,6 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
     const touch = event.touches[0];
     if (touch) startDrag(touch.clientX, touch.clientY);
   }
-
   function handleTouchMove(event: TouchEvent<HTMLDivElement>) {
     event.preventDefault();
     if (event.touches.length === 2 && pinchRef.current) {
@@ -277,12 +276,10 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
 
   return <main className="min-h-screen overflow-x-hidden bg-[#06080d] px-3 py-6 text-white md:px-6 md:py-10">
     <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={handleFileChange} />
-
     <section className="relative mx-auto w-full max-w-6xl overflow-hidden rounded-[1.8rem] border border-emerald-400/20 bg-gradient-to-br from-zinc-950 via-[#121720] to-violet-950/40 p-4 shadow-[0_0_120px_rgba(16,185,129,0.1)] md:rounded-[2.4rem] md:p-8">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_10%,rgba(34,197,94,0.16),transparent_35%),radial-gradient(circle_at_85%_20%,rgba(168,85,247,0.18),transparent_32%)]" />
       <div className="relative z-10">
         <Link href="/" className="inline-flex rounded-2xl border border-cyan-300/30 bg-cyan-400/10 px-4 py-2 text-sm font-medium text-cyan-100 hover:bg-cyan-300/20">← Voltar para Home</Link>
-
         <div className="mt-8 grid gap-6 lg:grid-cols-[320px_1fr] lg:items-start">
           <aside className="rounded-[2rem] border border-white/10 bg-white/[0.045] p-5 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
             <button type="button" onClick={() => fileInputRef.current?.click()} className="group relative mx-auto block h-36 w-36 overflow-hidden rounded-full border-2 border-cyan-300/50 bg-black/30 shadow-[0_0_40px_rgba(34,211,238,0.18)]">
@@ -294,7 +291,6 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
             </button>
             <p className="mt-4 text-xs leading-5 text-zinc-400">Use uma foto nítida para personalizar seu perfil e seu selo no topo do app.</p>
           </aside>
-
           <div className="min-w-0 space-y-5">
             <div className="rounded-[2rem] border border-white/10 bg-black/20 p-5 md:p-6">
               <p className="text-xs font-black uppercase tracking-[0.22em] text-emerald-300">Meu perfil</p>
@@ -306,43 +302,43 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
               </div>
               <div className="mt-4 min-w-0">
                 <p className="truncate text-lg font-semibold text-zinc-200">@{username}</p>
-                <p className="break-all text-sm text-zinc-400">{email}</p>
+                <p className="break-all text-sm text-zinc-400">{currentEmail}</p>
               </div>
             </div>
-
             <div className={`rounded-[2rem] border p-5 text-sm ${emailConfirmed ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-100" : "border-yellow-300/30 bg-yellow-300/10 text-yellow-50"}`}>
-              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                 <div>
                   <p className="text-base font-black">{emailConfirmed ? "E-mail confirmado" : "Confirmação de e-mail pendente"}</p>
                   <p className="mt-1 opacity-90">
-                    {emailConfirmed
-                      ? "Sua conta está protegida e pronta para recuperação de senha."
-                      : "Você pode usar o Harmomus normalmente. Confirme seu e-mail apenas para aumentar a segurança e facilitar a recuperação de senha."}
+                    {emailConfirmed ? "Sua conta está protegida e pronta para recuperação de senha." : "Você pode usar o Harmomus normalmente. Confirme seu e-mail apenas para aumentar a segurança e facilitar a recuperação de senha."}
                   </p>
+                  {!emailConfirmed ? <p className="mt-3 break-all rounded-2xl border border-yellow-200/20 bg-black/15 px-3 py-2 text-xs text-yellow-100">Enviaremos a confirmação para: <strong>{displayEmail}</strong></p> : null}
                 </div>
                 {!emailConfirmed ? (
-                  <button type="button" onClick={requestEmailConfirmation} disabled={emailConfirmationState === "sending"} className="shrink-0 rounded-2xl bg-yellow-300 px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-yellow-200 disabled:cursor-wait disabled:opacity-70">
+                  <button type="button" onClick={() => requestEmailConfirmation()} disabled={emailConfirmationState === "sending"} className="shrink-0 rounded-2xl bg-yellow-300 px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-yellow-200 disabled:cursor-wait disabled:opacity-70">
                     {emailConfirmationState === "sending" ? "Enviando..." : "Enviar confirmação"}
                   </button>
                 ) : null}
               </div>
+              {!emailConfirmed ? <button type="button" onClick={() => setShowWrongEmailForm((value) => !value)} className="mt-4 text-xs font-bold text-yellow-100 underline underline-offset-4">Preenchi o e-mail errado</button> : null}
+              {showWrongEmailForm ? <div className="mt-4 grid gap-3 rounded-2xl border border-white/10 bg-black/20 p-4 md:grid-cols-[1fr_auto]">
+                <input value={newEmail} onChange={(event) => setNewEmail(event.target.value)} placeholder="Digite o e-mail correto" className="min-w-0 rounded-xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm text-white outline-none ring-yellow-200/30 placeholder:text-zinc-400 focus:ring" />
+                <button type="button" onClick={() => requestEmailConfirmation(newEmail)} disabled={emailConfirmationState === "sending" || !newEmail.trim()} className="rounded-xl bg-white px-4 py-3 text-sm font-black text-slate-950 disabled:cursor-not-allowed disabled:opacity-60">Atualizar e enviar</button>
+              </div> : null}
               {emailConfirmationMessage ? <p className={`mt-3 text-xs ${emailConfirmationState === "error" ? "text-rose-100" : "text-emerald-100"}`}>{emailConfirmationMessage}</p> : null}
             </div>
-
             {pendingSubscription ? (
               <div className="rounded-[2rem] border border-amber-300/30 bg-amber-400/10 p-5 text-sm text-amber-100">
                 <p className="font-semibold">Assinatura pendente</p>
                 <p className="mt-1 text-amber-100/85">Seu perfil mostra o plano {planName}, mas a assinatura ainda está como {readableStatus}. Conclua o pagamento ou aguarde a confirmação para liberar o acesso completo.</p>
               </div>
             ) : null}
-
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <StatCard label="Plano" value={planName} />
               <StatCard label="Assinatura" value={readableStatus} />
               <StatCard label="Kits hoje" value={String(stats.kitsToday)} />
               <StatCard label="Histórico" value={String(stats.history)} />
             </div>
-
             <div className="grid gap-3 md:grid-cols-3">
               <StatCard label="Playlists" value={String(stats.playlists)} />
               <StatCard label="Favoritos" value={String(stats.favorites)} />
@@ -354,23 +350,17 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
                 {passwordResetMessage ? <p className={`mt-2 text-xs ${passwordResetState === "error" ? "text-rose-200" : "text-emerald-200"}`}>{passwordResetMessage}</p> : null}
               </div>
             </div>
-
             <a href="/logout" className="inline-flex rounded-2xl border border-rose-300/40 px-5 py-3 text-sm font-semibold text-rose-200 hover:bg-rose-500/10">Sair da conta</a>
           </div>
         </div>
       </div>
     </section>
-
     {open ? <div className="fixed inset-0 z-50 bg-black/95 text-white backdrop-blur-md md:grid md:place-items-center md:p-6">
       <div className="flex h-[100dvh] w-full flex-col overflow-hidden bg-[#070b14] md:h-auto md:max-h-[92vh] md:max-w-xl md:rounded-3xl md:border md:border-white/15 md:shadow-2xl">
         <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-4 py-4 md:px-6">
-          <div>
-            <h3 className="text-xl font-semibold">Ajustar foto</h3>
-            <p className="mt-1 text-xs text-zinc-400">Use a pinça para aproximar e arraste para posicionar.</p>
-          </div>
+          <div><h3 className="text-xl font-semibold">Ajustar foto</h3><p className="mt-1 text-xs text-zinc-400">Use a pinça para aproximar e arraste para posicionar.</p></div>
           <button className="rounded-full border border-white/15 px-3 py-1.5 text-sm text-zinc-200" onClick={() => { setOpen(false); endGesture(); }}>Fechar</button>
         </div>
-
         <div className="flex flex-1 items-center justify-center overflow-hidden px-4 py-6">
           {imageSrc ? (
             <div className="relative h-[320px] w-[320px] max-w-full touch-none overflow-hidden rounded-3xl bg-black/40" onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={endGesture} onMouseLeave={endGesture} onDoubleClick={resetEditor} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={endGesture}>
@@ -385,7 +375,6 @@ export function ProfilePageClient({ initialName, email, username, planName, subs
             </button>
           )}
         </div>
-
         <div className="flex shrink-0 flex-col gap-3 border-t border-white/10 px-4 py-4 md:flex-row md:justify-end md:px-6">
           <button type="button" onClick={() => fileInputRef.current?.click()} className="rounded-xl border border-white/15 px-4 py-3 text-sm font-medium text-zinc-200 hover:bg-white/10">Escolher outra foto</button>
           <button type="button" onClick={saveAvatar} disabled={!imageSrc || saving} className="rounded-xl bg-gradient-to-r from-cyan-300 to-violet-400 px-5 py-3 text-sm font-bold text-slate-950 disabled:cursor-not-allowed disabled:opacity-60">
