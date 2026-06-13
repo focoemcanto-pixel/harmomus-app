@@ -10,6 +10,8 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+type PageSearchParams = { message?: string | string[] };
+
 type TeamTemplate = {
   id: string;
   name: string;
@@ -72,10 +74,10 @@ async function createTeamTemplate(formData: FormData) {
   redirect(`/ministerio/equipes/${data.id}`);
 }
 
-export default async function MinistryTeamsPage({ searchParams }: { searchParams?: Promise<{ message?: string | string[] }> }) {
+export default async function MinistryTeamsPage({ searchParams }: { searchParams?: Promise<PageSearchParams> }) {
   const [context, params] = await Promise.all([
     getCurrentUserAccessContext(),
-    searchParams ?? Promise.resolve({}),
+    searchParams ?? Promise.resolve({} as PageSearchParams),
   ]);
 
   if (context.isGuest) redirect("/login");
@@ -83,7 +85,8 @@ export default async function MinistryTeamsPage({ searchParams }: { searchParams
   if (!isMinistryManager(context)) redirect("/");
 
   const admin = createSupabaseAdminClient() as any;
-  const message = Array.isArray(params.message) ? params.message[0] : params.message;
+  const rawMessage = params.message;
+  const message = Array.isArray(rawMessage) ? rawMessage[0] : rawMessage;
 
   const [{ data: templates, error: templatesError }, { data: members, error: membersError }, { data: templateMembers }] = await Promise.all([
     admin
@@ -140,69 +143,54 @@ export default async function MinistryTeamsPage({ searchParams }: { searchParams
               <Plus className="h-5 w-5" />
             </div>
             <div>
-              <p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Novo template</p>
-              <h2 className="mt-2 text-2xl font-semibold">Criar equipe reutilizável</h2>
-              <p className="mt-2 text-sm leading-6 text-zinc-300">
-                Use para formações que se repetem. O coordenador pode ser alterado depois em cada escala.
-              </p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">Nova equipe</p>
+              <h2 className="mt-1 text-2xl font-semibold">Criar template</h2>
+              <p className="mt-2 text-sm leading-6 text-zinc-300">Defina nome, descrição e coordenador. Você adiciona os integrantes na próxima tela.</p>
             </div>
           </div>
 
           <form action={createTeamTemplate} className="mt-6 space-y-4">
             <label className="block">
-              <span className="text-sm font-semibold text-zinc-200">Nome da equipe</span>
-              <input name="name" required maxLength={100} placeholder="Ex.: Grupo Verde" className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-cyan-300/50" />
+              <span className="text-sm font-medium text-zinc-200">Nome da equipe</span>
+              <input name="name" required placeholder="Ex.: Grupo Domingo Manhã" className="mt-2 w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm text-white outline-none ring-cyan-300/30 transition placeholder:text-zinc-500 focus:ring" />
             </label>
             <label className="block">
-              <span className="text-sm font-semibold text-zinc-200">Descrição</span>
-              <textarea name="description" rows={3} maxLength={400} placeholder="Ex.: Equipe principal dos cultos de domingo à noite." className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-cyan-300/50" />
+              <span className="text-sm font-medium text-zinc-200">Descrição</span>
+              <textarea name="description" rows={3} placeholder="Ex.: Equipe fixa dos domingos pela manhã" className="mt-2 w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm text-white outline-none ring-cyan-300/30 transition placeholder:text-zinc-500 focus:ring" />
             </label>
             <label className="block">
-              <span className="text-sm font-semibold text-zinc-200">Coordenador vocal padrão</span>
-              <select name="coordinator_member_id" className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50">
-                <option value="">Definir depois</option>
-                {activeMembers.map((member) => (
-                  <option key={member.id} value={member.id}>{memberLabel(member)}</option>
-                ))}
+              <span className="text-sm font-medium text-zinc-200">Coordenador vocal</span>
+              <select name="coordinator_member_id" className="mt-2 w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm text-white outline-none ring-cyan-300/30 transition focus:ring">
+                <option value="">Sem coordenador</option>
+                {activeMembers.map((member) => <option key={member.id} value={member.id}>{memberLabel(member)}</option>)}
               </select>
             </label>
-            <button className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200">
-              <Plus className="h-4 w-4" /> Criar equipe
+            <button className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-cyan-300 to-violet-400 px-5 py-4 font-bold text-slate-950 transition hover:scale-[1.01]">
+              Criar equipe <ArrowRight className="h-4 w-4" />
             </button>
           </form>
         </PremiumPanel>
 
         <PremiumPanel>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Templates salvos</p>
-              <h2 className="mt-2 text-2xl font-semibold">Equipes prontas para escala</h2>
-            </div>
-          </div>
-
-          <div className="mt-6 grid gap-3">
-            {rows.length ? rows.map((team) => {
-              const coordinator = team.coordinator_member_id ? membersById.get(team.coordinator_member_id) : null;
-              return (
-                <Link key={team.id} href={`/ministerio/equipes/${team.id}`} className="group rounded-3xl border border-white/10 bg-black/20 p-5 transition hover:border-cyan-300/40 hover:bg-white/[0.055]">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <h3 className="text-xl font-semibold text-white">{team.name}</h3>
-                      <p className="mt-2 text-sm leading-6 text-zinc-400">{team.description || "Sem descrição."}</p>
-                      <div className="mt-4 flex flex-wrap gap-2 text-xs text-zinc-300">
-                        <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1">{counts.get(team.id) ?? 0} integrante{(counts.get(team.id) ?? 0) === 1 ? "" : "s"}</span>
-                        <span className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1 text-cyan-100">Coord.: {memberLabel(coordinator)}</span>
-                      </div>
-                    </div>
-                    <ArrowRight className="mt-1 h-5 w-5 shrink-0 text-cyan-200 transition group-hover:translate-x-1" />
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">Templates salvos</p>
+          <h2 className="mt-1 text-2xl font-semibold">Suas equipes</h2>
+          <div className="mt-6 space-y-3">
+            {rows.length ? rows.map((template) => {
+              const coordinator = membersById.get(template.coordinator_member_id ?? "");
+              return <Link key={template.id} href={`/ministerio/equipes/${template.id}`} className="block rounded-[1.5rem] border border-white/10 bg-white/[0.04] p-5 transition hover:border-cyan-300/40 hover:bg-white/[0.07]">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <h3 className="text-lg font-semibold text-white">{template.name}</h3>
+                    <p className="mt-1 text-sm text-zinc-400">{template.description || "Sem descrição"}</p>
                   </div>
-                </Link>
-              );
-            }) : (
-              <div className="rounded-3xl border border-dashed border-white/10 bg-black/20 p-8 text-center text-sm text-zinc-400">
-                Nenhuma equipe criada ainda. Crie o primeiro template para acelerar suas próximas escalas.
-              </div>
-            )}
+                  <ArrowRight className="h-5 w-5 shrink-0 text-cyan-200" />
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2 text-xs text-zinc-300">
+                  <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1">{counts.get(template.id) ?? 0} integrantes</span>
+                  <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1">Coordenador: {memberLabel(coordinator)}</span>
+                </div>
+              </Link>;
+            }) : <p className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 text-sm text-zinc-300">Nenhuma equipe criada ainda.</p>}
           </div>
         </PremiumPanel>
       </div>
