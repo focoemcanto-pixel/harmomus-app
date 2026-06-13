@@ -15,9 +15,9 @@ async function safeCount(query: PromiseLike<{ count: number | null; error?: unkn
   }
 }
 
-function isVerified(status?: string | null) {
+function isVerified(status?: string | null, verifiedAt?: string | null) {
   const value = String(status ?? "").trim().toLowerCase();
-  return value === "active" || value === "email_confirmed" || value === "onboarding_completed";
+  return Boolean(verifiedAt) || value === "active" || value === "email_confirmed" || value === "onboarding_completed";
 }
 
 export default async function PerfilPage() {
@@ -29,6 +29,8 @@ export default async function PerfilPage() {
   const today = new Date();
   const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())).toISOString();
   const localStatus = String((context.profile as any)?.onboarding_status ?? "");
+  const emailVerifiedAt = String((context.profile as any)?.email_verified_at ?? "");
+  const pendingEmail = String((context.profile as any)?.pending_email ?? "");
 
   const [playlists, favorites, kitsToday, history] = await Promise.all([
     safeCount((supabase as any).from("playlists").select("id", { count: "exact", head: true }).eq("user_id", userId)),
@@ -41,11 +43,12 @@ export default async function PerfilPage() {
     userId={userId}
     initialName={context.profile?.full_name ?? "Sem nome"}
     email={context.profile?.email ?? "Sem e-mail"}
+    pendingEmail={pendingEmail || null}
     username={(context.profile?.email ?? "user").split("@")[0]}
     avatarUrl={context.profile?.avatar_url ?? null}
     planName={context.plan?.name ?? "Free"}
     subscriptionStatus={context.subscription?.status ?? "inactive"}
-    emailConfirmed={isVerified(localStatus)}
+    emailConfirmed={isVerified(localStatus, emailVerifiedAt)}
     stats={{ playlists, favorites, history, kitsToday }}
   /></PublicAppShell>;
 }
