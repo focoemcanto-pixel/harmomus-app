@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Crown, Headphones, Heart, ListMusic, MessageCircle, Music2, PlayCircle, RotateCw, Sparkles, Star, Trophy } from "lucide-react";
+import { Crown, Headphones, Heart, ListMusic, MessageCircle, Music2, PlayCircle, RotateCw, Star, Trophy } from "lucide-react";
 
 import { PremiumSongRequestForm } from "@/components/public/premium-song-request-form";
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { PremiumToneRequestForm } from "@/components/public/premium-tone-request-form";
 import { getCurrentUser, getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { canSubmitPremiumRequests } from "@/lib/auth/ministry-access";
-import { getGlobalTopKits, getRecommendedKits, getUserPlayStreak, getUserRecentActivities, type RecentActivity, type TopKit } from "@/lib/data/premium-analytics";
+import { getGlobalTopKits, getRecommendedKits, getUserRecentActivities, type RecentActivity, type TopKit } from "@/lib/data/premium-analytics";
 import { getPublishedKits, type PublicKit } from "@/lib/data/public-kits";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -74,7 +74,7 @@ function toDashboardKit(kit: any, extra: Partial<DashboardKit> = {}): DashboardK
   };
 }
 
-async function getFavoriteKits(userId: string, limit = 6): Promise<DashboardKit[]> {
+async function getFavoriteKits(userId: string, limit = 8): Promise<DashboardKit[]> {
   if (!userId) return [];
   const supabase = createSupabaseAdminClient() as any;
   const { data, error } = await supabase
@@ -142,11 +142,10 @@ export default async function AreaPremiumPage({ searchParams }: { searchParams?:
   const supabaseAdmin = createSupabaseAdminClient() as any;
   const monthStart = startOfMonthIso();
 
-  const [topSite, recommendedKits, activities, playStreak, allKits, premiumRequestsResponse, monthlySongRequestCountResponse, favoriteKits, globalFavoriteKits, playlistStats] = await Promise.all([
+  const [topSite, recommendedKits, activities, allKits, premiumRequestsResponse, monthlySongRequestCountResponse, favoriteKits, globalFavoriteKits, playlistStats] = await Promise.all([
     getGlobalTopKits(5).catch(() => [] as TopKit[]),
-    profileId ? getRecommendedKits(profileId, 6).catch(() => [] as TopKit[]) : Promise.resolve([] as TopKit[]),
-    profileId ? getUserRecentActivities(profileId, 12).catch(() => [] as RecentActivity[]) : Promise.resolve([] as RecentActivity[]),
-    profileId ? getUserPlayStreak(profileId).catch(() => 0) : Promise.resolve(0),
+    profileId ? getRecommendedKits(profileId, 8).catch(() => [] as TopKit[]) : Promise.resolve([] as TopKit[]),
+    profileId ? getUserRecentActivities(profileId, 8).catch(() => [] as RecentActivity[]) : Promise.resolve([] as RecentActivity[]),
     getPublishedKits().catch(() => [] as PublicKit[]),
     profileId
       ? supabaseAdmin
@@ -164,7 +163,7 @@ export default async function AreaPremiumPage({ searchParams }: { searchParams?:
           .eq("request_type", "song")
           .gte("created_at", monthStart)
       : Promise.resolve({ count: 0 }),
-    getFavoriteKits(favoriteUserId, 6),
+    getFavoriteKits(favoriteUserId, 8),
     getGlobalFavoriteKits(5),
     getPlaylistStats(favoriteUserId),
   ]);
@@ -172,7 +171,6 @@ export default async function AreaPremiumPage({ searchParams }: { searchParams?:
   const userPremiumRequests = premiumRequestsResponse?.data ?? [];
   const monthlySongRequests = monthlySongRequestCountResponse?.count ?? 0;
   const remainingSuggestions = Math.max(0, 3 - monthlySongRequests);
-  const newestKits = allKits.slice(0, 6).map((kit) => toDashboardKit(kit, { badge: "Novo" }));
   const continueStudying = Array.from(new Map(activities.filter((item) => item.kit_slug).map((item) => [item.kit_slug, item])).values()).slice(0, 3);
 
   const toneRequestKits = allKits.slice(0, 500).map((kit) => ({
@@ -185,7 +183,7 @@ export default async function AreaPremiumPage({ searchParams }: { searchParams?:
   const name = firstName(context.profile?.full_name, context.profile?.email);
   const avatar = context.profile?.avatar_url ?? null;
   const joinedAt = formatDate(context.profile?.created_at);
-  const totalUserPlays = activities.length ? activities.length : topSite.reduce((sum, kit) => sum + kit.plays, 0);
+  const totalUserPlays = activities.length;
 
   return (
     <PublicAppShell>
@@ -253,7 +251,7 @@ export default async function AreaPremiumPage({ searchParams }: { searchParams?:
           </div>
 
           <PremiumPanel title="Meus favoritos" icon={<Heart className="text-rose-300" />} className="mt-8">
-            {favoriteKits.length ? <KitGrid kits={favoriteKits} /> : <EmptyState text="Favorite os kits que você mais usa para montar seu repertório premium." />}
+            {favoriteKits.length ? <KitCarousel kits={favoriteKits} /> : <EmptyState text="Favorite os kits que você mais usa para montar seu repertório premium." />}
           </PremiumPanel>
 
           <div className="mt-8 grid gap-6 lg:grid-cols-2">
@@ -265,12 +263,8 @@ export default async function AreaPremiumPage({ searchParams }: { searchParams?:
             </PremiumPanel>
           </div>
 
-          <PremiumPanel title="Novidades" icon={<Sparkles className="text-yellow-300" />} className="mt-8">
-            {newestKits.length ? <KitGrid kits={newestKits} /> : <EmptyState text="Novos kits publicados aparecerão aqui." />}
-          </PremiumPanel>
-
           <PremiumPanel title="Recomendados para você" icon={<Music2 className="text-emerald-300" />} className="mt-8">
-            {recommendedKits.length ? <KitGrid kits={recommendedKits.map((kit) => toDashboardKit(kit, { badge: "Recomendado" }))} /> : <EmptyState text="As recomendações aparecerão depois que houver histórico real de reprodução no app." />}
+            {recommendedKits.length ? <KitCarousel kits={recommendedKits.map((kit) => toDashboardKit(kit, { badge: "Recomendado" }))} /> : <EmptyState text="As recomendações aparecerão depois que houver histórico real de reprodução no app." />}
           </PremiumPanel>
 
           <div className="mt-8 grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
@@ -308,20 +302,20 @@ export default async function AreaPremiumPage({ searchParams }: { searchParams?:
 }
 
 function PremiumPanel({ title, icon, children, className = "" }: { title: string; icon: React.ReactNode; children: React.ReactNode; className?: string }) {
-  return <section className={`rounded-[2rem] border border-emerald-400/20 bg-[#111513]/88 p-6 shadow-[0_0_80px_rgba(16,185,129,0.08)] ${className}`}><h2 className="mb-5 flex items-center gap-3 text-3xl font-black text-white">{icon}{title}</h2>{children}</section>;
+  return <section className={`rounded-[2rem] border border-emerald-400/20 bg-[#111513]/88 p-5 shadow-[0_0_80px_rgba(16,185,129,0.08)] md:p-6 ${className}`}><h2 className="mb-5 flex items-center gap-3 text-2xl font-black text-white md:text-3xl">{icon}{title}</h2>{children}</section>;
 }
 
 function Ranking({ items, empty }: { items: TopKit[]; empty: string }) {
   if (!items.length) return <EmptyState text={empty} />;
-  return <div className="space-y-2">{items.map((item, index) => <Link href={`/biblioteca/${item.slug}`} key={item.id} className="flex items-center gap-4 border-b border-white/10 py-4 transition hover:bg-white/[0.03] last:border-b-0"><div className="grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-emerald-400 to-indigo-300 text-lg font-black text-black">{index + 1}</div><p className="flex-1 text-lg font-bold text-white">{item.name}</p><p className="font-black text-emerald-400">{item.plays} plays</p></Link>)}</div>;
+  return <div className="space-y-2">{items.map((item, index) => <Link href={`/biblioteca/${item.slug}`} key={item.id} className="flex items-center gap-4 border-b border-white/10 py-4 transition hover:bg-white/[0.03] last:border-b-0"><div className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-emerald-400 to-indigo-300 text-base font-black text-black md:h-14 md:w-14 md:text-lg">{index + 1}</div><p className="flex-1 text-base font-bold text-white md:text-lg">{item.name}</p><p className="text-sm font-black text-emerald-400 md:text-base">{item.plays} plays</p></Link>)}</div>;
 }
 
 function FavoriteRanking({ items }: { items: DashboardKit[] }) {
-  return <div className="space-y-2">{items.map((item, index) => <Link href={`/biblioteca/${item.slug}`} key={item.id} className="flex items-center gap-4 border-b border-white/10 py-4 transition hover:bg-white/[0.03] last:border-b-0"><div className="grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-yellow-300 to-emerald-300 text-lg font-black text-black">{index + 1}</div><p className="flex-1 text-lg font-bold text-white">{item.name}</p><p className="font-black text-yellow-300">{item.metric}</p></Link>)}</div>;
+  return <div className="space-y-2">{items.map((item, index) => <Link href={`/biblioteca/${item.slug}`} key={item.id} className="flex items-center gap-4 border-b border-white/10 py-4 transition hover:bg-white/[0.03] last:border-b-0"><div className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-yellow-300 to-emerald-300 text-base font-black text-black md:h-14 md:w-14 md:text-lg">{index + 1}</div><p className="flex-1 text-base font-bold text-white md:text-lg">{item.name}</p><p className="text-sm font-black text-yellow-300 md:text-base">{item.metric}</p></Link>)}</div>;
 }
 
-function KitGrid({ kits }: { kits: DashboardKit[] }) {
-  return <div className="grid gap-4 md:grid-cols-3">{kits.map((kit) => <Link key={kit.id} href={`/biblioteca/${kit.slug}`} className="group overflow-hidden rounded-3xl border border-emerald-400/20 bg-white/[0.04] transition hover:-translate-y-1 hover:border-emerald-300/60"><div className="aspect-video overflow-hidden bg-zinc-900">{kit.cover_url ? <img src={kit.cover_url} alt={kit.name} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" /> : <div className="grid h-full place-items-center text-zinc-500">Harmomus</div>}</div><div className="p-4">{kit.badge ? <span className="rounded-full bg-emerald-500/20 px-3 py-1 text-xs font-bold text-emerald-300">{kit.badge}</span> : null}<h3 className="mt-3 text-lg font-bold text-white">{kit.name}</h3><p className="mt-1 text-sm text-zinc-400">{kit.artist ?? "Kit vocal premium"}</p>{kit.metric ? <p className="mt-3 text-sm font-black text-yellow-300">{kit.metric}</p> : null}</div></Link>)}</div>;
+function KitCarousel({ kits }: { kits: DashboardKit[] }) {
+  return <div className="-mx-5 overflow-x-auto px-5 pb-2 md:-mx-6 md:px-6"><div className="flex gap-4">{kits.map((kit) => <Link key={kit.id} href={`/biblioteca/${kit.slug}`} className="group w-[240px] shrink-0 overflow-hidden rounded-3xl border border-emerald-400/20 bg-white/[0.04] transition hover:-translate-y-1 hover:border-emerald-300/60 md:w-[300px]"><div className="aspect-video overflow-hidden bg-zinc-900">{kit.cover_url ? <img src={kit.cover_url} alt={kit.name} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" /> : <div className="grid h-full place-items-center text-zinc-500">Harmomus</div>}</div><div className="p-4">{kit.badge ? <span className="rounded-full bg-emerald-500/20 px-3 py-1 text-xs font-bold text-emerald-300">{kit.badge}</span> : null}<h3 className="mt-3 text-lg font-bold text-white">{kit.name}</h3><p className="mt-1 truncate text-sm text-zinc-400">{kit.artist ?? "Kit vocal premium"}</p>{kit.metric ? <p className="mt-3 text-sm font-black text-yellow-300">{kit.metric}</p> : null}</div></Link>)}</div></div>;
 }
 
 function EmptyState({ text }: { text: string }) {
