@@ -19,7 +19,7 @@ type SyncProfileOnboardingInput = {
 };
 
 function hasConfirmedEmail(authUser?: Record<string, unknown> | null) {
-  return Boolean(authUser?.email_confirmed_at || authUser?.confirmed_at);
+  return Boolean(authUser?.email_confirmed_at);
 }
 
 export async function syncProfileOnboardingAfterAuth(input: SyncProfileOnboardingInput) {
@@ -28,7 +28,7 @@ export async function syncProfileOnboardingAfterAuth(input: SyncProfileOnboardin
   const admin = createSupabaseAdminClient() as any;
   let authUser = input.authUser ?? null;
 
-  if (!authUser || (!hasConfirmedEmail(authUser) && !input.successfulLogin)) {
+  if (!authUser || !hasConfirmedEmail(authUser)) {
     const { data, error } = await admin.auth.admin.getUserById(input.userId);
     if (error) {
       console.error("[syncProfileOnboardingAfterAuth] Falha ao buscar usuário no Auth", error);
@@ -37,7 +37,7 @@ export async function syncProfileOnboardingAfterAuth(input: SyncProfileOnboardin
     }
   }
 
-  const shouldCompleteEmailConfirmation = input.successfulLogin || hasConfirmedEmail(authUser);
+  const shouldCompleteEmailConfirmation = hasConfirmedEmail(authUser);
   if (!shouldCompleteEmailConfirmation) return null;
 
   const { data: profile, error: profileError } = await admin
