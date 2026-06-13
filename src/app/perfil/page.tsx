@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { ProfilePageClient } from "@/components/public/profile-page-client";
+import { ProfileAdvancedCard } from "@/components/public/profile-advanced-card";
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -39,16 +40,21 @@ export default async function PerfilPage() {
     safeCount((supabase as any).from("audio_access_logs").select("id", { count: "exact", head: true }).eq("user_id", userId).eq("status", "allowed")),
   ]);
 
-  return <PublicAppShell><ProfilePageClient
-    userId={userId}
-    initialName={context.profile?.full_name ?? "Sem nome"}
-    email={context.profile?.email ?? "Sem e-mail"}
-    pendingEmail={pendingEmail || null}
-    username={(context.profile?.email ?? "user").split("@")[0]}
-    avatarUrl={context.profile?.avatar_url ?? null}
-    planName={context.plan?.name ?? "Free"}
-    subscriptionStatus={context.subscription?.status ?? "inactive"}
-    emailConfirmed={isVerified(localStatus, emailVerifiedAt)}
-    stats={{ playlists, favorites, history, kitsToday }}
-  /></PublicAppShell>;
+  return <PublicAppShell>
+    <ProfilePageClient
+      userId={userId}
+      initialName={context.profile?.full_name ?? "Sem nome"}
+      email={context.profile?.email ?? "Sem e-mail"}
+      pendingEmail={pendingEmail || null}
+      username={(context.profile?.email ?? "user").split("@")[0]}
+      avatarUrl={context.profile?.avatar_url ?? null}
+      planName={context.plan?.name ?? "Free"}
+      subscriptionStatus={context.subscription?.status ?? "inactive"}
+      emailConfirmed={isVerified(localStatus, emailVerifiedAt)}
+      stats={{ playlists, favorites, history, kitsToday }}
+    />
+    <div className="mx-auto -mt-2 max-w-6xl px-3 pb-10 md:px-6">
+      <ProfileAdvancedCard />
+    </div>
+  </PublicAppShell>;
 }
