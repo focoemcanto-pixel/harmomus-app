@@ -183,7 +183,7 @@ export function KitPreviewCard({ audioFiles, initialAudioFileId, initialStartSec
             </select>
           </label>
 
-          <audio ref={audioRef} src={audioFileId ? `/api/audio/${audioFileId}` : undefined} preload="metadata" onLoadedMetadata={(event) => { const duration = Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 180; setAudioDuration(duration); setPlayheadSeconds(startSeconds); }} onTimeUpdate={(event) => { if (isPlaying) setPlayheadSeconds(event.currentTarget.currentTime); }} onEnded={() => { stopPreview(true); }} />
+          <audio ref={audioRef} src={audioFileId ? `/api/audio/${audioFileId}` : undefined} preload="metadata" controlsList="nodownload noplaybackrate" disableRemotePlayback onContextMenu={(event) => event.preventDefault()} onLoadedMetadata={(event) => { const duration = Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 180; setAudioDuration(duration); setPlayheadSeconds(startSeconds); }} onTimeUpdate={(event) => { if (isPlaying) setPlayheadSeconds(event.currentTarget.currentTime); }} onEnded={() => { stopPreview(true); }} />
 
           <div>
             <div ref={scrubberRef} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} className="relative flex h-28 touch-none cursor-ew-resize items-center gap-1 overflow-hidden rounded-2xl border border-white/10 bg-black/35 px-4">
@@ -218,7 +218,7 @@ export function KitPreviewCard({ audioFiles, initialAudioFileId, initialStartSec
           {isPending ? <p className="text-xs text-cyan-100">Salvando o trecho selecionado e atualizando a vitrine...</p> : null}
         </form>
       ) : (
-        <div className="mt-5 rounded-xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-100">Sincronize os áudios do kit antes de definir o preview.</div>
+        <div className="mt-5 rounded-lg border border-dashed border-white/10 bg-black/25 p-5 text-sm text-muted">Envie pelo menos um áudio para configurar o preview do kit.</div>
       )}
     </section>
   );
