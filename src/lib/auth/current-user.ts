@@ -1,3 +1,5 @@
+import { cache } from "react";
+
 import { createClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import {
@@ -106,7 +108,6 @@ function isSubscriptionUsable(
   planSlug?: string | null,
 ) {
   if (!subscription) return false;
-  const status = String(subscription.status ?? "").toLowerCase();
   const effectivePlan = resolveEffectivePlan({ subscription: subscription as any, planSlug });
   if (effectivePlan === "free") return false;
 
@@ -210,7 +211,7 @@ async function getActiveMinistryMembership(admin: any, userId: string) {
   return null;
 }
 
-export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessContext> {
+async function loadCurrentUserAccessContext(): Promise<CurrentUserAccessContext> {
   const supabase = await createClient();
   const { data } = await supabase.auth.getUser();
   if (!data.user)
@@ -308,6 +309,8 @@ export async function getCurrentUserAccessContext(): Promise<CurrentUserAccessCo
     ministry: ministryContext,
   };
 }
+
+export const getCurrentUserAccessContext = cache(loadCurrentUserAccessContext);
 
 export async function getCurrentUserPlan() {
   return getCurrentUserAccessContext();
