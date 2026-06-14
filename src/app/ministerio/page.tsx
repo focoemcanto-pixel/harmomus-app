@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Archive, Crown, Mail, ShieldCheck, Sparkles, Users } from "lucide-react";
+import { Archive, BarChart3, CalendarDays, Crown, Mail, Plus, ShieldCheck, Sparkles, Users } from "lucide-react";
 
 import { ArchivedMembersPanel } from "@/components/ministerio/archived-members-panel";
 import { MinistryInviteCard } from "@/components/ministerio/ministry-invite-card";
@@ -27,6 +27,21 @@ function metric(label: string, value: string | number, icon: React.ReactNode, hi
       <p className="mt-2 text-3xl font-semibold text-white">{value}</p>
       {hint ? <p className="mt-2 text-xs text-zinc-500">{hint}</p> : null}
     </div>
+  );
+}
+
+function actionCard({ href, icon, label, title, description }: { href: string; icon: React.ReactNode; label: string; title: string; description: string }) {
+  return (
+    <Link href={href} className="group rounded-3xl border border-white/10 bg-black/20 p-5 transition hover:-translate-y-0.5 hover:border-cyan-300/40 hover:bg-white/[0.06]">
+      <div className="flex items-start gap-4">
+        <div className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-3 text-cyan-100 transition group-hover:bg-cyan-300/20">{icon}</div>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">{label}</p>
+          <h3 className="mt-2 text-lg font-semibold text-white">{title}</h3>
+          <p className="mt-2 text-sm leading-6 text-zinc-400">{description}</p>
+        </div>
+      </div>
+    </Link>
   );
 }
 
@@ -117,7 +132,7 @@ export default async function MinisterioPage({ searchParams }: { searchParams?: 
               </div>
               <h1 className="mt-5 text-3xl font-semibold tracking-tight md:text-5xl">{ministry?.name}</h1>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-300 md:text-base">
-                Um plano compartilhado premium para sua equipe de louvor: acessos, convites, permissões e acompanhamento em um só lugar.
+                Um plano compartilhado premium para sua equipe de louvor: acessos, convites, escalas, permissões e acompanhamento em um só lugar.
               </p>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-sm text-zinc-200 md:min-w-[240px]">
@@ -136,6 +151,25 @@ export default async function MinisterioPage({ searchParams }: { searchParams?: 
           </div>
           <div className="mt-7 h-3 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-gradient-to-r from-cyan-300 to-fuchsia-400" style={{ width: `${usagePercent}%` }} /></div>
         </div>
+
+        <PremiumPanel>
+          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">Ações rápidas</p>
+              <h2 className="mt-2 text-2xl font-semibold">O que você quer organizar agora?</h2>
+              <p className="mt-2 text-sm leading-6 text-zinc-400">Atalhos para as áreas mais usadas pelo responsável do ministério.</p>
+            </div>
+            <span className="inline-flex w-fit rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-zinc-300">
+              {remainingSeats} vaga{remainingSeats === 1 ? "" : "s"} livre{remainingSeats === 1 ? "" : "s"}
+            </span>
+          </div>
+          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {actionCard({ href: "/ministerio/repertorios/novo", icon: <Plus className="h-5 w-5" />, label: "Escalas", title: "Criar nova escala", description: "Monte um culto ou ensaio com kits, tons e orientações para a equipe." })}
+            {actionCard({ href: "/ministerio/equipes", icon: <Users className="h-5 w-5" />, label: "Equipes", title: "Montar grupos vocais", description: "Crie equipes padrão para reutilizar formações em futuras escalas." })}
+            {actionCard({ href: "/ministerio/solicitacoes", icon: <CalendarDays className="h-5 w-5" />, label: "Pedidos", title: "Ver solicitações", description: "Acompanhe pedidos de músicas e tons centralizados pelo ministério." })}
+            {actionCard({ href: "/ministerio/relatorios", icon: <BarChart3 className="h-5 w-5" />, label: "Relatórios", title: "Analisar engajamento", description: "Veja ocupação, convites e consumo dos kits pelos integrantes." })}
+          </div>
+        </PremiumPanel>
 
         <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
           <MinistryInviteCard canManage={canManage} remainingSeats={remainingSeats} />
