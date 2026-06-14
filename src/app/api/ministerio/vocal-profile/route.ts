@@ -15,7 +15,12 @@ const ALLOWED_VOCAL_PROFILES = new Set([
   "outro",
 ]);
 
-function redirectToMinisterio(request: Request, message?: string) {
+function wantsJson(request: Request) {
+  return request.headers.get("x-harmomus-action") === "fetch" || request.headers.get("accept")?.includes("application/json");
+}
+
+function ministryResponse(request: Request, message: string, status = 200) {
+  if (wantsJson(request)) return NextResponse.json({ ok: status < 400, message }, { status });
   const url = new URL("/ministerio", request.url);
   if (message) url.searchParams.set("message", message);
   url.hash = "integrantes";
@@ -35,11 +40,11 @@ export async function POST(request: Request) {
   const context = await getCurrentUserAccessContext();
 
   if (!context.profile?.id || !context.ministry) {
-    return redirectToMinisterio(request, "Faça login para editar o perfil vocal.");
+    return ministryResponse(request, "Faça login para editar o perfil vocal.", 401);
   }
 
   if (!isMinistryManager(context)) {
-    return redirectToMinisterio(request, "Você não possui permissão para editar perfil vocal.");
+    return ministryResponse(request, "Você não possui permissão para editar perfil vocal.", 403);
   }
 
   const form = await request.formData();
@@ -48,11 +53,11 @@ export async function POST(request: Request) {
   const vocalSecondary = normalizeVocalValue(form.get("vocal_secondary"));
 
   if (!memberId) {
-    return redirectToMinisterio(request, "Integrante inválido.");
+    return ministryResponse(request, "Integrante inválido.", 400);
   }
 
   if (!isValidVocalValue(vocalPrimary) || !isValidVocalValue(vocalSecondary)) {
-    return redirectToMinisterio(request, "Perfil vocal inválido.");
+    return ministryResponse(request, "Perfil vocal inválido.", 400);
   }
 
   const admin = createSupabaseAdminClient() as any;
@@ -65,7 +70,7 @@ export async function POST(request: Request) {
     .maybeSingle();
 
   if (!actorMembership?.id || !["owner", "admin", "manager"].includes(String(actorMembership.role))) {
-    return redirectToMinisterio(request, "Você não possui permissão para editar perfil vocal.");
+    return ministryResponse(request, "Você não possui permissão para editar perfil vocal.", 403);
   }
 
   const { data: member, error: memberError } = await admin
@@ -76,22 +81,22 @@ export async function POST(request: Request) {
     .maybeSingle();
 
   if (memberError) {
-    return redirectToMinisterio(request, memberError.message || "Não foi possível localizar o integrante.");
+    return ministryResponse(request, memberError.message || "Não foi possível localizar o integrante.", 500);
   }
 
   if (!member?.id) {
-    return redirectToMinisterio(request, "Integrante não encontrado neste ministério.");
+    return ministryResponse(request, "Integrante não encontrado neste ministério.", 404);
   }
 
   if (String(member.status) === "removed") {
-    return redirectToMinisterio(request, "Não é permitido editar integrante arquivado.");
+    return ministryResponse(request, "Não é permitido editar integrante arquivado.", 409);
   }
 
   const previousVocalPrimary = member.vocal_primary ?? null;
   const previousVocalSecondary = member.vocal_secondary ?? null;
 
   if (previousVocalPrimary === vocalPrimary && previousVocalSecondary === vocalSecondary) {
-    return redirectToMinisterio(request, "Perfil vocal atualizado com sucesso");
+    return ministryResponse(request, "Perfil vocal atualizado com sucesso");
   }
 
   const now = new Date().toISOString();
@@ -107,7 +112,7 @@ export async function POST(request: Request) {
     .neq("status", "removed");
 
   if (updateError) {
-    return redirectToMinisterio(request, updateError.message || "Não foi possível atualizar o perfil vocal.");
+    return ministryResponse(request, updateError.message || "Não foi possível atualizar o perfil vocal.", 500);
   }
 
   const { data: memberProfile } = member.user_id
@@ -137,5 +142,5 @@ export async function POST(request: Request) {
     },
   });
 
-  return redirectToMinisterio(request, "Perfil vocal atualizado com sucesso");
+  return ministryResponse(request, "Perfil vocal atualizado com sucesso");
 }
