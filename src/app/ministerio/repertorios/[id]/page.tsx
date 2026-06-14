@@ -34,7 +34,6 @@ type MinistryMemberRow = {
   user_id?: string | null;
   invited_name?: string | null;
   invited_email?: string | null;
-  profiles?: { full_name?: string | null; email?: string | null } | null;
 };
 
 type TeamTemplateRow = { id: string; name: string } | null;
@@ -48,12 +47,12 @@ function isSchemaMissing(message?: string | null) {
 
 function memberLabel(member?: MinistryMemberRow | null, profilesById?: Map<string, ProfileRow>) {
   const profile = member?.user_id ? profilesById?.get(member.user_id) : null;
-  return member?.invited_name || member?.profiles?.full_name || profile?.full_name || member?.invited_email || member?.profiles?.email || profile?.email || "Integrante sem nome";
+  return member?.invited_name || profile?.full_name || member?.invited_email || profile?.email || "Integrante sem nome";
 }
 
 function memberEmail(member?: MinistryMemberRow | null, profilesById?: Map<string, ProfileRow>) {
   const profile = member?.user_id ? profilesById?.get(member.user_id) : null;
-  return member?.invited_email || member?.profiles?.email || profile?.email || "";
+  return member?.invited_email || profile?.email || "";
 }
 
 function voiceLabel(value?: string | null) {
@@ -95,7 +94,7 @@ export default async function RepertoireDetailPage({ params }: { params: Promise
   const [{ data: items, error: itemsError }, assignmentsResult, { data: members }, { data: teamTemplate }] = await Promise.all([
     admin.from("ministry_repertoire_items").select("id,position,kits(id,slug,name,artist,cover_url)").eq("repertoire_id", repertoire.id).order("position", { ascending: true }),
     admin.from("ministry_repertoire_assignments").select("id,member_id,assigned_role,assigned_voice,assigned_tone,study_mode,notes").eq("repertoire_id", repertoire.id).is("repertoire_item_id", null).order("created_at", { ascending: true }),
-    admin.from("ministry_members").select("id,user_id,invited_name,invited_email,profiles(full_name,email)").eq("ministry_id", context.ministry.ministryId),
+    admin.from("ministry_members").select("id,user_id,invited_name,invited_email,status").eq("ministry_id", context.ministry.ministryId),
     repertoire.team_template_id ? admin.from("ministry_team_templates").select("id,name").eq("id", repertoire.team_template_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
 
@@ -107,7 +106,7 @@ export default async function RepertoireDetailPage({ params }: { params: Promise
 
   const repertoireItems = (items ?? []) as RepertoireItem[];
   const scaleAssignments = (assignmentsSchemaMissing ? [] : (assignmentsResult?.data ?? [])) as ScaleAssignment[];
-  const memberRows = (members ?? []) as MinistryMemberRow[];
+  const memberRows = ((members ?? []) as MinistryMemberRow[]).filter((member) => (member as any).status !== "removed");
   const profileIds = memberRows.map((member) => member.user_id).filter(Boolean) as string[];
   const { data: profileRows } = profileIds.length ? await admin.from("profiles").select("id,full_name,email").in("id", profileIds) : { data: [] };
   const profilesById = new Map<string, ProfileRow>((profileRows ?? []).map((profile: ProfileRow) => [profile.id, profile]));
