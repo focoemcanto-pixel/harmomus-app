@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, Check, Music2, Plus, Search } from "lucide-react";
 
 import { MinistryShell, PremiumPanel } from "@/components/ministerio/ministry-ui";
+import { MinistrySubmitButton } from "@/components/ministerio/ministry-submit-button";
 import { getActivityActorName, logMinistryActivity } from "@/lib/data/ministry-activity";
 import { getCurrentUserAccessContext, isMinistryManager } from "@/lib/auth/current-user";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -178,7 +179,7 @@ export default async function AddKitsToRepertoirePage({ params, searchParams }: 
   return (
     <MinistryShell>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Link href={`/ministerio/repertorios/${repertoire.id}`} className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10">
+        <Link prefetch href={`/ministerio/repertorios/${repertoire.id}`} className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10">
           <ArrowLeft className="h-4 w-4" /> Voltar ao repertório
         </Link>
       </div>
@@ -205,9 +206,9 @@ export default async function AddKitsToRepertoirePage({ params, searchParams }: 
               className="w-full rounded-2xl border border-white/10 bg-black/20 py-3 pl-11 pr-4 text-sm text-white outline-none placeholder:text-zinc-500 focus:border-cyan-300/50"
             />
           </div>
-          <button className="rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200">
+          <MinistrySubmitButton pendingText="Buscando..." className="rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200">
             Buscar
-          </button>
+          </MinistrySubmitButton>
         </form>
 
         {message ? (
@@ -222,13 +223,13 @@ export default async function AddKitsToRepertoirePage({ params, searchParams }: 
             return (
               <div key={kit.id} className="overflow-hidden rounded-3xl border border-white/10 bg-black/20">
                 <div className="aspect-video bg-white/5">
-                  {kit.cover_url ? <img src={kit.cover_url} alt={kit.name} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-sm text-zinc-500">Harmomus</div>}
+                  {kit.cover_url ? <img src={kit.cover_url} alt={kit.name} loading="lazy" className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-sm text-zinc-500">Harmomus</div>}
                 </div>
                 <div className="p-4">
                   <h3 className="text-lg font-semibold text-white">{kit.name}</h3>
                   <p className="mt-1 text-sm text-zinc-400">{kit.artist || "Kit vocal"}</p>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <Link href={`/biblioteca/${kit.slug}`} className="rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-zinc-200 transition hover:bg-white/10">
+                    <Link prefetch href={`/biblioteca/${kit.slug}`} className="rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-zinc-200 transition hover:bg-white/10">
                       Ver kit
                     </Link>
                     {alreadyAdded ? (
@@ -239,9 +240,9 @@ export default async function AddKitsToRepertoirePage({ params, searchParams }: 
                       <form action={addKitToRepertoire}>
                         <input type="hidden" name="repertoire_id" value={repertoire.id} />
                         <input type="hidden" name="kit_id" value={kit.id} />
-                        <button className="inline-flex items-center gap-2 rounded-xl bg-cyan-300 px-3 py-2 text-xs font-bold text-slate-950 transition hover:bg-cyan-200">
+                        <MinistrySubmitButton pendingText="Adicionando..." className="inline-flex items-center gap-2 rounded-xl bg-cyan-300 px-3 py-2 text-xs font-bold text-slate-950 transition hover:bg-cyan-200">
                           <Plus className="h-3.5 w-3.5" /> Adicionar
-                        </button>
+                        </MinistrySubmitButton>
                       </form>
                     )}
                   </div>
