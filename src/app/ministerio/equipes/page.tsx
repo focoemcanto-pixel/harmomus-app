@@ -10,6 +10,8 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+type PageSearchParams = Record<string, string | string[] | undefined>;
+
 function isSchemaMissing(message?: string | null) {
   const text = String(message ?? "").toLowerCase();
   return text.includes("does not exist") || text.includes("schema cache") || text.includes("could not find");
@@ -17,6 +19,11 @@ function isSchemaMissing(message?: string | null) {
 
 function memberLabel(member: any) {
   return member?.invited_name || member?.invited_email || "Integrante";
+}
+
+function getParam(params: PageSearchParams, key: string) {
+  const value = params[key];
+  return Array.isArray(value) ? value[0] : value;
 }
 
 async function createTeam(formData: FormData) {
@@ -60,11 +67,12 @@ async function createTeam(formData: FormData) {
   redirect(`/ministerio/equipes/${data.id}`);
 }
 
-export default async function MinistryTeamsPage({ searchParams }: { searchParams?: Promise<{ message?: string | string[] }> }) {
-  const [context, params] = await Promise.all([
+export default async function MinistryTeamsPage({ searchParams }: { searchParams?: Promise<PageSearchParams> | PageSearchParams }) {
+  const [context, resolvedSearchParams] = await Promise.all([
     getCurrentUserAccessContext(),
-    searchParams ?? Promise.resolve({}),
+    Promise.resolve(searchParams ?? {}),
   ]);
+  const params = (resolvedSearchParams ?? {}) as PageSearchParams;
 
   if (context.isGuest) redirect("/login");
   if (!context.ministry) redirect("/assinatura");
@@ -85,7 +93,7 @@ export default async function MinistryTeamsPage({ searchParams }: { searchParams
       .order("created_at", { ascending: true }),
   ]);
 
-  const rawMessage = Array.isArray(params.message) ? params.message[0] : params.message;
+  const rawMessage = getParam(params, "message");
   const schemaNotReady = isSchemaMissing(error?.message);
   if (error && !schemaNotReady) throw new Error(error.message);
   const activeMembers = (members ?? []).filter((member: any) => member.status !== "removed");
