@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { ArrowLeft, Save, UserPlus, Users } from "lucide-react";
+import { ArrowLeft, Save, Trash2, UserPlus, Users } from "lucide-react";
 
 import { MinistryShell, PremiumPanel } from "@/components/ministerio/ministry-ui";
 import { getCurrentUserAccessContext, isMinistryManager } from "@/lib/auth/current-user";
@@ -49,6 +49,28 @@ async function addTeamMember(formData: FormData) {
   if (response.error) redirect(backPath(templateId, response.error.message));
   revalidatePath(`/ministerio/equipes/${templateId}`);
   redirect(backPath(templateId, "Integrante adicionado à equipe."));
+}
+
+async function removeTeamMember(formData: FormData) {
+  "use server";
+  const context = await getCurrentUserAccessContext();
+  if (context.isGuest) redirect("/login");
+  if (!context.ministry) redirect("/assinatura");
+  if (!isMinistryManager(context)) redirect("/");
+
+  const templateId = String(formData.get("template_id") ?? "").trim();
+  const rowId = String(formData.get("row_id") ?? "").trim();
+  if (!templateId || !rowId) redirect("/ministerio/equipes");
+
+  const admin = createSupabaseAdminClient() as any;
+  const { data: template } = await admin.from("ministry_team_templates").select("id").eq("id", templateId).eq("ministry_id", context.ministry.ministryId).maybeSingle();
+  if (!template?.id) notFound();
+
+  const { error } = await admin.from("ministry_team_template_members").delete().eq("id", rowId).eq("template_id", templateId);
+  if (error) redirect(backPath(templateId, error.message));
+
+  revalidatePath(`/ministerio/equipes/${templateId}`);
+  redirect(backPath(templateId, "Vocal removido da equipe."));
 }
 
 async function updateTeamCoordinator(formData: FormData) {
@@ -115,7 +137,7 @@ export default async function MinistryTeamDetailPage({ params, searchParams }: {
         <PremiumPanel><p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Coordenação</p><h2 className="mt-2 text-2xl font-semibold">Coordenador vocal da equipe</h2><p className="mt-2 text-sm leading-6 text-zinc-400">Você pode definir, trocar ou deixar sem coordenador. O coordenador será sugerido ao criar escalas com esta equipe.</p><form action={updateTeamCoordinator} className="mt-5 space-y-4"><input type="hidden" name="template_id" value={template.id} /><label className="block"><span className="text-sm font-semibold text-zinc-200">Coordenador vocal</span><select name="coordinator_member_id" defaultValue={template.coordinator_member_id ?? ""} className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50"><option value="">Sem coordenador</option>{activeMembers.map((member) => <option key={member.id} value={member.id}>{getMemberName(member)}</option>)}</select></label><button className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-cyan-300/25 bg-cyan-400/10 px-5 py-3 text-sm font-bold text-cyan-100 transition hover:bg-cyan-400/20"><Save className="h-4 w-4" /> Salvar coordenador</button></form></PremiumPanel>
         <PremiumPanel><div className="flex items-start gap-4"><div className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-3 text-cyan-100"><UserPlus className="h-5 w-5" /></div><div><p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Adicionar vocal</p><h2 className="mt-2 text-2xl font-semibold">Montar formação</h2><p className="mt-2 text-sm leading-6 text-zinc-400">Aqui você define apenas o nipe vocal padrão da equipe. Tom será definido em cada música da escala.</p></div></div><form action={addTeamMember} className="mt-6 space-y-4"><input type="hidden" name="template_id" value={template.id} /><label className="block"><span className="text-sm font-semibold text-zinc-200">Integrante</span><select name="member_id" required className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50"><option value="">Selecione</option>{availableMembers.map((member) => <option key={member.id} value={member.id}>{getMemberName(member)}</option>)}</select></label><label className="block"><span className="text-sm font-semibold text-zinc-200">Nipe vocal padrão</span><select name="assigned_voice" className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50">{VOICES.map(([value, text]) => <option key={value} value={value}>{text}</option>)}</select></label><label className="block"><span className="text-sm font-semibold text-zinc-200">Observação padrão</span><textarea name="notes" rows={3} maxLength={500} placeholder="Ex.: Costuma estudar como tenor, mas pode reforçar lead em refrão." className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-cyan-300/50" /></label><button className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200"><Save className="h-4 w-4" /> Salvar na equipe</button></form></PremiumPanel>
       </div>
-      <PremiumPanel><p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Integrantes configurados</p><h2 className="mt-2 text-2xl font-semibold">{rows.length} vocal{rows.length === 1 ? "" : "s"} nesta equipe</h2><div className="mt-6 grid gap-3">{rows.length ? rows.map((item) => { const member: MinistryMember | null = membersById.get(item.member_id) ?? null; return <div key={item.id} className="rounded-3xl border border-white/10 bg-black/20 p-5"><h3 className="text-xl font-semibold text-white">{getMemberName(member)}</h3><p className="mt-1 text-xs text-zinc-500">{member?.invited_email}</p><div className="mt-4 flex flex-wrap gap-2 text-xs"><span className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1 text-cyan-100">Nipe padrão: {item.assigned_voice || "—"}</span></div>{item.notes ? <p className="mt-4 max-w-3xl text-sm leading-6 text-zinc-300">{item.notes}</p> : null}</div>; }) : <div className="rounded-3xl border border-dashed border-white/10 bg-black/20 p-8 text-center text-sm text-zinc-400">Esta equipe ainda não tem vocalistas configurados.</div>}</div></PremiumPanel>
+      <PremiumPanel><p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Integrantes configurados</p><h2 className="mt-2 text-2xl font-semibold">{rows.length} vocal{rows.length === 1 ? "" : "s"} nesta equipe</h2><div className="mt-6 grid gap-3">{rows.length ? rows.map((item) => { const member: MinistryMember | null = membersById.get(item.member_id) ?? null; return <div key={item.id} className="rounded-3xl border border-white/10 bg-black/20 p-5"><div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between"><div><h3 className="text-xl font-semibold text-white">{getMemberName(member)}</h3><p className="mt-1 text-xs text-zinc-500">{member?.invited_email}</p><div className="mt-4 flex flex-wrap gap-2 text-xs"><span className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1 text-cyan-100">Nipe padrão: {item.assigned_voice || "—"}</span></div>{item.notes ? <p className="mt-4 max-w-3xl text-sm leading-6 text-zinc-300">{item.notes}</p> : null}</div><form action={removeTeamMember}><input type="hidden" name="template_id" value={template.id} /><input type="hidden" name="row_id" value={item.id} /><button className="inline-flex w-fit items-center gap-2 rounded-2xl border border-red-300/20 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-100 transition hover:bg-red-500/20"><Trash2 className="h-4 w-4" /> Remover</button></form></div></div>; }) : <div className="rounded-3xl border border-dashed border-white/10 bg-black/20 p-8 text-center text-sm text-zinc-400">Esta equipe ainda não tem vocalistas configurados.</div>}</div></PremiumPanel>
     </MinistryShell>
   );
 }
