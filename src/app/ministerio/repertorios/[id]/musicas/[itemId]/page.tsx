@@ -20,10 +20,6 @@ function memberLabel(member: any) {
   return member?.invited_name || member?.invited_email || "Integrante";
 }
 
-function getParam(value?: string | string[]) {
-  return Array.isArray(value) ? value[0] ?? "" : value ?? "";
-}
-
 function backPath(repertoireId: string, itemId: string, message?: string) {
   return `/ministerio/repertorios/${repertoireId}/musicas/${itemId}${message ? `?message=${encodeURIComponent(message)}` : ""}`;
 }
@@ -67,7 +63,7 @@ async function saveSongSettings(formData: FormData) {
 }
 
 export default async function SongSettingsPage({ params, searchParams }: { params: Promise<PageParams>; searchParams?: Promise<PageSearchParams> }) {
-  const [context, resolvedParams, resolvedSearchParams] = await Promise.all([
+  const [context, resolvedParams] = await Promise.all([
     getCurrentUserAccessContext(),
     params,
     searchParams ?? Promise.resolve({} as PageSearchParams),
@@ -78,7 +74,6 @@ export default async function SongSettingsPage({ params, searchParams }: { param
   if (!isMinistryManager(context)) redirect("/");
 
   const admin = createSupabaseAdminClient() as any;
-  const message = getParam(resolvedSearchParams.message);
 
   const [{ data: repertoire }, itemResult, { data: scaleAssignments }, { data: songAssignments }, { data: members }] = await Promise.all([
     admin.from("ministry_repertoires").select("id,name,archived,ministry_id").eq("id", resolvedParams.id).eq("ministry_id", context.ministry.ministryId).maybeSingle(),
@@ -121,8 +116,6 @@ export default async function SongSettingsPage({ params, searchParams }: { param
         <h1 className="mt-5 text-3xl font-semibold tracking-tight md:text-5xl">{kit?.name || "Música"}</h1>
         <p className="mt-3 text-sm text-zinc-300">{kit?.artist || "Kit vocal"} · {repertoire.name}</p>
       </div>
-
-      {message ? <div className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-4 text-sm text-cyan-50">{message}</div> : null}
 
       <form action={saveSongSettings} className="grid gap-6 lg:grid-cols-[0.8fr_1.2fr]">
         <input type="hidden" name="repertoire_id" value={repertoire.id} />
