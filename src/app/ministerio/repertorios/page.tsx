@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { CalendarDays, ListMusic, Music2, Plus, ArrowRight } from "lucide-react";
 
 import { DeleteScaleButton } from "@/components/ministerio/delete-scale-button";
+import { MinistryRouteTransition } from "@/components/ministerio/ministry-route-transition";
 import { MinistryShell, PremiumPanel, formatDate } from "@/components/ministerio/ministry-ui";
 import { getCurrentUserAccessContext, isMinistryManager } from "@/lib/auth/current-user";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -56,12 +57,12 @@ export default async function MinisterioRepertoriosPage() {
             </p>
           </div>
           {canManage ? (
-            <Link
+            <MinistryRouteTransition
               href="/ministerio/repertorios/novo"
-              className="inline-flex w-fit items-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200"
+              className="inline-flex w-fit items-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200 data-[pending=true]:bg-cyan-200"
             >
               <Plus className="h-4 w-4" /> Nova escala
-            </Link>
+            </MinistryRouteTransition>
           ) : null}
         </div>
       </div>
@@ -112,12 +113,12 @@ export default async function MinisterioRepertoriosPage() {
                     </div>
                   </div>
                   <div className="mt-5 grid gap-2">
-                    <Link
+                    <MinistryRouteTransition
                       href={`/ministerio/repertorios/${repertoire.id}`}
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-4 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200"
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-4 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200 data-[pending=true]:bg-cyan-200"
                     >
                       Abrir escala <ArrowRight className="h-4 w-4" />
-                    </Link>
+                    </MinistryRouteTransition>
                     {canManage ? <DeleteScaleButton repertoireId={repertoire.id} /> : null}
                   </div>
                 </article>
@@ -136,9 +137,9 @@ export default async function MinisterioRepertoriosPage() {
                 : "Quando o responsável do ministério criar escalas, elas aparecerão aqui."}
             </p>
             {canManage ? (
-              <Link href="/ministerio/repertorios/novo" className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200">
+              <MinistryRouteTransition href="/ministerio/repertorios/novo" className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200 data-[pending=true]:bg-cyan-200">
                 <Plus className="h-4 w-4" /> Criar primeira escala
-              </Link>
+              </MinistryRouteTransition>
             ) : null}
           </div>
         )}
