@@ -6,7 +6,15 @@ import { getActivityActorName, logMinistryActivity } from "@/lib/data/ministry-a
 import { buildAbsoluteUrl, sendMinistryInviteEmail } from "@/lib/email/ministry-invite-email";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
-function redirectToMinisterio(request: Request, message?: string, hash = "convites") {
+function wantsJson(request: Request) {
+  return request.headers.get("x-harmomus-action") === "fetch" || request.headers.get("accept")?.includes("application/json");
+}
+
+function ministryResponse(request: Request, message: string, hash = "convites", status = 200) {
+  if (wantsJson(request)) {
+    return NextResponse.json({ ok: status < 400, message, hash }, { status });
+  }
+
   const url = new URL("/ministerio", request.url);
   if (message) url.searchParams.set("message", message);
   url.hash = hash;
@@ -46,7 +54,7 @@ export async function POST(request: Request) {
   const context = await getCurrentUserAccessContext();
 
   if (!context.profile?.id || !context.ministry || !isMinistryManager(context)) {
-    return redirectToMinisterio(request, "Você não possui permissão para convidar integrantes.");
+    return ministryResponse(request, "Você não possui permissão para convidar integrantes.", "convites", 403);
   }
 
   const form = await request.formData();
@@ -61,11 +69,11 @@ export async function POST(request: Request) {
     .maybeSingle();
 
   if (!ministry?.id) {
-    return redirectToMinisterio(request, "Central ministerial não encontrada.");
+    return ministryResponse(request, "Central ministerial não encontrada.", "convites", 404);
   }
 
   if (!["active", "trialing"].includes(String(ministry.status ?? "").toLowerCase())) {
-    return redirectToMinisterio(request, "Seu plano ministerial não está ativo.");
+    return ministryResponse(request, "Seu plano ministerial não está ativo.", "convites", 409);
   }
 
   if (resendMemberId) {
@@ -79,24 +87,15 @@ export async function POST(request: Request) {
       .select("id,invited_email,invited_name,invite_token")
       .single();
 
-    if (error || !member?.id) return redirectToMinisterio(request, "Não foi possível reenviar o convite.");
+    if (error || !member?.id) return ministryResponse(request, "Não foi possível reenviar o convite.", "convites", 400);
 
     const inviteUrl = buildAbsoluteUrl(`/convite-ministerio/${member.invite_token}`, request.url);
-    console.log("[MINISTRY INVITE] resend preparing email", {
-      to: member.invited_email,
-      from: process.env.RESEND_FROM_EMAIL,
-      ministry: ministry.name,
-      memberId: member.id,
-    });
-
     const emailResult = await sendMinistryInviteEmail({
       to: member.invited_email,
       invitedName: member.invited_name,
       ministryName: ministry.name,
       inviteUrl,
     });
-
-    console.log("[MINISTRY INVITE] resend result", emailResult);
 
     const actorName = getActivityActorName(context.profile);
     await logMinistryActivity({
@@ -110,17 +109,16 @@ export async function POST(request: Request) {
       metadata: { member_id: member.id, member_email: member.invited_email, member_name: member.invited_name, invite_token: member.invite_token },
     });
 
-    return redirectToMinisterio(request, emailStatusMessage("resent", emailResult, member.invited_email));
+    return ministryResponse(request, emailStatusMessage("resent", emailResult, member.invited_email));
   }
 
   const email = normalizeEmail(form.get("email"));
   const name = String(form.get("name") ?? "").trim();
   const role = String(form.get("role") ?? "member").trim().toLowerCase();
-
   const normalizedRole = role === "manager" ? "admin" : role;
 
   if (!email || !email.includes("@") || !["member", "admin"].includes(normalizedRole)) {
-    return redirectToMinisterio(request, "Informe dados válidos para o convite.");
+    return ministryResponse(request, "Informe dados válidos para o convite.", "convites", 400);
   }
 
   const { data: allMembers } = await admin
@@ -131,19 +129,19 @@ export async function POST(request: Request) {
   const duplicate = (allMembers ?? []).find((member: any) => String(member.invited_email ?? "").trim().toLowerCase() === email);
   if (duplicate) {
     if (String(duplicate.status) === "removed") {
-      return redirectToMinisterio(request, "Este integrante está arquivado. Use o botão Restaurar para devolver o acesso sem criar novo convite.", "arquivados");
+      return ministryResponse(request, "Este integrante está arquivado. Use o botão Restaurar para devolver o acesso sem criar novo convite.", "arquivados", 409);
     }
-    return redirectToMinisterio(request, "Esse integrante já possui acesso ou convite pendente.");
+    return ministryResponse(request, "Esse integrante já possui acesso ou convite pendente.", "convites", 409);
   }
 
   const seatLimit = resolveSeatLimit(ministry, context);
   if (seatLimit <= 0) {
-    return redirectToMinisterio(request, "Não foi possível identificar o limite de vagas deste plano.");
+    return ministryResponse(request, "Não foi possível identificar o limite de vagas deste plano.", "convites", 409);
   }
 
   const usedSeats = (allMembers ?? []).filter((member: any) => ["active", "pending", "invited"].includes(String(member.status))).length;
   if (usedSeats >= seatLimit) {
-    return redirectToMinisterio(request, "Você atingiu o limite de vagas do seu plano.");
+    return ministryResponse(request, "Você atingiu o limite de vagas do seu plano.", "convites", 409);
   }
 
   const { data: profile } = await admin
@@ -172,25 +170,16 @@ export async function POST(request: Request) {
     .single();
 
   if (error || !insertedMember?.id) {
-    return redirectToMinisterio(request, "Não foi possível preparar o convite. Tente novamente em instantes.");
+    return ministryResponse(request, "Não foi possível preparar o convite. Tente novamente em instantes.", "convites", 500);
   }
 
   const inviteUrl = buildAbsoluteUrl(`/convite-ministerio/${insertedMember.invite_token}`, request.url);
-  console.log("[MINISTRY INVITE] preparing email", {
-    to: insertedMember.invited_email,
-    from: process.env.RESEND_FROM_EMAIL,
-    ministry: ministry.name,
-    inviteToken,
-  });
-
   const emailResult = await sendMinistryInviteEmail({
     to: insertedMember.invited_email,
     invitedName: insertedMember.invited_name,
     ministryName: ministry.name,
     inviteUrl,
   });
-
-  console.log("[MINISTRY INVITE] resend response", emailResult);
 
   const actorName = getActivityActorName(context.profile);
   await logMinistryActivity({
@@ -210,5 +199,5 @@ export async function POST(request: Request) {
     },
   });
 
-  return redirectToMinisterio(request, emailStatusMessage("created", emailResult, insertedMember.invited_email));
+  return ministryResponse(request, emailStatusMessage("created", emailResult, insertedMember.invited_email));
 }
