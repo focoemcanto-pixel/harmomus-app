@@ -15,34 +15,34 @@ type MinistrySubmitButtonProps = {
 export function MinistrySubmitButton({ children, pendingText = "Salvando...", className = "", disabled = false, type = "submit", onClick }: MinistrySubmitButtonProps) {
   const { pending } = useFormStatus();
   const [instantPending, setInstantPending] = useState(false);
-  const isPending = pending || instantPending;
-  const isDisabled = disabled || isPending;
+  const isVisuallyPending = pending || instantPending;
+  const isDisabled = disabled || pending;
 
   useEffect(() => {
     if (pending) return;
     if (!instantPending) return;
-    const timer = window.setTimeout(() => setInstantPending(false), 1200);
+    const timer = window.setTimeout(() => setInstantPending(false), 900);
     return () => window.clearTimeout(timer);
   }, [instantPending, pending]);
 
   function triggerInstantFeedback() {
-    if (!disabled) setInstantPending(true);
+    if (!disabled && !pending) setInstantPending(true);
   }
 
   return (
     <button
       type={type}
       disabled={isDisabled}
-      aria-busy={isPending}
+      aria-busy={isVisuallyPending}
       onPointerDown={triggerInstantFeedback}
       onClick={(event) => {
         triggerInstantFeedback();
         onClick?.(event);
       }}
       className={`${className} active:scale-[0.985] disabled:cursor-wait disabled:opacity-80 data-[pending=true]:scale-[0.99]`}
-      data-pending={isPending ? "true" : "false"}
+      data-pending={isVisuallyPending ? "true" : "false"}
     >
-      {isPending ? (
+      {isVisuallyPending ? (
         <span className="inline-flex items-center justify-center gap-2">
           <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
           {pendingText}
