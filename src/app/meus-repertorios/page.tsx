@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowRight, CalendarDays, ListMusic, Music2, ShieldCheck } from "lucide-react";
 
+import { MinistryRouteTransition } from "@/components/ministerio/ministry-route-transition";
 import { PublicAppShell } from "@/components/public/public-app-shell";
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -198,12 +199,12 @@ export default async function MeusRepertoriosPage() {
                         </div>
                       </div>
                     </div>
-                    <Link
+                    <MinistryRouteTransition
                       href={`/meus-repertorios/${repertoire.id}`}
-                      className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-4 py-3 text-sm font-black text-slate-950 transition hover:bg-cyan-200"
+                      className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-4 py-3 text-sm font-black text-slate-950 transition hover:bg-cyan-200 data-[pending=true]:bg-cyan-200 data-[pending=true]:shadow-[0_0_0_4px_rgba(103,232,249,0.18)]"
                     >
                       Abrir escala <ArrowRight className="h-4 w-4" />
-                    </Link>
+                    </MinistryRouteTransition>
                   </article>
                 );
               })}
@@ -218,7 +219,7 @@ export default async function MeusRepertoriosPage() {
                 Quando a liderança do ministério criar escalas, elas aparecerão aqui para você estudar como playlist.
               </p>
               <Link href="/todos-os-kits" className="mt-6 inline-flex rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-cyan-200">
-                Explorar kits
+                Explorar biblioteca
               </Link>
             </div>
           )}
