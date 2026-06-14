@@ -27,7 +27,6 @@ function backPath(repertoireId: string, itemId: string, message?: string) {
 function normalizeTone(value: string | null | undefined) {
   const raw = String(value ?? "").trim();
   if (!raw) return "";
-
   const normalized = raw.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/♯/g, "#").replace(/＃/g, "#").replace(/\s+/g, "").toUpperCase();
   const flatMap: Record<string, string> = { DB: "C#", EB: "D#", GB: "F#", AB: "G#", BB: "A#" };
   return flatMap[normalized] ?? normalized;
@@ -89,6 +88,7 @@ async function saveSongSettings(formData: FormData) {
 
   revalidatePath(`/ministerio/repertorios/${repertoireId}`);
   revalidatePath(`/ministerio/repertorios/${repertoireId}/musicas/${itemId}`);
+  revalidatePath(`/meus-repertorios/${repertoireId}`);
   redirect(backPath(repertoireId, itemId, "Configurações da música salvas."));
 }
 
@@ -176,54 +176,34 @@ export default async function SongSettingsPage({ params, searchParams }: { param
         <p className="mt-3 text-sm text-zinc-300">{kit?.artist || "Kit vocal"} · {repertoire.name}</p>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[0.8fr_1.2fr]">
-        <PremiumPanel>
-          <form action={saveSongSettings}>
-            <input type="hidden" name="repertoire_id" value={repertoire.id} />
-            <input type="hidden" name="item_id" value={item.id} />
+      <form action={saveSongSettings}>
+        <input type="hidden" name="repertoire_id" value={repertoire.id} />
+        <input type="hidden" name="item_id" value={item.id} />
+        <div className="grid gap-6 lg:grid-cols-[0.8fr_1.2fr]">
+          <PremiumPanel>
             <p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Tom da música</p>
             <h2 className="mt-2 text-2xl font-semibold">Tom exibido para equipe</h2>
             <p className="mt-2 text-sm leading-6 text-zinc-400">Selecione um tom disponível no kit ou solicite um novo tom sem sair deste campo.</p>
             <div className="mt-6 overflow-hidden rounded-3xl border border-white/10 bg-black/20">
-              <label className="block p-4">
-                <span className="text-sm font-semibold text-zinc-200">Tom definido</span>
-                <select name="key_override" defaultValue={selectedTone} disabled={!availableTones.length} className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50 disabled:cursor-not-allowed disabled:opacity-60">
-                  <option value="">{availableTones.length ? "Usar tom padrão do kit" : "Nenhum tom disponível neste kit"}</option>
-                  {availableTones.map((tone: string) => <option key={tone} value={tone}>{toneLabel(tone)}</option>)}
-                </select>
-              </label>
+              <label className="block p-4"><span className="text-sm font-semibold text-zinc-200">Tom definido</span><select name="key_override" defaultValue={selectedTone} disabled={!availableTones.length} className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50 disabled:cursor-not-allowed disabled:opacity-60"><option value="">{availableTones.length ? "Usar tom padrão do kit" : "Nenhum tom disponível neste kit"}</option>{availableTones.map((tone: string) => <option key={tone} value={tone}>{toneLabel(tone)}</option>)}</select></label>
               {availableTones.length ? <div className="border-t border-white/10 px-4 pb-4 pt-3"><p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Tons disponíveis</p><div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.14em]">{availableTones.map((tone: string) => <span key={tone} className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1 text-cyan-100">{toneLabel(tone)}</span>)}</div></div> : null}
-              <div className="border-t border-emerald-300/20 bg-emerald-400/10 p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-100">Não achou o tom?</p>
-                <div className="mt-3 grid gap-2 md:grid-cols-[120px_1fr_auto]">
-                  <input form="request-tone-form" name="desired_tone" maxLength={40} placeholder="Ex.: D" className="rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-500 focus:border-emerald-300/50" />
-                  <input form="request-tone-form" name="tone_request_notes" maxLength={300} placeholder="Observação opcional" className="rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-500 focus:border-emerald-300/50" />
-                  <button form="request-tone-form" type="submit" className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-300 px-4 py-2 text-sm font-bold text-slate-950 transition hover:bg-emerald-200"><Send className="h-4 w-4" /> Solicitar</button>
-                </div>
-              </div>
+              <div className="border-t border-emerald-300/20 bg-emerald-400/10 p-4"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-100">Não achou o tom?</p><div className="mt-3 grid gap-2 md:grid-cols-[120px_1fr_auto]"><input form="request-tone-form" name="desired_tone" maxLength={40} placeholder="Ex.: D" className="rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-500 focus:border-emerald-300/50" /><input form="request-tone-form" name="tone_request_notes" maxLength={300} placeholder="Observação opcional" className="rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-500 focus:border-emerald-300/50" /><button form="request-tone-form" type="submit" className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-300 px-4 py-2 text-sm font-bold text-slate-950 transition hover:bg-emerald-200"><Send className="h-4 w-4" /> Solicitar</button></div></div>
             </div>
             <label className="mt-4 block"><span className="text-sm font-semibold text-zinc-200">Observação da música</span><textarea name="item_notes" defaultValue={itemNotes ?? ""} rows={4} maxLength={600} placeholder="Ex.: Atenção à entrada da ponte." className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-cyan-300/50" /></label>
-            <MinistrySubmitButton pendingText="Salvando..." className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200"><Save className="h-4 w-4" /> Salvar tom e observação</MinistrySubmitButton>
-          </form>
+          </PremiumPanel>
 
-          <form id="request-tone-form" action={requestSongTone}>
-            <input type="hidden" name="repertoire_id" value={repertoire.id} />
-            <input type="hidden" name="item_id" value={item.id} />
-          </form>
-        </PremiumPanel>
-
-        <form action={saveSongSettings}>
-          <input type="hidden" name="repertoire_id" value={repertoire.id} />
-          <input type="hidden" name="item_id" value={item.id} />
-          <input type="hidden" name="key_override" value={selectedTone} />
-          <input type="hidden" name="item_notes" value={itemNotes ?? ""} />
           <PremiumPanel>
             <div className="flex items-start gap-4"><div className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-3 text-cyan-100"><Users className="h-5 w-5" /></div><div><p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Vocais da música</p><h2 className="mt-2 text-2xl font-semibold">Nipe por vocalista</h2><p className="mt-2 text-sm text-zinc-400">Cada vocalista receberá seu nipe específico ao estudar esta música.</p></div></div>
             <div className="mt-6 grid gap-3">{rows.length ? rows.map((row: any) => { const defaultVoice = row.song?.assigned_voice ?? row.voice ?? ""; const defaultNotes = row.song?.notes ?? ""; return <div key={row.member.id} className="rounded-3xl border border-white/10 bg-black/20 p-5"><input type="hidden" name="member_id" value={row.member.id} /><h3 className="text-lg font-semibold text-white">{memberLabel(row.member)}</h3><p className="mt-1 text-sm text-zinc-400">Nipe padrão da escala: {row.voice || "não definido"}</p><div className="mt-4 grid gap-3 md:grid-cols-2"><label><span className="text-sm font-semibold text-zinc-200">Nipe nesta música</span><select name={`voice_${row.member.id}`} defaultValue={defaultVoice} className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50">{VOICES.map(([value, text]) => <option key={value} value={value}>{text}</option>)}</select></label><label><span className="text-sm font-semibold text-zinc-200">Observação individual</span><input name={`notes_${row.member.id}`} defaultValue={defaultNotes} maxLength={300} placeholder="Ex.: entra no refrão" className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-cyan-300/50" /></label></div></div>; }) : <div className="rounded-3xl border border-dashed border-white/10 bg-black/20 p-8 text-center text-sm text-zinc-400">Adicione vocalistas na escala antes de configurar esta música.</div>}</div>
-            <MinistrySubmitButton pendingText="Salvando configuração..." className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200"><Save className="h-4 w-4" /> Salvar configuração da música</MinistrySubmitButton>
           </PremiumPanel>
-        </form>
-      </div>
+        </div>
+        <MinistrySubmitButton pendingText="Salvando configuração..." className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 py-4 text-sm font-bold text-slate-950 transition hover:bg-cyan-200"><Save className="h-4 w-4" /> Salvar configuração da música</MinistrySubmitButton>
+      </form>
+
+      <form id="request-tone-form" action={requestSongTone}>
+        <input type="hidden" name="repertoire_id" value={repertoire.id} />
+        <input type="hidden" name="item_id" value={item.id} />
+      </form>
     </MinistryShell>
   );
 }
