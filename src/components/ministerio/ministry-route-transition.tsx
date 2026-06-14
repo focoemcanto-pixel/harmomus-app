@@ -18,13 +18,29 @@ export function MinistryRouteTransition({ href, className, children }: MinistryR
   const isExternal = href.startsWith("http");
   const isHash = href.startsWith("#") || href.includes("#");
   const isCurrent = href === pathname;
+  const canPrefetch = !isExternal && !isHash && !isCurrent;
 
   useEffect(() => {
     setClicked(false);
   }, [pathname]);
 
+  useEffect(() => {
+    if (!canPrefetch) return;
+    const id = window.requestIdleCallback?.(() => router.prefetch(href)) ?? window.setTimeout(() => router.prefetch(href), 80);
+    return () => {
+      if (typeof id === "number") window.clearTimeout(id);
+    };
+  }, [canPrefetch, href, router]);
+
   function prefetch() {
-    if (!isExternal && !isHash && !isCurrent) router.prefetch(href);
+    if (canPrefetch) router.prefetch(href);
+  }
+
+  function markIntent() {
+    if (canPrefetch) {
+      setClicked(true);
+      router.prefetch(href);
+    }
   }
 
   function navigate(event: React.MouseEvent<HTMLAnchorElement>) {
@@ -49,18 +65,23 @@ export function MinistryRouteTransition({ href, className, children }: MinistryR
     });
   }
 
+  const pending = clicked || isPending;
+
   return (
     <a
       href={href}
       onClick={navigate}
+      onPointerDown={markIntent}
       onMouseEnter={prefetch}
+      onTouchStart={prefetch}
       onFocus={prefetch}
+      aria-busy={pending}
       className={className}
-      data-pending={clicked || isPending ? "true" : "false"}
+      data-pending={pending ? "true" : "false"}
       data-active={isCurrent ? "true" : "false"}
     >
       {children}
-      {(clicked || isPending) ? <span className="ml-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-200 align-middle" /> : null}
+      {pending ? <span className="ml-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-200 align-middle" /> : null}
     </a>
   );
 }
