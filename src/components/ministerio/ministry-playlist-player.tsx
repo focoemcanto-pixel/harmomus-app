@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, ChevronLeft, ChevronRight, Circle, CircleHelp, Clock3, Loader2, Music2, Play, RotateCcw } from "lucide-react";
 
 type StudyStatus = "not_studied" | "studied" | "doubt" | "review";
@@ -65,6 +65,13 @@ function toneLabel(value?: string | null) {
   return value.replace("#", "♯");
 }
 
+function protectAudioElement(audio: HTMLAudioElement | null) {
+  if (!audio) return;
+  audio.setAttribute("controlsList", "nodownload noplaybackrate");
+  audio.setAttribute("disableRemotePlayback", "true");
+  audio.setAttribute("oncontextmenu", "return false");
+}
+
 function pickBestAudio(tones: AudioFilesApiTone[] | null | undefined): ResolvedAudio {
   const allFiles = (tones ?? []).flatMap((tone) => (tone.files ?? []).map((file) => ({ tone: tone.tone ?? file.tone ?? null, file })));
   const preferred = allFiles.find(({ file }) => String(file.voice ?? file.name ?? "").toLowerCase().includes("todos")) ?? allFiles.find(({ file }) => Boolean(file.streamUrl || file.url));
@@ -84,6 +91,20 @@ type MinistryPlaylistPlayerProps = {
   repertoireId?: string;
   updateStudyStatusAction?: (formData: FormData) => Promise<void>;
 };
+
+function ProtectedAudio({ source, cacheKey }: { source: string; cacheKey: string }) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    protectAudioElement(audioRef.current);
+  }, [source]);
+
+  return (
+    <audio key={cacheKey} ref={audioRef} controls controlsList="nodownload noplaybackrate" preload="metadata" className="w-full" onContextMenu={(event) => event.preventDefault()} onLoadedMetadata={(event) => protectAudioElement(event.currentTarget)}>
+      <source src={source} />
+    </audio>
+  );
+}
 
 export function MinistryPlaylistPlayer({ tracks, repertoireId, updateStudyStatusAction }: MinistryPlaylistPlayerProps) {
   const [currentIndex, setCurrentIndex] = useState<number | null>(tracks.length ? 0 : null);
@@ -179,9 +200,7 @@ export function MinistryPlaylistPlayer({ tracks, repertoireId, updateStudyStatus
 
             <div className="mt-6 rounded-3xl border border-white/10 bg-black/25 p-4">
               {audioLoading ? <div className="flex items-center gap-2 text-sm text-zinc-300"><Loader2 className="h-4 w-4 animate-spin" /> Carregando áudio da música...</div> : audioError ? <p className="text-sm text-amber-100">{audioError}</p> : currentAudio?.streamUrl ? (
-                <audio key={`${currentTrack?.id}-${currentAudio.streamUrl}`} controls controlsList="nodownload noplaybackrate" disableRemotePlayback preload="metadata" className="w-full" onContextMenu={(event) => event.preventDefault()}>
-                  <source src={currentAudio.streamUrl} />
-                </audio>
+                <ProtectedAudio cacheKey={`${currentTrack?.id}-${currentAudio.streamUrl}`} source={currentAudio.streamUrl} />
               ) : <p className="text-sm text-zinc-400">Selecione uma música da escala para carregar o áudio aqui.</p>}
             </div>
 
