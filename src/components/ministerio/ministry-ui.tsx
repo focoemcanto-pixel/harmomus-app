@@ -11,6 +11,8 @@ import {
   Users,
 } from "lucide-react";
 
+import { MinistryRouteTransition } from "@/components/ministerio/ministry-route-transition";
+
 const navItems = [
   { href: "/ministerio", label: "Visão Geral", icon: LayoutDashboard },
   { href: "/ministerio/equipes", label: "Equipes", icon: Users },
@@ -26,10 +28,12 @@ const navItems = [
 export function MinistryShell({ children }: { children: React.ReactNode }) {
   return (
     <main className="min-h-screen overflow-hidden bg-[#020617] px-4 py-6 text-white md:px-8 md:py-10">
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_12%_10%,rgba(34,211,238,0.18),transparent_30%),radial-gradient(circle_at_88%_20%,rgba(217,70,239,0.16),transparent_35%),radial-gradient(circle_at_45%_85%,rgba(16,185,129,0.12),transparent_36%)]" />
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_12%_10%,rgba(34,211,238,0.14),transparent_30%),radial-gradient(circle_at_88%_20%,rgba(217,70,239,0.12),transparent_35%),radial-gradient(circle_at_45%_85%,rgba(16,185,129,0.08),transparent_36%)]" />
       <section className="relative mx-auto max-w-7xl space-y-6">
         <MinistryNav />
-        {children}
+        <div className="min-h-[60vh] will-change-auto">
+          {children}
+        </div>
       </section>
     </main>
   );
@@ -37,21 +41,19 @@ export function MinistryShell({ children }: { children: React.ReactNode }) {
 
 export function MinistryNav() {
   return (
-    <nav className="flex gap-2 overflow-x-auto rounded-[1.5rem] border border-white/10 bg-white/[0.04] p-2 shadow-[0_20px_80px_rgba(0,0,0,0.25)] backdrop-blur-xl">
+    <nav className="sticky top-3 z-20 flex gap-2 overflow-x-auto rounded-[1.5rem] border border-white/10 bg-white/[0.045] p-2 shadow-[0_14px_44px_rgba(0,0,0,0.2)] backdrop-blur-xl md:top-4">
       {navItems.map((item) => {
         const Icon = item.icon;
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            className="inline-flex shrink-0 items-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold text-zinc-300 transition hover:bg-white/10 hover:text-white"
-          >
-            <Icon className="h-4 w-4 text-cyan-200" />
-            {item.label}
-          </Link>
+        const className = "inline-flex shrink-0 items-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold text-zinc-300 transition hover:bg-white/10 hover:text-white data-[pending=true]:bg-cyan-300/15 data-[pending=true]:text-cyan-100";
+        const content = <><Icon className="h-4 w-4 text-cyan-200" />{item.label}</>;
+        return item.href.includes("#") ? (
+          <Link prefetch key={item.href} href={item.href} className={className}>{content}</Link>
+        ) : (
+          <MinistryRouteTransition key={item.href} href={item.href} className={className}>{content}</MinistryRouteTransition>
         );
       })}
       <Link
+        prefetch
         href="/"
         className="ml-auto inline-flex shrink-0 items-center gap-2 rounded-2xl border border-cyan-300/20 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/20"
       >
@@ -73,7 +75,7 @@ export function PremiumPanel({
   return (
     <section
       id={id}
-      className={`rounded-[2rem] border border-white/10 bg-white/[0.045] p-5 shadow-[0_24px_90px_rgba(0,0,0,0.28)] backdrop-blur-xl md:p-6 ${className}`}
+      className={`rounded-[2rem] border border-white/10 bg-white/[0.045] p-5 shadow-[0_16px_56px_rgba(0,0,0,0.22)] backdrop-blur-md md:p-6 ${className}`}
     >
       {children}
     </section>
