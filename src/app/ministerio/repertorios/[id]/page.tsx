@@ -31,6 +31,7 @@ type ScaleAssignment = {
 
 type MinistryMemberRow = {
   id: string;
+  user_id?: string | null;
   invited_name?: string | null;
   invited_email?: string | null;
   profiles?: { full_name?: string | null; email?: string | null } | null;
@@ -38,17 +39,31 @@ type MinistryMemberRow = {
 
 type TeamTemplateRow = { id: string; name: string } | null;
 
+type ProfileRow = { id: string; full_name?: string | null; email?: string | null };
+
 function isSchemaMissing(message?: string | null) {
   const text = String(message ?? "").toLowerCase();
   return text.includes("does not exist") || text.includes("schema cache") || text.includes("could not find");
 }
 
-function memberLabel(member?: MinistryMemberRow | null) {
-  return member?.invited_name || member?.profiles?.full_name || member?.invited_email || member?.profiles?.email || "Integrante";
+function memberLabel(member?: MinistryMemberRow | null, profilesById?: Map<string, ProfileRow>) {
+  const profile = member?.user_id ? profilesById?.get(member.user_id) : null;
+  return member?.invited_name || member?.profiles?.full_name || profile?.full_name || member?.invited_email || member?.profiles?.email || profile?.email || "Integrante sem nome";
 }
 
-function memberEmail(member?: MinistryMemberRow | null) {
-  return member?.invited_email || member?.profiles?.email || "";
+function memberEmail(member?: MinistryMemberRow | null, profilesById?: Map<string, ProfileRow>) {
+  const profile = member?.user_id ? profilesById?.get(member.user_id) : null;
+  return member?.invited_email || member?.profiles?.email || profile?.email || "";
+}
+
+function voiceLabel(value?: string | null) {
+  if (value === "lead") return "Lead";
+  if (value === "tenor") return "Tenor";
+  if (value === "contralto") return "Contralto";
+  if (value === "soprano") return "Soprano";
+  if (value === "baritono") return "Barítono";
+  if (value === "baixo") return "Baixo";
+  return "Definir por música";
 }
 
 function studyModeLabel(value?: string | null) {
@@ -80,7 +95,7 @@ export default async function RepertoireDetailPage({ params }: { params: Promise
   const [{ data: items, error: itemsError }, assignmentsResult, { data: members }, { data: teamTemplate }] = await Promise.all([
     admin.from("ministry_repertoire_items").select("id,position,kits(id,slug,name,artist,cover_url)").eq("repertoire_id", repertoire.id).order("position", { ascending: true }),
     admin.from("ministry_repertoire_assignments").select("id,member_id,assigned_role,assigned_voice,assigned_tone,study_mode,notes").eq("repertoire_id", repertoire.id).is("repertoire_item_id", null).order("created_at", { ascending: true }),
-    admin.from("ministry_members").select("id,invited_name,invited_email,profiles(full_name,email)").eq("ministry_id", context.ministry.ministryId),
+    admin.from("ministry_members").select("id,user_id,invited_name,invited_email,profiles(full_name,email)").eq("ministry_id", context.ministry.ministryId),
     repertoire.team_template_id ? admin.from("ministry_team_templates").select("id,name").eq("id", repertoire.team_template_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
 
@@ -93,6 +108,9 @@ export default async function RepertoireDetailPage({ params }: { params: Promise
   const repertoireItems = (items ?? []) as RepertoireItem[];
   const scaleAssignments = (assignmentsSchemaMissing ? [] : (assignmentsResult?.data ?? [])) as ScaleAssignment[];
   const memberRows = (members ?? []) as MinistryMemberRow[];
+  const profileIds = memberRows.map((member) => member.user_id).filter(Boolean) as string[];
+  const { data: profileRows } = profileIds.length ? await admin.from("profiles").select("id,full_name,email").in("id", profileIds) : { data: [] };
+  const profilesById = new Map<string, ProfileRow>((profileRows ?? []).map((profile: ProfileRow) => [profile.id, profile]));
   const membersById = new Map<string, MinistryMemberRow>(memberRows.map((member) => [member.id, member]));
   const coordinator = repertoire.coordinator_member_id ? (membersById.get(repertoire.coordinator_member_id) ?? null) : null;
   const selectedTeamTemplate = teamTemplate as TeamTemplateRow;
@@ -144,18 +162,18 @@ export default async function RepertoireDetailPage({ params }: { params: Promise
           <p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Coordenação</p>
           <h2 className="mt-2 text-2xl font-semibold">Responsáveis da escala</h2>
           <div className="mt-5 space-y-3 text-sm text-zinc-300">
-            <div className="rounded-2xl border border-white/10 bg-black/20 p-4"><p className="text-xs uppercase tracking-[0.14em] text-zinc-500">Coordenador vocal</p><p className="mt-1 text-base font-semibold text-white">{coordinator ? memberLabel(coordinator) : "Não definido"}</p></div>
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-4"><p className="text-xs uppercase tracking-[0.14em] text-zinc-500">Coordenador vocal</p><p className="mt-1 text-base font-semibold text-white">{coordinator ? memberLabel(coordinator, profilesById) : "Não definido"}</p></div>
             <div className="rounded-2xl border border-white/10 bg-black/20 p-4"><p className="text-xs uppercase tracking-[0.14em] text-zinc-500">Equipe/template</p><p className="mt-1 text-base font-semibold text-white">{selectedTeamTemplate?.name || "Sem template"}</p></div>
           </div>
         </PremiumPanel>
 
         <PremiumPanel>
           <div className="flex items-start justify-between gap-4">
-            <div className="flex items-start gap-4"><div className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-3 text-cyan-100"><UserCheck className="h-5 w-5" /></div><div><p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Integrantes da escala</p><h2 className="mt-2 text-2xl font-semibold">Vocais e estudo</h2><p className="mt-2 text-sm leading-6 text-zinc-400">O nipe final pode ser ajustado em cada música.</p></div></div>
+            <div className="flex items-start gap-4"><div className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-3 text-cyan-100"><UserCheck className="h-5 w-5" /></div><div><p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Equipe do dia</p><h2 className="mt-2 text-2xl font-semibold">Vocais e estudo</h2><p className="mt-2 text-sm leading-6 text-zinc-400">Visualize rapidamente quem canta e qual voz cada integrante fará nesta escala.</p></div></div>
             {canManage ? <Link href={`/ministerio/repertorios/${repertoire.id}/integrantes`} className="hidden rounded-2xl border border-cyan-300/25 bg-cyan-400/10 px-4 py-3 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-400/20 md:inline-flex">Editar</Link> : null}
           </div>
           <div className="mt-6 grid gap-3">
-            {scaleAssignments.length ? scaleAssignments.map((assignment) => { const member = membersById.get(assignment.member_id); const isCoordinator = assignment.member_id === repertoire.coordinator_member_id; return <div key={assignment.id} className="rounded-3xl border border-white/10 bg-black/20 p-5"><div className="flex flex-wrap items-center gap-2"><h3 className="text-lg font-semibold text-white">{memberLabel(member)}</h3>{isCoordinator ? <span className="rounded-full border border-amber-300/25 bg-amber-400/10 px-3 py-1 text-xs font-semibold text-amber-100">Coordenador vocal</span> : null}</div><p className="mt-1 text-xs text-zinc-500">{memberEmail(member)}</p><div className="mt-4 flex flex-wrap gap-2 text-xs"><span className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1 text-cyan-100">Nipe padrão: {assignment.assigned_voice || "Definir por música"}</span><span className="rounded-full border border-emerald-300/20 bg-emerald-400/10 px-3 py-1 text-emerald-100">Estudo: {studyModeLabel(assignment.study_mode)}</span></div>{assignment.notes ? <p className="mt-4 max-w-3xl text-sm leading-6 text-zinc-300">{assignment.notes}</p> : null}</div>; }) : <div className="rounded-3xl border border-dashed border-white/10 bg-black/20 p-8 text-center text-sm text-zinc-400">Nenhum integrante foi atribuído ainda. Use um template de equipe na criação da escala ou adicione vocalistas manualmente.</div>}
+            {scaleAssignments.length ? scaleAssignments.map((assignment) => { const member = membersById.get(assignment.member_id); const isCoordinator = assignment.member_id === repertoire.coordinator_member_id; return <div key={assignment.id} className="rounded-3xl border border-white/10 bg-black/20 p-5"><div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="text-lg font-semibold text-white">{memberLabel(member, profilesById)}</h3>{isCoordinator ? <span className="rounded-full border border-amber-300/25 bg-amber-400/10 px-3 py-1 text-xs font-semibold text-amber-100">Coordenador vocal</span> : null}</div>{memberEmail(member, profilesById) ? <p className="mt-1 break-all text-xs text-zinc-500">{memberEmail(member, profilesById)}</p> : null}</div><div className="flex shrink-0 flex-wrap gap-2 text-xs"><span className="rounded-full border border-cyan-300/25 bg-cyan-400/10 px-4 py-2 font-semibold text-cyan-100">Voz: {voiceLabel(assignment.assigned_voice)}</span><span className="rounded-full border border-emerald-300/20 bg-emerald-400/10 px-4 py-2 font-semibold text-emerald-100">Estudo: {studyModeLabel(assignment.study_mode)}</span></div></div>{assignment.notes ? <p className="mt-4 max-w-3xl text-sm leading-6 text-zinc-300">{assignment.notes}</p> : null}</div>; }) : <div className="rounded-3xl border border-dashed border-white/10 bg-black/20 p-8 text-center text-sm text-zinc-400">Nenhum integrante foi atribuído ainda. Use um template de equipe na criação da escala ou adicione vocalistas manualmente.</div>}
           </div>
         </PremiumPanel>
       </div>
