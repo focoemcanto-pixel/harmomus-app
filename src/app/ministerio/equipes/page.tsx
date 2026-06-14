@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { revalidatePath } from "next/cache";
 import { ArrowRight, Plus, Users } from "lucide-react";
 
+import { MinistryRouteTransition } from "@/components/ministerio/ministry-route-transition";
 import { MinistryShell, PremiumPanel } from "@/components/ministerio/ministry-ui";
-import { MinistrySubmitButton } from "@/components/ministerio/ministry-submit-button";
+import { TeamCreateForm } from "@/components/ministerio/team-create-form";
 import { getCurrentUserAccessContext, isMinistryManager } from "@/lib/auth/current-user";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -25,47 +25,6 @@ function memberLabel(member: any) {
 function getParam(params: PageSearchParams, key: string) {
   const value = params[key];
   return Array.isArray(value) ? value[0] : value;
-}
-
-async function createTeam(formData: FormData) {
-  "use server";
-
-  const context = await getCurrentUserAccessContext();
-  if (context.isGuest) redirect("/login");
-  if (!context.ministry) redirect("/assinatura");
-  if (!isMinistryManager(context)) redirect("/");
-
-  const name = String(formData.get("name") ?? "").trim();
-  const description = String(formData.get("description") ?? "").trim();
-  const coordinatorMemberId = String(formData.get("coordinator_member_id") ?? "").trim();
-
-  if (!name) redirect("/ministerio/equipes");
-
-  const admin = createSupabaseAdminClient() as any;
-  const now = new Date().toISOString();
-
-  const { data, error } = await admin
-    .from("ministry_team_templates")
-    .insert({
-      ministry_id: context.ministry.ministryId,
-      name,
-      description: description || null,
-      coordinator_member_id: coordinatorMemberId || null,
-      created_by: context.profile?.id ?? null,
-      archived: false,
-      created_at: now,
-      updated_at: now,
-    })
-    .select("id")
-    .single();
-
-  if (error || !data?.id) {
-    const message = encodeURIComponent(error?.message || "Não foi possível criar a equipe.");
-    redirect(`/ministerio/equipes?message=${message}`);
-  }
-
-  revalidatePath("/ministerio/equipes");
-  redirect(`/ministerio/equipes/${data.id}`);
 }
 
 export default async function MinistryTeamsPage({ searchParams }: { searchParams?: Promise<PageSearchParams> | PageSearchParams }) {
@@ -98,6 +57,7 @@ export default async function MinistryTeamsPage({ searchParams }: { searchParams
   const schemaNotReady = isSchemaMissing(error?.message);
   if (error && !schemaNotReady) throw new Error(error.message);
   const activeMembers = (members ?? []).filter((member: any) => member.status !== "removed");
+  const memberOptions = activeMembers.map((member: any) => ({ id: member.id, label: memberLabel(member) }));
 
   return (
     <MinistryShell>
@@ -132,14 +92,7 @@ export default async function MinistryTeamsPage({ searchParams }: { searchParams
                 <p className="mt-2 text-sm leading-6 text-zinc-400">Depois de criar, você monta os vocalistas e nipes padrão.</p>
               </div>
             </div>
-            <form action={createTeam} className="mt-6 space-y-4">
-              <label className="block"><span className="text-sm font-semibold text-zinc-200">Nome da equipe</span><input name="name" required maxLength={100} placeholder="Ex.: Grupo A" className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-cyan-300/50" /></label>
-              <label className="block"><span className="text-sm font-semibold text-zinc-200">Coordenador vocal padrão</span><select name="coordinator_member_id" className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50"><option value="">Definir depois</option>{activeMembers.map((member: any) => <option key={member.id} value={member.id}>{memberLabel(member)}</option>)}</select></label>
-              <label className="block"><span className="text-sm font-semibold text-zinc-200">Descrição</span><textarea name="description" rows={3} maxLength={400} placeholder="Ex.: Equipe dos domingos à noite" className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-cyan-300/50" /></label>
-              <MinistrySubmitButton pendingText="Criando equipe..." className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200">
-                <Plus className="h-4 w-4" /> Criar e montar equipe
-              </MinistrySubmitButton>
-            </form>
+            <TeamCreateForm members={memberOptions} />
           </PremiumPanel>
 
           <PremiumPanel>
@@ -147,12 +100,12 @@ export default async function MinistryTeamsPage({ searchParams }: { searchParams
             <h2 className="mt-2 text-2xl font-semibold">Suas equipes</h2>
             <div className="mt-6 grid gap-3">
               {(teams ?? []).length ? (teams ?? []).map((team: any) => (
-                <Link prefetch href={`/ministerio/equipes/${team.id}`} key={team.id} className="block rounded-3xl border border-white/10 bg-black/20 p-5 transition hover:border-cyan-300/40 hover:bg-white/[0.055]">
+                <MinistryRouteTransition href={`/ministerio/equipes/${team.id}`} key={team.id} className="block rounded-3xl border border-white/10 bg-black/20 p-5 transition hover:border-cyan-300/40 hover:bg-white/[0.055] data-[pending=true]:border-cyan-300/50 data-[pending=true]:bg-cyan-400/10">
                   <div className="flex items-center justify-between gap-4">
                     <div><h3 className="text-lg font-semibold text-white">{team.name}</h3><p className="mt-2 text-sm text-zinc-400">{team.description || "Sem descrição"}</p></div>
                     <ArrowRight className="h-5 w-5 text-cyan-200" />
                   </div>
-                </Link>
+                </MinistryRouteTransition>
               )) : (
                 <div className="rounded-3xl border border-dashed border-white/10 bg-black/20 p-8 text-center text-sm text-zinc-400">
                   Nenhuma equipe criada ainda.
