@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Check, Library, Loader2, Music2, Plus, Search, Settings, X } from "lucide-react";
 
 type Kit = {
@@ -15,6 +16,7 @@ type Kit = {
 
 type SelectedScaleSong = {
   id: string;
+  kitId: string;
   position: number;
   name: string;
   artist: string | null;
@@ -26,10 +28,12 @@ type ScaleKitManagerProps = {
 };
 
 export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitManagerProps) {
+  const router = useRouter();
   const [query, setQuery] = useState("");
   const [kits, setKits] = useState<Kit[]>([]);
   const [libraryKits, setLibraryKits] = useState<Kit[]>([]);
-  const [existingKitIds, setExistingKitIds] = useState<Set<string>>(new Set());
+  const [scaleSongs, setScaleSongs] = useState<SelectedScaleSong[]>(selectedSongs);
+  const [existingKitIds, setExistingKitIds] = useState<Set<string>>(new Set(selectedSongs.map((song) => song.kitId)));
   const [message, setMessage] = useState("");
   const [hasSearched, setHasSearched] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -41,19 +45,15 @@ export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitMa
 
   const endpoint = useMemo(() => `/api/ministerio/repertorios/${repertoireId}/kits`, [repertoireId]);
   const cleanQuery = query.trim();
-  const selectedCount = Math.max(selectedSongs.length, existingKitIds.size);
+  const selectedCount = scaleSongs.length;
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
   useEffect(() => {
-    if (!selectedSongs.length) return;
-    setExistingKitIds((current) => {
-      const next = new Set(current);
-      selectedSongs.forEach((song) => next.add(song.id));
-      return next;
-    });
+    setScaleSongs(selectedSongs);
+    setExistingKitIds(new Set(selectedSongs.map((song) => song.kitId)));
   }, [selectedSongs]);
 
   useEffect(() => {
@@ -77,7 +77,7 @@ export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitMa
     const nextKits = payload.kits ?? [];
     if (target === "search") setKits(nextKits);
     if (target === "library") setLibraryKits(nextKits);
-    setExistingKitIds(new Set((payload.existingKitIds ?? []).map(String)));
+    setExistingKitIds((current) => new Set([...current, ...(payload.existingKitIds ?? []).map(String)]));
   }
 
   function loadKits(nextQuery = query, target: "search" | "library" = "search") {
@@ -150,14 +150,32 @@ export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitMa
       }
 
       setExistingKitIds((current) => new Set([...current, kit.id]));
+
+      if (payload?.item?.id) {
+        setScaleSongs((current) => {
+          if (current.some((song) => song.kitId === kit.id || song.id === payload.item.id)) return current;
+          return [
+            ...current,
+            {
+              id: String(payload.item.id),
+              kitId: kit.id,
+              position: Number(payload.item.position ?? current.length + 1),
+              name: String(payload?.kit?.name ?? kit.name),
+              artist: payload?.kit?.artist ?? kit.artist ?? null,
+            },
+          ].sort((a, b) => a.position - b.position);
+        });
+      }
+
       setMessage(payload?.alreadyAdded ? "Esse kit já estava na escala." : `${kit.name} foi adicionado à escala.`);
+      router.refresh();
     } finally {
       setAddingKitId(null);
     }
   }
 
   function KitRow({ kit, compact = false }: { kit: Kit; compact?: boolean }) {
-    const alreadyAdded = existingKitIds.has(kit.id);
+    const alreadyAdded = existingKitIds.has(kit.id) || scaleSongs.some((song) => song.kitId === kit.id);
     const isAdding = addingKitId === kit.id;
 
     return (
@@ -229,9 +247,9 @@ export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitMa
                 </div>
                 <p className="text-xs text-zinc-500">Configuração de tom e nipes continua por música.</p>
               </div>
-              {selectedSongs.length ? (
+              {scaleSongs.length ? (
                 <div className="mt-4 space-y-2">
-                  {selectedSongs.map((song) => <div key={song.id} className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/[0.035] p-3 md:flex-row md:items-center md:justify-between"><div className="min-w-0"><p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-200">Música {song.position}</p><h5 className="truncate text-sm font-semibold text-white">{song.name}</h5><p className="truncate text-xs text-zinc-400">{song.artist || "Kit vocal"}</p></div><Link href={`/ministerio/repertorios/${repertoireId}/musicas/${song.id}`} className="inline-flex w-fit items-center gap-2 rounded-xl border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-400/20"><Settings className="h-3.5 w-3.5" /> Configurar</Link></div>)}
+                  {scaleSongs.map((song) => <div key={song.id} className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/[0.035] p-3 md:flex-row md:items-center md:justify-between"><div className="min-w-0"><p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-200">Música {song.position}</p><h5 className="truncate text-sm font-semibold text-white">{song.name}</h5><p className="truncate text-xs text-zinc-400">{song.artist || "Kit vocal"}</p></div><Link href={`/ministerio/repertorios/${repertoireId}/musicas/${song.id}`} className="inline-flex w-fit items-center gap-2 rounded-xl border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-400/20"><Settings className="h-3.5 w-3.5" /> Configurar</Link></div>)}
                 </div>
               ) : <div className="mt-4 rounded-2xl border border-dashed border-white/10 bg-black/20 p-6 text-center text-sm text-zinc-400">Nenhuma música adicionada ainda.</div>}
             </div>
