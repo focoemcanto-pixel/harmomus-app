@@ -168,7 +168,7 @@ export default async function MeuRepertorioDetalhePage({ params }: { params: Pro
   if (context.isGuest) redirect("/login");
   if (!context.ministry?.ministryId || !context.profile?.id) redirect("/");
   const admin = createSupabaseAdminClient() as any;
-  const currentEmail = normalizeEmail((context.profile as any)?.email ?? (context.user as any)?.email ?? null);
+  const currentEmail = normalizeEmail((context.profile as any)?.email ?? null);
 
   const [{ data: ministry }, { data: repertoire, error }] = await Promise.all([
     admin.from("ministries").select("id,name").eq("id", context.ministry.ministryId).maybeSingle(),
