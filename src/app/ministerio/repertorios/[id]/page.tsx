@@ -43,6 +43,11 @@ type MinistryMemberRow = {
 
 type TeamTemplateRow = { id: string; name: string } | null;
 
+function isSchemaMissing(message?: string | null) {
+  const text = String(message ?? "").toLowerCase();
+  return text.includes("does not exist") || text.includes("schema cache") || text.includes("could not find");
+}
+
 function memberLabel(member?: MinistryMemberRow | null) {
   return member?.invited_name || member?.profile?.full_name || member?.invited_email || member?.profile?.email || "Integrante";
 }
@@ -80,7 +85,7 @@ export default async function RepertoireDetailPage({ params }: { params: Promise
   if (error) throw new Error(error.message);
   if (!repertoire?.id || repertoire.archived) notFound();
 
-  const [{ data: items, error: itemsError }, { data: assignments, error: assignmentsError }, { data: members }, { data: teamTemplate }] = await Promise.all([
+  const [{ data: items, error: itemsError }, assignmentsResult, { data: members }, { data: teamTemplate }] = await Promise.all([
     admin
       .from("ministry_repertoire_items")
       .select("id,position,kits(id,slug,name,artist,cover_url)")
@@ -106,13 +111,16 @@ export default async function RepertoireDetailPage({ params }: { params: Promise
   ]);
 
   if (itemsError) throw new Error(itemsError.message);
-  if (assignmentsError) throw new Error(assignmentsError.message);
+
+  const assignmentsError = assignmentsResult?.error;
+  const assignmentsSchemaMissing = isSchemaMissing(assignmentsError?.message);
+  if (assignmentsError && !assignmentsSchemaMissing) throw new Error(assignmentsError.message);
 
   const repertoireItems = (items ?? []) as RepertoireItem[];
-  const scaleAssignments = (assignments ?? []) as ScaleAssignment[];
+  const scaleAssignments = (assignmentsSchemaMissing ? [] : (assignmentsResult?.data ?? [])) as ScaleAssignment[];
   const memberRows = (members ?? []) as MinistryMemberRow[];
   const membersById = new Map<string, MinistryMemberRow>(memberRows.map((member) => [member.id, member]));
-  const coordinator = repertoire.coordinator_member_id ? membersById.get(repertoire.coordinator_member_id) : null;
+  const coordinator = repertoire.coordinator_member_id ? (membersById.get(repertoire.coordinator_member_id) ?? null) : null;
   const selectedTeamTemplate = teamTemplate as TeamTemplateRow;
 
   return (
@@ -132,6 +140,14 @@ export default async function RepertoireDetailPage({ params }: { params: Promise
           </div>
         ) : null}
       </div>
+
+      {assignmentsSchemaMissing ? (
+        <PremiumPanel>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-200">Configuração pendente</p>
+          <h2 className="mt-2 text-2xl font-semibold">Tabela de integrantes da escala ainda não reconhecida</h2>
+          <p className="mt-3 text-sm leading-6 text-zinc-300">Aplique a SQL de `ministry_repertoire_assignments` no Supabase e rode `NOTIFY pgrst, 'reload schema';`. A página foi estabilizada para não derrubar o app.</p>
+        </PremiumPanel>
+      ) : null}
 
       <div className="overflow-hidden rounded-[2rem] border border-cyan-300/20 bg-gradient-to-br from-[#0b1120]/95 via-[#140d27]/95 to-[#06111f]/95 p-6 shadow-[0_30px_100px_rgba(34,211,238,0.16)] md:p-10">
         <div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/25 bg-cyan-400/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100">
