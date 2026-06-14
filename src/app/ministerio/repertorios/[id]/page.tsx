@@ -110,6 +110,22 @@ export default async function RepertoireDetailPage({ params }: { params: Promise
   const membersById = new Map<string, MinistryMemberRow>(memberRows.map((member) => [member.id, member]));
   const coordinator = repertoire.coordinator_member_id ? (membersById.get(repertoire.coordinator_member_id) ?? null) : null;
   const selectedTeamTemplate = teamTemplate as TeamTemplateRow;
+  const playlistTracks = repertoireItems.flatMap((item) => {
+    const kit = item.kits;
+    if (!kit) return [];
+
+    return [
+      {
+        id: item.id,
+        position: item.position,
+        name: kit.name,
+        artist: kit.artist,
+        coverUrl: kit.cover_url,
+        href: `/biblioteca/${kit.slug}`,
+        kitId: kit.id,
+      },
+    ];
+  });
 
   return (
     <MinistryShell>
@@ -172,9 +188,49 @@ export default async function RepertoireDetailPage({ params }: { params: Promise
       </div>
 
       <PremiumPanel>
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"><div><p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Playlist</p><h2 className="mt-2 text-2xl font-semibold">Músicas da escala</h2><p className="mt-1 text-sm text-zinc-400">{canManage ? "Busque músicas, adicione à escala e configure tom/nipe por música." : "Estas são as músicas definidas pelo responsável do seu ministério para estudo."}</p></div></div>
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Playlist</p>
+            <h2 className="mt-2 text-2xl font-semibold">Músicas da escala</h2>
+            <p className="mt-1 text-sm text-zinc-400">{canManage ? "Busque músicas, adicione à escala e configure tom/nipe por música." : "Estas são as músicas definidas pelo responsável do seu ministério para estudo."}</p>
+          </div>
+        </div>
+
         {canManage ? <ScaleKitManager repertoireId={repertoire.id} /> : null}
-        {repertoireItems.length ? <><div className="mt-6 grid gap-3">{repertoireItems.map((item) => { const kit = item.kits; if (!kit) return null; return <div key={item.id} className="flex flex-col gap-3 rounded-3xl border border-white/10 bg-black/20 p-4 md:flex-row md:items-center md:justify-between"><div><p className="text-xs uppercase tracking-[0.16em] text-cyan-200">Música {item.position}</p><h3 className="text-lg font-semibold text-white">{kit.name}</h3><p className="text-sm text-zinc-400">{kit.artist || "Kit vocal"}</p></div>{canManage ? <Link href={`/ministerio/repertorios/${repertoire.id}/musicas/${item.id}`} className="inline-flex w-fit items-center gap-2 rounded-2xl border border-cyan-300/25 bg-cyan-400/10 px-4 py-3 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-400/20"><Settings className="h-4 w-4" /> Configurar tom e nipes</Link> : null}</div>; })}</div><MinistryPlaylistPlayer tracks={repertoireItems.flatMap((item) => { const kit = item.kits; if (!kit) return []; return [{ id: item.id, position: item.position, name: kit.name, artist: kit.artist, coverUrl: kit.cover_url, href: `/biblioteca/${kit.slug}` }]; })} /></> : <div className="mt-6 rounded-3xl border border-dashed border-white/10 bg-black/20 p-10 text-center"><div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-400/10 text-cyan-100"><Music2 className="h-7 w-7" /></div><h3 className="mt-5 text-2xl font-semibold text-white">Nenhuma música adicionada ainda</h3><p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-zinc-400">{canManage ? "Use a busca acima para adicionar músicas que sua equipe precisa estudar." : "Quando o responsável adicionar músicas, elas aparecerão aqui."}</p></div>}
+
+        {repertoireItems.length ? (
+          <>
+            <div className="mt-6 grid gap-3">
+              {repertoireItems.map((item) => {
+                const kit = item.kits;
+                if (!kit) return null;
+
+                return (
+                  <div key={item.id} className="flex flex-col gap-3 rounded-3xl border border-white/10 bg-black/20 p-4 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.16em] text-cyan-200">Música {item.position}</p>
+                      <h3 className="text-lg font-semibold text-white">{kit.name}</h3>
+                      <p className="text-sm text-zinc-400">{kit.artist || "Kit vocal"}</p>
+                    </div>
+                    {canManage ? (
+                      <Link href={`/ministerio/repertorios/${repertoire.id}/musicas/${item.id}`} className="inline-flex w-fit items-center gap-2 rounded-2xl border border-cyan-300/25 bg-cyan-400/10 px-4 py-3 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-400/20">
+                        <Settings className="h-4 w-4" /> Configurar tom e nipes
+                      </Link>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+
+            <MinistryPlaylistPlayer tracks={playlistTracks} />
+          </>
+        ) : (
+          <div className="mt-6 rounded-3xl border border-dashed border-white/10 bg-black/20 p-10 text-center">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-400/10 text-cyan-100"><Music2 className="h-7 w-7" /></div>
+            <h3 className="mt-5 text-2xl font-semibold text-white">Nenhuma música adicionada ainda</h3>
+            <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-zinc-400">{canManage ? "Use a busca acima para adicionar músicas que sua equipe precisa estudar." : "Quando o responsável adicionar músicas, elas aparecerão aqui."}</p>
+          </div>
+        )}
       </PremiumPanel>
     </MinistryShell>
   );
