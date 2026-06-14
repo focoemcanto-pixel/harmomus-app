@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { ArrowRight, Plus, Users } from "lucide-react";
 
 import { MinistryShell, PremiumPanel } from "@/components/ministerio/ministry-ui";
+import { MinistrySubmitButton } from "@/components/ministerio/ministry-submit-button";
 import { getCurrentUserAccessContext, isMinistryManager } from "@/lib/auth/current-user";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -135,7 +136,9 @@ export default async function MinistryTeamsPage({ searchParams }: { searchParams
               <label className="block"><span className="text-sm font-semibold text-zinc-200">Nome da equipe</span><input name="name" required maxLength={100} placeholder="Ex.: Grupo A" className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-cyan-300/50" /></label>
               <label className="block"><span className="text-sm font-semibold text-zinc-200">Coordenador vocal padrão</span><select name="coordinator_member_id" className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50"><option value="">Definir depois</option>{activeMembers.map((member: any) => <option key={member.id} value={member.id}>{memberLabel(member)}</option>)}</select></label>
               <label className="block"><span className="text-sm font-semibold text-zinc-200">Descrição</span><textarea name="description" rows={3} maxLength={400} placeholder="Ex.: Equipe dos domingos à noite" className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-cyan-300/50" /></label>
-              <button className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200"><Plus className="h-4 w-4" /> Criar e montar equipe</button>
+              <MinistrySubmitButton pendingText="Criando equipe..." className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200">
+                <Plus className="h-4 w-4" /> Criar e montar equipe
+              </MinistrySubmitButton>
             </form>
           </PremiumPanel>
 
@@ -144,7 +147,7 @@ export default async function MinistryTeamsPage({ searchParams }: { searchParams
             <h2 className="mt-2 text-2xl font-semibold">Suas equipes</h2>
             <div className="mt-6 grid gap-3">
               {(teams ?? []).length ? (teams ?? []).map((team: any) => (
-                <Link href={`/ministerio/equipes/${team.id}`} key={team.id} className="block rounded-3xl border border-white/10 bg-black/20 p-5 transition hover:border-cyan-300/40 hover:bg-white/[0.055]">
+                <Link prefetch href={`/ministerio/equipes/${team.id}`} key={team.id} className="block rounded-3xl border border-white/10 bg-black/20 p-5 transition hover:border-cyan-300/40 hover:bg-white/[0.055]">
                   <div className="flex items-center justify-between gap-4">
                     <div><h3 className="text-lg font-semibold text-white">{team.name}</h3><p className="mt-2 text-sm text-zinc-400">{team.description || "Sem descrição"}</p></div>
                     <ArrowRight className="h-5 w-5 text-cyan-200" />
