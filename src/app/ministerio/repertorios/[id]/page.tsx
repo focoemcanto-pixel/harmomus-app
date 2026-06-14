@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, CalendarDays, ListMusic, Music2, Plus, UserCheck, Users } from "lucide-react";
+import { ArrowLeft, CalendarDays, ListMusic, Music2, Plus, Settings, UserCheck, Users } from "lucide-react";
 
 import { ScaleKitManager } from "@/components/ministerio/scale-kit-manager";
 import { MinistryPlaylistPlayer } from "@/components/ministerio/ministry-playlist-player";
@@ -16,13 +16,7 @@ type PageParams = { id: string };
 type RepertoireItem = {
   id: string;
   position: number;
-  kits: {
-    id: string;
-    slug: string;
-    name: string;
-    artist: string | null;
-    cover_url: string | null;
-  } | null;
+  kits: { id: string; slug: string; name: string; artist: string | null; cover_url: string | null } | null;
 };
 
 type ScaleAssignment = {
@@ -65,10 +59,7 @@ function studyModeLabel(value?: string | null) {
 }
 
 export default async function RepertoireDetailPage({ params }: { params: Promise<PageParams> }) {
-  const [context, resolvedParams] = await Promise.all([
-    getCurrentUserAccessContext(),
-    params,
-  ]);
+  const [context, resolvedParams] = await Promise.all([getCurrentUserAccessContext(), params]);
 
   if (context.isGuest) redirect("/login");
   if (!context.ministry) redirect("/assinatura");
@@ -103,11 +94,7 @@ export default async function RepertoireDetailPage({ params }: { params: Promise
       .select("id,invited_name,invited_email,profile:profiles(full_name,email)")
       .eq("ministry_id", context.ministry.ministryId),
     repertoire.team_template_id
-      ? admin
-          .from("ministry_team_templates")
-          .select("id,name")
-          .eq("id", repertoire.team_template_id)
-          .maybeSingle()
+      ? admin.from("ministry_team_templates").select("id,name").eq("id", repertoire.team_template_id).maybeSingle()
       : Promise.resolve({ data: null }),
   ]);
 
@@ -175,19 +162,19 @@ export default async function RepertoireDetailPage({ params }: { params: Promise
 
         <PremiumPanel>
           <div className="flex items-start justify-between gap-4">
-            <div className="flex items-start gap-4"><div className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-3 text-cyan-100"><UserCheck className="h-5 w-5" /></div><div><p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Integrantes da escala</p><h2 className="mt-2 text-2xl font-semibold">Funções, vozes e estudo</h2><p className="mt-2 text-sm leading-6 text-zinc-400">Estas definições serão usadas quando o integrante abrir a escala e estudar a playlist.</p></div></div>
+            <div className="flex items-start gap-4"><div className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-3 text-cyan-100"><UserCheck className="h-5 w-5" /></div><div><p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Integrantes da escala</p><h2 className="mt-2 text-2xl font-semibold">Vocais e estudo</h2><p className="mt-2 text-sm leading-6 text-zinc-400">O nipe final pode ser ajustado em cada música.</p></div></div>
             {canManage ? <Link href={`/ministerio/repertorios/${repertoire.id}/integrantes`} className="hidden rounded-2xl border border-cyan-300/25 bg-cyan-400/10 px-4 py-3 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-400/20 md:inline-flex">Editar</Link> : null}
           </div>
           <div className="mt-6 grid gap-3">
-            {scaleAssignments.length ? scaleAssignments.map((assignment) => { const member = membersById.get(assignment.member_id); return <div key={assignment.id} className="rounded-3xl border border-white/10 bg-black/20 p-5"><h3 className="text-lg font-semibold text-white">{memberLabel(member)}</h3><p className="mt-1 text-xs text-zinc-500">{memberEmail(member)}</p><div className="mt-4 flex flex-wrap gap-2 text-xs"><span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-zinc-200">Função: {assignment.assigned_role || "—"}</span><span className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1 text-cyan-100">Voz: {assignment.assigned_voice || "—"}</span><span className="rounded-full border border-fuchsia-300/20 bg-fuchsia-400/10 px-3 py-1 text-fuchsia-100">Tom: {assignment.assigned_tone || "—"}</span><span className="rounded-full border border-emerald-300/20 bg-emerald-400/10 px-3 py-1 text-emerald-100">Estudo: {studyModeLabel(assignment.study_mode)}</span></div>{assignment.notes ? <p className="mt-4 max-w-3xl text-sm leading-6 text-zinc-300">{assignment.notes}</p> : null}</div>; }) : <div className="rounded-3xl border border-dashed border-white/10 bg-black/20 p-8 text-center text-sm text-zinc-400">Nenhum integrante foi atribuído ainda. Use um template de equipe na criação da escala ou adicione integrantes manualmente.</div>}
+            {scaleAssignments.length ? scaleAssignments.map((assignment) => { const member = membersById.get(assignment.member_id); return <div key={assignment.id} className="rounded-3xl border border-white/10 bg-black/20 p-5"><h3 className="text-lg font-semibold text-white">{memberLabel(member)}</h3><p className="mt-1 text-xs text-zinc-500">{memberEmail(member)}</p><div className="mt-4 flex flex-wrap gap-2 text-xs"><span className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1 text-cyan-100">Nipe padrão: {assignment.assigned_voice || "Definir por música"}</span><span className="rounded-full border border-emerald-300/20 bg-emerald-400/10 px-3 py-1 text-emerald-100">Estudo: {studyModeLabel(assignment.study_mode)}</span></div>{assignment.notes ? <p className="mt-4 max-w-3xl text-sm leading-6 text-zinc-300">{assignment.notes}</p> : null}</div>; }) : <div className="rounded-3xl border border-dashed border-white/10 bg-black/20 p-8 text-center text-sm text-zinc-400">Nenhum integrante foi atribuído ainda. Use um template de equipe na criação da escala ou adicione vocalistas manualmente.</div>}
           </div>
         </PremiumPanel>
       </div>
 
       <PremiumPanel>
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"><div><p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Playlist</p><h2 className="mt-2 text-2xl font-semibold">Músicas da escala</h2><p className="mt-1 text-sm text-zinc-400">{canManage ? "Busque e adicione músicas sem sair desta escala." : "Estas são as músicas definidas pelo responsável do seu ministério para estudo."}</p></div></div>
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"><div><p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Playlist</p><h2 className="mt-2 text-2xl font-semibold">Músicas da escala</h2><p className="mt-1 text-sm text-zinc-400">{canManage ? "Busque músicas, adicione à escala e configure tom/nipe por música." : "Estas são as músicas definidas pelo responsável do seu ministério para estudo."}</p></div></div>
         {canManage ? <ScaleKitManager repertoireId={repertoire.id} /> : null}
-        {repertoireItems.length ? <MinistryPlaylistPlayer tracks={repertoireItems.flatMap((item) => { const kit = item.kits; if (!kit) return []; return [{ id: item.id, position: item.position, name: kit.name, artist: kit.artist, coverUrl: kit.cover_url, href: `/biblioteca/${kit.slug}` }]; })} /> : <div className="mt-6 rounded-3xl border border-dashed border-white/10 bg-black/20 p-10 text-center"><div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-400/10 text-cyan-100"><Music2 className="h-7 w-7" /></div><h3 className="mt-5 text-2xl font-semibold text-white">Nenhuma música adicionada ainda</h3><p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-zinc-400">{canManage ? "Use a busca acima para adicionar músicas que sua equipe precisa estudar." : "Quando o responsável adicionar músicas, elas aparecerão aqui."}</p></div>}
+        {repertoireItems.length ? <><div className="mt-6 grid gap-3">{repertoireItems.map((item) => { const kit = item.kits; if (!kit) return null; return <div key={item.id} className="flex flex-col gap-3 rounded-3xl border border-white/10 bg-black/20 p-4 md:flex-row md:items-center md:justify-between"><div><p className="text-xs uppercase tracking-[0.16em] text-cyan-200">Música {item.position}</p><h3 className="text-lg font-semibold text-white">{kit.name}</h3><p className="text-sm text-zinc-400">{kit.artist || "Kit vocal"}</p></div>{canManage ? <Link href={`/ministerio/repertorios/${repertoire.id}/musicas/${item.id}`} className="inline-flex w-fit items-center gap-2 rounded-2xl border border-cyan-300/25 bg-cyan-400/10 px-4 py-3 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-400/20"><Settings className="h-4 w-4" /> Configurar tom e nipes</Link> : null}</div>; })}</div><MinistryPlaylistPlayer tracks={repertoireItems.flatMap((item) => { const kit = item.kits; if (!kit) return []; return [{ id: item.id, position: item.position, name: kit.name, artist: kit.artist, coverUrl: kit.cover_url, href: `/biblioteca/${kit.slug}` }]; })} /></> : <div className="mt-6 rounded-3xl border border-dashed border-white/10 bg-black/20 p-10 text-center"><div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-400/10 text-cyan-100"><Music2 className="h-7 w-7" /></div><h3 className="mt-5 text-2xl font-semibold text-white">Nenhuma música adicionada ainda</h3><p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-zinc-400">{canManage ? "Use a busca acima para adicionar músicas que sua equipe precisa estudar." : "Quando o responsável adicionar músicas, elas aparecerão aqui."}</p></div>}
       </PremiumPanel>
     </MinistryShell>
   );
