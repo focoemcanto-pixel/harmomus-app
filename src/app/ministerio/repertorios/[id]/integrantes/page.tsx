@@ -11,6 +11,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type PageParams = { id: string };
+type PageSearchParams = { message?: string | string[] };
 
 const VOICES = [
   ["", "Sem definição"],
@@ -23,14 +24,14 @@ const VOICES = [
   ["baixo", "Baixo"],
   ["instrumento", "Instrumento"],
   ["outro", "Outro"],
-];
+] as const;
 
 const STUDY_MODES = [
   ["voice", "Voz definida"],
   ["full_mix", "Mix completo"],
   ["instrumental", "Instrumental"],
   ["custom", "Personalizado"],
-];
+] as const;
 
 function label(member: any) {
   return member?.invited_name || member?.profile?.full_name || member?.invited_email || member?.profile?.email || "Integrante";
@@ -117,12 +118,14 @@ async function saveAssignment(formData: FormData) {
   redirect(backPath(repertoireId, "Integrante salvo na escala."));
 }
 
-export default async function ScaleMembersPage({ params, searchParams }: { params: Promise<PageParams>; searchParams?: Promise<{ message?: string | string[] }> }) {
+export default async function ScaleMembersPage({ params, searchParams }: { params: Promise<PageParams>; searchParams?: Promise<PageSearchParams> }) {
   const [context, resolvedParams, rawSearchParams] = await Promise.all([
     getCurrentUserAccessContext(),
     params,
-    searchParams ?? Promise.resolve({}),
+    searchParams ?? Promise.resolve({} as PageSearchParams),
   ]);
+
+  const resolvedSearchParams = rawSearchParams as PageSearchParams;
 
   if (context.isGuest) redirect("/login");
   if (!context.ministry) redirect("/assinatura");
@@ -130,7 +133,7 @@ export default async function ScaleMembersPage({ params, searchParams }: { param
 
   const admin = createSupabaseAdminClient() as any;
   const repertoireId = resolvedParams.id;
-  const message = Array.isArray(rawSearchParams.message) ? rawSearchParams.message[0] : rawSearchParams.message;
+  const message = Array.isArray(resolvedSearchParams.message) ? resolvedSearchParams.message[0] : resolvedSearchParams.message;
 
   const [{ data: repertoire }, { data: members }, { data: assignments }] = await Promise.all([
     admin
