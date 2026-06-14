@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { Check, Library, Loader2, Music2, Plus, Search, X } from "lucide-react";
+import { Check, Library, Loader2, Music2, Plus, Search, Settings, X } from "lucide-react";
 
 type Kit = {
   id: string;
@@ -12,11 +12,19 @@ type Kit = {
   cover_url: string | null;
 };
 
-type ScaleKitManagerProps = {
-  repertoireId: string;
+type SelectedScaleSong = {
+  id: string;
+  position: number;
+  name: string;
+  artist: string | null;
 };
 
-export function ScaleKitManager({ repertoireId }: ScaleKitManagerProps) {
+type ScaleKitManagerProps = {
+  repertoireId: string;
+  selectedSongs?: SelectedScaleSong[];
+};
+
+export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitManagerProps) {
   const [query, setQuery] = useState("");
   const [kits, setKits] = useState<Kit[]>([]);
   const [libraryKits, setLibraryKits] = useState<Kit[]>([]);
@@ -31,6 +39,16 @@ export function ScaleKitManager({ repertoireId }: ScaleKitManagerProps) {
 
   const endpoint = useMemo(() => `/api/ministerio/repertorios/${repertoireId}/kits`, [repertoireId]);
   const cleanQuery = query.trim();
+  const selectedCount = Math.max(selectedSongs.length, existingKitIds.size);
+
+  useEffect(() => {
+    if (!selectedSongs.length) return;
+    setExistingKitIds((current) => {
+      const next = new Set(current);
+      selectedSongs.forEach((song) => next.add(song.id));
+      return next;
+    });
+  }, [selectedSongs]);
 
   function applySearchPayload(payload: { kits?: Kit[]; existingKitIds?: string[] }, target: "search" | "library") {
     const nextKits = payload.kits ?? [];
@@ -162,7 +180,9 @@ export function ScaleKitManager({ repertoireId }: ScaleKitManagerProps) {
           <span>
             <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">Montagem</span>
             <span className="mt-1 block text-xl font-semibold text-white">Montar repertório</span>
-            <span className="mt-1 block text-sm leading-6 text-zinc-400">Adicione músicas e explore a biblioteca sem ocupar a tela principal da escala.</span>
+            <span className="mt-1 block text-sm leading-6 text-zinc-400">
+              {selectedCount ? `${selectedCount} música${selectedCount === 1 ? "" : "s"} selecionada${selectedCount === 1 ? "" : "s"}. Abra para ver, adicionar e configurar.` : "Adicione músicas e explore a biblioteca sem ocupar a tela principal da escala."}
+            </span>
           </span>
         </span>
         <span className="inline-flex w-fit items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950">
@@ -177,12 +197,41 @@ export function ScaleKitManager({ repertoireId }: ScaleKitManagerProps) {
               <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">Montar repertório</p>
-                  <h3 className="mt-2 text-2xl font-semibold text-white">Adicionar músicas à escala</h3>
-                  <p className="mt-1 max-w-2xl text-sm leading-6 text-zinc-400">Busque uma música específica ou abra a biblioteca completa. Ao terminar, feche esta janela para voltar à escala limpa.</p>
+                  <h3 className="mt-2 text-2xl font-semibold text-white">Adicionar e organizar músicas</h3>
+                  <p className="mt-1 max-w-2xl text-sm leading-6 text-zinc-400">As músicas selecionadas ficam aqui dentro para manter a página da escala limpa.</p>
                 </div>
                 <button type="button" onClick={closeModal} className="absolute right-4 top-4 rounded-2xl border border-white/10 p-3 text-zinc-300 transition hover:bg-white/10 md:static">
                   <X className="h-5 w-5" />
                 </button>
+              </div>
+
+              <div className="mt-6 rounded-3xl border border-white/10 bg-black/20 p-4">
+                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200">Repertório selecionado</p>
+                    <h4 className="mt-1 text-lg font-semibold text-white">{selectedCount} música{selectedCount === 1 ? "" : "s"} na escala</h4>
+                  </div>
+                  <p className="text-xs text-zinc-500">Configuração de tom e nipes continua por música.</p>
+                </div>
+
+                {selectedSongs.length ? (
+                  <div className="mt-4 max-h-[34vh] space-y-2 overflow-y-auto pr-1">
+                    {selectedSongs.map((song) => (
+                      <div key={song.id} className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/[0.035] p-3 md:flex-row md:items-center md:justify-between">
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-200">Música {song.position}</p>
+                          <h5 className="truncate text-sm font-semibold text-white">{song.name}</h5>
+                          <p className="truncate text-xs text-zinc-400">{song.artist || "Kit vocal"}</p>
+                        </div>
+                        <Link href={`/ministerio/repertorios/${repertoireId}/musicas/${song.id}`} className="inline-flex w-fit items-center gap-2 rounded-xl border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-400/20">
+                          <Settings className="h-3.5 w-3.5" /> Configurar
+                        </Link>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-4 rounded-2xl border border-dashed border-white/10 bg-black/20 p-6 text-center text-sm text-zinc-400">Nenhuma música adicionada ainda.</div>
+                )}
               </div>
 
               <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -217,10 +266,6 @@ export function ScaleKitManager({ repertoireId }: ScaleKitManagerProps) {
               </div>
 
               {message ? <div className="mt-4 rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-3 text-sm text-cyan-50">{message}</div> : null}
-
-              <div className="mt-6 rounded-3xl border border-white/10 bg-black/20 p-5 text-sm leading-6 text-zinc-400">
-                Dica: depois de adicionar as músicas, use os botões de configuração da lista para definir tom e nipe por música.
-              </div>
 
               {drawerOpen ? (
                 <div className="fixed inset-0 z-[60]">
