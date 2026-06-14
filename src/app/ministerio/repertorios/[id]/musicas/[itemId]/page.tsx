@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { ArrowLeft, Music2, Save, Users } from "lucide-react";
 
 import { MinistryShell, PremiumPanel } from "@/components/ministerio/ministry-ui";
+import { MinistrySubmitButton } from "@/components/ministerio/ministry-submit-button";
 import { getCurrentUserAccessContext, isMinistryManager } from "@/lib/auth/current-user";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -111,7 +112,7 @@ export default async function SongSettingsPage({ params, searchParams }: { param
 
   return (
     <MinistryShell>
-      <Link href={`/ministerio/repertorios/${repertoire.id}`} className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10">
+      <Link prefetch href={`/ministerio/repertorios/${repertoire.id}`} className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10">
         <ArrowLeft className="h-4 w-4" /> Voltar para escala
       </Link>
 
@@ -142,7 +143,7 @@ export default async function SongSettingsPage({ params, searchParams }: { param
               return <div key={row.member.id} className="rounded-3xl border border-white/10 bg-black/20 p-5"><input type="hidden" name="member_id" value={row.member.id} /><h3 className="text-lg font-semibold text-white">{memberLabel(row.member)}</h3><p className="mt-1 text-sm text-zinc-400">Nipe padrão da escala: {row.voice || "não definido"}</p><div className="mt-4 grid gap-3 md:grid-cols-2"><label><span className="text-sm font-semibold text-zinc-200">Nipe nesta música</span><select name={`voice_${row.member.id}`} defaultValue={defaultVoice} className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50">{VOICES.map(([value, text]) => <option key={value} value={value}>{text}</option>)}</select></label><label><span className="text-sm font-semibold text-zinc-200">Observação individual</span><input name={`notes_${row.member.id}`} defaultValue={defaultNotes} maxLength={300} placeholder="Ex.: entra no refrão" className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-cyan-300/50" /></label></div></div>;
             }) : <div className="rounded-3xl border border-dashed border-white/10 bg-black/20 p-8 text-center text-sm text-zinc-400">Adicione vocalistas na escala antes de configurar esta música.</div>}
           </div>
-          <button className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200"><Save className="h-4 w-4" /> Salvar configuração da música</button>
+          <MinistrySubmitButton pendingText="Salvando configuração..." className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200"><Save className="h-4 w-4" /> Salvar configuração da música</MinistrySubmitButton>
         </PremiumPanel>
       </form>
     </MinistryShell>
