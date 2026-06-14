@@ -26,10 +26,8 @@ export function MinistryRouteTransition({ href, className, children }: MinistryR
 
   useEffect(() => {
     if (!canPrefetch) return;
-    const id = window.requestIdleCallback?.(() => router.prefetch(href)) ?? window.setTimeout(() => router.prefetch(href), 80);
-    return () => {
-      if (typeof id === "number") window.clearTimeout(id);
-    };
+    const id = window.setTimeout(() => router.prefetch(href), 80);
+    return () => window.clearTimeout(id);
   }, [canPrefetch, href, router]);
 
   function prefetch() {
