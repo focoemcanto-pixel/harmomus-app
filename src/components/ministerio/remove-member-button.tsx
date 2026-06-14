@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { useRouter } from "next/navigation";
 import { Trash2, X } from "lucide-react";
 
 export function RemoveMemberButton({ memberId, memberName }: { memberId: string; memberName: string }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -36,16 +38,22 @@ export function RemoveMemberButton({ memberId, memberName }: { memberId: string;
       const response = await fetch("/api/ministerio/remove", {
         method: "POST",
         body: form,
-        redirect: "follow",
+        headers: {
+          Accept: "application/json",
+          "x-harmomus-action": "fetch",
+        },
       });
+      const data = await response.json().catch(() => ({}));
 
-      if (!response.ok) {
-        throw new Error("Não foi possível remover o integrante agora.");
+      if (!response.ok || data?.ok === false) {
+        throw new Error(data?.message || "Não foi possível remover o integrante agora.");
       }
 
-      window.location.href = response.url || "/ministerio";
+      setOpen(false);
+      router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível remover o integrante.");
+    } finally {
       setRemoving(false);
     }
   }
