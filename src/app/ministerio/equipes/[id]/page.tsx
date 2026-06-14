@@ -19,7 +19,6 @@ type TeamMember = { id: string; member_id: string; assigned_voice: string | null
 const VOICES = [["", "Sem definição"], ["lead", "Lead"], ["tenor", "Tenor"], ["contralto", "Contralto"], ["soprano", "Soprano"], ["baritono", "Barítono"], ["baixo", "Baixo"]] as const;
 
 function getMemberName(member?: MinistryMember | null) { return member?.invited_name || member?.invited_email || "Integrante"; }
-function getParam(value?: string | string[]) { return Array.isArray(value) ? value[0] ?? "" : value ?? ""; }
 function backPath(templateId: string, message?: string) { return `/ministerio/equipes/${templateId}${message ? `?message=${encodeURIComponent(message)}` : ""}`; }
 function voiceLabel(value?: string | null) { return VOICES.find(([key]) => key === (value ?? ""))?.[1] ?? "Sem definição"; }
 function voiceBadgeClass(value?: string | null) {
@@ -142,14 +141,13 @@ async function removeTeamMember(formData: FormData) {
 }
 
 export default async function MinistryTeamDetailPage({ params, searchParams }: { params: Promise<PageParams>; searchParams?: Promise<PageSearchParams> }) {
-  const [context, resolvedParams, resolvedSearchParams] = await Promise.all([getCurrentUserAccessContext(), params, searchParams ?? Promise.resolve({} as PageSearchParams)]);
+  const [context, resolvedParams] = await Promise.all([getCurrentUserAccessContext(), params, searchParams ?? Promise.resolve({} as PageSearchParams)]);
   if (context.isGuest) redirect("/login");
   if (!context.ministry) redirect("/assinatura");
   if (!isMinistryManager(context)) redirect("/");
 
   const admin = createSupabaseAdminClient() as any;
   const templateId = resolvedParams.id;
-  const message = getParam(resolvedSearchParams.message);
 
   const [{ data: template, error: templateError }, { data: members, error: membersError }, { data: teamMembers, error: teamMembersError }] = await Promise.all([
     admin.from("ministry_team_templates").select("id,name,description,coordinator_member_id").eq("id", templateId).eq("ministry_id", context.ministry.ministryId).eq("archived", false).maybeSingle(),
@@ -199,8 +197,6 @@ export default async function MinistryTeamDetailPage({ params, searchParams }: {
           {coordinator ? <span className="inline-flex items-center gap-2 rounded-full border border-amber-300/25 bg-amber-400/10 px-4 py-2 font-semibold text-amber-100"><Star className="h-4 w-4 fill-current" /> Coordenador vocal: {getMemberName(coordinator)}</span> : <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.05] px-4 py-2 text-zinc-300"><Star className="h-4 w-4" /> Sem coordenador vocal</span>}
         </div>
       </div>
-
-      {message ? <div className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-4 text-sm text-cyan-50">{message}</div> : null}
 
       <PremiumPanel>
         <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
