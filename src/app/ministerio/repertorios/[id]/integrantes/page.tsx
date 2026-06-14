@@ -71,7 +71,6 @@ async function saveAssignment(formData: FormData) {
 
   if (!member?.id) redirect(backPath(repertoireId, "Integrante inválido para este ministério."));
 
-  const now = new Date().toISOString();
   const { data: existing } = await admin
     .from("ministry_repertoire_assignments")
     .select("id")
@@ -83,19 +82,14 @@ async function saveAssignment(formData: FormData) {
   const payload = {
     repertoire_id: repertoireId,
     repertoire_item_id: null,
-    kit_id: null,
     member_id: memberId,
-    assigned_role: "vocal",
     assigned_voice: assignedVoice || null,
-    assigned_tone: null,
-    study_mode: "voice",
     notes: notes || null,
-    updated_at: now,
   };
 
   const response = existing?.id
     ? await admin.from("ministry_repertoire_assignments").update(payload).eq("id", existing.id)
-    : await admin.from("ministry_repertoire_assignments").insert({ ...payload, created_at: now });
+    : await admin.from("ministry_repertoire_assignments").insert(payload);
 
   if (response.error) redirect(backPath(repertoireId, response.error.message));
 
