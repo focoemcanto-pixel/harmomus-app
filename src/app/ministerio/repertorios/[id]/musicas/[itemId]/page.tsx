@@ -24,6 +24,11 @@ function backPath(repertoireId: string, itemId: string, message?: string) {
   return `/ministerio/repertorios/${repertoireId}/musicas/${itemId}${message ? `?message=${encodeURIComponent(message)}` : ""}`;
 }
 
+function isSchemaMissing(message?: string | null) {
+  const text = String(message ?? "").toLowerCase();
+  return text.includes("does not exist") || text.includes("schema cache") || text.includes("could not find") || text.includes("column");
+}
+
 function normalizeTone(value: string | null | undefined) {
   const raw = String(value ?? "").trim();
   if (!raw) return "";
@@ -51,6 +56,39 @@ async function assertAvailableTone(admin: any, kitId: string, tone: string): Pro
   return availableTones.includes(normalizedTone) ? normalizedTone : null;
 }
 
+async function saveItemToneAndNotes(admin: any, input: { repertoireId: string; itemId: string; tone: string; notes: string }) {
+  const payload = { key_override: input.tone || null, notes: input.notes || null };
+  const fallbackPayload = { key_override: input.tone || null };
+
+  const rich = await admin
+    .from("ministry_repertoire_items")
+    .update(payload)
+    .eq("id", input.itemId)
+    .eq("repertoire_id", input.repertoireId)
+    .select("id,key_override")
+    .maybeSingle();
+
+  if (!rich.error) return rich.data;
+
+  if (!isSchemaMissing(rich.error.message)) {
+    throw new Error(rich.error.message || "Não foi possível salvar o tom.");
+  }
+
+  const fallback = await admin
+    .from("ministry_repertoire_items")
+    .update(fallbackPayload)
+    .eq("id", input.itemId)
+    .eq("repertoire_id", input.repertoireId)
+    .select("id,key_override")
+    .maybeSingle();
+
+  if (fallback.error) {
+    throw new Error(fallback.error.message || "Não foi possível salvar o tom.");
+  }
+
+  return fallback.data;
+}
+
 async function saveSongSettings(formData: FormData) {
   "use server";
   const context = await getCurrentUserAccessContext();
@@ -74,7 +112,11 @@ async function saveSongSettings(formData: FormData) {
   const validatedTone = await assertAvailableTone(admin, item.kit_id, keyOverride);
   if (validatedTone === null) redirect(backPath(repertoireId, itemId, "Esse tom não está disponível neste kit. Solicite o tom desejado."));
 
-  await admin.from("ministry_repertoire_items").update({ key_override: validatedTone || null, notes: itemNotes || null }).eq("id", itemId).eq("repertoire_id", repertoireId);
+  try {
+    await saveItemToneAndNotes(admin, { repertoireId, itemId, tone: validatedTone, notes: itemNotes });
+  } catch (error) {
+    redirect(backPath(repertoireId, itemId, error instanceof Error ? error.message : "Não foi possível salvar o tom."));
+  }
 
   const memberIds = formData.getAll("member_id").map((value) => String(value).trim()).filter(Boolean);
   for (const memberId of memberIds) {
@@ -82,8 +124,14 @@ async function saveSongSettings(formData: FormData) {
     const notes = String(formData.get(`notes_${memberId}`) ?? "").trim();
     const { data: existing } = await admin.from("ministry_repertoire_assignments").select("id").eq("repertoire_id", repertoireId).eq("repertoire_item_id", itemId).eq("member_id", memberId).maybeSingle();
     const payload = { repertoire_id: repertoireId, repertoire_item_id: itemId, member_id: memberId, assigned_voice: assignedVoice || null, notes: notes || null };
-    if (existing?.id) await admin.from("ministry_repertoire_assignments").update(payload).eq("id", existing.id);
-    else await admin.from("ministry_repertoire_assignments").insert(payload);
+    const fallbackPayload = { repertoire_id: repertoireId, repertoire_item_id: itemId, member_id: memberId, assigned_voice: assignedVoice || null };
+    if (existing?.id) {
+      const result = await admin.from("ministry_repertoire_assignments").update(payload).eq("id", existing.id);
+      if (result.error && isSchemaMissing(result.error.message)) await admin.from("ministry_repertoire_assignments").update(fallbackPayload).eq("id", existing.id);
+    } else {
+      const result = await admin.from("ministry_repertoire_assignments").insert(payload);
+      if (result.error && isSchemaMissing(result.error.message)) await admin.from("ministry_repertoire_assignments").insert(fallbackPayload);
+    }
   }
 
   revalidatePath(`/ministerio/repertorios/${repertoireId}`);
@@ -148,8 +196,12 @@ export default async function SongSettingsPage({ params, searchParams }: { param
 
   let item = itemResult.data;
   if (itemResult.error) {
-    const fallback = await admin.from("ministry_repertoire_items").select("id,kit_id,position,kits(id,slug,name,artist,cover_url)").eq("id", resolvedParams.itemId).eq("repertoire_id", resolvedParams.id).maybeSingle();
-    item = fallback.data;
+    const fallbackWithTone = await admin.from("ministry_repertoire_items").select("id,kit_id,position,key_override,kits(id,slug,name,artist,cover_url)").eq("id", resolvedParams.itemId).eq("repertoire_id", resolvedParams.id).maybeSingle();
+    if (!fallbackWithTone.error) item = fallbackWithTone.data;
+    else {
+      const fallback = await admin.from("ministry_repertoire_items").select("id,kit_id,position,kits(id,slug,name,artist,cover_url)").eq("id", resolvedParams.itemId).eq("repertoire_id", resolvedParams.id).maybeSingle();
+      item = fallback.data;
+    }
   }
   if (!repertoire?.id || repertoire.archived || !item?.id) notFound();
 
