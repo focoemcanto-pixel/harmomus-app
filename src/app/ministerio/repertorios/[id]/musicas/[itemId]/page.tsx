@@ -183,18 +183,32 @@ export default async function SongSettingsPage({ params, searchParams }: { param
             <input type="hidden" name="item_id" value={item.id} />
             <p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Tom da música</p>
             <h2 className="mt-2 text-2xl font-semibold">Tom exibido para equipe</h2>
-            <p className="mt-2 text-sm leading-6 text-zinc-400">Selecione apenas um dos tons já disponíveis no kit.</p>
-            <label className="mt-6 block"><span className="text-sm font-semibold text-zinc-200">Tom definido</span><select name="key_override" defaultValue={selectedTone} disabled={!availableTones.length} className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50 disabled:cursor-not-allowed disabled:opacity-60"><option value="">{availableTones.length ? "Usar tom padrão do kit" : "Nenhum tom disponível neste kit"}</option>{availableTones.map((tone: string) => <option key={tone} value={tone}>{toneLabel(tone)}</option>)}</select></label>
-            <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.14em]">{availableTones.map((tone: string) => <span key={tone} className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1 text-cyan-100">{toneLabel(tone)}</span>)}</div>
+            <p className="mt-2 text-sm leading-6 text-zinc-400">Selecione um tom disponível no kit ou solicite um novo tom sem sair deste campo.</p>
+            <div className="mt-6 overflow-hidden rounded-3xl border border-white/10 bg-black/20">
+              <label className="block p-4">
+                <span className="text-sm font-semibold text-zinc-200">Tom definido</span>
+                <select name="key_override" defaultValue={selectedTone} disabled={!availableTones.length} className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50 disabled:cursor-not-allowed disabled:opacity-60">
+                  <option value="">{availableTones.length ? "Usar tom padrão do kit" : "Nenhum tom disponível neste kit"}</option>
+                  {availableTones.map((tone: string) => <option key={tone} value={tone}>{toneLabel(tone)}</option>)}
+                </select>
+              </label>
+              {availableTones.length ? <div className="border-t border-white/10 px-4 pb-4 pt-3"><p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Tons disponíveis</p><div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.14em]">{availableTones.map((tone: string) => <span key={tone} className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1 text-cyan-100">{toneLabel(tone)}</span>)}</div></div> : null}
+              <div className="border-t border-emerald-300/20 bg-emerald-400/10 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-100">Não achou o tom?</p>
+                <div className="mt-3 grid gap-2 md:grid-cols-[120px_1fr_auto]">
+                  <input form="request-tone-form" name="desired_tone" maxLength={40} placeholder="Ex.: D" className="rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-500 focus:border-emerald-300/50" />
+                  <input form="request-tone-form" name="tone_request_notes" maxLength={300} placeholder="Observação opcional" className="rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-500 focus:border-emerald-300/50" />
+                  <button form="request-tone-form" type="submit" className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-300 px-4 py-2 text-sm font-bold text-slate-950 transition hover:bg-emerald-200"><Send className="h-4 w-4" /> Solicitar</button>
+                </div>
+              </div>
+            </div>
             <label className="mt-4 block"><span className="text-sm font-semibold text-zinc-200">Observação da música</span><textarea name="item_notes" defaultValue={itemNotes ?? ""} rows={4} maxLength={600} placeholder="Ex.: Atenção à entrada da ponte." className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-cyan-300/50" /></label>
             <MinistrySubmitButton pendingText="Salvando..." className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200"><Save className="h-4 w-4" /> Salvar tom e observação</MinistrySubmitButton>
           </form>
 
-          <form action={requestSongTone} className="mt-4 rounded-2xl border border-emerald-300/20 bg-emerald-400/10 p-3">
+          <form id="request-tone-form" action={requestSongTone}>
             <input type="hidden" name="repertoire_id" value={repertoire.id} />
             <input type="hidden" name="item_id" value={item.id} />
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-100">Solicitar tom</p>
-            <div className="mt-2 grid gap-2 md:grid-cols-[120px_1fr_auto]"><input name="desired_tone" maxLength={40} placeholder="Ex.: D" className="rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-500 focus:border-emerald-300/50" /><input name="tone_request_notes" maxLength={300} placeholder="Observação opcional" className="rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-500 focus:border-emerald-300/50" /><MinistrySubmitButton pendingText="Enviando..." className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-300 px-4 py-2 text-sm font-bold text-slate-950 transition hover:bg-emerald-200"><Send className="h-4 w-4" /> Solicitar</MinistrySubmitButton></div>
           </form>
         </PremiumPanel>
 
