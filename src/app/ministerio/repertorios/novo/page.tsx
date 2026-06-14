@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { ArrowLeft, CalendarDays, Save } from "lucide-react";
 
 import { MinistryShell, PremiumPanel } from "@/components/ministerio/ministry-ui";
+import { MinistrySubmitButton } from "@/components/ministerio/ministry-submit-button";
 import { getActivityActorName, logMinistryActivity } from "@/lib/data/ministry-activity";
 import { getCurrentUserAccessContext, isMinistryManager } from "@/lib/auth/current-user";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -75,7 +76,7 @@ export default async function NovoRepertorioPage({ searchParams }: { searchParam
 
   return (
     <MinistryShell>
-      <Link href="/ministerio/repertorios" className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10"><ArrowLeft className="h-4 w-4" /> Voltar para escalas</Link>
+      <Link prefetch href="/ministerio/repertorios" className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10"><ArrowLeft className="h-4 w-4" /> Voltar para escalas</Link>
       <PremiumPanel>
         <div className="grid gap-8 lg:grid-cols-[0.9fr_1.1fr]"><div><div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/25 bg-cyan-400/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100"><CalendarDays className="h-4 w-4" /> Nova escala ministerial</div><h1 className="mt-5 text-3xl font-semibold tracking-tight md:text-5xl">Monte uma escala completa</h1><p className="mt-3 max-w-xl text-sm leading-6 text-zinc-300 md:text-base">Crie a escala do culto, selecione uma equipe pronta e defina o coordenador vocal.</p></div>
           <form action={createScale} className="rounded-[2rem] border border-white/10 bg-black/20 p-5 md:p-6">
@@ -86,7 +87,7 @@ export default async function NovoRepertorioPage({ searchParams }: { searchParam
             <label className="mt-5 block"><span className="text-sm font-semibold text-zinc-200">Coordenador vocal</span><select name="coordinator_member_id" className="mt-2 w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50"><option value="">Usar coordenador do template ou definir depois</option>{(members ?? []).map((member: any) => <option key={member.id} value={member.id}>{memberLabel(member)}</option>)}</select></label>
             <label className="mt-5 block"><span className="text-sm font-semibold text-zinc-200">Descrição</span><textarea name="description" rows={3} maxLength={500} placeholder="Ex.: Louvor da manhã, ensaio quinta-feira às 19h." className="mt-2 w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-cyan-300/50" /></label>
             <label className="mt-5 block"><span className="text-sm font-semibold text-zinc-200">Observação geral da escala</span><textarea name="general_notes" rows={3} maxLength={700} placeholder="Ex.: Coordenador deve revisar entradas e liberar estudo até sexta." className="mt-2 w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-cyan-300/50" /></label>
-            <div className="mt-6 flex flex-wrap justify-end gap-3 border-t border-white/10 pt-5"><Link href="/ministerio/repertorios" className="rounded-2xl border border-white/10 px-5 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10">Cancelar</Link><button className="inline-flex items-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200"><Save className="h-4 w-4" /> Salvar escala</button></div>
+            <div className="mt-6 flex flex-wrap justify-end gap-3 border-t border-white/10 pt-5"><Link href="/ministerio/repertorios" className="rounded-2xl border border-white/10 px-5 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10">Cancelar</Link><MinistrySubmitButton pendingText="Salvando escala..." className="inline-flex items-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200"><Save className="h-4 w-4" /> Salvar escala</MinistrySubmitButton></div>
           </form></div>
       </PremiumPanel>
     </MinistryShell>
