@@ -4,7 +4,12 @@ import { getCurrentUserAccessContext, isMinistryOwner } from "@/lib/auth/current
 import { getActivityActorName, logMinistryActivity } from "@/lib/data/ministry-activity";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
-function redirectToMinisterio(request: Request, message?: string) {
+function wantsJson(request: Request) {
+  return request.headers.get("x-harmomus-action") === "fetch" || request.headers.get("accept")?.includes("application/json");
+}
+
+function ministryResponse(request: Request, message: string, status = 200) {
+  if (wantsJson(request)) return NextResponse.json({ ok: status < 400, message }, { status });
   const url = new URL("/ministerio", request.url);
   if (message) url.searchParams.set("message", message);
   url.hash = "integrantes";
@@ -20,11 +25,11 @@ export async function POST(request: Request) {
   const context = await getCurrentUserAccessContext();
 
   if (!context.profile?.id || !context.ministry) {
-    return redirectToMinisterio(request, "Faça login para alterar permissões.");
+    return ministryResponse(request, "Faça login para alterar permissões.", 401);
   }
 
   if (!isMinistryOwner(context)) {
-    return redirectToMinisterio(request, "Apenas o responsável do ministério pode alterar permissões.");
+    return ministryResponse(request, "Apenas o responsável do ministério pode alterar permissões.", 403);
   }
 
   const form = await request.formData();
@@ -32,7 +37,7 @@ export async function POST(request: Request) {
   const role = String(form.get("role") ?? "").trim().toLowerCase();
 
   if (!memberId || !["admin", "member"].includes(role)) {
-    return redirectToMinisterio(request, "Permissão inválida.");
+    return ministryResponse(request, "Permissão inválida.", 400);
   }
 
   const admin = createSupabaseAdminClient() as any;
@@ -44,19 +49,19 @@ export async function POST(request: Request) {
     .maybeSingle();
 
   if (memberError) {
-    return redirectToMinisterio(request, memberError.message || "Não foi possível localizar o integrante.");
+    return ministryResponse(request, memberError.message || "Não foi possível localizar o integrante.", 500);
   }
 
   if (!member?.id) {
-    return redirectToMinisterio(request, "Integrante não encontrado neste ministério.");
+    return ministryResponse(request, "Integrante não encontrado neste ministério.", 404);
   }
 
   if (String(member.role) === "owner") {
-    return redirectToMinisterio(request, "Não é permitido alterar o responsável do ministério.");
+    return ministryResponse(request, "Não é permitido alterar o responsável do ministério.", 409);
   }
 
   if (String(member.status) === "removed") {
-    return redirectToMinisterio(request, "Não é permitido alterar integrante arquivado.");
+    return ministryResponse(request, "Não é permitido alterar integrante arquivado.", 409);
   }
 
   const { data: memberProfile } = member.user_id
@@ -65,7 +70,7 @@ export async function POST(request: Request) {
 
   const previousRole = String(member.role ?? "member").toLowerCase();
   if (previousRole === role || (previousRole === "manager" && role === "admin")) {
-    return redirectToMinisterio(request, "Permissão atualizada com sucesso");
+    return ministryResponse(request, "Permissão atualizada com sucesso");
   }
 
   const now = new Date().toISOString();
@@ -76,7 +81,7 @@ export async function POST(request: Request) {
     .eq("ministry_id", context.ministry.ministryId);
 
   if (updateError) {
-    return redirectToMinisterio(request, updateError.message || "Não foi possível atualizar a permissão.");
+    return ministryResponse(request, updateError.message || "Não foi possível atualizar a permissão.", 500);
   }
 
   const actorName = getActivityActorName(context.profile);
@@ -101,5 +106,5 @@ export async function POST(request: Request) {
     },
   });
 
-  return redirectToMinisterio(request, "Permissão atualizada com sucesso");
+  return ministryResponse(request, "Permissão atualizada com sucesso");
 }
