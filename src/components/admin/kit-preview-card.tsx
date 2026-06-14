@@ -42,6 +42,13 @@ function buildBars(seed: string) {
   });
 }
 
+function protectAudioElement(audio: HTMLAudioElement | null) {
+  if (!audio) return;
+  audio.setAttribute("controlsList", "nodownload noplaybackrate");
+  audio.setAttribute("disableRemotePlayback", "true");
+  audio.setAttribute("oncontextmenu", "return false");
+}
+
 export function KitPreviewCard({ audioFiles, initialAudioFileId, initialStartSeconds, initialDurationSeconds, action }: KitPreviewCardProps) {
   const fallbackFile = audioFiles.find((file) => String(file.name ?? "").toLowerCase().includes("todos")) ?? audioFiles[0] ?? null;
   const [audioFileId, setAudioFileId] = useState(initialAudioFileId || fallbackFile?.id || "");
@@ -71,12 +78,17 @@ export function KitPreviewCard({ audioFiles, initialAudioFileId, initialStartSec
   }, [startSeconds, audioFileId]);
 
   useEffect(() => {
+    protectAudioElement(audioRef.current);
     return () => {
       if (stopTimerRef.current) window.clearTimeout(stopTimerRef.current);
       if (rafRef.current) window.cancelAnimationFrame(rafRef.current);
       audioRef.current?.pause();
     };
   }, []);
+
+  useEffect(() => {
+    protectAudioElement(audioRef.current);
+  }, [audioFileId]);
 
   function clearPreviewTimer() {
     if (stopTimerRef.current) window.clearTimeout(stopTimerRef.current);
@@ -128,6 +140,7 @@ export function KitPreviewCard({ audioFiles, initialAudioFileId, initialStartSec
   async function playPreview() {
     const audio = audioRef.current;
     if (!audio || !audioFileId) return;
+    protectAudioElement(audio);
 
     clearPreviewTimer();
     audio.pause();
@@ -183,7 +196,7 @@ export function KitPreviewCard({ audioFiles, initialAudioFileId, initialStartSec
             </select>
           </label>
 
-          <audio ref={audioRef} src={audioFileId ? `/api/audio/${audioFileId}` : undefined} preload="metadata" controlsList="nodownload noplaybackrate" disableRemotePlayback onContextMenu={(event) => event.preventDefault()} onLoadedMetadata={(event) => { const duration = Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 180; setAudioDuration(duration); setPlayheadSeconds(startSeconds); }} onTimeUpdate={(event) => { if (isPlaying) setPlayheadSeconds(event.currentTarget.currentTime); }} onEnded={() => { stopPreview(true); }} />
+          <audio ref={audioRef} src={audioFileId ? `/api/audio/${audioFileId}` : undefined} preload="metadata" controlsList="nodownload noplaybackrate" onContextMenu={(event) => event.preventDefault()} onLoadedMetadata={(event) => { protectAudioElement(event.currentTarget); const duration = Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 180; setAudioDuration(duration); setPlayheadSeconds(startSeconds); }} onTimeUpdate={(event) => { if (isPlaying) setPlayheadSeconds(event.currentTarget.currentTime); }} onEnded={() => { stopPreview(true); }} />
 
           <div>
             <div ref={scrubberRef} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} className="relative flex h-28 touch-none cursor-ew-resize items-center gap-1 overflow-hidden rounded-2xl border border-white/10 bg-black/35 px-4">
