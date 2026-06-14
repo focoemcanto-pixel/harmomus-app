@@ -57,16 +57,15 @@ function storePreferences(volume: number, loop: boolean) {
   } catch {}
 }
 
+function protectAudioElement(audio: HTMLAudioElement) {
+  audio.setAttribute("controlsList", "nodownload noplaybackrate");
+  audio.setAttribute("disableRemotePlayback", "true");
+  audio.setAttribute("oncontextmenu", "return false");
+}
+
 function getTrackIdentity(track: GlobalTrack | null | undefined) {
   if (!track) return "";
-  return [
-    track.trackId || track.src,
-    track.src,
-    track.title,
-    track.voice ?? "todos",
-    track.tone ?? "unknown",
-    String(track.semitoneShift ?? 0),
-  ].join("::");
+  return [track.trackId || track.src, track.src, track.title, track.voice ?? "todos", track.tone ?? "unknown", String(track.semitoneShift ?? 0)].join("::");
 }
 
 function isSameTrack(a: GlobalTrack | null, b: GlobalTrack) {
@@ -116,6 +115,7 @@ function createAudioElement(preload: "metadata" | "auto") {
   const audio = new Audio();
   audio.preload = preload;
   audio.setAttribute("playsinline", "true");
+  protectAudioElement(audio);
   return audio;
 }
 
@@ -157,16 +157,7 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
 
   function logDev(message: string, extra?: Record<string, unknown>) {
     if (!isDev) return;
-    console.info(`[GlobalAudioPlayer] ${message}`, {
-      sessionId: currentPlaybackSessionIdRef.current,
-      activePitchController: Boolean(pitchControllerRef.current),
-      activePlaybackKey: activePlaybackKeyRef.current,
-      identity: getTrackIdentity(trackRef.current),
-      voice: trackRef.current?.voice ?? null,
-      tone: trackRef.current?.tone ?? null,
-      shift: trackRef.current?.semitoneShift ?? 0,
-      ...extra,
-    });
+    console.info(`[GlobalAudioPlayer] ${message}`, { sessionId: currentPlaybackSessionIdRef.current, activePitchController: Boolean(pitchControllerRef.current), activePlaybackKey: activePlaybackKeyRef.current, identity: getTrackIdentity(trackRef.current), voice: trackRef.current?.voice ?? null, tone: trackRef.current?.tone ?? null, shift: trackRef.current?.semitoneShift ?? 0, ...extra });
   }
 
   function stopPlayback() {
@@ -174,25 +165,14 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
     currentPlaybackSessionIdRef.current += 1;
     currentPlaybackAbortControllerRef.current?.abort("stop-playback::abort");
     currentPlaybackAbortControllerRef.current = null;
-
-    try {
-      pitchControllerRef.current?.dispose();
-    } catch {}
+    try { pitchControllerRef.current?.dispose(); } catch {}
     pitchControllerRef.current = null;
-
     const audio = audioRef.current;
     if (audio) {
-      try {
-        audio.pause();
-      } catch {}
-      try {
-        audio.currentTime = 0;
-      } catch {}
-      try {
-        audio.currentTime = 0;
-      } catch {}
+      try { audio.pause(); } catch {}
+      try { audio.currentTime = 0; } catch {}
+      try { audio.currentTime = 0; } catch {}
     }
-
     activePlaybackKeyRef.current = null;
     setActiveTrack(null);
     setIsPlaying(false);
@@ -206,27 +186,15 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
   async function fullyDisposeEngine() {
     const audio = audioRef.current;
     const preloadAudio = preloadAudioRef.current;
-
-    try {
-      pitchControllerRef.current?.dispose();
-    } catch {}
+    try { pitchControllerRef.current?.dispose(); } catch {}
     pitchControllerRef.current = null;
-
     if (audio) {
-      try {
-        audio.pause();
-      } catch {}
-      try {
-        audio.currentTime = 0;
-      } catch {}
+      try { audio.pause(); } catch {}
+      try { audio.currentTime = 0; } catch {}
     }
-
     if (preloadAudio) {
-      try {
-        preloadAudio.pause();
-      } catch {}
+      try { preloadAudio.pause(); } catch {}
     }
-
     activePlaybackKeyRef.current = null;
     setIsPlaying(false);
     logDev("engine cleanup complete");
@@ -247,9 +215,11 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
     setLoop(prefs.loop);
     loopRef.current = prefs.loop;
     if (audioRef.current) {
+      protectAudioElement(audioRef.current);
       audioRef.current.volume = prefs.volume;
       audioRef.current.loop = prefs.loop;
     }
+    if (preloadAudioRef.current) protectAudioElement(preloadAudioRef.current);
   }, []);
 
   useEffect(() => {
@@ -264,7 +234,6 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
     const preloadKey = getTrackIdentity(nextTrack);
     if (!nextTrack.src || isSameTrack(trackRef.current, nextTrack) || preloadedSrc === preloadKey) return;
     if ((nextTrack.semitoneShift ?? 0) !== 0) return;
-
     try {
       let preloadAudio = audioCacheRef.current.get(preloadKey);
       if (!preloadAudio) {
@@ -272,13 +241,12 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
         preloadAudio.src = nextTrack.src;
         audioCacheRef.current.set(preloadKey, preloadAudio);
       }
+      protectAudioElement(preloadAudio);
       preloadAudio.preload = mode;
       preloadAudioRef.current = preloadAudio;
       preloadAudio.load();
       setPreloadedSrc(preloadKey);
-    } catch {
-      setPreloadedSrc(null);
-    }
+    } catch { setPreloadedSrc(null); }
   }
 
   async function playTrack(nextTrack: GlobalTrack) {
@@ -291,29 +259,24 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
     return enqueueOperation(async () => {
       let audio = audioRef.current;
       if (!audio) return;
+      protectAudioElement(audio);
       if (requestId !== latestPlayRequestIdRef.current) return;
-
       const semitoneShift = nextTrack.semitoneShift ?? 0;
       const sourceId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-
       try {
         setErrorMessage(null);
         setHasEnded(false);
-
         if (!isSameTrack(trackRef.current, nextTrack)) {
-          if (trackRef.current || activePlaybackKeyRef.current || isPlaying) {
-            await invalidateCurrentPlayback("track-change");
-          }
+          if (trackRef.current || activePlaybackKeyRef.current || isPlaying) await invalidateCurrentPlayback("track-change");
           if (requestId !== latestPlayRequestIdRef.current) return;
         }
-
         setActiveTrack(nextTrack);
         activePlaybackKeyRef.current = targetIdentity;
         setCurrentTime(0);
         setDuration(0);
-
         const cachedAudio = semitoneShift === 0 ? audioCacheRef.current.get(targetIdentity) : null;
         if (cachedAudio) {
+          protectAudioElement(cachedAudio);
           audio = cachedAudio;
           audioRef.current = cachedAudio;
           if (preloadedSrc === targetIdentity) setPreloadedSrc(null);
@@ -321,10 +284,10 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
           audio.src = nextTrack.src;
           if (semitoneShift === 0) audioCacheRef.current.set(targetIdentity, audio);
         }
+        protectAudioElement(audio);
         audio.preload = "auto";
         audio.volume = volumeRef.current;
         audio.loop = loopRef.current;
-
         metric.fetchStartAt = nowPerf();
         logPlaybackMetric(metric, "FETCH_AUDIO_START");
         const onCanPlay = () => {
@@ -346,32 +309,17 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
         audio.addEventListener("canplay", onCanPlay, { once: true });
         audio.addEventListener("playing", onPlaying, { once: true });
         audio.load();
-
         const abortController = new AbortController();
         currentPlaybackAbortControllerRef.current = abortController;
         const sessionId = currentPlaybackSessionIdRef.current;
-
-        logDev("building fresh playback pipeline", {
-          identity: targetIdentity,
-          sourceId,
-          voice: nextTrack.voice ?? null,
-          tone: nextTrack.tone ?? null,
-          shift: semitoneShift,
-          sessionId,
-        });
-
-        if (semitoneShift === 0) {
-          await audio.play();
-        } else {
+        logDev("building fresh playback pipeline", { identity: targetIdentity, sourceId, voice: nextTrack.voice ?? null, tone: nextTrack.tone ?? null, shift: semitoneShift, sessionId });
+        if (semitoneShift === 0) await audio.play();
+        else {
           const controller = await getPitchEngine().createPlayback({ audio, semitoneShift, signal: abortController.signal });
-          if (abortController.signal.aborted || sessionId !== currentPlaybackSessionIdRef.current || requestId !== latestPlayRequestIdRef.current || targetIdentity !== getTrackIdentity(trackRef.current)) {
-            controller.dispose();
-            return;
-          }
+          if (abortController.signal.aborted || sessionId !== currentPlaybackSessionIdRef.current || requestId !== latestPlayRequestIdRef.current || targetIdentity !== getTrackIdentity(trackRef.current)) { controller.dispose(); return; }
           pitchControllerRef.current = controller;
           await controller.play();
         }
-
         if (requestId !== latestPlayRequestIdRef.current || targetIdentity !== getTrackIdentity(trackRef.current)) return;
         setIsPlaying(true);
         logDev("source loaded", { identity: targetIdentity, sourceId, src: nextTrack.src, semitoneShift, sessionId });
@@ -388,114 +336,30 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
     const currentTrack = trackRef.current;
     const audio = audioRef.current;
     if (!audio || !currentTrack?.src) return;
-
     if (isPlaying) {
       currentPlaybackAbortControllerRef.current?.abort("pause::abort");
-      try {
-        pitchControllerRef.current?.pause();
-      } catch {}
+      try { pitchControllerRef.current?.pause(); } catch {}
       audio.pause();
       setIsPlaying(false);
       return;
     }
-
     await playTrack(currentTrack);
   }
 
-  async function replay() {
-    const currentTrack = trackRef.current;
-    if (!currentTrack) return;
-    await playTrack(currentTrack);
-  }
+  async function replay() { const currentTrack = trackRef.current; if (currentTrack) await playTrack(currentTrack); }
+  function seekTo(seconds: number) { const audio = audioRef.current; if (!audio) return; if ((trackRef.current?.semitoneShift ?? 0) !== 0) { setErrorMessage("Busca manual ainda não está disponível em áudio modulado."); return; } const next = Math.max(0, Math.min(seconds, duration || seconds)); audio.currentTime = next; setCurrentTime(next); if (hasEnded && next < duration) setHasEnded(false); }
+  function skipBy(seconds: number) { const audio = audioRef.current; if (!audio) return; seekTo(audio.currentTime + seconds); }
+  function setVolumeValue(value: number) { const next = Math.max(0, Math.min(value, 1)); setVolume(next); volumeRef.current = next; if (audioRef.current) audioRef.current.volume = next; storePreferences(next, loopRef.current); }
+  function setLoopValue(value: boolean) { setLoop(value); loopRef.current = value; if (audioRef.current) audioRef.current.loop = value; storePreferences(volumeRef.current, value); }
+  async function closePlayer() { stopPlayback(); return enqueueOperation(async () => { await invalidateCurrentPlayback("close-player"); setActiveTrack(null); setCurrentTime(0); setDuration(0); setHasEnded(false); setErrorMessage(null); }); }
 
-  function seekTo(seconds: number) {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if ((trackRef.current?.semitoneShift ?? 0) !== 0) {
-      setErrorMessage("Busca manual ainda não está disponível em áudio modulado.");
-      return;
-    }
-
-    const next = Math.max(0, Math.min(seconds, duration || seconds));
-    audio.currentTime = next;
-    setCurrentTime(next);
-    if (hasEnded && next < duration) setHasEnded(false);
-  }
-
-  function skipBy(seconds: number) {
-    const audio = audioRef.current;
-    if (!audio) return;
-    seekTo(audio.currentTime + seconds);
-  }
-
-  function setVolumeValue(value: number) {
-    const next = Math.max(0, Math.min(value, 1));
-    setVolume(next);
-    volumeRef.current = next;
-    if (audioRef.current) audioRef.current.volume = next;
-    storePreferences(next, loopRef.current);
-  }
-
-  function setLoopValue(value: boolean) {
-    setLoop(value);
-    loopRef.current = value;
-    if (audioRef.current) audioRef.current.loop = value;
-    storePreferences(volumeRef.current, value);
-  }
-
-  async function closePlayer() {
-    stopPlayback();
-    return enqueueOperation(async () => {
-      await invalidateCurrentPlayback("close-player");
-      setActiveTrack(null);
-      setCurrentTime(0);
-      setDuration(0);
-      setHasEnded(false);
-      setErrorMessage(null);
-    });
-  }
-
-  const value = useMemo<GlobalAudioPlayerContextValue>(() => ({
-    audioRef,
-    track,
-    isPlaying,
-    currentTime,
-    duration,
-    volume,
-    loop,
-    hasEnded,
-    errorMessage,
-    preloadedSrc,
-    preloadTrack,
-    playTrack,
-    togglePlay,
-    replay,
-    seekTo,
-    skipBy,
-    setVolumeValue,
-    setLoopValue,
-    stopPlayback,
-    closePlayer,
-  }), [track, isPlaying, currentTime, duration, volume, loop, hasEnded, errorMessage, preloadedSrc]);
+  const value = useMemo<GlobalAudioPlayerContextValue>(() => ({ audioRef, track, isPlaying, currentTime, duration, volume, loop, hasEnded, errorMessage, preloadedSrc, preloadTrack, playTrack, togglePlay, replay, seekTo, skipBy, setVolumeValue, setLoopValue, stopPlayback, closePlayer }), [track, isPlaying, currentTime, duration, volume, loop, hasEnded, errorMessage, preloadedSrc]);
 
   return (
     <GlobalAudioPlayerContext.Provider value={value}>
       {children}
-      <audio
-        ref={audioRef}
-        preload="auto"
-        onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
-        onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
-        onPause={() => setIsPlaying(false)}
-        onPlay={() => setIsPlaying(true)}
-        onEnded={() => {
-          setIsPlaying(false);
-          if (!loopRef.current) setHasEnded(true);
-        }}
-        onError={() => setErrorMessage("Áudio indisponível ou acesso negado.")}
-        className="hidden"
-      />
-      <audio ref={preloadAudioRef} preload="auto" className="hidden" aria-hidden="true" />
+      <audio ref={audioRef} preload="auto" controlsList="nodownload noplaybackrate" disableRemotePlayback onContextMenu={(event) => event.preventDefault()} onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)} onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)} onPause={() => setIsPlaying(false)} onPlay={() => setIsPlaying(true)} onEnded={() => { setIsPlaying(false); if (!loopRef.current) setHasEnded(true); }} onError={() => setErrorMessage("Áudio indisponível ou acesso negado.")} className="hidden" />
+      <audio ref={preloadAudioRef} preload="auto" controlsList="nodownload noplaybackrate" disableRemotePlayback onContextMenu={(event) => event.preventDefault()} className="hidden" aria-hidden="true" />
     </GlobalAudioPlayerContext.Provider>
   );
 }
