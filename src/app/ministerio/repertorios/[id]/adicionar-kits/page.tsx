@@ -138,7 +138,6 @@ export default async function AddKitsToRepertoirePage({ params, searchParams }: 
 
   const admin = createSupabaseAdminClient() as any;
   const query = sanitizeSearchTerm(getParamValue(resolvedSearchParams.q));
-  const message = getParamValue(resolvedSearchParams.message);
 
   const { data: repertoire, error: repertoireError } = await admin
     .from("ministry_repertoires")
@@ -210,12 +209,6 @@ export default async function AddKitsToRepertoirePage({ params, searchParams }: 
             Buscar
           </MinistrySubmitButton>
         </form>
-
-        {message ? (
-          <div className="mt-5 rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-4 text-sm text-cyan-50">
-            {message}
-          </div>
-        ) : null}
 
         <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {rows.map((kit) => {
