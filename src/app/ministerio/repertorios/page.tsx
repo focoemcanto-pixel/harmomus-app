@@ -11,139 +11,16 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type RepertoireRow = {
-  id: string;
-  name: string;
-  description: string | null;
-  event_date: string | null;
-  created_at: string;
-  ministry_repertoire_items?: { id: string }[];
-};
+type RepertoireRow = { id: string; name: string; description: string | null; event_date: string | null; created_at: string; ministry_repertoire_items?: { id: string }[] };
 
 export default async function MinisterioRepertoriosPage() {
   const context = await getCurrentUserAccessContext();
-
   if (context.isGuest) redirect("/login");
   if (!context.ministry) redirect("/assinatura");
-
   const canManage = isMinistryManager(context);
   const admin = createSupabaseAdminClient() as any;
-
-  const { data: repertoires, error } = await admin
-    .from("ministry_repertoires")
-    .select("id,name,description,event_date,created_at,ministry_repertoire_items(id)")
-    .eq("ministry_id", context.ministry.ministryId)
-    .eq("archived", false)
-    .order("event_date", { ascending: true, nullsFirst: false })
-    .order("created_at", { ascending: false });
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
+  const { data: repertoires, error } = await admin.from("ministry_repertoires").select("id,name,description,event_date,created_at,ministry_repertoire_items(id)").eq("ministry_id", context.ministry.ministryId).eq("archived", false).order("event_date", { ascending: true, nullsFirst: false }).order("created_at", { ascending: false });
+  if (error) throw new Error(error.message);
   const rows = (repertoires ?? []) as RepertoireRow[];
-
-  return (
-    <MinistryShell>
-      <div className="overflow-hidden rounded-[2rem] border border-cyan-300/20 bg-gradient-to-br from-[#0b1120]/95 via-[#140d27]/95 to-[#06111f]/95 p-6 shadow-[0_30px_100px_rgba(34,211,238,0.16)] md:p-10">
-        <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/25 bg-cyan-400/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100">
-              <ListMusic className="h-4 w-4" /> Minha Escala
-            </div>
-            <h1 className="mt-5 text-3xl font-semibold tracking-tight md:text-5xl">Escalas e cultos compartilhados</h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-300 md:text-base">
-              Acompanhe os repertórios como playlists ministeriais para cultos, eventos, conferências e ensaios.
-            </p>
-          </div>
-          {canManage ? (
-            <MinistryRouteTransition
-              href="/ministerio/repertorios/novo"
-              className="inline-flex w-fit items-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200 data-[pending=true]:bg-cyan-200"
-            >
-              <Plus className="h-4 w-4" /> Nova escala
-            </MinistryRouteTransition>
-          ) : null}
-        </div>
-      </div>
-
-      <PremiumPanel>
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Lista</p>
-            <h2 className="mt-2 text-2xl font-semibold">Escalas ativas</h2>
-            <p className="mt-1 text-sm text-zinc-400">
-              {canManage
-                ? "Os integrantes verão estas escalas como playlists para estudar as músicas definidas pelo responsável."
-                : "Estas são as escalas e cultos compartilhados pelo responsável do seu ministério."}
-            </p>
-          </div>
-          <span className="inline-flex w-fit rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-zinc-300">
-            {rows.length} escala{rows.length === 1 ? "" : "s"}
-          </span>
-        </div>
-
-        {rows.length ? (
-          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {rows.map((repertoire) => {
-              const kitCount = repertoire.ministry_repertoire_items?.length ?? 0;
-              return (
-                <article
-                  key={repertoire.id}
-                  className="group rounded-3xl border border-white/10 bg-black/20 p-5 transition hover:-translate-y-0.5 hover:border-cyan-300/35 hover:bg-white/[0.06]"
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-3 text-cyan-100">
-                      <Music2 className="h-5 w-5" />
-                    </div>
-                    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-zinc-300">
-                      {kitCount} música{kitCount === 1 ? "" : "s"}
-                    </span>
-                  </div>
-                  <h3 className="mt-5 text-xl font-semibold text-white group-hover:text-cyan-100">{repertoire.name}</h3>
-                  {repertoire.description ? <p className="mt-2 line-clamp-2 text-sm leading-6 text-zinc-400">{repertoire.description}</p> : null}
-                  <div className="mt-5 grid gap-2 text-xs text-zinc-400">
-                    <div className="flex items-center gap-2">
-                      <CalendarDays className="h-4 w-4" />
-                      <span>Data: {repertoire.event_date ? formatDate(repertoire.event_date) : formatDate(repertoire.created_at)}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Music2 className="h-4 w-4" />
-                      <span>Quantidade de músicas: {kitCount}</span>
-                    </div>
-                  </div>
-                  <div className="mt-5 grid gap-2">
-                    <MinistryRouteTransition
-                      href={`/ministerio/repertorios/${repertoire.id}`}
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-4 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200 data-[pending=true]:bg-cyan-200"
-                    >
-                      Abrir escala <ArrowRight className="h-4 w-4" />
-                    </MinistryRouteTransition>
-                    {canManage ? <DeleteScaleButton repertoireId={repertoire.id} /> : null}
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="mt-6 rounded-3xl border border-dashed border-white/10 bg-black/20 p-10 text-center">
-            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-400/10 text-cyan-100">
-              <ListMusic className="h-7 w-7" />
-            </div>
-            <h3 className="mt-5 text-2xl font-semibold text-white">Nenhuma escala criada ainda</h3>
-            <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-zinc-400">
-              {canManage
-                ? "Crie a primeira escala para organizar as músicas que sua equipe precisa estudar."
-                : "Quando o responsável do ministério criar escalas, elas aparecerão aqui."}
-            </p>
-            {canManage ? (
-              <MinistryRouteTransition href="/ministerio/repertorios/novo" className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200 data-[pending=true]:bg-cyan-200">
-                <Plus className="h-4 w-4" /> Criar primeira escala
-              </MinistryRouteTransition>
-            ) : null}
-          </div>
-        )}
-      </PremiumPanel>
-    </MinistryShell>
-  );
+  return <MinistryShell><div className="overflow-hidden rounded-[2rem] border border-cyan-300/20 bg-gradient-to-br from-[#0b1120]/95 via-[#140d27]/95 to-[#06111f]/95 p-6 shadow-[0_30px_100px_rgba(34,211,238,0.16)] md:p-10"><div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between"><div><div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/25 bg-cyan-400/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100"><ListMusic className="h-4 w-4" /> Minha Escala</div><h1 className="mt-5 text-3xl font-semibold tracking-tight md:text-5xl">Escalas e cultos compartilhados</h1><p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-300 md:text-base">Acompanhe os repertórios como playlists ministeriais para cultos, eventos, conferências e ensaios.</p></div>{canManage ? <div className="flex flex-wrap gap-2"><MinistryRouteTransition href="/ministerio/repertorios/calendario" className="inline-flex w-fit items-center gap-2 rounded-2xl border border-cyan-300/25 bg-cyan-400/10 px-5 py-3 text-sm font-bold text-cyan-100 transition hover:bg-cyan-400/20 data-[pending=true]:bg-cyan-400/20"><CalendarDays className="h-4 w-4" /> Programar calendário</MinistryRouteTransition><MinistryRouteTransition href="/ministerio/repertorios/novo" className="inline-flex w-fit items-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200 data-[pending=true]:bg-cyan-200"><Plus className="h-4 w-4" /> Nova escala</MinistryRouteTransition></div> : null}</div></div><PremiumPanel><div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"><div><p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Lista</p><h2 className="mt-2 text-2xl font-semibold">Escalas ativas</h2><p className="mt-1 text-sm text-zinc-400">{canManage ? "Os integrantes verão estas escalas como playlists para estudar as músicas definidas pelo responsável." : "Estas são as escalas e cultos compartilhados pelo responsável do seu ministério."}</p></div><span className="inline-flex w-fit rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-zinc-300">{rows.length} escala{rows.length === 1 ? "" : "s"}</span></div>{rows.length ? <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{rows.map((repertoire) => { const kitCount = repertoire.ministry_repertoire_items?.length ?? 0; return <article key={repertoire.id} className="group rounded-3xl border border-white/10 bg-black/20 p-5 transition hover:-translate-y-0.5 hover:border-cyan-300/35 hover:bg-white/[0.06]"><div className="flex items-start justify-between gap-4"><div className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-3 text-cyan-100"><Music2 className="h-5 w-5" /></div><span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-zinc-300">{kitCount} música{kitCount === 1 ? "" : "s"}</span></div><h3 className="mt-5 text-xl font-semibold text-white group-hover:text-cyan-100">{repertoire.name}</h3>{repertoire.description ? <p className="mt-2 line-clamp-2 text-sm leading-6 text-zinc-400">{repertoire.description}</p> : null}<div className="mt-5 grid gap-2 text-xs text-zinc-400"><div className="flex items-center gap-2"><CalendarDays className="h-4 w-4" /><span>Data: {repertoire.event_date ? formatDate(repertoire.event_date) : formatDate(repertoire.created_at)}</span></div><div className="flex items-center gap-2"><Music2 className="h-4 w-4" /><span>Quantidade de músicas: {kitCount}</span></div></div><div className="mt-5 grid gap-2"><MinistryRouteTransition href={`/ministerio/repertorios/${repertoire.id}`} className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-4 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200 data-[pending=true]:bg-cyan-200">Abrir escala <ArrowRight className="h-4 w-4" /></MinistryRouteTransition>{canManage ? <DeleteScaleButton repertoireId={repertoire.id} /> : null}</div></article>; })}</div> : <div className="mt-6 rounded-3xl border border-dashed border-white/10 bg-black/20 p-10 text-center"><div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-400/10 text-cyan-100"><ListMusic className="h-7 w-7" /></div><h3 className="mt-5 text-2xl font-semibold text-white">Nenhuma escala criada ainda</h3><p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-zinc-400">{canManage ? "Crie a primeira escala para organizar as músicas que sua equipe precisa estudar." : "Quando o responsável do ministério criar escalas, elas aparecerão aqui."}</p>{canManage ? <MinistryRouteTransition href="/ministerio/repertorios/novo" className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200 data-[pending=true]:bg-cyan-200"><Plus className="h-4 w-4" /> Criar primeira escala</MinistryRouteTransition> : null}</div>}</PremiumPanel></MinistryShell>;
 }
