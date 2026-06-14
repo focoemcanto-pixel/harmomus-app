@@ -19,7 +19,7 @@ const navItems = [
   { href: "/ministerio/equipes", label: "Equipes", icon: Users },
   { href: "/ministerio#integrantes", label: "Integrantes", icon: Users },
   { href: "/ministerio#convites", label: "Convites", icon: UserPlus },
-  { href: "/ministerio/repertorios", label: "Minha Escala", icon: ListMusic },
+  { href: "/ministerio/repertorios", label: "Escalas", icon: ListMusic },
   { href: "/ministerio#permissoes", label: "Permissões", icon: ShieldCheck },
   { href: "/ministerio/solicitacoes", label: "Solicitações", icon: Bell },
   { href: "/ministerio/historico", label: "Histórico", icon: History },
