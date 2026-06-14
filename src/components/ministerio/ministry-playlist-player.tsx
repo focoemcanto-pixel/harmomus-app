@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, ChevronLeft, ChevronRight, Circle, CircleHelp, Clock3, Eye, Loader2, Music2, Play, RotateCcw, Users, X } from "lucide-react";
+import type { ReactNode } from "react";
+import { CheckCircle2, ChevronLeft, ChevronRight, Circle, CircleHelp, Clock3, Loader2, Music2, Play, RotateCcw, Users, X } from "lucide-react";
 
 type StudyStatus = "not_studied" | "studied" | "doubt" | "review";
 type TeamMember = { id: string; name: string; email?: string | null; isCoordinator?: boolean };
@@ -26,6 +27,14 @@ type ResolvedAudio = { streamUrl: string | null; tone: string | null; voice: str
 type AudioFilesApiFile = { streamUrl?: string | null; url?: string | null; voice?: string | null; name?: string | null; tone?: string | null };
 type AudioFilesApiTone = { tone?: string | null; files?: AudioFilesApiFile[] | null };
 type AudioCacheEntry = { tones: AudioFilesApiTone[]; resolved: ResolvedAudio };
+
+type MinistryPlaylistPlayerProps = {
+  tracks: MinistryPlaylistTrack[];
+  repertoireId?: string;
+  updateStudyStatusAction?: (formData: FormData) => Promise<void>;
+  teamMembers?: TeamMember[];
+  coordinatorName?: string | null;
+};
 
 const STUDY_STATUS_OPTIONS: Array<{ status: StudyStatus; label: string; icon: typeof Circle; className: string; activeClassName: string }> = [
   { status: "not_studied", label: "Não estudada", icon: Circle, className: "border-white/10 bg-white/[0.04] text-zinc-100 hover:bg-white/10", activeClassName: "border-zinc-300/30 bg-zinc-300/10 text-zinc-100" },
@@ -57,8 +66,6 @@ function pickAudio(tones: AudioFilesApiTone[] | null | undefined, preferredTone?
 }
 function uniqueTones(tones?: AudioFilesApiTone[] | null) { return Array.from(new Set((tones ?? []).map((tone) => tone.tone).filter(Boolean))) as string[]; }
 function uniqueVoices(tones?: AudioFilesApiTone[] | null) { return Array.from(new Set(allFiles(tones).map(({ file }) => normalizeVoice(file.voice ?? file.name)).filter(Boolean))); }
-
-type MinistryPlaylistPlayerProps = { tracks: MinistryPlaylistTrack[]; repertoireId?: string; updateStudyStatusAction?: (formData: FormData) => Promise<void>; teamMembers?: TeamMember[]; coordinatorName?: string | null };
 
 function ProtectedAudio({ source, cacheKey, autoPlay, onEnded }: { source: string; cacheKey: string; autoPlay?: boolean; onEnded?: () => void }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -145,5 +152,5 @@ export function MinistryPlaylistPlayer({ tracks, repertoireId, updateStudyStatus
   );
 }
 
-function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) { return <div className="fixed inset-0 z-[2147483647] bg-black/75 p-4 backdrop-blur-md"><button type="button" aria-label="Fechar" onClick={onClose} className="absolute inset-0" /><div className="relative z-10 mx-auto mt-16 max-h-[80dvh] max-w-2xl overflow-y-auto rounded-[2rem] border border-white/10 bg-[#090d18] p-6 text-white shadow-2xl"><div className="flex items-start justify-between gap-4"><h3 className="text-2xl font-black">{title}</h3><button type="button" onClick={onClose} className="rounded-2xl border border-white/10 p-3 text-zinc-300 hover:bg-white/10"><X className="h-5 w-5" /></button></div><div className="mt-5">{children}</div></div></div>; }
+function Modal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) { return <div className="fixed inset-0 z-[2147483647] bg-black/75 p-4 backdrop-blur-md"><button type="button" aria-label="Fechar" onClick={onClose} className="absolute inset-0" /><div className="relative z-10 mx-auto mt-16 max-h-[80dvh] max-w-2xl overflow-y-auto rounded-[2rem] border border-white/10 bg-[#090d18] p-6 text-white shadow-2xl"><div className="flex items-start justify-between gap-4"><h3 className="text-2xl font-black">{title}</h3><button type="button" onClick={onClose} className="rounded-2xl border border-white/10 p-3 text-zinc-300 hover:bg-white/10"><X className="h-5 w-5" /></button></div><div className="mt-5">{children}</div></div></div>; }
 function StatusPill({ label, track, tone }: { label: string; track: MinistryPlaylistTrack | null; tone: "current" | "next" | "last" }) { const toneClass = { current: "border-cyan-300/30 bg-cyan-300/10 text-cyan-100", next: "border-emerald-300/30 bg-emerald-300/10 text-emerald-100", last: "border-fuchsia-300/30 bg-fuchsia-300/10 text-fuchsia-100" }[tone]; return <div className={`rounded-2xl border p-3 ${toneClass}`}><p className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em]"><Clock3 className="h-3.5 w-3.5" /> {label}</p><p className="mt-2 truncate text-sm font-semibold text-white">{track?.name ?? "—"}</p><p className="truncate text-xs text-zinc-300">{track?.artist ?? "Aguardando navegação"}</p></div>; }
