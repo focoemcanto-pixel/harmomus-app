@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { ArrowLeft, Music2, Save, Send, Users, Wand2 } from "lucide-react";
+import { ArrowLeft, Music2, Save, Send, Users } from "lucide-react";
 
 import { MinistryShell, PremiumPanel } from "@/components/ministerio/ministry-ui";
 import { MinistrySubmitButton } from "@/components/ministerio/ministry-submit-button";
@@ -28,14 +28,7 @@ function normalizeTone(value: string | null | undefined) {
   const raw = String(value ?? "").trim();
   if (!raw) return "";
 
-  const normalized = raw
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/♯/g, "#")
-    .replace(/＃/g, "#")
-    .replace(/\s+/g, "")
-    .toUpperCase();
-
+  const normalized = raw.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/♯/g, "#").replace(/＃/g, "#").replace(/\s+/g, "").toUpperCase();
   const flatMap: Record<string, string> = { DB: "C#", EB: "D#", GB: "F#", AB: "G#", BB: "A#" };
   return flatMap[normalized] ?? normalized;
 }
@@ -46,34 +39,21 @@ function toneLabel(value: string) {
 
 async function getAvailableTones(admin: any, kitId: string): Promise<string[]> {
   if (!kitId) return [];
-
-  const { data, error } = await admin
-    .from("kit_audio_files")
-    .select("tone,source_type")
-    .eq("kit_id", kitId)
-    .in("source_type", ["original", "generated"])
-    .order("tone", { ascending: true });
-
+  const { data, error } = await admin.from("kit_audio_files").select("tone,source_type").eq("kit_id", kitId).in("source_type", ["original", "generated"]).order("tone", { ascending: true });
   if (error) return [];
-
-  const tones = (data ?? [])
-    .map((file: any) => normalizeTone(file.tone))
-    .filter((tone: string): tone is string => Boolean(tone));
-
+  const tones = (data ?? []).map((file: any) => normalizeTone(file.tone)).filter((tone: string): tone is string => Boolean(tone));
   return Array.from(new Set<string>(tones));
 }
 
 async function assertAvailableTone(admin: any, kitId: string, tone: string): Promise<string | null> {
   const normalizedTone = normalizeTone(tone);
   if (!normalizedTone) return "";
-
   const availableTones = await getAvailableTones(admin, kitId);
   return availableTones.includes(normalizedTone) ? normalizedTone : null;
 }
 
 async function saveSongSettings(formData: FormData) {
   "use server";
-
   const context = await getCurrentUserAccessContext();
   if (context.isGuest) redirect("/login");
   if (!context.ministry) redirect("/assinatura");
@@ -93,9 +73,7 @@ async function saveSongSettings(formData: FormData) {
   if (!item?.id) notFound();
 
   const validatedTone = await assertAvailableTone(admin, item.kit_id, keyOverride);
-  if (validatedTone === null) {
-    redirect(backPath(repertoireId, itemId, "Esse tom não está disponível neste kit. Solicite o tom desejado abaixo."));
-  }
+  if (validatedTone === null) redirect(backPath(repertoireId, itemId, "Esse tom não está disponível neste kit. Solicite o tom desejado."));
 
   await admin.from("ministry_repertoire_items").update({ key_override: validatedTone || null, notes: itemNotes || null }).eq("id", itemId).eq("repertoire_id", repertoireId);
 
@@ -116,7 +94,6 @@ async function saveSongSettings(formData: FormData) {
 
 async function requestSongTone(formData: FormData) {
   "use server";
-
   const context = await getCurrentUserAccessContext();
   if (context.isGuest || !context.profile?.id) redirect("/login");
   if (!context.ministry) redirect("/assinatura");
@@ -126,7 +103,6 @@ async function requestSongTone(formData: FormData) {
   const itemId = String(formData.get("item_id") ?? "").trim();
   const desiredTone = String(formData.get("desired_tone") ?? "").trim().slice(0, 40);
   const notes = String(formData.get("tone_request_notes") ?? "").trim().slice(0, 1000);
-
   if (!repertoireId || !itemId) redirect("/ministerio/repertorios");
   if (!desiredTone) redirect(backPath(repertoireId, itemId, "Informe o tom desejado para solicitar."));
 
@@ -134,15 +110,8 @@ async function requestSongTone(formData: FormData) {
   const { data: repertoire } = await admin.from("ministry_repertoires").select("id,ministry_id,archived").eq("id", repertoireId).eq("ministry_id", context.ministry.ministryId).maybeSingle();
   if (!repertoire?.id || repertoire.archived) notFound();
 
-  const { data: item } = await admin
-    .from("ministry_repertoire_items")
-    .select("id,kit_id,kits(slug,name,artist)")
-    .eq("id", itemId)
-    .eq("repertoire_id", repertoireId)
-    .maybeSingle();
-
+  const { data: item } = await admin.from("ministry_repertoire_items").select("id,kit_id,kits(slug,name,artist)").eq("id", itemId).eq("repertoire_id", repertoireId).maybeSingle();
   if (!item?.id) notFound();
-
   const kit = Array.isArray(item.kits) ? item.kits[0] : item.kits;
 
   const { error } = await admin.from("premium_requests").insert({
@@ -158,24 +127,17 @@ async function requestSongTone(formData: FormData) {
   });
 
   if (error) redirect(backPath(repertoireId, itemId, error.message || "Não foi possível solicitar o tom."));
-
   revalidatePath(`/ministerio/repertorios/${repertoireId}/musicas/${itemId}`);
   redirect(backPath(repertoireId, itemId, "Pedido de tom enviado com sucesso."));
 }
 
 export default async function SongSettingsPage({ params, searchParams }: { params: Promise<PageParams>; searchParams?: Promise<PageSearchParams> }) {
-  const [context, resolvedParams, resolvedSearchParams] = await Promise.all([
-    getCurrentUserAccessContext(),
-    params,
-    searchParams ?? Promise.resolve({} as PageSearchParams),
-  ]);
-
+  const [context, resolvedParams, resolvedSearchParams] = await Promise.all([getCurrentUserAccessContext(), params, searchParams ?? Promise.resolve({} as PageSearchParams)]);
   if (context.isGuest) redirect("/login");
   if (!context.ministry) redirect("/assinatura");
   if (!isMinistryManager(context)) redirect("/");
 
   const admin = createSupabaseAdminClient() as any;
-
   const [{ data: repertoire }, itemResult, { data: scaleAssignments }, { data: songAssignments }, { data: members }] = await Promise.all([
     admin.from("ministry_repertoires").select("id,name,archived,ministry_id").eq("id", resolvedParams.id).eq("ministry_id", context.ministry.ministryId).maybeSingle(),
     admin.from("ministry_repertoire_items").select("id,kit_id,position,key_override,notes,kits(id,slug,name,artist,cover_url)").eq("id", resolvedParams.itemId).eq("repertoire_id", resolvedParams.id).maybeSingle(),
@@ -189,18 +151,12 @@ export default async function SongSettingsPage({ params, searchParams }: { param
     const fallback = await admin.from("ministry_repertoire_items").select("id,kit_id,position,kits(id,slug,name,artist,cover_url)").eq("id", resolvedParams.itemId).eq("repertoire_id", resolvedParams.id).maybeSingle();
     item = fallback.data;
   }
-
   if (!repertoire?.id || repertoire.archived || !item?.id) notFound();
 
   const activeMembers = (members ?? []).filter((member: any) => member.status !== "removed");
   const membersById = new Map(activeMembers.map((member: any) => [member.id, member]));
   const songMap = new Map((songAssignments ?? []).map((assignment: any) => [assignment.member_id, assignment]));
-  const rows = (scaleAssignments ?? []).map((assignment: any) => ({
-    member: membersById.get(assignment.member_id),
-    voice: assignment.assigned_voice,
-    notes: assignment.notes,
-    song: songMap.get(assignment.member_id),
-  })).filter((row: any) => Boolean(row.member));
+  const rows = (scaleAssignments ?? []).map((assignment: any) => ({ member: membersById.get(assignment.member_id), voice: assignment.assigned_voice, notes: assignment.notes, song: songMap.get(assignment.member_id) })).filter((row: any) => Boolean(row.member));
 
   const kit = Array.isArray(item.kits) ? item.kits[0] : item.kits;
   const availableTones: string[] = await getAvailableTones(admin, item.kit_id);
@@ -211,10 +167,7 @@ export default async function SongSettingsPage({ params, searchParams }: { param
 
   return (
     <MinistryShell>
-      <Link prefetch href={`/ministerio/repertorios/${repertoire.id}`} className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10">
-        <ArrowLeft className="h-4 w-4" /> Voltar para escala
-      </Link>
-
+      <Link prefetch href={`/ministerio/repertorios/${repertoire.id}`} className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10"><ArrowLeft className="h-4 w-4" /> Voltar para escala</Link>
       {message ? <div className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-4 text-sm text-cyan-50">{message}</div> : null}
 
       <div className="overflow-hidden rounded-[2rem] border border-cyan-300/20 bg-gradient-to-br from-[#0b1120]/95 via-[#140d27]/95 to-[#06111f]/95 p-6 shadow-[0_30px_100px_rgba(34,211,238,0.16)] md:p-10">
@@ -223,62 +176,40 @@ export default async function SongSettingsPage({ params, searchParams }: { param
         <p className="mt-3 text-sm text-zinc-300">{kit?.artist || "Kit vocal"} · {repertoire.name}</p>
       </div>
 
-      <form action={saveSongSettings} className="grid gap-6 lg:grid-cols-[0.8fr_1.2fr]">
-        <input type="hidden" name="repertoire_id" value={repertoire.id} />
-        <input type="hidden" name="item_id" value={item.id} />
+      <div className="grid gap-6 lg:grid-cols-[0.8fr_1.2fr]">
         <PremiumPanel>
-          <p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Tom da música</p>
-          <h2 className="mt-2 text-2xl font-semibold">Tom exibido para equipe</h2>
-          <p className="mt-2 text-sm leading-6 text-zinc-400">A equipe só poderá estudar tons que já existem no kit. Se o tom desejado não aparecer, solicite a produção logo abaixo.</p>
+          <form action={saveSongSettings}>
+            <input type="hidden" name="repertoire_id" value={repertoire.id} />
+            <input type="hidden" name="item_id" value={item.id} />
+            <p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Tom da música</p>
+            <h2 className="mt-2 text-2xl font-semibold">Tom exibido para equipe</h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-400">Selecione apenas um dos tons já disponíveis no kit.</p>
+            <label className="mt-6 block"><span className="text-sm font-semibold text-zinc-200">Tom definido</span><select name="key_override" defaultValue={selectedTone} disabled={!availableTones.length} className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50 disabled:cursor-not-allowed disabled:opacity-60"><option value="">{availableTones.length ? "Usar tom padrão do kit" : "Nenhum tom disponível neste kit"}</option>{availableTones.map((tone: string) => <option key={tone} value={tone}>{toneLabel(tone)}</option>)}</select></label>
+            <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.14em]">{availableTones.map((tone: string) => <span key={tone} className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1 text-cyan-100">{toneLabel(tone)}</span>)}</div>
+            <label className="mt-4 block"><span className="text-sm font-semibold text-zinc-200">Observação da música</span><textarea name="item_notes" defaultValue={itemNotes ?? ""} rows={4} maxLength={600} placeholder="Ex.: Atenção à entrada da ponte." className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-cyan-300/50" /></label>
+            <MinistrySubmitButton pendingText="Salvando..." className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200"><Save className="h-4 w-4" /> Salvar tom e observação</MinistrySubmitButton>
+          </form>
 
-          <label className="mt-6 block">
-            <span className="text-sm font-semibold text-zinc-200">Tom definido</span>
-            <select name="key_override" defaultValue={selectedTone} disabled={!availableTones.length} className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50 disabled:cursor-not-allowed disabled:opacity-60">
-              <option value="">{availableTones.length ? "Usar tom padrão do kit" : "Nenhum tom disponível neste kit"}</option>
-              {availableTones.map((tone: string) => <option key={tone} value={tone}>{toneLabel(tone)}</option>)}
-            </select>
-          </label>
-
-          {availableTones.length ? (
-            <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.14em]">
-              {availableTones.map((tone: string) => <span key={tone} className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1 text-cyan-100">{toneLabel(tone)}</span>)}
-            </div>
-          ) : (
-            <p className="mt-3 rounded-2xl border border-amber-300/20 bg-amber-400/10 p-3 text-sm text-amber-100">Este kit ainda não possui áudios disponíveis para seleção de tom.</p>
-          )}
-
-          <label className="mt-4 block"><span className="text-sm font-semibold text-zinc-200">Observação da música</span><textarea name="item_notes" defaultValue={itemNotes ?? ""} rows={4} maxLength={600} placeholder="Ex.: Atenção à entrada da ponte." className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-cyan-300/50" /></label>
+          <form action={requestSongTone} className="mt-4 rounded-2xl border border-emerald-300/20 bg-emerald-400/10 p-3">
+            <input type="hidden" name="repertoire_id" value={repertoire.id} />
+            <input type="hidden" name="item_id" value={item.id} />
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-100">Solicitar tom</p>
+            <div className="mt-2 grid gap-2 md:grid-cols-[120px_1fr_auto]"><input name="desired_tone" maxLength={40} placeholder="Ex.: D" className="rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-500 focus:border-emerald-300/50" /><input name="tone_request_notes" maxLength={300} placeholder="Observação opcional" className="rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-500 focus:border-emerald-300/50" /><MinistrySubmitButton pendingText="Enviando..." className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-300 px-4 py-2 text-sm font-bold text-slate-950 transition hover:bg-emerald-200"><Send className="h-4 w-4" /> Solicitar</MinistrySubmitButton></div>
+          </form>
         </PremiumPanel>
 
-        <PremiumPanel>
-          <div className="flex items-start gap-4"><div className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-3 text-cyan-100"><Users className="h-5 w-5" /></div><div><p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Vocais da música</p><h2 className="mt-2 text-2xl font-semibold">Nipe por vocalista</h2><p className="mt-2 text-sm text-zinc-400">Cada vocalista receberá seu nipe específico ao estudar esta música.</p></div></div>
-          <div className="mt-6 grid gap-3">
-            {rows.length ? rows.map((row: any) => {
-              const defaultVoice = row.song?.assigned_voice ?? row.voice ?? "";
-              const defaultNotes = row.song?.notes ?? "";
-              return <div key={row.member.id} className="rounded-3xl border border-white/10 bg-black/20 p-5"><input type="hidden" name="member_id" value={row.member.id} /><h3 className="text-lg font-semibold text-white">{memberLabel(row.member)}</h3><p className="mt-1 text-sm text-zinc-400">Nipe padrão da escala: {row.voice || "não definido"}</p><div className="mt-4 grid gap-3 md:grid-cols-2"><label><span className="text-sm font-semibold text-zinc-200">Nipe nesta música</span><select name={`voice_${row.member.id}`} defaultValue={defaultVoice} className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50">{VOICES.map(([value, text]) => <option key={value} value={value}>{text}</option>)}</select></label><label><span className="text-sm font-semibold text-zinc-200">Observação individual</span><input name={`notes_${row.member.id}`} defaultValue={defaultNotes} maxLength={300} placeholder="Ex.: entra no refrão" className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-cyan-300/50" /></label></div></div>;
-            }) : <div className="rounded-3xl border border-dashed border-white/10 bg-black/20 p-8 text-center text-sm text-zinc-400">Adicione vocalistas na escala antes de configurar esta música.</div>}
-          </div>
-          <MinistrySubmitButton pendingText="Salvando configuração..." className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200"><Save className="h-4 w-4" /> Salvar configuração da música</MinistrySubmitButton>
-        </PremiumPanel>
-      </form>
-
-      <form action={requestSongTone} className="rounded-[2rem] border border-emerald-300/20 bg-emerald-400/10 p-5 md:p-6">
-        <input type="hidden" name="repertoire_id" value={repertoire.id} />
-        <input type="hidden" name="item_id" value={item.id} />
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div className="min-w-0 flex-1">
-            <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-100"><Wand2 className="h-4 w-4" /> Não encontrou o tom?</p>
-            <h2 className="mt-2 text-2xl font-semibold text-white">Solicitar novo tom para este kit</h2>
-            <p className="mt-1 text-sm text-zinc-300">O pedido já vai vinculado à música {kit?.name || "selecionada"}.</p>
-            <div className="mt-4 grid gap-3 md:grid-cols-[180px_1fr]">
-              <input name="desired_tone" maxLength={40} placeholder="Ex.: D, E♭, F#" className="rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-emerald-300/50" />
-              <input name="tone_request_notes" maxLength={300} placeholder="Observação opcional: voz, urgência ou contexto" className="rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-emerald-300/50" />
-            </div>
-          </div>
-          <MinistrySubmitButton pendingText="Enviando pedido..." className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-emerald-200 md:w-auto"><Send className="h-4 w-4" /> Solicitar tom</MinistrySubmitButton>
-        </div>
-      </form>
+        <form action={saveSongSettings}>
+          <input type="hidden" name="repertoire_id" value={repertoire.id} />
+          <input type="hidden" name="item_id" value={item.id} />
+          <input type="hidden" name="key_override" value={selectedTone} />
+          <input type="hidden" name="item_notes" value={itemNotes ?? ""} />
+          <PremiumPanel>
+            <div className="flex items-start gap-4"><div className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-3 text-cyan-100"><Users className="h-5 w-5" /></div><div><p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Vocais da música</p><h2 className="mt-2 text-2xl font-semibold">Nipe por vocalista</h2><p className="mt-2 text-sm text-zinc-400">Cada vocalista receberá seu nipe específico ao estudar esta música.</p></div></div>
+            <div className="mt-6 grid gap-3">{rows.length ? rows.map((row: any) => { const defaultVoice = row.song?.assigned_voice ?? row.voice ?? ""; const defaultNotes = row.song?.notes ?? ""; return <div key={row.member.id} className="rounded-3xl border border-white/10 bg-black/20 p-5"><input type="hidden" name="member_id" value={row.member.id} /><h3 className="text-lg font-semibold text-white">{memberLabel(row.member)}</h3><p className="mt-1 text-sm text-zinc-400">Nipe padrão da escala: {row.voice || "não definido"}</p><div className="mt-4 grid gap-3 md:grid-cols-2"><label><span className="text-sm font-semibold text-zinc-200">Nipe nesta música</span><select name={`voice_${row.member.id}`} defaultValue={defaultVoice} className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50">{VOICES.map(([value, text]) => <option key={value} value={value}>{text}</option>)}</select></label><label><span className="text-sm font-semibold text-zinc-200">Observação individual</span><input name={`notes_${row.member.id}`} defaultValue={defaultNotes} maxLength={300} placeholder="Ex.: entra no refrão" className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-cyan-300/50" /></label></div></div>; }) : <div className="rounded-3xl border border-dashed border-white/10 bg-black/20 p-8 text-center text-sm text-zinc-400">Adicione vocalistas na escala antes de configurar esta música.</div>}</div>
+            <MinistrySubmitButton pendingText="Salvando configuração..." className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200"><Save className="h-4 w-4" /> Salvar configuração da música</MinistrySubmitButton>
+          </PremiumPanel>
+        </form>
+      </div>
     </MinistryShell>
   );
 }
