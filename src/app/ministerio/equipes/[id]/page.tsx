@@ -42,14 +42,25 @@ async function addTeamMember(formData: FormData) {
   const { data: member } = await admin.from("ministry_members").select("id").eq("id", memberId).eq("ministry_id", context.ministry.ministryId).maybeSingle();
   if (!member?.id) redirect(backPath(templateId, "Integrante não encontrado."));
 
-  const { error } = await admin.from("ministry_team_template_members").upsert({
+  const payload = {
     template_id: templateId,
     member_id: memberId,
     assigned_voice: assignedVoice || null,
     notes: notes || null,
-  }, { onConflict: "template_id,member_id" });
+  };
 
-  if (error) redirect(backPath(templateId, error.message));
+  const { data: existing } = await admin
+    .from("ministry_team_template_members")
+    .select("id")
+    .eq("template_id", templateId)
+    .eq("member_id", memberId)
+    .maybeSingle();
+
+  const response = existing?.id
+    ? await admin.from("ministry_team_template_members").update(payload).eq("id", existing.id)
+    : await admin.from("ministry_team_template_members").insert(payload);
+
+  if (response.error) redirect(backPath(templateId, response.error.message));
   revalidatePath(`/ministerio/equipes/${templateId}`);
   redirect(backPath(templateId, "Integrante adicionado à equipe."));
 }
