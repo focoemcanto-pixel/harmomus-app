@@ -44,7 +44,7 @@ function toneLabel(value: string) {
   return value.replace("#", "♯");
 }
 
-async function getAvailableTones(admin: any, kitId: string) {
+async function getAvailableTones(admin: any, kitId: string): Promise<string[]> {
   if (!kitId) return [];
 
   const { data, error } = await admin
@@ -56,10 +56,14 @@ async function getAvailableTones(admin: any, kitId: string) {
 
   if (error) return [];
 
-  return Array.from(new Set((data ?? []).map((file: any) => normalizeTone(file.tone)).filter(Boolean)));
+  const tones = (data ?? [])
+    .map((file: any) => normalizeTone(file.tone))
+    .filter((tone: string): tone is string => Boolean(tone));
+
+  return Array.from(new Set<string>(tones));
 }
 
-async function assertAvailableTone(admin: any, kitId: string, tone: string) {
+async function assertAvailableTone(admin: any, kitId: string, tone: string): Promise<string | null> {
   const normalizedTone = normalizeTone(tone);
   if (!normalizedTone) return "";
 
@@ -199,7 +203,7 @@ export default async function SongSettingsPage({ params, searchParams }: { param
   })).filter((row: any) => Boolean(row.member));
 
   const kit = Array.isArray(item.kits) ? item.kits[0] : item.kits;
-  const availableTones = await getAvailableTones(admin, item.kit_id);
+  const availableTones: string[] = await getAvailableTones(admin, item.kit_id);
   const itemKey = "key_override" in item ? normalizeTone(item.key_override) : "";
   const selectedTone = availableTones.includes(itemKey) ? itemKey : "";
   const itemNotes = "notes" in item ? item.notes : "";
@@ -231,13 +235,13 @@ export default async function SongSettingsPage({ params, searchParams }: { param
             <span className="text-sm font-semibold text-zinc-200">Tom definido</span>
             <select name="key_override" defaultValue={selectedTone} disabled={!availableTones.length} className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50 disabled:cursor-not-allowed disabled:opacity-60">
               <option value="">{availableTones.length ? "Usar tom padrão do kit" : "Nenhum tom disponível neste kit"}</option>
-              {availableTones.map((tone) => <option key={tone} value={tone}>{toneLabel(tone)}</option>)}
+              {availableTones.map((tone: string) => <option key={tone} value={tone}>{toneLabel(tone)}</option>)}
             </select>
           </label>
 
           {availableTones.length ? (
             <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.14em]">
-              {availableTones.map((tone) => <span key={tone} className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1 text-cyan-100">{toneLabel(tone)}</span>)}
+              {availableTones.map((tone: string) => <span key={tone} className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1 text-cyan-100">{toneLabel(tone)}</span>)}
             </div>
           ) : (
             <p className="mt-3 rounded-2xl border border-amber-300/20 bg-amber-400/10 p-3 text-sm text-amber-100">Este kit ainda não possui áudios disponíveis para seleção de tom.</p>
