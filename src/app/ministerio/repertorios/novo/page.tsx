@@ -52,7 +52,7 @@ async function createScale(formData: FormData) {
   }
 
   if (templateMembers.length) {
-    await admin.from("ministry_repertoire_assignments").insert(templateMembers.map((member) => ({ repertoire_id: data.id, repertoire_item_id: null, kit_id: null, member_id: member.member_id, assigned_role: "vocal", assigned_voice: member.assigned_voice || null, assigned_tone: null, notes: member.notes || null, study_mode: "voice", created_at: now, updated_at: now })));
+    await admin.from("ministry_repertoire_assignments").insert(templateMembers.map((member) => ({ repertoire_id: data.id, repertoire_item_id: null, member_id: member.member_id, assigned_voice: member.assigned_voice || null, notes: member.notes || null })));
   }
 
   const actorName = getActivityActorName(context.profile);
