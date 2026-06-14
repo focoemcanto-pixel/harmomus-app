@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, Users } from "lucide-react";
 
+import { DeleteTeamButton } from "@/components/ministerio/delete-team-button";
 import { TeamMembersManager } from "@/components/ministerio/team-members-manager";
 import { MinistryShell, PremiumPanel } from "@/components/ministerio/ministry-ui";
 import { getCurrentUserAccessContext, isMinistryManager } from "@/lib/auth/current-user";
@@ -35,7 +36,10 @@ export default async function MinistryTeamDetailPage({ params }: { params: Promi
 
   return (
     <MinistryShell>
-      <Link prefetch href="/ministerio/equipes" className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10 active:scale-[0.98]"><ArrowLeft className="h-4 w-4" /> Voltar para equipes</Link>
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <Link prefetch href="/ministerio/equipes" className="inline-flex w-fit items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10 active:scale-[0.98]"><ArrowLeft className="h-4 w-4" /> Voltar para equipes</Link>
+        <DeleteTeamButton teamId={template.id} />
+      </div>
       <div className="overflow-hidden rounded-[2rem] border border-cyan-300/20 bg-gradient-to-br from-[#0b1120]/95 via-[#140d27]/95 to-[#06111f]/95 p-6 shadow-[0_30px_100px_rgba(34,211,238,0.16)] md:p-10">
         <div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/25 bg-cyan-400/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100"><Users className="h-4 w-4" /> Equipe vocal</div>
         <h1 className="mt-5 text-3xl font-semibold tracking-tight md:text-5xl">{template.name}</h1>
