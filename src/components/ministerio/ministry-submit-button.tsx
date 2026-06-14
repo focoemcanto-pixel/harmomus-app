@@ -21,20 +21,26 @@ export function MinistrySubmitButton({ children, pendingText = "Salvando...", cl
   useEffect(() => {
     if (pending) return;
     if (!instantPending) return;
-    const timer = window.setTimeout(() => setInstantPending(false), 900);
+    const timer = window.setTimeout(() => setInstantPending(false), 1200);
     return () => window.clearTimeout(timer);
   }, [instantPending, pending]);
+
+  function triggerInstantFeedback() {
+    if (!disabled) setInstantPending(true);
+  }
 
   return (
     <button
       type={type}
       disabled={isDisabled}
       aria-busy={isPending}
+      onPointerDown={triggerInstantFeedback}
       onClick={(event) => {
-        if (!disabled) setInstantPending(true);
+        triggerInstantFeedback();
         onClick?.(event);
       }}
-      className={`${className} active:scale-[0.99] disabled:cursor-wait disabled:opacity-80`}
+      className={`${className} active:scale-[0.985] disabled:cursor-wait disabled:opacity-80 data-[pending=true]:scale-[0.99]`}
+      data-pending={isPending ? "true" : "false"}
     >
       {isPending ? (
         <span className="inline-flex items-center justify-center gap-2">
