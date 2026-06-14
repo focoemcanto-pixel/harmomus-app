@@ -1,4 +1,8 @@
+"use client";
+
 import Link from "next/link";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { ExternalLink, RotateCcw } from "lucide-react";
 
 import { CopyInviteLink } from "@/components/ministerio/copy-invite-link";
@@ -17,7 +21,6 @@ function statusClass(status?: string | null) {
   return "border-white/10 bg-white/5 text-zinc-200";
 }
 
-
 const VOCAL_PROFILE_OPTIONS = [
   { value: "lead", label: "Lead" },
   { value: "tenor", label: "Tenor" },
@@ -35,7 +38,39 @@ function vocalProfileLabel(value?: string | null) {
 }
 
 function VocalProfileForm({ member, canManage }: { member: MinistryMemberRow; canManage: boolean }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [message, setMessage] = useState("");
+  const [tone, setTone] = useState<"success" | "warning">("success");
   const normalizedStatus = String(member.status ?? "").toLowerCase();
+
+  async function saveVocalProfile(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (isPending) return;
+    const formData = new FormData(event.currentTarget);
+    setMessage("");
+
+    startTransition(async () => {
+      try {
+        const response = await fetch("/api/ministerio/vocal-profile", {
+          method: "POST",
+          body: formData,
+          headers: {
+            Accept: "application/json",
+            "x-harmomus-action": "fetch",
+          },
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data?.ok === false) throw new Error(data?.message || "Não foi possível salvar o perfil vocal.");
+        setTone("success");
+        setMessage(data?.message || "Perfil vocal salvo.");
+        router.refresh();
+      } catch (error) {
+        setTone("warning");
+        setMessage(error instanceof Error ? error.message : "Não foi possível salvar o perfil vocal.");
+      }
+    });
+  }
 
   if (!canManage || normalizedStatus === "removed") {
     return (
@@ -47,12 +82,12 @@ function VocalProfileForm({ member, canManage }: { member: MinistryMemberRow; ca
   }
 
   return (
-    <form action="/api/ministerio/vocal-profile" method="post" className="space-y-2">
+    <form action="/api/ministerio/vocal-profile" method="post" onSubmit={saveVocalProfile} className="space-y-2">
       <input type="hidden" name="member_id" value={member.id} />
       <div className="grid gap-2 lg:grid-cols-2">
         <label className="text-xs font-medium text-zinc-400">
           Principal
-          <select name="vocal_primary" defaultValue={member.vocal_primary ?? ""} className="mt-1 h-9 w-full rounded-xl border border-white/10 bg-slate-950/80 px-2 text-xs text-zinc-100 outline-none transition focus:border-cyan-300/60">
+          <select disabled={isPending} name="vocal_primary" defaultValue={member.vocal_primary ?? ""} className="mt-1 h-9 w-full rounded-xl border border-white/10 bg-slate-950/80 px-2 text-xs text-zinc-100 outline-none transition focus:border-cyan-300/60 disabled:cursor-wait disabled:opacity-70">
             <option value="">Sem definição</option>
             {VOCAL_PROFILE_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
@@ -61,7 +96,7 @@ function VocalProfileForm({ member, canManage }: { member: MinistryMemberRow; ca
         </label>
         <label className="text-xs font-medium text-zinc-400">
           Secundária
-          <select name="vocal_secondary" defaultValue={member.vocal_secondary ?? ""} className="mt-1 h-9 w-full rounded-xl border border-white/10 bg-slate-950/80 px-2 text-xs text-zinc-100 outline-none transition focus:border-cyan-300/60">
+          <select disabled={isPending} name="vocal_secondary" defaultValue={member.vocal_secondary ?? ""} className="mt-1 h-9 w-full rounded-xl border border-white/10 bg-slate-950/80 px-2 text-xs text-zinc-100 outline-none transition focus:border-cyan-300/60 disabled:cursor-wait disabled:opacity-70">
             <option value="">Sem definição</option>
             {VOCAL_PROFILE_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
@@ -69,9 +104,10 @@ function VocalProfileForm({ member, canManage }: { member: MinistryMemberRow; ca
           </select>
         </label>
       </div>
-      <button className="inline-flex h-9 items-center justify-center rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-3 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-500/20">
-        Salvar voz
+      <button disabled={isPending} className="inline-flex h-9 items-center justify-center rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-3 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-500/20 disabled:cursor-wait disabled:opacity-70">
+        {isPending ? "Salvando..." : "Salvar voz"}
       </button>
+      {message ? <p className={`text-[10px] leading-4 ${tone === "success" ? "text-emerald-200" : "text-amber-200"}`}>{message}</p> : null}
     </form>
   );
 }
@@ -85,12 +121,42 @@ function OpenInviteLink({ href }: { href: string }) {
 }
 
 function ResendInviteButton({ memberId }: { memberId: string }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [message, setMessage] = useState("");
+
+  async function resendInvite(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (isPending) return;
+    const formData = new FormData(event.currentTarget);
+    setMessage("");
+    startTransition(async () => {
+      try {
+        const response = await fetch("/api/ministerio/invite", {
+          method: "POST",
+          body: formData,
+          headers: {
+            Accept: "application/json",
+            "x-harmomus-action": "fetch",
+          },
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data?.ok === false) throw new Error(data?.message || "Não foi possível reenviar.");
+        setMessage("Reenviado");
+        router.refresh();
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "Falha ao reenviar");
+      }
+    });
+  }
+
   return (
-    <form action="/api/ministerio/invite" method="post">
+    <form action="/api/ministerio/invite" method="post" onSubmit={resendInvite} className="space-y-1">
       <input type="hidden" name="resend_member_id" value={memberId} />
-      <button className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-3 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-500/20" aria-label="Gerar novo convite">
-        <RotateCcw className="h-3.5 w-3.5" /> Reenviar
+      <button disabled={isPending} className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-3 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-500/20 disabled:cursor-wait disabled:opacity-70" aria-label="Gerar novo convite">
+        <RotateCcw className={`h-3.5 w-3.5 ${isPending ? "animate-spin" : ""}`} /> {isPending ? "Reenviando..." : "Reenviar"}
       </button>
+      {message ? <p className="max-w-[160px] text-[10px] leading-4 text-zinc-400">{message}</p> : null}
     </form>
   );
 }
