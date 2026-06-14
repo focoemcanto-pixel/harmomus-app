@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { ArrowLeft, Music2, Save, Users } from "lucide-react";
+import { ArrowLeft, Music2, Save, Send, Users, Wand2 } from "lucide-react";
 
 import { MinistryShell, PremiumPanel } from "@/components/ministerio/ministry-ui";
 import { MinistrySubmitButton } from "@/components/ministerio/ministry-submit-button";
@@ -24,6 +24,49 @@ function backPath(repertoireId: string, itemId: string, message?: string) {
   return `/ministerio/repertorios/${repertoireId}/musicas/${itemId}${message ? `?message=${encodeURIComponent(message)}` : ""}`;
 }
 
+function normalizeTone(value: string | null | undefined) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+
+  const normalized = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/♯/g, "#")
+    .replace(/＃/g, "#")
+    .replace(/\s+/g, "")
+    .toUpperCase();
+
+  const flatMap: Record<string, string> = { DB: "C#", EB: "D#", GB: "F#", AB: "G#", BB: "A#" };
+  return flatMap[normalized] ?? normalized;
+}
+
+function toneLabel(value: string) {
+  return value.replace("#", "♯");
+}
+
+async function getAvailableTones(admin: any, kitId: string) {
+  if (!kitId) return [];
+
+  const { data, error } = await admin
+    .from("kit_audio_files")
+    .select("tone,source_type")
+    .eq("kit_id", kitId)
+    .in("source_type", ["original", "generated"])
+    .order("tone", { ascending: true });
+
+  if (error) return [];
+
+  return Array.from(new Set((data ?? []).map((file: any) => normalizeTone(file.tone)).filter(Boolean)));
+}
+
+async function assertAvailableTone(admin: any, kitId: string, tone: string) {
+  const normalizedTone = normalizeTone(tone);
+  if (!normalizedTone) return "";
+
+  const availableTones = await getAvailableTones(admin, kitId);
+  return availableTones.includes(normalizedTone) ? normalizedTone : null;
+}
+
 async function saveSongSettings(formData: FormData) {
   "use server";
 
@@ -42,10 +85,15 @@ async function saveSongSettings(formData: FormData) {
   const { data: repertoire } = await admin.from("ministry_repertoires").select("id,ministry_id,archived").eq("id", repertoireId).eq("ministry_id", context.ministry.ministryId).maybeSingle();
   if (!repertoire?.id || repertoire.archived) notFound();
 
-  const { data: item } = await admin.from("ministry_repertoire_items").select("id,repertoire_id").eq("id", itemId).eq("repertoire_id", repertoireId).maybeSingle();
+  const { data: item } = await admin.from("ministry_repertoire_items").select("id,repertoire_id,kit_id").eq("id", itemId).eq("repertoire_id", repertoireId).maybeSingle();
   if (!item?.id) notFound();
 
-  await admin.from("ministry_repertoire_items").update({ key_override: keyOverride || null, notes: itemNotes || null }).eq("id", itemId).eq("repertoire_id", repertoireId);
+  const validatedTone = await assertAvailableTone(admin, item.kit_id, keyOverride);
+  if (validatedTone === null) {
+    redirect(backPath(repertoireId, itemId, "Esse tom não está disponível neste kit. Solicite o tom desejado abaixo."));
+  }
+
+  await admin.from("ministry_repertoire_items").update({ key_override: validatedTone || null, notes: itemNotes || null }).eq("id", itemId).eq("repertoire_id", repertoireId);
 
   const memberIds = formData.getAll("member_id").map((value) => String(value).trim()).filter(Boolean);
   for (const memberId of memberIds) {
@@ -62,8 +110,57 @@ async function saveSongSettings(formData: FormData) {
   redirect(backPath(repertoireId, itemId, "Configurações da música salvas."));
 }
 
+async function requestSongTone(formData: FormData) {
+  "use server";
+
+  const context = await getCurrentUserAccessContext();
+  if (context.isGuest || !context.profile?.id) redirect("/login");
+  if (!context.ministry) redirect("/assinatura");
+  if (!isMinistryManager(context)) redirect("/");
+
+  const repertoireId = String(formData.get("repertoire_id") ?? "").trim();
+  const itemId = String(formData.get("item_id") ?? "").trim();
+  const desiredTone = String(formData.get("desired_tone") ?? "").trim().slice(0, 40);
+  const notes = String(formData.get("tone_request_notes") ?? "").trim().slice(0, 1000);
+
+  if (!repertoireId || !itemId) redirect("/ministerio/repertorios");
+  if (!desiredTone) redirect(backPath(repertoireId, itemId, "Informe o tom desejado para solicitar."));
+
+  const admin = createSupabaseAdminClient() as any;
+  const { data: repertoire } = await admin.from("ministry_repertoires").select("id,ministry_id,archived").eq("id", repertoireId).eq("ministry_id", context.ministry.ministryId).maybeSingle();
+  if (!repertoire?.id || repertoire.archived) notFound();
+
+  const { data: item } = await admin
+    .from("ministry_repertoire_items")
+    .select("id,kit_id,kits(slug,name,artist)")
+    .eq("id", itemId)
+    .eq("repertoire_id", repertoireId)
+    .maybeSingle();
+
+  if (!item?.id) notFound();
+
+  const kit = Array.isArray(item.kits) ? item.kits[0] : item.kits;
+
+  const { error } = await admin.from("premium_requests").insert({
+    user_id: context.profile.id,
+    ministry_id: context.ministry.ministryId,
+    request_type: "tone",
+    song_name: kit?.name || "Música da escala",
+    artist_name: kit?.artist || null,
+    kit_slug: kit?.slug || null,
+    desired_tone: normalizeTone(desiredTone) || desiredTone,
+    notes: notes || `Solicitado pela configuração da escala ${repertoireId}.`,
+    status: "pending",
+  });
+
+  if (error) redirect(backPath(repertoireId, itemId, error.message || "Não foi possível solicitar o tom."));
+
+  revalidatePath(`/ministerio/repertorios/${repertoireId}/musicas/${itemId}`);
+  redirect(backPath(repertoireId, itemId, "Pedido de tom enviado com sucesso."));
+}
+
 export default async function SongSettingsPage({ params, searchParams }: { params: Promise<PageParams>; searchParams?: Promise<PageSearchParams> }) {
-  const [context, resolvedParams] = await Promise.all([
+  const [context, resolvedParams, resolvedSearchParams] = await Promise.all([
     getCurrentUserAccessContext(),
     params,
     searchParams ?? Promise.resolve({} as PageSearchParams),
@@ -101,15 +198,20 @@ export default async function SongSettingsPage({ params, searchParams }: { param
     song: songMap.get(assignment.member_id),
   })).filter((row: any) => Boolean(row.member));
 
-  const kit = item.kits;
-  const itemKey = "key_override" in item ? item.key_override : "";
+  const kit = Array.isArray(item.kits) ? item.kits[0] : item.kits;
+  const availableTones = await getAvailableTones(admin, item.kit_id);
+  const itemKey = "key_override" in item ? normalizeTone(item.key_override) : "";
+  const selectedTone = availableTones.includes(itemKey) ? itemKey : "";
   const itemNotes = "notes" in item ? item.notes : "";
+  const message = Array.isArray(resolvedSearchParams.message) ? resolvedSearchParams.message[0] : resolvedSearchParams.message;
 
   return (
     <MinistryShell>
       <Link prefetch href={`/ministerio/repertorios/${repertoire.id}`} className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10">
         <ArrowLeft className="h-4 w-4" /> Voltar para escala
       </Link>
+
+      {message ? <div className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-4 text-sm text-cyan-50">{message}</div> : null}
 
       <div className="overflow-hidden rounded-[2rem] border border-cyan-300/20 bg-gradient-to-br from-[#0b1120]/95 via-[#140d27]/95 to-[#06111f]/95 p-6 shadow-[0_30px_100px_rgba(34,211,238,0.16)] md:p-10">
         <div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/25 bg-cyan-400/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100"><Music2 className="h-4 w-4" /> Configuração da música</div>
@@ -123,7 +225,24 @@ export default async function SongSettingsPage({ params, searchParams }: { param
         <PremiumPanel>
           <p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Tom da música</p>
           <h2 className="mt-2 text-2xl font-semibold">Tom exibido para equipe</h2>
-          <label className="mt-6 block"><span className="text-sm font-semibold text-zinc-200">Tom definido</span><input name="key_override" defaultValue={itemKey ?? ""} maxLength={30} placeholder="Ex.: Original, A, Bb, C" className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-cyan-300/50" /></label>
+          <p className="mt-2 text-sm leading-6 text-zinc-400">A equipe só poderá estudar tons que já existem no kit. Se o tom desejado não aparecer, solicite a produção logo abaixo.</p>
+
+          <label className="mt-6 block">
+            <span className="text-sm font-semibold text-zinc-200">Tom definido</span>
+            <select name="key_override" defaultValue={selectedTone} disabled={!availableTones.length} className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50 disabled:cursor-not-allowed disabled:opacity-60">
+              <option value="">{availableTones.length ? "Usar tom padrão do kit" : "Nenhum tom disponível neste kit"}</option>
+              {availableTones.map((tone) => <option key={tone} value={tone}>{toneLabel(tone)}</option>)}
+            </select>
+          </label>
+
+          {availableTones.length ? (
+            <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.14em]">
+              {availableTones.map((tone) => <span key={tone} className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1 text-cyan-100">{toneLabel(tone)}</span>)}
+            </div>
+          ) : (
+            <p className="mt-3 rounded-2xl border border-amber-300/20 bg-amber-400/10 p-3 text-sm text-amber-100">Este kit ainda não possui áudios disponíveis para seleção de tom.</p>
+          )}
+
           <label className="mt-4 block"><span className="text-sm font-semibold text-zinc-200">Observação da música</span><textarea name="item_notes" defaultValue={itemNotes ?? ""} rows={4} maxLength={600} placeholder="Ex.: Atenção à entrada da ponte." className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-cyan-300/50" /></label>
         </PremiumPanel>
 
@@ -138,6 +257,23 @@ export default async function SongSettingsPage({ params, searchParams }: { param
           </div>
           <MinistrySubmitButton pendingText="Salvando configuração..." className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200"><Save className="h-4 w-4" /> Salvar configuração da música</MinistrySubmitButton>
         </PremiumPanel>
+      </form>
+
+      <form action={requestSongTone} className="rounded-[2rem] border border-emerald-300/20 bg-emerald-400/10 p-5 md:p-6">
+        <input type="hidden" name="repertoire_id" value={repertoire.id} />
+        <input type="hidden" name="item_id" value={item.id} />
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div className="min-w-0 flex-1">
+            <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-100"><Wand2 className="h-4 w-4" /> Não encontrou o tom?</p>
+            <h2 className="mt-2 text-2xl font-semibold text-white">Solicitar novo tom para este kit</h2>
+            <p className="mt-1 text-sm text-zinc-300">O pedido já vai vinculado à música {kit?.name || "selecionada"}.</p>
+            <div className="mt-4 grid gap-3 md:grid-cols-[180px_1fr]">
+              <input name="desired_tone" maxLength={40} placeholder="Ex.: D, E♭, F#" className="rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-emerald-300/50" />
+              <input name="tone_request_notes" maxLength={300} placeholder="Observação opcional: voz, urgência ou contexto" className="rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-emerald-300/50" />
+            </div>
+          </div>
+          <MinistrySubmitButton pendingText="Enviando pedido..." className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-emerald-200 md:w-auto"><Send className="h-4 w-4" /> Solicitar tom</MinistrySubmitButton>
+        </div>
       </form>
     </MinistryShell>
   );
