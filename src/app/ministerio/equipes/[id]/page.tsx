@@ -42,13 +42,11 @@ async function addTeamMember(formData: FormData) {
   const { data: member } = await admin.from("ministry_members").select("id").eq("id", memberId).eq("ministry_id", context.ministry.ministryId).maybeSingle();
   if (!member?.id) redirect(backPath(templateId, "Integrante não encontrado."));
 
-  const now = new Date().toISOString();
   const { error } = await admin.from("ministry_team_template_members").upsert({
     template_id: templateId,
     member_id: memberId,
     assigned_voice: assignedVoice || null,
     notes: notes || null,
-    updated_at: now,
   }, { onConflict: "template_id,member_id" });
 
   if (error) redirect(backPath(templateId, error.message));
