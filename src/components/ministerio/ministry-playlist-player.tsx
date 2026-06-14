@@ -37,34 +37,10 @@ type AudioFilesApiTone = {
 };
 
 const STUDY_STATUS_OPTIONS: Array<{ status: StudyStatus; label: string; icon: typeof Circle; className: string; activeClassName: string }> = [
-  {
-    status: "not_studied",
-    label: "Não estudada",
-    icon: Circle,
-    className: "border-white/10 bg-white/[0.04] text-zinc-100 hover:bg-white/10",
-    activeClassName: "border-zinc-300/30 bg-zinc-300/10 text-zinc-100",
-  },
-  {
-    status: "studied",
-    label: "Estudei",
-    icon: CheckCircle2,
-    className: "border-emerald-300/25 bg-emerald-400/10 text-emerald-100 hover:bg-emerald-400/20",
-    activeClassName: "border-emerald-300/40 bg-emerald-400/20 text-emerald-50",
-  },
-  {
-    status: "doubt",
-    label: "Tenho dúvida",
-    icon: CircleHelp,
-    className: "border-amber-300/25 bg-amber-400/10 text-amber-100 hover:bg-amber-400/20",
-    activeClassName: "border-amber-300/40 bg-amber-400/20 text-amber-50",
-  },
-  {
-    status: "review",
-    label: "Preciso revisar",
-    icon: RotateCcw,
-    className: "border-fuchsia-300/25 bg-fuchsia-400/10 text-fuchsia-100 hover:bg-fuchsia-400/20",
-    activeClassName: "border-fuchsia-300/40 bg-fuchsia-400/20 text-fuchsia-50",
-  },
+  { status: "not_studied", label: "Não estudada", icon: Circle, className: "border-white/10 bg-white/[0.04] text-zinc-100 hover:bg-white/10", activeClassName: "border-zinc-300/30 bg-zinc-300/10 text-zinc-100" },
+  { status: "studied", label: "Estudei", icon: CheckCircle2, className: "border-emerald-300/25 bg-emerald-400/10 text-emerald-100 hover:bg-emerald-400/20", activeClassName: "border-emerald-300/40 bg-emerald-400/20 text-emerald-50" },
+  { status: "doubt", label: "Tenho dúvida", icon: CircleHelp, className: "border-amber-300/25 bg-amber-400/10 text-amber-100 hover:bg-amber-400/20", activeClassName: "border-amber-300/40 bg-amber-400/20 text-amber-50" },
+  { status: "review", label: "Preciso revisar", icon: RotateCcw, className: "border-fuchsia-300/25 bg-fuchsia-400/10 text-fuchsia-100 hover:bg-fuchsia-400/20", activeClassName: "border-fuchsia-300/40 bg-fuchsia-400/20 text-fuchsia-50" },
 ];
 
 function statusLabel(status: StudyStatus) {
@@ -80,15 +56,7 @@ function statusBadgeClass(status: StudyStatus) {
 
 function voiceLabel(value?: string | null) {
   const normalized = String(value ?? "").toLowerCase().trim();
-  const map: Record<string, string> = {
-    todos: "Todos",
-    lead: "Lead",
-    tenor: "Tenor",
-    contralto: "Contralto",
-    soprano: "Soprano",
-    baritono: "Barítono",
-    baixo: "Baixo",
-  };
+  const map: Record<string, string> = { todos: "Todos", lead: "Lead", tenor: "Tenor", contralto: "Contralto", soprano: "Soprano", baritono: "Barítono", baixo: "Baixo" };
   return map[normalized] ?? value ?? "Áudio";
 }
 
@@ -99,9 +67,7 @@ function toneLabel(value?: string | null) {
 
 function pickBestAudio(tones: AudioFilesApiTone[] | null | undefined): ResolvedAudio {
   const allFiles = (tones ?? []).flatMap((tone) => (tone.files ?? []).map((file) => ({ tone: tone.tone ?? file.tone ?? null, file })));
-  const preferred =
-    allFiles.find(({ file }) => String(file.voice ?? file.name ?? "").toLowerCase().includes("todos")) ??
-    allFiles.find(({ file }) => Boolean(file.streamUrl || file.url));
+  const preferred = allFiles.find(({ file }) => String(file.voice ?? file.name ?? "").toLowerCase().includes("todos")) ?? allFiles.find(({ file }) => Boolean(file.streamUrl || file.url));
 
   if (!preferred) return { streamUrl: null, tone: null, voice: null, label: null };
 
@@ -131,7 +97,6 @@ export function MinistryPlaylistPlayer({ tracks, repertoireId, updateStudyStatus
   const lastPlayedTrack = lastPlayedIndex === null ? null : tracks[lastPlayedIndex] ?? null;
   const studiedCount = tracks.filter((track) => track.studyStatus === "studied").length;
   const progressPercent = tracks.length ? Math.round((studiedCount / tracks.length) * 100) : 0;
-
   const currentAudio = currentTrack?.kitId ? audioCache[currentTrack.kitId] : null;
 
   const playbackLabel = useMemo(() => {
@@ -153,15 +118,10 @@ export function MinistryPlaylistPlayer({ tracks, repertoireId, updateStudyStatus
       try {
         const response = await fetch(`/api/kits/${resolvedKitId}/audio-files`, { cache: "no-store" });
         const data = await response.json().catch(() => null);
-
         if (!response.ok) throw new Error(data?.error || "Não foi possível carregar os áudios desta música.");
-
         const resolved = pickBestAudio(data?.tones as AudioFilesApiTone[]);
         if (!resolved.streamUrl) throw new Error("Nenhum áudio disponível para esta música.");
-
-        if (!cancelled) {
-          setAudioCache((current) => ({ ...current, [resolvedKitId]: resolved }));
-        }
+        if (!cancelled) setAudioCache((current) => ({ ...current, [resolvedKitId]: resolved }));
       } catch (error) {
         if (!cancelled) setAudioError(error instanceof Error ? error.message : "Erro ao carregar áudio.");
       } finally {
@@ -170,10 +130,7 @@ export function MinistryPlaylistPlayer({ tracks, repertoireId, updateStudyStatus
     }
 
     void loadAudio();
-
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [audioCache, currentTrack?.kitId]);
 
   function playTrack(index: number) {
@@ -203,20 +160,10 @@ export function MinistryPlaylistPlayer({ tracks, repertoireId, updateStudyStatus
         <div className="grid gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
           <div className="mx-auto flex w-full max-w-[260px] flex-col gap-4">
             <div className="aspect-square overflow-hidden rounded-[2rem] border border-white/10 bg-black/30 shadow-2xl shadow-cyan-950/30">
-              {currentTrack?.coverUrl ? (
-                <img src={currentTrack.coverUrl} alt={currentTrack.name} className="h-full w-full object-cover" />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center text-cyan-100">
-                  <Music2 className="h-16 w-16" />
-                </div>
-              )}
+              {currentTrack?.coverUrl ? <img src={currentTrack.coverUrl} alt={currentTrack.name} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-cyan-100"><Music2 className="h-16 w-16" /></div>}
             </div>
-            <div className="h-3 overflow-hidden rounded-full bg-white/10">
-              <div className="h-full rounded-full bg-cyan-300 transition-all" style={{ width: `${progressPercent}%` }} />
-            </div>
-            <p className="text-center text-xs font-semibold uppercase tracking-[0.18em] text-zinc-400">
-              {studiedCount}/{tracks.length} estudadas
-            </p>
+            <div className="h-3 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-cyan-300 transition-all" style={{ width: `${progressPercent}%` }} /></div>
+            <p className="text-center text-xs font-semibold uppercase tracking-[0.18em] text-zinc-400">{studiedCount}/{tracks.length} estudadas</p>
           </div>
 
           <div className="min-w-0">
@@ -225,54 +172,23 @@ export function MinistryPlaylistPlayer({ tracks, repertoireId, updateStudyStatus
             <p className="mt-2 text-base text-zinc-300">{currentTrack?.artist ?? "Clique em Reproduzir Escala para iniciar o estudo."}</p>
 
             <div className="mt-5 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.16em]">
-              <span className={`rounded-full border px-3 py-1.5 ${statusBadgeClass(currentTrack?.studyStatus ?? "not_studied")}`}>
-                {statusLabel(currentTrack?.studyStatus ?? "not_studied")}
-              </span>
+              <span className={`rounded-full border px-3 py-1.5 ${statusBadgeClass(currentTrack?.studyStatus ?? "not_studied")}`}>{statusLabel(currentTrack?.studyStatus ?? "not_studied")}</span>
               {currentAudio?.tone ? <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-zinc-200">Tom disponível: {toneLabel(currentAudio.tone)}</span> : null}
               {currentAudio?.voice ? <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-zinc-200">Áudio: {voiceLabel(currentAudio.voice)}</span> : null}
             </div>
 
             <div className="mt-6 rounded-3xl border border-white/10 bg-black/25 p-4">
-              {audioLoading ? (
-                <div className="flex items-center gap-2 text-sm text-zinc-300">
-                  <Loader2 className="h-4 w-4 animate-spin" /> Carregando áudio da música...
-                </div>
-              ) : audioError ? (
-                <p className="text-sm text-amber-100">{audioError}</p>
-              ) : currentAudio?.streamUrl ? (
-                <audio key={`${currentTrack?.id}-${currentAudio.streamUrl}`} controls preload="metadata" className="w-full">
+              {audioLoading ? <div className="flex items-center gap-2 text-sm text-zinc-300"><Loader2 className="h-4 w-4 animate-spin" /> Carregando áudio da música...</div> : audioError ? <p className="text-sm text-amber-100">{audioError}</p> : currentAudio?.streamUrl ? (
+                <audio key={`${currentTrack?.id}-${currentAudio.streamUrl}`} controls controlsList="nodownload noplaybackrate" disableRemotePlayback preload="metadata" className="w-full" onContextMenu={(event) => event.preventDefault()}>
                   <source src={currentAudio.streamUrl} />
                 </audio>
-              ) : (
-                <p className="text-sm text-zinc-400">Selecione uma música da escala para carregar o áudio aqui.</p>
-              )}
+              ) : <p className="text-sm text-zinc-400">Selecione uma música da escala para carregar o áudio aqui.</p>}
             </div>
 
             <div className="mt-5 flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={goToPrevious}
-                disabled={currentIndex === null || currentIndex <= 0}
-                className="inline-flex items-center gap-2 rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <ChevronLeft className="h-4 w-4" /> Anterior
-              </button>
-              <button
-                type="button"
-                onClick={playPlaylist}
-                disabled={!tracks.length}
-                className="inline-flex items-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Play className="h-4 w-4 fill-current" /> Reproduzir Escala
-              </button>
-              <button
-                type="button"
-                onClick={goToNext}
-                disabled={currentIndex === null || currentIndex >= tracks.length - 1}
-                className="inline-flex items-center gap-2 rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Próxima <ChevronRight className="h-4 w-4" />
-              </button>
+              <button type="button" onClick={goToPrevious} disabled={currentIndex === null || currentIndex <= 0} className="inline-flex items-center gap-2 rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"><ChevronLeft className="h-4 w-4" /> Anterior</button>
+              <button type="button" onClick={playPlaylist} disabled={!tracks.length} className="inline-flex items-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"><Play className="h-4 w-4 fill-current" /> Reproduzir Escala</button>
+              <button type="button" onClick={goToNext} disabled={currentIndex === null || currentIndex >= tracks.length - 1} className="inline-flex items-center gap-2 rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40">Próxima <ChevronRight className="h-4 w-4" /></button>
             </div>
 
             {currentTrack && updateStudyStatusAction && repertoireId ? (
@@ -280,19 +196,13 @@ export function MinistryPlaylistPlayer({ tracks, repertoireId, updateStudyStatus
                 {STUDY_STATUS_OPTIONS.map((option) => {
                   const Icon = option.icon;
                   const isActive = (currentTrack.studyStatus ?? "not_studied") === option.status;
-
                   return (
                     <form key={option.status} action={updateStudyStatusAction}>
                       <input type="hidden" name="repertoire_id" value={repertoireId} />
                       <input type="hidden" name="item_id" value={currentTrack.id} />
                       <input type="hidden" name="kit_id" value={currentTrack.kitId ?? ""} />
                       <input type="hidden" name="study_status" value={option.status} />
-                      <button
-                        disabled={isActive}
-                        className={`inline-flex w-fit items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition disabled:cursor-default ${isActive ? option.activeClassName : option.className}`}
-                      >
-                        <Icon className="h-4 w-4" /> {option.label}
-                      </button>
+                      <button disabled={isActive} className={`inline-flex w-fit items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition disabled:cursor-default ${isActive ? option.activeClassName : option.className}`}><Icon className="h-4 w-4" /> {option.label}</button>
                     </form>
                   );
                 })}
@@ -314,31 +224,12 @@ export function MinistryPlaylistPlayer({ tracks, repertoireId, updateStudyStatus
           const isNext = currentIndex !== null && index === currentIndex + 1;
           const isLastPlayed = index === lastPlayedIndex;
           const studyStatus = track.studyStatus ?? "not_studied";
-
           return (
-            <button
-              key={track.id}
-              type="button"
-              onClick={() => playTrack(index)}
-              className={`grid w-full gap-4 border-b border-white/10 p-4 text-left transition last:border-b-0 md:grid-cols-[1fr_auto] md:items-center ${
-                isCurrent
-                  ? "bg-cyan-300/12 ring-1 ring-inset ring-cyan-300/35"
-                  : isNext
-                    ? "bg-emerald-400/10"
-                    : isLastPlayed
-                      ? "bg-fuchsia-400/10"
-                      : "bg-transparent hover:bg-white/[0.035]"
-              }`}
-            >
+            <button key={track.id} type="button" onClick={() => playTrack(index)} className={`grid w-full gap-4 border-b border-white/10 p-4 text-left transition last:border-b-0 md:grid-cols-[1fr_auto] md:items-center ${isCurrent ? "bg-cyan-300/12 ring-1 ring-inset ring-cyan-300/35" : isNext ? "bg-emerald-400/10" : isLastPlayed ? "bg-fuchsia-400/10" : "bg-transparent hover:bg-white/[0.035]"}`}>
               <div className="flex w-full items-center gap-4">
-                <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-white/5 text-sm font-bold text-zinc-300">
-                  {track.coverUrl ? <img src={track.coverUrl} alt={track.name} className="h-full w-full object-cover" /> : track.position}
-                </div>
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-white/5 text-sm font-bold text-zinc-300">{track.coverUrl ? <img src={track.coverUrl} alt={track.name} className="h-full w-full object-cover" /> : track.position}</div>
                 <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-semibold text-zinc-400">{track.position}.</span>
-                    <h3 className="truncate text-lg font-semibold text-white">{track.name}</h3>
-                  </div>
+                  <div className="flex flex-wrap items-center gap-2"><span className="text-sm font-semibold text-zinc-400">{track.position}.</span><h3 className="truncate text-lg font-semibold text-white">{track.name}</h3></div>
                   <p className="text-sm text-zinc-400">{track.artist || "Música da escala"}</p>
                   <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-semibold uppercase tracking-[0.16em]">
                     {isCurrent ? <span className="rounded-full bg-cyan-300 px-2 py-1 text-slate-950">Atual</span> : null}
@@ -348,9 +239,7 @@ export function MinistryPlaylistPlayer({ tracks, repertoireId, updateStudyStatus
                   </div>
                 </div>
               </div>
-              <span className="inline-flex w-fit items-center gap-2 rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-zinc-200 md:justify-self-end">
-                {isCurrent ? "Tocando agora" : "Estudar aqui"}
-              </span>
+              <span className="inline-flex w-fit items-center gap-2 rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-zinc-200 md:justify-self-end">{isCurrent ? "Tocando agora" : "Estudar aqui"}</span>
             </button>
           );
         })}
@@ -360,17 +249,10 @@ export function MinistryPlaylistPlayer({ tracks, repertoireId, updateStudyStatus
 }
 
 function StatusPill({ label, track, tone }: { label: string; track: MinistryPlaylistTrack | null; tone: "current" | "next" | "last" }) {
-  const toneClass = {
-    current: "border-cyan-300/30 bg-cyan-300/10 text-cyan-100",
-    next: "border-emerald-300/30 bg-emerald-300/10 text-emerald-100",
-    last: "border-fuchsia-300/30 bg-fuchsia-300/10 text-fuchsia-100",
-  }[tone];
-
+  const toneClass = { current: "border-cyan-300/30 bg-cyan-300/10 text-cyan-100", next: "border-emerald-300/30 bg-emerald-300/10 text-emerald-100", last: "border-fuchsia-300/30 bg-fuchsia-300/10 text-fuchsia-100" }[tone];
   return (
     <div className={`rounded-2xl border p-3 ${toneClass}`}>
-      <p className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em]">
-        <Clock3 className="h-3.5 w-3.5" /> {label}
-      </p>
+      <p className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em]"><Clock3 className="h-3.5 w-3.5" /> {label}</p>
       <p className="mt-2 truncate text-sm font-semibold text-white">{track?.name ?? "—"}</p>
       <p className="truncate text-xs text-zinc-300">{track?.artist ?? "Aguardando navegação"}</p>
     </div>
