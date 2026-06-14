@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -41,8 +41,8 @@ export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitMa
   const [modalOpen, setModalOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [loading, startLoading] = useTransition();
-  const [libraryLoading, startLibraryLoading] = useTransition();
+  const [loading, setLoading] = useState(false);
+  const [libraryLoading, setLibraryLoading] = useState(false);
   const [addingKitId, setAddingKitId] = useState<string | null>(null);
 
   const endpoint = useMemo(() => `/api/ministerio/repertorios/${repertoireId}/kits`, [repertoireId]);
@@ -93,7 +93,7 @@ export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitMa
     setExistingKitIds((current) => new Set([...current, ...(payload.existingKitIds ?? []).map(String)]));
   }
 
-  function loadKits(nextQuery = query, target: "search" | "library" = "search") {
+  async function loadKits(nextQuery = query, target: "search" | "library" = "search") {
     const normalizedQuery = nextQuery.trim();
 
     if (target === "search" && !normalizedQuery) {
@@ -103,15 +103,16 @@ export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitMa
       return;
     }
 
-    const transition = target === "library" ? startLibraryLoading : startLoading;
+    setMessage("");
+    if (target === "search") {
+      setHasSearched(true);
+      setSearchOpen(true);
+      setLoading(true);
+    } else {
+      setLibraryLoading(true);
+    }
 
-    transition(async () => {
-      setMessage("");
-      if (target === "search") {
-        setHasSearched(true);
-        setSearchOpen(true);
-      }
-
+    try {
       const params = new URLSearchParams();
       if (normalizedQuery) params.set("q", normalizedQuery);
 
@@ -124,7 +125,10 @@ export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitMa
       }
 
       applySearchPayload(payload, target);
-    });
+    } finally {
+      if (target === "search") setLoading(false);
+      else setLibraryLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -136,13 +140,13 @@ export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitMa
       return;
     }
 
-    const timeout = window.setTimeout(() => loadKits(cleanQuery, "search"), 120);
+    const timeout = window.setTimeout(() => void loadKits(cleanQuery, "search"), 70);
     return () => window.clearTimeout(timeout);
   }, [cleanQuery, endpoint, modalOpen]);
 
   function openLibrary() {
     setDrawerOpen(true);
-    if (!libraryKits.length) loadKits("", "library");
+    if (!libraryKits.length) void loadKits("", "library");
   }
 
   function closeModal() {
@@ -152,8 +156,26 @@ export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitMa
   }
 
   async function addKit(kit: Kit) {
+    if (existingKitIds.has(kit.id) || scaleSongs.some((song) => song.kitId === kit.id)) return;
+
+    const optimisticId = `optimistic-${kit.id}`;
+    const optimisticSong: SelectedScaleSong = {
+      id: optimisticId,
+      kitId: kit.id,
+      position: scaleSongs.length + 1,
+      name: kit.name,
+      artist: kit.artist,
+    };
+
     setAddingKitId(kit.id);
-    setMessage("");
+    setMessage(`${kit.name} foi adicionado à escala.`);
+    setExistingKitIds((current) => new Set([...current, kit.id]));
+    setScaleSongs((current) => {
+      if (current.some((song) => song.kitId === kit.id)) return current;
+      return [...current, { ...optimisticSong, position: current.length + 1 }];
+    });
+    setSearchOpen(false);
+    setHasSearched(false);
 
     try {
       const response = await fetch(endpoint, {
@@ -164,32 +186,31 @@ export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitMa
       const payload = await response.json();
 
       if (!response.ok) {
+        setExistingKitIds((current) => {
+          const next = new Set(current);
+          next.delete(kit.id);
+          return next;
+        });
+        setScaleSongs((current) => current.filter((song) => song.kitId !== kit.id && song.id !== optimisticId).map((song, index) => ({ ...song, position: index + 1 })));
         setMessage(payload?.error || "Não foi possível adicionar o kit.");
         return;
       }
 
-      setExistingKitIds((current) => new Set([...current, kit.id]));
-
       if (payload?.item?.id) {
-        setScaleSongs((current) => {
-          if (current.some((song) => song.kitId === kit.id || song.id === payload.item.id)) return current;
-          return [
-            ...current,
-            {
-              id: String(payload.item.id),
-              kitId: kit.id,
-              position: Number(payload.item.position ?? current.length + 1),
-              name: String(payload?.kit?.name ?? kit.name),
-              artist: payload?.kit?.artist ?? kit.artist ?? null,
-            },
-          ].sort((a, b) => a.position - b.position);
-        });
+        setScaleSongs((current) => current.map((song) => {
+          if (song.kitId !== kit.id && song.id !== optimisticId) return song;
+          return {
+            id: String(payload.item.id),
+            kitId: kit.id,
+            position: Number(payload.item.position ?? song.position),
+            name: String(payload?.kit?.name ?? kit.name),
+            artist: payload?.kit?.artist ?? kit.artist ?? null,
+          };
+        }).sort((a, b) => a.position - b.position));
       }
 
       setMessage(payload?.alreadyAdded ? "Esse kit já estava na escala." : `${kit.name} foi adicionado à escala.`);
-      setSearchOpen(false);
-      setHasSearched(false);
-      router.refresh();
+      window.setTimeout(() => router.refresh(), 450);
     } finally {
       setAddingKitId(null);
     }
@@ -200,7 +221,7 @@ export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitMa
     const isAdding = addingKitId === kit.id;
 
     return (
-      <div className={`flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.035] ${compact ? "p-2" : "p-3"}`}>
+      <div className={`flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.035] transition ${compact ? "p-2" : "p-3"} ${alreadyAdded ? "border-emerald-300/20 bg-emerald-400/10" : ""}`}>
         <button type="button" onClick={() => addKit(kit)} disabled={alreadyAdded || isAdding} className="flex min-w-0 flex-1 items-center gap-3 text-left disabled:cursor-default">
           <div className={`${compact ? "h-9 w-9" : "h-12 w-12"} shrink-0 overflow-hidden rounded-xl bg-white/5`}>
             {kit.cover_url ? <img src={kit.cover_url} alt={kit.name} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-[10px] text-zinc-500">HM</div>}
@@ -212,11 +233,11 @@ export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitMa
         </button>
 
         <div className="flex shrink-0 items-center gap-2">
-          {!compact ? <Link href={`/biblioteca/${kit.slug}`} className="rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-zinc-200 transition hover:bg-white/10">Ver kit</Link> : null}
+          {!compact ? <Link href={`/biblioteca/${kit.slug}`} prefetch className="rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-zinc-200 transition hover:bg-white/10">Ver kit</Link> : null}
           {alreadyAdded ? (
             <span className="inline-flex items-center gap-2 rounded-xl border border-emerald-300/25 bg-emerald-400/10 px-3 py-2 text-xs font-semibold text-emerald-100"><Check className="h-3.5 w-3.5" /> Adicionado</span>
           ) : (
-            <button type="button" onClick={() => addKit(kit)} disabled={isAdding} className="inline-flex items-center gap-2 rounded-xl bg-cyan-300 px-3 py-2 text-xs font-bold text-slate-950 transition hover:bg-cyan-200 disabled:opacity-70">
+            <button type="button" onClick={() => addKit(kit)} disabled={isAdding} className="inline-flex items-center gap-2 rounded-xl bg-cyan-300 px-3 py-2 text-xs font-bold text-slate-950 transition hover:bg-cyan-200 active:scale-[0.98] disabled:opacity-70">
               {isAdding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />} Adicionar
             </button>
           )}
@@ -246,7 +267,7 @@ export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitMa
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div ref={searchBoxRef} className="relative md:max-w-2xl md:flex-1">
                   <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
-                  <input value={query} onFocus={() => { if (kits.length || hasSearched) setSearchOpen(true); }} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); loadKits(query, "search"); } if (event.key === "Escape") setSearchOpen(false); }} maxLength={80} placeholder="Buscar música..." className="w-full rounded-2xl border border-cyan-300/35 bg-white/[0.06] py-3 pl-11 pr-4 text-sm text-white outline-none placeholder:text-zinc-500 focus:border-cyan-300/70" />
+                  <input value={query} onFocus={() => { if (kits.length || hasSearched) setSearchOpen(true); }} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void loadKits(query, "search"); } if (event.key === "Escape") setSearchOpen(false); }} maxLength={80} placeholder="Buscar música..." className="w-full rounded-2xl border border-cyan-300/35 bg-white/[0.06] py-3 pl-11 pr-4 text-sm text-white outline-none placeholder:text-zinc-500 focus:border-cyan-300/70" />
                   {hasSearched && searchOpen ? (
                     <div className="absolute z-40 mt-2 max-h-[50dvh] w-full overflow-y-auto rounded-3xl border border-white/10 bg-[#090d18] p-2 shadow-2xl shadow-black/60">
                       {loading ? <div className="flex items-center gap-2 p-4 text-sm text-zinc-300"><Loader2 className="h-4 w-4 animate-spin" /> Buscando...</div> : null}
@@ -255,7 +276,7 @@ export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitMa
                     </div>
                   ) : null}
                 </div>
-                <button type="button" onClick={openLibrary} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10"><Library className="h-4 w-4" /> Explorar biblioteca</button>
+                <button type="button" onClick={openLibrary} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10 active:scale-[0.99]"><Library className="h-4 w-4" /> Explorar biblioteca</button>
               </div>
               {message ? <div className="mt-4 rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-3 text-sm text-cyan-50">{message}</div> : null}
             </div>
@@ -270,7 +291,7 @@ export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitMa
               </div>
               {scaleSongs.length ? (
                 <div className="mt-4 space-y-2">
-                  {scaleSongs.map((song) => <div key={song.id} className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/[0.035] p-3 md:flex-row md:items-center md:justify-between"><div className="min-w-0"><p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-200">Música {song.position}</p><h5 className="truncate text-sm font-semibold text-white">{song.name}</h5><p className="truncate text-xs text-zinc-400">{song.artist || "Kit vocal"}</p></div><Link href={`/ministerio/repertorios/${repertoireId}/musicas/${song.id}`} className="inline-flex w-fit items-center gap-2 rounded-xl border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-400/20"><Settings className="h-3.5 w-3.5" /> Configurar</Link></div>)}
+                  {scaleSongs.map((song) => <div key={song.id} className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/[0.035] p-3 transition md:flex-row md:items-center md:justify-between"><div className="min-w-0"><p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-200">Música {song.position}</p><h5 className="truncate text-sm font-semibold text-white">{song.name}</h5><p className="truncate text-xs text-zinc-400">{song.artist || "Kit vocal"}</p></div>{song.id.startsWith("optimistic-") ? <span className="inline-flex w-fit items-center gap-2 rounded-xl border border-emerald-300/20 bg-emerald-400/10 px-3 py-2 text-xs font-semibold text-emerald-100"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Salvando</span> : <Link prefetch href={`/ministerio/repertorios/${repertoireId}/musicas/${song.id}`} className="inline-flex w-fit items-center gap-2 rounded-xl border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-400/20"><Settings className="h-3.5 w-3.5" /> Configurar</Link>}</div>)}
                 </div>
               ) : <div className="mt-4 rounded-2xl border border-dashed border-white/10 bg-black/20 p-6 text-center text-sm text-zinc-400">Nenhuma música adicionada ainda.</div>}
             </div>
@@ -284,7 +305,7 @@ export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitMa
 
   return (
     <div className="mt-5">
-      <button type="button" onClick={() => setModalOpen(true)} className="grid w-full gap-4 rounded-[2rem] border border-cyan-300/20 bg-cyan-400/10 p-5 text-left transition hover:border-cyan-300/40 hover:bg-cyan-400/15 md:grid-cols-[1fr_auto] md:items-center">
+      <button type="button" onClick={() => setModalOpen(true)} className="grid w-full gap-4 rounded-[2rem] border border-cyan-300/20 bg-cyan-400/10 p-5 text-left transition hover:border-cyan-300/40 hover:bg-cyan-400/15 active:scale-[0.995] md:grid-cols-[1fr_auto] md:items-center">
         <span className="flex items-start gap-4">
           <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-cyan-300/25 bg-cyan-300/10 text-cyan-100"><Music2 className="h-5 w-5" /></span>
           <span>
