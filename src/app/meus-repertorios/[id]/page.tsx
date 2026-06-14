@@ -17,10 +17,15 @@ type KitRow = { id: string; slug: string; name: string; artist: string | null; c
 type RepertoireItem = { id: string; position: number; kit_id?: string | null; key_override?: string | null; notes?: string | null; kits: KitRow | null };
 type StudyStatus = "not_studied" | "studied" | "doubt" | "review";
 type ProgressRow = { repertoire_item_id: string | null; studied: boolean; studied_at: string | null; study_status?: StudyStatus | null; ready?: boolean | null; ready_at?: string | null };
-type AssignmentRow = { id: string; member_id: string; repertoire_item_id: string | null; assigned_voice: string | null; notes: string | null; study_mode?: string | null };
+type AssignmentRow = { id: string; member_id: string; repertoire_item_id: string | null; assigned_voice: string | null; notes?: string | null; study_mode?: string | null };
 type MemberRow = { id: string; user_id: string | null; invited_name: string | null; invited_email: string | null; role?: string | null; status?: string | null; profiles?: { full_name: string | null; email: string | null } | null };
 
 const STUDY_STATUSES: StudyStatus[] = ["not_studied", "studied", "doubt", "review"];
+
+function isSchemaMissing(message?: string | null) {
+  const text = String(message ?? "").toLowerCase();
+  return text.includes("does not exist") || text.includes("schema cache") || text.includes("could not find") || text.includes("column");
+}
 
 function normalizeStudyStatus(row?: ProgressRow | null): StudyStatus {
   if (row?.study_status && STUDY_STATUSES.includes(row.study_status)) return row.study_status;
@@ -31,13 +36,28 @@ function statusIsStudied(status: StudyStatus) { return status === "studied"; }
 function formatDate(value?: string | null, fallback = "—") { if (!value) return fallback; const date = new Date(value); if (Number.isNaN(date.getTime())) return fallback; return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" }); }
 function memberName(member?: MemberRow | null) { return member?.profiles?.full_name || member?.invited_name || member?.profiles?.email || member?.invited_email || "Integrante"; }
 function memberEmail(member?: MemberRow | null) { return member?.profiles?.email || member?.invited_email || ""; }
-function voiceLabel(value?: string | null) { const map: Record<string, string> = { lead: "Lead", tenor: "Tenor", contralto: "Contralto", soprano: "Soprano", baritono: "Barítono", baixo: "Baixo" }; return value ? map[value] ?? value : "Definir por música"; }
 
 async function assertRepertoireAccess(input: { admin: any; repertoireId: string; ministryId: string }) {
   const { data: repertoire, error } = await input.admin.from("ministry_repertoires").select("id,ministry_id,archived").eq("id", input.repertoireId).eq("ministry_id", input.ministryId).maybeSingle();
   if (error) throw new Error(error.message);
   if (!repertoire?.id || repertoire.archived) notFound();
   return repertoire;
+}
+
+async function safeUpdateProgress(admin: any, id: string, payload: Record<string, unknown>, fallbackPayload: Record<string, unknown>) {
+  const { error } = await admin.from("ministry_repertoire_progress").update(payload).eq("id", id);
+  if (!error) return;
+  if (!isSchemaMissing(error.message)) throw new Error(error.message);
+  const fallback = await admin.from("ministry_repertoire_progress").update(fallbackPayload).eq("id", id);
+  if (fallback.error) throw new Error(fallback.error.message);
+}
+
+async function safeInsertProgress(admin: any, payload: Record<string, unknown>, fallbackPayload: Record<string, unknown>) {
+  const { error } = await admin.from("ministry_repertoire_progress").insert(payload);
+  if (!error) return;
+  if (!isSchemaMissing(error.message)) throw new Error(error.message);
+  const fallback = await admin.from("ministry_repertoire_progress").insert(fallbackPayload);
+  if (fallback.error) throw new Error(fallback.error.message);
 }
 
 async function updateStudyStatus(formData: FormData) {
@@ -65,14 +85,10 @@ async function updateStudyStatus(formData: FormData) {
   const { data: existing, error: existingError } = await admin.from("ministry_repertoire_progress").select("id").eq("repertoire_id", repertoireId).eq("repertoire_item_id", itemId).eq("user_id", context.profile.id).maybeSingle();
   if (existingError) throw new Error(existingError.message);
 
-  const payload = { studied: nextStudied, studied_at: studiedAt, study_status: studyStatus, updated_at: now };
-  if (existing?.id) {
-    const { error } = await admin.from("ministry_repertoire_progress").update(payload).eq("id", existing.id);
-    if (error) throw new Error(error.message);
-  } else {
-    const { error } = await admin.from("ministry_repertoire_progress").insert({ repertoire_id: repertoireId, repertoire_item_id: itemId, kit_id: kitId, user_id: context.profile.id, ready: false, created_at: now, ...payload });
-    if (error) throw new Error(error.message);
-  }
+  const basePayload = { studied: nextStudied, studied_at: studiedAt, updated_at: now };
+  const richPayload = { ...basePayload, study_status: studyStatus };
+  if (existing?.id) await safeUpdateProgress(admin, existing.id, richPayload, basePayload);
+  else await safeInsertProgress(admin, { repertoire_id: repertoireId, repertoire_item_id: itemId, kit_id: kitId, user_id: context.profile.id, ready: false, created_at: now, ...richPayload }, { repertoire_id: repertoireId, repertoire_item_id: itemId, kit_id: kitId, user_id: context.profile.id, ready: false, created_at: now, ...basePayload });
 
   if (!nextStudied) await admin.from("ministry_repertoire_progress").update({ ready: false, ready_at: null, updated_at: now }).eq("repertoire_id", repertoireId).eq("user_id", context.profile.id).is("repertoire_item_id", null).eq("ready", true);
   redirect(`/meus-repertorios/${repertoireId}`);
@@ -90,7 +106,7 @@ async function toggleReady(formData: FormData) {
   await assertRepertoireAccess({ admin, repertoireId, ministryId: context.ministry.ministryId });
   const [{ count: totalItems }, { count: studiedItems }] = await Promise.all([
     admin.from("ministry_repertoire_items").select("id", { count: "exact", head: true }).eq("repertoire_id", repertoireId),
-    admin.from("ministry_repertoire_progress").select("id", { count: "exact", head: true }).eq("repertoire_id", repertoireId).eq("user_id", context.profile.id).eq("study_status", "studied").not("repertoire_item_id", "is", null),
+    admin.from("ministry_repertoire_progress").select("id", { count: "exact", head: true }).eq("repertoire_id", repertoireId).eq("user_id", context.profile.id).eq("studied", true).not("repertoire_item_id", "is", null),
   ]);
   const canConfirmReady = Number(totalItems ?? 0) > 0 && Number(studiedItems ?? 0) >= Number(totalItems ?? 0);
   if (nextReady && !canConfirmReady) redirect(`/meus-repertorios/${repertoireId}`);
@@ -108,8 +124,35 @@ function mergeItemsWithKits(items: any[] | null | undefined, kits: KitRow[] | nu
   return (items ?? []).map((item: any) => ({ id: item.id, position: Number(item.position ?? 0), kit_id: item.kit_id ?? null, key_override: item.key_override ?? null, notes: item.notes ?? null, kits: item.kit_id ? kitsById.get(String(item.kit_id)) ?? null : null })) as RepertoireItem[];
 }
 
-export default async function MeuRepertorioDetalhePage({ params, searchParams }: { params: Promise<PageParams>; searchParams?: Promise<PageSearchParams> }) {
-  const [context, resolvedParams] = await Promise.all([getCurrentUserAccessContext(), params, searchParams ?? Promise.resolve({} as PageSearchParams)]);
+async function loadRepertoireItems(admin: any, repertoireId: string) {
+  const rich = await admin.from("ministry_repertoire_items").select("id,position,kit_id,key_override,notes").eq("repertoire_id", repertoireId).order("position", { ascending: true });
+  if (!rich.error) return rich.data ?? [];
+  if (!isSchemaMissing(rich.error.message)) throw new Error(rich.error.message);
+  const basic = await admin.from("ministry_repertoire_items").select("id,position,kit_id").eq("repertoire_id", repertoireId).order("position", { ascending: true });
+  if (basic.error) throw new Error(basic.error.message);
+  return basic.data ?? [];
+}
+
+async function loadProgressRows(admin: any, repertoireId: string, userId: string) {
+  const rich = await admin.from("ministry_repertoire_progress").select("repertoire_item_id,studied,studied_at,study_status,ready,ready_at").eq("repertoire_id", repertoireId).eq("user_id", userId);
+  if (!rich.error) return rich.data ?? [];
+  if (!isSchemaMissing(rich.error.message)) throw new Error(rich.error.message);
+  const basic = await admin.from("ministry_repertoire_progress").select("repertoire_item_id,studied,studied_at,ready,ready_at").eq("repertoire_id", repertoireId).eq("user_id", userId);
+  if (basic.error) throw new Error(basic.error.message);
+  return basic.data ?? [];
+}
+
+async function loadAssignments(admin: any, repertoireId: string) {
+  const rich = await admin.from("ministry_repertoire_assignments").select("id,member_id,repertoire_item_id,assigned_voice,notes,study_mode").eq("repertoire_id", repertoireId);
+  if (!rich.error) return rich.data ?? [];
+  if (!isSchemaMissing(rich.error.message)) throw new Error(rich.error.message);
+  const basic = await admin.from("ministry_repertoire_assignments").select("id,member_id,repertoire_item_id,assigned_voice").eq("repertoire_id", repertoireId);
+  if (basic.error) return [];
+  return basic.data ?? [];
+}
+
+export default async function MeuRepertorioDetalhePage({ params }: { params: Promise<PageParams>; searchParams?: Promise<PageSearchParams> }) {
+  const [context, resolvedParams] = await Promise.all([getCurrentUserAccessContext(), params]);
   if (context.isGuest) redirect("/login");
   if (!context.ministry?.ministryId || !context.profile?.id) redirect("/");
   const admin = createSupabaseAdminClient() as any;
@@ -121,14 +164,13 @@ export default async function MeuRepertorioDetalhePage({ params, searchParams }:
   if (error) throw new Error(error.message);
   if (!repertoire?.id || repertoire.archived) notFound();
 
-  const [{ data: rawItems, error: itemsError }, { data: progressRows, error: progressError }, { data: members }, { data: scaleAssignments }] = await Promise.all([
-    admin.from("ministry_repertoire_items").select("id,position,kit_id,key_override,notes").eq("repertoire_id", repertoire.id).order("position", { ascending: true }),
-    admin.from("ministry_repertoire_progress").select("repertoire_item_id,studied,studied_at,study_status,ready,ready_at").eq("repertoire_id", repertoire.id).eq("user_id", context.profile.id),
+  const [rawItems, progressRows, membersResult, scaleAssignments] = await Promise.all([
+    loadRepertoireItems(admin, repertoire.id),
+    loadProgressRows(admin, repertoire.id, context.profile.id),
     admin.from("ministry_members").select("id,user_id,invited_name,invited_email,role,status,profiles(full_name,email)").eq("ministry_id", context.ministry.ministryId).neq("status", "removed").order("created_at", { ascending: true }),
-    admin.from("ministry_repertoire_assignments").select("id,member_id,repertoire_item_id,assigned_voice,notes,study_mode").eq("repertoire_id", repertoire.id),
+    loadAssignments(admin, repertoire.id),
   ]);
-  if (itemsError) throw new Error(itemsError.message);
-  if (progressError) throw new Error(progressError.message);
+  const members = membersResult.error ? [] : (membersResult.data ?? []);
 
   const currentMember = ((members ?? []) as MemberRow[]).find((member) => member.user_id === context.profile?.id) ?? null;
   const allMembers = ((members ?? []) as MemberRow[]).map((member) => ({ id: member.id, name: memberName(member), email: memberEmail(member), isCoordinator: member.id === repertoire.coordinator_member_id }));
