@@ -128,6 +128,10 @@ function buildLivePayload(input: DispatchWebhookInput) {
 }
 
 async function dispatchWebhookEventUnsafe(input: DispatchWebhookInput) {
+  if (input.event === "upgrade.free_to_premium") {
+    return { dispatched: 0, skipped: true, reason: "free_to_premium_uses_plan_premium_activated" };
+  }
+
   if (!WEBHOOK_EVENTS.includes(input.event)) {
     return { dispatched: 0, skipped: true, reason: "unsupported_event" };
   }
@@ -258,6 +262,6 @@ export async function dispatchWebhookEvent(input: DispatchWebhookInput) {
     return await dispatchWebhookEventUnsafe(input);
   } catch (error) {
     console.error("[webhooks] Dispatcher falhou sem interromper o fluxo principal", { event: input.event, error });
-    return { dispatched: 0, error: error instanceof Error ? error.message : "Falha desconhecida" };
+    return { dispatched: 0, error: error instanceof Error ? error.message : "unknown" };
   }
 }
