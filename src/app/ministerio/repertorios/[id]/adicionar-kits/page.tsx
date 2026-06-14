@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, Check, Music2, Plus, Search } from "lucide-react";
 
+import { MinistryRouteTransition } from "@/components/ministerio/ministry-route-transition";
 import { MinistryShell, PremiumPanel } from "@/components/ministerio/ministry-ui";
 import { MinistrySubmitButton } from "@/components/ministerio/ministry-submit-button";
 import { getActivityActorName, logMinistryActivity } from "@/lib/data/ministry-activity";
@@ -56,36 +57,32 @@ async function addKitToRepertoire(formData: FormData) {
 
   const admin = createSupabaseAdminClient() as any;
 
-  const { data: repertoire, error: repertoireError } = await admin
-    .from("ministry_repertoires")
-    .select("id,ministry_id,name,archived")
-    .eq("id", repertoireId)
-    .eq("ministry_id", context.ministry.ministryId)
-    .maybeSingle();
+  const [{ data: repertoire, error: repertoireError }, { data: kit, error: kitError }, { data: existing }] = await Promise.all([
+    admin
+      .from("ministry_repertoires")
+      .select("id,ministry_id,name,archived")
+      .eq("id", repertoireId)
+      .eq("ministry_id", context.ministry.ministryId)
+      .maybeSingle(),
+    admin
+      .from("kits")
+      .select("id,name,artist,published")
+      .eq("id", kitId)
+      .eq("published", true)
+      .maybeSingle(),
+    admin
+      .from("ministry_repertoire_items")
+      .select("id")
+      .eq("repertoire_id", repertoireId)
+      .eq("kit_id", kitId)
+      .maybeSingle(),
+  ]);
 
   if (repertoireError) throw new Error(repertoireError.message);
   if (!repertoire?.id || repertoire.archived) notFound();
-
-  const { data: kit, error: kitError } = await admin
-    .from("kits")
-    .select("id,name,artist,published")
-    .eq("id", kitId)
-    .eq("published", true)
-    .maybeSingle();
-
   if (kitError) throw new Error(kitError.message);
   if (!kit?.id) redirect(`/ministerio/repertorios/${repertoireId}/adicionar-kits?message=Kit%20indispon%C3%ADvel`);
-
-  const { data: existing } = await admin
-    .from("ministry_repertoire_items")
-    .select("id")
-    .eq("repertoire_id", repertoireId)
-    .eq("kit_id", kitId)
-    .maybeSingle();
-
-  if (existing?.id) {
-    redirect(`/ministerio/repertorios/${repertoireId}/adicionar-kits?message=Este%20kit%20j%C3%A1%20est%C3%A1%20no%20repert%C3%B3rio`);
-  }
+  if (existing?.id) redirect(`/ministerio/repertorios/${repertoireId}/adicionar-kits?message=Este%20kit%20j%C3%A1%20est%C3%A1%20no%20repert%C3%B3rio`);
 
   const { count } = await admin
     .from("ministry_repertoire_items")
@@ -103,7 +100,7 @@ async function addKitToRepertoire(formData: FormData) {
   if (error) throw new Error(error.message);
 
   const actorName = getActivityActorName(context.profile);
-  await logMinistryActivity({
+  logMinistryActivity({
     ministryId: context.ministry.ministryId,
     actorUserId: context.profile?.id ?? null,
     actorName,
@@ -120,7 +117,7 @@ async function addKitToRepertoire(formData: FormData) {
       kit_artist: kit.artist,
       position,
     },
-  });
+  }).catch(() => null);
 
   redirect(`/ministerio/repertorios/${repertoireId}/adicionar-kits?message=Kit%20adicionado%20com%20sucesso`);
 }
@@ -178,9 +175,9 @@ export default async function AddKitsToRepertoirePage({ params, searchParams }: 
   return (
     <MinistryShell>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Link prefetch href={`/ministerio/repertorios/${repertoire.id}`} className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10">
+        <MinistryRouteTransition href={`/ministerio/repertorios/${repertoire.id}`} className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10 data-[pending=true]:bg-white/10">
           <ArrowLeft className="h-4 w-4" /> Voltar ao repertório
-        </Link>
+        </MinistryRouteTransition>
       </div>
 
       <div className="overflow-hidden rounded-[2rem] border border-cyan-300/20 bg-gradient-to-br from-[#0b1120]/95 via-[#140d27]/95 to-[#06111f]/95 p-6 shadow-[0_30px_100px_rgba(34,211,238,0.16)] md:p-10">
@@ -244,12 +241,6 @@ export default async function AddKitsToRepertoirePage({ params, searchParams }: 
             );
           })}
         </div>
-
-        {!rows.length ? (
-          <div className="mt-6 rounded-3xl border border-dashed border-white/10 bg-black/20 p-10 text-center text-sm text-zinc-400">
-            Nenhum kit encontrado para essa busca.
-          </div>
-        ) : null}
       </PremiumPanel>
     </MinistryShell>
   );
