@@ -33,7 +33,7 @@ type MinistryMemberRow = {
   id: string;
   invited_name?: string | null;
   invited_email?: string | null;
-  profile?: { full_name?: string | null; email?: string | null } | null;
+  profiles?: { full_name?: string | null; email?: string | null } | null;
 };
 
 type TeamTemplateRow = { id: string; name: string } | null;
@@ -44,11 +44,11 @@ function isSchemaMissing(message?: string | null) {
 }
 
 function memberLabel(member?: MinistryMemberRow | null) {
-  return member?.invited_name || member?.profile?.full_name || member?.invited_email || member?.profile?.email || "Integrante";
+  return member?.invited_name || member?.profiles?.full_name || member?.invited_email || member?.profiles?.email || "Integrante";
 }
 
 function memberEmail(member?: MinistryMemberRow | null) {
-  return member?.invited_email || member?.profile?.email || "";
+  return member?.invited_email || member?.profiles?.email || "";
 }
 
 function studyModeLabel(value?: string | null) {
@@ -80,7 +80,7 @@ export default async function RepertoireDetailPage({ params }: { params: Promise
   const [{ data: items, error: itemsError }, assignmentsResult, { data: members }, { data: teamTemplate }] = await Promise.all([
     admin.from("ministry_repertoire_items").select("id,position,kits(id,slug,name,artist,cover_url)").eq("repertoire_id", repertoire.id).order("position", { ascending: true }),
     admin.from("ministry_repertoire_assignments").select("id,member_id,assigned_role,assigned_voice,assigned_tone,study_mode,notes").eq("repertoire_id", repertoire.id).is("repertoire_item_id", null).order("created_at", { ascending: true }),
-    admin.from("ministry_members").select("id,invited_name,invited_email,profile:profiles(full_name,email)").eq("ministry_id", context.ministry.ministryId),
+    admin.from("ministry_members").select("id,invited_name,invited_email,profiles(full_name,email)").eq("ministry_id", context.ministry.ministryId),
     repertoire.team_template_id ? admin.from("ministry_team_templates").select("id,name").eq("id", repertoire.team_template_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
 
@@ -98,7 +98,7 @@ export default async function RepertoireDetailPage({ params }: { params: Promise
   const selectedTeamTemplate = teamTemplate as TeamTemplateRow;
   const selectedSongs = repertoireItems.flatMap((item) => {
     if (!item.kits) return [];
-    return [{ id: item.id, position: item.position, name: item.kits.name, artist: item.kits.artist }];
+    return [{ id: item.id, kitId: item.kits.id, position: item.position, name: item.kits.name, artist: item.kits.artist }];
   });
 
   return (
@@ -155,7 +155,7 @@ export default async function RepertoireDetailPage({ params }: { params: Promise
             {canManage ? <Link href={`/ministerio/repertorios/${repertoire.id}/integrantes`} className="hidden rounded-2xl border border-cyan-300/25 bg-cyan-400/10 px-4 py-3 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-400/20 md:inline-flex">Editar</Link> : null}
           </div>
           <div className="mt-6 grid gap-3">
-            {scaleAssignments.length ? scaleAssignments.map((assignment) => { const member = membersById.get(assignment.member_id); return <div key={assignment.id} className="rounded-3xl border border-white/10 bg-black/20 p-5"><h3 className="text-lg font-semibold text-white">{memberLabel(member)}</h3><p className="mt-1 text-xs text-zinc-500">{memberEmail(member)}</p><div className="mt-4 flex flex-wrap gap-2 text-xs"><span className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1 text-cyan-100">Nipe padrão: {assignment.assigned_voice || "Definir por música"}</span><span className="rounded-full border border-emerald-300/20 bg-emerald-400/10 px-3 py-1 text-emerald-100">Estudo: {studyModeLabel(assignment.study_mode)}</span></div>{assignment.notes ? <p className="mt-4 max-w-3xl text-sm leading-6 text-zinc-300">{assignment.notes}</p> : null}</div>; }) : <div className="rounded-3xl border border-dashed border-white/10 bg-black/20 p-8 text-center text-sm text-zinc-400">Nenhum integrante foi atribuído ainda. Use um template de equipe na criação da escala ou adicione vocalistas manualmente.</div>}
+            {scaleAssignments.length ? scaleAssignments.map((assignment) => { const member = membersById.get(assignment.member_id); const isCoordinator = assignment.member_id === repertoire.coordinator_member_id; return <div key={assignment.id} className="rounded-3xl border border-white/10 bg-black/20 p-5"><div className="flex flex-wrap items-center gap-2"><h3 className="text-lg font-semibold text-white">{memberLabel(member)}</h3>{isCoordinator ? <span className="rounded-full border border-amber-300/25 bg-amber-400/10 px-3 py-1 text-xs font-semibold text-amber-100">Coordenador vocal</span> : null}</div><p className="mt-1 text-xs text-zinc-500">{memberEmail(member)}</p><div className="mt-4 flex flex-wrap gap-2 text-xs"><span className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1 text-cyan-100">Nipe padrão: {assignment.assigned_voice || "Definir por música"}</span><span className="rounded-full border border-emerald-300/20 bg-emerald-400/10 px-3 py-1 text-emerald-100">Estudo: {studyModeLabel(assignment.study_mode)}</span></div>{assignment.notes ? <p className="mt-4 max-w-3xl text-sm leading-6 text-zinc-300">{assignment.notes}</p> : null}</div>; }) : <div className="rounded-3xl border border-dashed border-white/10 bg-black/20 p-8 text-center text-sm text-zinc-400">Nenhum integrante foi atribuído ainda. Use um template de equipe na criação da escala ou adicione vocalistas manualmente.</div>}
           </div>
         </PremiumPanel>
       </div>
