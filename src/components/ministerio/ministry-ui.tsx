@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import { MinistryRouteTransition } from "@/components/ministerio/ministry-route-transition";
+import { MinistryToast } from "@/components/ministerio/ministry-toast";
 
 const navItems = [
   { href: "/ministerio", label: "Visão Geral", icon: LayoutDashboard },
@@ -29,6 +30,7 @@ export function MinistryShell({ children }: { children: React.ReactNode }) {
   return (
     <main className="min-h-screen overflow-hidden bg-[#020617] px-4 py-6 text-white md:px-8 md:py-10">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_12%_10%,rgba(34,211,238,0.14),transparent_30%),radial-gradient(circle_at_88%_20%,rgba(217,70,239,0.12),transparent_35%),radial-gradient(circle_at_45%_85%,rgba(16,185,129,0.08),transparent_36%)]" />
+      <MinistryToast />
       <section className="relative mx-auto max-w-7xl space-y-6">
         <MinistryNav />
         <div className="min-h-[60vh] will-change-auto">
