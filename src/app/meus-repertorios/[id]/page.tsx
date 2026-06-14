@@ -32,10 +32,17 @@ function normalizeStudyStatus(row?: ProgressRow | null): StudyStatus {
   return row?.studied ? "studied" : "not_studied";
 }
 
+function normalizeEmail(value?: string | null) { return String(value ?? "").trim().toLowerCase(); }
 function statusIsStudied(status: StudyStatus) { return status === "studied"; }
 function formatDate(value?: string | null, fallback = "—") { if (!value) return fallback; const date = new Date(value); if (Number.isNaN(date.getTime())) return fallback; return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" }); }
 function memberName(member?: MemberRow | null) { return member?.profiles?.full_name || member?.invited_name || member?.profiles?.email || member?.invited_email || "Integrante"; }
 function memberEmail(member?: MemberRow | null) { return member?.profiles?.email || member?.invited_email || ""; }
+function memberMatchesProfile(member: MemberRow, profileId?: string | null, profileEmail?: string | null) {
+  if (profileId && member.user_id === profileId) return true;
+  const email = normalizeEmail(profileEmail);
+  if (!email) return false;
+  return normalizeEmail(member.invited_email) === email || normalizeEmail(member.profiles?.email) === email;
+}
 
 async function assertRepertoireAccess(input: { admin: any; repertoireId: string; ministryId: string }) {
   const { data: repertoire, error } = await input.admin.from("ministry_repertoires").select("id,ministry_id,archived").eq("id", input.repertoireId).eq("ministry_id", input.ministryId).maybeSingle();
@@ -128,6 +135,9 @@ async function loadRepertoireItems(admin: any, repertoireId: string) {
   const rich = await admin.from("ministry_repertoire_items").select("id,position,kit_id,key_override,notes").eq("repertoire_id", repertoireId).order("position", { ascending: true });
   if (!rich.error) return rich.data ?? [];
   if (!isSchemaMissing(rich.error.message)) throw new Error(rich.error.message);
+  const withTone = await admin.from("ministry_repertoire_items").select("id,position,kit_id,key_override").eq("repertoire_id", repertoireId).order("position", { ascending: true });
+  if (!withTone.error) return withTone.data ?? [];
+  if (!isSchemaMissing(withTone.error.message)) throw new Error(withTone.error.message);
   const basic = await admin.from("ministry_repertoire_items").select("id,position,kit_id").eq("repertoire_id", repertoireId).order("position", { ascending: true });
   if (basic.error) throw new Error(basic.error.message);
   return basic.data ?? [];
@@ -146,6 +156,8 @@ async function loadAssignments(admin: any, repertoireId: string) {
   const rich = await admin.from("ministry_repertoire_assignments").select("id,member_id,repertoire_item_id,assigned_voice,notes,study_mode").eq("repertoire_id", repertoireId);
   if (!rich.error) return rich.data ?? [];
   if (!isSchemaMissing(rich.error.message)) throw new Error(rich.error.message);
+  const withNotes = await admin.from("ministry_repertoire_assignments").select("id,member_id,repertoire_item_id,assigned_voice,notes").eq("repertoire_id", repertoireId);
+  if (!withNotes.error) return withNotes.data ?? [];
   const basic = await admin.from("ministry_repertoire_assignments").select("id,member_id,repertoire_item_id,assigned_voice").eq("repertoire_id", repertoireId);
   if (basic.error) return [];
   return basic.data ?? [];
@@ -156,6 +168,7 @@ export default async function MeuRepertorioDetalhePage({ params }: { params: Pro
   if (context.isGuest) redirect("/login");
   if (!context.ministry?.ministryId || !context.profile?.id) redirect("/");
   const admin = createSupabaseAdminClient() as any;
+  const currentEmail = normalizeEmail((context.profile as any)?.email ?? (context.user as any)?.email ?? null);
 
   const [{ data: ministry }, { data: repertoire, error }] = await Promise.all([
     admin.from("ministries").select("id,name").eq("id", context.ministry.ministryId).maybeSingle(),
@@ -172,7 +185,7 @@ export default async function MeuRepertorioDetalhePage({ params }: { params: Pro
   ]);
   const members = membersResult.error ? [] : (membersResult.data ?? []);
 
-  const currentMember = ((members ?? []) as MemberRow[]).find((member) => member.user_id === context.profile?.id) ?? null;
+  const currentMember = ((members ?? []) as MemberRow[]).find((member) => memberMatchesProfile(member, context.profile?.id, currentEmail)) ?? null;
   const allMembers = ((members ?? []) as MemberRow[]).map((member) => ({ id: member.id, name: memberName(member), email: memberEmail(member), isCoordinator: member.id === repertoire.coordinator_member_id }));
   const assignments = (scaleAssignments ?? []) as AssignmentRow[];
   const defaultAssignment = currentMember ? assignments.find((assignment) => assignment.member_id === currentMember.id && !assignment.repertoire_item_id) : null;
