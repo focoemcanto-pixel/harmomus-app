@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -29,6 +29,7 @@ type ScaleKitManagerProps = {
 
 export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitManagerProps) {
   const router = useRouter();
+  const searchBoxRef = useRef<HTMLDivElement | null>(null);
   const [query, setQuery] = useState("");
   const [kits, setKits] = useState<Kit[]>([]);
   const [libraryKits, setLibraryKits] = useState<Kit[]>([]);
@@ -36,6 +37,7 @@ export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitMa
   const [existingKitIds, setExistingKitIds] = useState<Set<string>>(new Set(selectedSongs.map((song) => song.kitId)));
   const [message, setMessage] = useState("");
   const [hasSearched, setHasSearched] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -73,6 +75,17 @@ export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitMa
     };
   }, [modalOpen]);
 
+  useEffect(() => {
+    if (!modalOpen || !searchOpen) return;
+    function handlePointerDown(event: PointerEvent) {
+      if (!searchBoxRef.current?.contains(event.target as Node)) {
+        setSearchOpen(false);
+      }
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [modalOpen, searchOpen]);
+
   function applySearchPayload(payload: { kits?: Kit[]; existingKitIds?: string[] }, target: "search" | "library") {
     const nextKits = payload.kits ?? [];
     if (target === "search") setKits(nextKits);
@@ -86,6 +99,7 @@ export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitMa
     if (target === "search" && !normalizedQuery) {
       setKits([]);
       setHasSearched(false);
+      setSearchOpen(false);
       return;
     }
 
@@ -93,7 +107,10 @@ export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitMa
 
     transition(async () => {
       setMessage("");
-      if (target === "search") setHasSearched(true);
+      if (target === "search") {
+        setHasSearched(true);
+        setSearchOpen(true);
+      }
 
       const params = new URLSearchParams();
       if (normalizedQuery) params.set("q", normalizedQuery);
@@ -115,10 +132,11 @@ export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitMa
     if (cleanQuery.length < 2) {
       setKits([]);
       setHasSearched(false);
+      setSearchOpen(false);
       return;
     }
 
-    const timeout = window.setTimeout(() => loadKits(cleanQuery, "search"), 260);
+    const timeout = window.setTimeout(() => loadKits(cleanQuery, "search"), 120);
     return () => window.clearTimeout(timeout);
   }, [cleanQuery, endpoint, modalOpen]);
 
@@ -130,6 +148,7 @@ export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitMa
   function closeModal() {
     setModalOpen(false);
     setDrawerOpen(false);
+    setSearchOpen(false);
   }
 
   async function addKit(kit: Kit) {
@@ -168,6 +187,8 @@ export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitMa
       }
 
       setMessage(payload?.alreadyAdded ? "Esse kit já estava na escala." : `${kit.name} foi adicionado à escala.`);
+      setSearchOpen(false);
+      setHasSearched(false);
       router.refresh();
     } finally {
       setAddingKitId(null);
@@ -223,10 +244,10 @@ export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitMa
           <div className="min-h-0 flex-1 overflow-y-auto p-5 md:p-7">
             <div className="sticky top-0 z-20 -mx-5 -mt-5 border-b border-white/10 bg-[#090d18]/95 p-5 backdrop-blur md:-mx-7 md:-mt-7 md:p-7">
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                <div className="relative md:max-w-2xl md:flex-1">
+                <div ref={searchBoxRef} className="relative md:max-w-2xl md:flex-1">
                   <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
-                  <input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); loadKits(query, "search"); } }} maxLength={80} placeholder="Buscar música..." className="w-full rounded-2xl border border-cyan-300/35 bg-white/[0.06] py-3 pl-11 pr-4 text-sm text-white outline-none placeholder:text-zinc-500 focus:border-cyan-300/70" />
-                  {hasSearched ? (
+                  <input value={query} onFocus={() => { if (kits.length || hasSearched) setSearchOpen(true); }} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); loadKits(query, "search"); } if (event.key === "Escape") setSearchOpen(false); }} maxLength={80} placeholder="Buscar música..." className="w-full rounded-2xl border border-cyan-300/35 bg-white/[0.06] py-3 pl-11 pr-4 text-sm text-white outline-none placeholder:text-zinc-500 focus:border-cyan-300/70" />
+                  {hasSearched && searchOpen ? (
                     <div className="absolute z-40 mt-2 max-h-[50dvh] w-full overflow-y-auto rounded-3xl border border-white/10 bg-[#090d18] p-2 shadow-2xl shadow-black/60">
                       {loading ? <div className="flex items-center gap-2 p-4 text-sm text-zinc-300"><Loader2 className="h-4 w-4 animate-spin" /> Buscando...</div> : null}
                       {!loading && kits.map((kit) => <KitRow key={kit.id} kit={kit} compact />)}
