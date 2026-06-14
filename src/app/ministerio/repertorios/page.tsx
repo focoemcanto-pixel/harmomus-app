@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CalendarDays, ListMusic, Music2, Plus, ArrowRight } from "lucide-react";
 
+import { DeleteScaleButton } from "@/components/ministerio/delete-scale-button";
 import { MinistryShell, PremiumPanel, formatDate } from "@/components/ministerio/ministry-ui";
 import { getCurrentUserAccessContext, isMinistryManager } from "@/lib/auth/current-user";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -110,12 +111,15 @@ export default async function MinisterioRepertoriosPage() {
                       <span>Quantidade de músicas: {kitCount}</span>
                     </div>
                   </div>
-                  <Link
-                    href={`/ministerio/repertorios/${repertoire.id}`}
-                    className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-4 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200"
-                  >
-                    Abrir escala <ArrowRight className="h-4 w-4" />
-                  </Link>
+                  <div className="mt-5 grid gap-2">
+                    <Link
+                      href={`/ministerio/repertorios/${repertoire.id}`}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-4 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200"
+                    >
+                      Abrir escala <ArrowRight className="h-4 w-4" />
+                    </Link>
+                    {canManage ? <DeleteScaleButton repertoireId={repertoire.id} /> : null}
+                  </div>
                 </article>
               );
             })}
