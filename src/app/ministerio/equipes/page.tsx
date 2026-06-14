@@ -1,10 +1,9 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowRight, Plus, Users } from "lucide-react";
+import { Plus, Users } from "lucide-react";
 
-import { MinistryRouteTransition } from "@/components/ministerio/ministry-route-transition";
 import { MinistryShell, PremiumPanel } from "@/components/ministerio/ministry-ui";
 import { TeamCreateForm } from "@/components/ministerio/team-create-form";
+import { TeamListCard } from "@/components/ministerio/team-list-card";
 import { getCurrentUserAccessContext, isMinistryManager } from "@/lib/auth/current-user";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -99,14 +98,7 @@ export default async function MinistryTeamsPage({ searchParams }: { searchParams
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">Templates salvos</p>
             <h2 className="mt-2 text-2xl font-semibold">Suas equipes</h2>
             <div className="mt-6 grid gap-3">
-              {(teams ?? []).length ? (teams ?? []).map((team: any) => (
-                <MinistryRouteTransition href={`/ministerio/equipes/${team.id}`} key={team.id} className="block rounded-3xl border border-white/10 bg-black/20 p-5 transition hover:border-cyan-300/40 hover:bg-white/[0.055] data-[pending=true]:border-cyan-300/50 data-[pending=true]:bg-cyan-400/10">
-                  <div className="flex items-center justify-between gap-4">
-                    <div><h3 className="text-lg font-semibold text-white">{team.name}</h3><p className="mt-2 text-sm text-zinc-400">{team.description || "Sem descrição"}</p></div>
-                    <ArrowRight className="h-5 w-5 text-cyan-200" />
-                  </div>
-                </MinistryRouteTransition>
-              )) : (
+              {(teams ?? []).length ? (teams ?? []).map((team: any) => <TeamListCard key={team.id} team={team} />) : (
                 <div className="rounded-3xl border border-dashed border-white/10 bg-black/20 p-8 text-center text-sm text-zinc-400">
                   Nenhuma equipe criada ainda.
                 </div>
