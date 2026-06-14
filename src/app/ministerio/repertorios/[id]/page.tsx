@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, CalendarDays, ListMusic, Music2, Plus, UserCheck, Users, Play } from "lucide-react";
 
+import { DeleteScaleButton } from "@/components/ministerio/delete-scale-button";
 import { ScaleKitManager } from "@/components/ministerio/scale-kit-manager";
 import { MinistryShell, PremiumPanel, formatDate } from "@/components/ministerio/ministry-ui";
 import { getCurrentUserAccessContext, isMinistryManager } from "@/lib/auth/current-user";
@@ -107,13 +108,14 @@ export default async function RepertoireDetailPage({ params }: { params: Promise
           <ArrowLeft className="h-4 w-4" /> Voltar para Minha Escala
         </Link>
         {canManage ? (
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-start justify-end gap-2">
             <Link href={`/ministerio/repertorios/${repertoire.id}/integrantes`} className="inline-flex items-center gap-2 rounded-2xl border border-cyan-300/25 bg-cyan-400/10 px-5 py-3 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-400/20">
               <UserCheck className="h-4 w-4" /> Gerenciar integrantes
             </Link>
             <Link href={`/ministerio/repertorios/${repertoire.id}/adicionar-kits`} className="inline-flex items-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200">
               <Plus className="h-4 w-4" /> Adicionar músicas
             </Link>
+            <DeleteScaleButton repertoireId={repertoire.id} />
           </div>
         ) : null}
       </div>
