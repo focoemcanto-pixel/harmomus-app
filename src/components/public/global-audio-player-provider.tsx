@@ -358,8 +358,8 @@ export function GlobalAudioPlayerProvider({ children }: { children: ReactNode })
   return (
     <GlobalAudioPlayerContext.Provider value={value}>
       {children}
-      <audio ref={audioRef} preload="auto" controlsList="nodownload noplaybackrate" disableRemotePlayback onContextMenu={(event) => event.preventDefault()} onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)} onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)} onPause={() => setIsPlaying(false)} onPlay={() => setIsPlaying(true)} onEnded={() => { setIsPlaying(false); if (!loopRef.current) setHasEnded(true); }} onError={() => setErrorMessage("Áudio indisponível ou acesso negado.")} className="hidden" />
-      <audio ref={preloadAudioRef} preload="auto" controlsList="nodownload noplaybackrate" disableRemotePlayback onContextMenu={(event) => event.preventDefault()} className="hidden" aria-hidden="true" />
+      <audio ref={audioRef} preload="auto" controlsList="nodownload noplaybackrate" onContextMenu={(event) => event.preventDefault()} onLoadedMetadata={(e) => { protectAudioElement(e.currentTarget); setDuration(e.currentTarget.duration || 0); }} onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)} onPause={() => setIsPlaying(false)} onPlay={() => setIsPlaying(true)} onEnded={() => { setIsPlaying(false); if (!loopRef.current) setHasEnded(true); }} onError={() => setErrorMessage("Áudio indisponível ou acesso negado.")} className="hidden" />
+      <audio ref={preloadAudioRef} preload="auto" controlsList="nodownload noplaybackrate" onContextMenu={(event) => event.preventDefault()} onLoadedMetadata={(e) => protectAudioElement(e.currentTarget)} className="hidden" aria-hidden="true" />
     </GlobalAudioPlayerContext.Provider>
   );
 }
