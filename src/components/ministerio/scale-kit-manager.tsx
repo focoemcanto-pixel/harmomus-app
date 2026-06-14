@@ -192,20 +192,22 @@ export function ScaleKitManager({ repertoireId, selectedSongs = [] }: ScaleKitMa
       </button>
 
       {modalOpen ? (
-        <div className="fixed inset-0 z-[2147483647] isolate bg-[#020617] text-white">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_10%_10%,rgba(34,211,238,0.18),transparent_28%),radial-gradient(circle_at_85%_12%,rgba(217,70,239,0.14),transparent_34%),radial-gradient(circle_at_50%_90%,rgba(16,185,129,0.1),transparent_38%)]" />
-          <div className="relative z-10 mx-auto flex h-dvh w-full max-w-6xl flex-col overflow-hidden p-4 md:p-8">
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[2rem] border border-white/10 bg-[#090d18] shadow-2xl shadow-black/60">
-              <div className="flex flex-col gap-4 border-b border-white/10 p-5 md:flex-row md:items-start md:justify-between md:p-7">
-                <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">Montar repertório</p><h3 className="mt-2 text-2xl font-semibold text-white">Adicionar e organizar músicas</h3><p className="mt-1 max-w-2xl text-sm leading-6 text-zinc-400">As músicas selecionadas ficam aqui dentro para manter a página da escala limpa.</p></div>
-                <button type="button" onClick={closeModal} className="absolute right-4 top-4 rounded-2xl border border-white/10 p-3 text-zinc-300 transition hover:bg-white/10 md:static"><X className="h-5 w-5" /></button>
+        <div className="fixed inset-0 z-[2147483647] overflow-y-auto bg-black/80 p-4 text-white backdrop-blur-md overscroll-contain md:p-8">
+          <button type="button" aria-label="Fechar montagem" onClick={closeModal} className="fixed inset-0 cursor-default" />
+          <div className="relative z-10 mx-auto flex min-h-full w-full max-w-6xl items-start py-6 md:items-center">
+            <div className="relative flex max-h-[calc(100dvh-3rem)] w-full flex-col overflow-hidden rounded-[2rem] border border-white/10 bg-[#090d18] shadow-2xl shadow-black/60" onClick={(event) => event.stopPropagation()}>
+              <div className="shrink-0 border-b border-white/10 p-5 md:p-7">
+                <div className="flex flex-col gap-4 pr-14 md:flex-row md:items-start md:justify-between md:pr-0">
+                  <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">Montar repertório</p><h3 className="mt-2 text-2xl font-semibold text-white">Adicionar e organizar músicas</h3><p className="mt-1 max-w-2xl text-sm leading-6 text-zinc-400">As músicas selecionadas ficam aqui dentro para manter a página da escala limpa.</p></div>
+                  <button type="button" onClick={closeModal} className="absolute right-4 top-4 rounded-2xl border border-white/10 p-3 text-zinc-300 transition hover:bg-white/10 md:static"><X className="h-5 w-5" /></button>
+                </div>
               </div>
 
               <div className="min-h-0 flex-1 overflow-y-auto p-5 md:p-7">
                 <div className="rounded-3xl border border-white/10 bg-black/20 p-4">
                   <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200">Repertório selecionado</p><h4 className="mt-1 text-lg font-semibold text-white">{selectedCount} música{selectedCount === 1 ? "" : "s"} na escala</h4></div><p className="text-xs text-zinc-500">Configuração de tom e nipes continua por música.</p></div>
                   {selectedSongs.length ? (
-                    <div className="mt-4 max-h-[38vh] space-y-2 overflow-y-auto pr-1">
+                    <div className="mt-4 max-h-[42vh] space-y-2 overflow-y-auto pr-1">
                       {selectedSongs.map((song) => <div key={song.id} className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/[0.035] p-3 md:flex-row md:items-center md:justify-between"><div className="min-w-0"><p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-200">Música {song.position}</p><h5 className="truncate text-sm font-semibold text-white">{song.name}</h5><p className="truncate text-xs text-zinc-400">{song.artist || "Kit vocal"}</p></div><Link href={`/ministerio/repertorios/${repertoireId}/musicas/${song.id}`} className="inline-flex w-fit items-center gap-2 rounded-xl border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-400/20"><Settings className="h-3.5 w-3.5" /> Configurar</Link></div>)}
                     </div>
                   ) : <div className="mt-4 rounded-2xl border border-dashed border-white/10 bg-black/20 p-6 text-center text-sm text-zinc-400">Nenhuma música adicionada ainda.</div>}
