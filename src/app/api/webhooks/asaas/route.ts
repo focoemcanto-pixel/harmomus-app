@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 
-import { trackMarketingEvent } from "@/lib/communications/events";
 import { ensureMinistryForSubscription } from "@/lib/data/ministry";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
@@ -29,8 +28,6 @@ type AsaasWebhookPayment = {
   paymentDate?: string | null;
   clientPaymentDate?: string | null;
   value?: number;
-  invoiceUrl?: string | null;
-  bankSlipUrl?: string | null;
   externalReference?: string | null;
 };
 
@@ -58,17 +55,16 @@ type SubscriptionRow = {
   plan_id?: string | null;
   gateway_subscription_id?: string | null;
   gateway_customer_id?: string | null;
+  current_period_end?: string | null;
   plans?: { slug?: string | null } | null;
 };
 
 function validateWebhookToken(req: Request) {
   const expected = process.env.ASAAS_WEBHOOK_TOKEN?.trim();
   if (!expected) throw new Error("Configuração ausente: ASAAS_WEBHOOK_TOKEN.");
-
   const received = req.headers.get("asaas-access-token")?.trim() ?? "";
   const expectedBuffer = Buffer.from(expected);
   const receivedBuffer = Buffer.from(received);
-
   return expectedBuffer.length === receivedBuffer.length && timingSafeEqual(expectedBuffer, receivedBuffer);
 }
 
@@ -76,6 +72,10 @@ function isPayload(value: unknown): value is AsaasWebhookPayload {
   if (!value || typeof value !== "object") return false;
   const event = (value as { event?: unknown }).event;
   return typeof event === "string" && event.trim().length > 0;
+}
+
+function normalizeLower(value: unknown) {
+  return String(value ?? "").trim().toLowerCase() || null;
 }
 
 function parseAsaasDate(value?: string | null) {
@@ -91,11 +91,6 @@ function addMonths(value: string, months: number) {
   return date.toISOString();
 }
 
-function nextMonthlyDate(dueDate?: string | null) {
-  const due = parseAsaasDate(dueDate);
-  return due ? addMonths(due, 1) : null;
-}
-
 function gatewaySubscriptionId(payload: AsaasWebhookPayload) {
   return payload.subscription?.id ?? payload.payment?.subscription ?? null;
 }
@@ -108,18 +103,17 @@ function externalUserId(payload: AsaasWebhookPayload) {
   return payload.subscription?.externalReference ?? payload.payment?.externalReference ?? null;
 }
 
-function normalizeLower(value: unknown) {
-  return String(value ?? "").trim().toLowerCase() || null;
+function asaasExternalEventId(payload: AsaasWebhookPayload) {
+  return payload.id ?? payload.payment?.id ?? payload.subscription?.id ?? gatewaySubscriptionId(payload) ?? null;
+}
+
+function asaasPaymentId(payload: AsaasWebhookPayload) {
+  return payload.payment?.id ?? (payload.event?.startsWith("PAYMENT_") ? payload.id ?? null : null);
 }
 
 function isConfirmedPaymentEvent(event: string, payload: AsaasWebhookPayload) {
   const paymentStatus = normalizeLower(payload.payment?.status);
-  return (
-    event === "PAYMENT_RECEIVED" ||
-    event === "PAYMENT_CONFIRMED" ||
-    paymentStatus === "received" ||
-    paymentStatus === "confirmed"
-  );
+  return event === "PAYMENT_RECEIVED" || event === "PAYMENT_CONFIRMED" || paymentStatus === "received" || paymentStatus === "confirmed";
 }
 
 function isPaymentOverdueEvent(event: string, payload: AsaasWebhookPayload) {
@@ -127,89 +121,15 @@ function isPaymentOverdueEvent(event: string, payload: AsaasWebhookPayload) {
   return event === "PAYMENT_OVERDUE" || paymentStatus === "overdue";
 }
 
-function statusForEvent(event: string, payload?: AsaasWebhookPayload) {
-  const paymentStatus = normalizeLower(payload?.payment?.status);
-  if (payload && isConfirmedPaymentEvent(event, payload)) return "active";
-  if (payload && isPaymentOverdueEvent(event, payload)) return "overdue";
-  if (event === "PAYMENT_DELETED" || event === "SUBSCRIPTION_DELETED" || event === "SUBSCRIPTION_INACTIVATED" || payload?.subscription?.deleted) return "canceled";
-  return null;
-}
-
-async function findSubscription(
-  supabase: ReturnType<typeof createSupabaseAdminClient>,
-  payload: AsaasWebhookPayload,
-) {
-  const asaasSubscriptionId = gatewaySubscriptionId(payload);
-  const asaasCustomerId = gatewayCustomerId(payload);
-  const userId = externalUserId(payload);
-
-  if (asaasSubscriptionId) {
-    const { data, error } = await supabase
-      .from("subscriptions")
-      .select("id,user_id,status,plan_id,gateway_subscription_id,gateway_customer_id,plans(slug)")
-      .eq("gateway", "asaas")
-      .eq("gateway_subscription_id", asaasSubscriptionId)
-      .maybeSingle();
-    if (error) throw new Error(`Falha ao localizar assinatura Asaas: ${error.message}`);
-    if (data) return data as SubscriptionRow;
-  }
-
-  if (asaasCustomerId) {
-    const { data, error } = await supabase
-      .from("subscriptions")
-      .select("id,user_id,status,plan_id,gateway_subscription_id,gateway_customer_id,plans(slug)")
-      .eq("gateway", "asaas")
-      .eq("gateway_customer_id", asaasCustomerId)
-      .maybeSingle();
-    if (error) throw new Error(`Falha ao localizar customer Asaas: ${error.message}`);
-    if (data) return data as SubscriptionRow;
-  }
-
-  if (userId) {
-    const { data, error } = await supabase
-      .from("subscriptions")
-      .select("id,user_id,status,plan_id,gateway_subscription_id,gateway_customer_id,plans(slug)")
-      .eq("gateway", "asaas")
-      .eq("user_id", userId)
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (error) throw new Error(`Falha ao localizar assinatura Asaas por usuário: ${error.message}`);
-    if (data) return data as SubscriptionRow;
-  }
-
-  return null;
-}
-
-function buildUpdatePayload(event: string, payload: AsaasWebhookPayload, freePlanId?: string | null) {
-  const status = statusForEvent(event, payload);
-  const paymentDueDate = payload.payment?.dueDate;
-  const subscriptionDueDate = payload.subscription?.nextDueDate;
-  const active = status === "active";
-  const canceled = status === "canceled";
-  const created = event === "PAYMENT_CREATED";
-  const baseDueDate = subscriptionDueDate ?? paymentDueDate;
-  const nextBillingDate = active ? nextMonthlyDate(paymentDueDate) : parseAsaasDate(baseDueDate);
-
-  return {
-    gateway: "asaas",
-    gateway_customer_id: gatewayCustomerId(payload),
-    gateway_subscription_id: gatewaySubscriptionId(payload),
-    plan_id: status === "canceled" && freePlanId ? freePlanId : undefined,
-    status: status ?? undefined,
-    current_period_end: active ? nextBillingDate : created ? undefined : parseAsaasDate(baseDueDate),
-    next_billing_at: canceled ? null : nextBillingDate,
-    auto_renew: canceled ? false : undefined,
-    last_webhook_event: event,
-    starts_at: active ? new Date().toISOString() : undefined,
-    updated_at: new Date().toISOString(),
-  };
+function isSubscriptionCancellationEvent(event: string, payload: AsaasWebhookPayload) {
+  return event === "SUBSCRIPTION_DELETED" || event === "SUBSCRIPTION_INACTIVATED" || Boolean(payload.subscription?.deleted);
 }
 
 function normalizePlanFamily(slug?: string | null) {
-  if (!slug) return null;
-  if (slug.startsWith("ministry")) return "ministry";
-  if (["free", "plus", "premium"].includes(slug)) return slug;
+  const value = normalizeLower(slug);
+  if (!value) return null;
+  if (value.startsWith("ministry")) return "ministry";
+  if (["free", "plus", "premium"].includes(value)) return value;
   return null;
 }
 
@@ -222,7 +142,11 @@ function planRank(slug?: string | null) {
   return -1;
 }
 
-function getPlanActivatedEvent(planSlug?: string | null) {
+function currentPlanSlug(subscription: SubscriptionRow) {
+  return normalizeLower(subscription.plans?.slug) ?? "free";
+}
+
+function getPlanActivatedEvent(planSlug?: string | null): WebhookEvent | null {
   const family = normalizePlanFamily(planSlug);
   if (family === "plus") return "plan.plus_activated";
   if (family === "premium") return "plan.premium_activated";
@@ -230,93 +154,31 @@ function getPlanActivatedEvent(planSlug?: string | null) {
   return null;
 }
 
-function getSpecificPlanTransitionEvent(fromSlug?: string | null, toSlug?: string | null) {
+function getSpecificPlanTransitionEvent(fromSlug?: string | null, toSlug?: string | null): WebhookEvent | null {
   const from = normalizePlanFamily(fromSlug);
   const to = normalizePlanFamily(toSlug);
   if (!from || !to || from === to) return null;
-
-  const direction = planRank(to) > planRank(from) ? "upgrade" : "downgrade";
   const key = `${from}_to_${to}`;
   const allowed = new Set(["free_to_plus", "free_to_premium", "plus_to_premium", "premium_to_plus", "premium_to_free", "plus_to_free"]);
   if (!allowed.has(key)) return null;
-  return `${direction}.${key}` as WebhookEvent;
+  return `${planRank(to) > planRank(from) ? "upgrade" : "downgrade"}.${key}` as WebhookEvent;
 }
 
-function asaasExternalEventId(payload: AsaasWebhookPayload) {
-  return payload.id ?? payload.payment?.id ?? payload.subscription?.id ?? gatewaySubscriptionId(payload) ?? null;
+async function markEvent(supabase: ReturnType<typeof createSupabaseAdminClient>, payload: AsaasWebhookPayload, processed: boolean, errorMessage?: string, extra: Record<string, unknown> = {}) {
+  const { error } = await supabase.from("billing_events").insert({
+    provider: "asaas",
+    event_type: payload.event ?? "unknown",
+    payload: { ...(payload as unknown as Record<string, unknown>), external_event_id: asaasExternalEventId(payload), ...extra },
+    processed,
+    processed_at: processed ? new Date().toISOString() : null,
+    error_message: errorMessage ?? null,
+  });
+  if (error && error.code !== "23505") console.error("[asaas.webhook] Falha ao registrar billing_event", error);
 }
 
-function asaasPaymentId(payload: AsaasWebhookPayload) {
-  return payload.payment?.id ?? (payload.event?.startsWith("PAYMENT_") ? payload.id ?? null : null);
-}
-
-function asaasOccurredAt(payload: AsaasWebhookPayload) {
-  return parseAsaasDate(payload.payment?.clientPaymentDate) ?? parseAsaasDate(payload.payment?.paymentDate) ?? parseAsaasDate(payload.dateCreated) ?? new Date().toISOString();
-}
-
-function isActivationEvent(event: string, payload: AsaasWebhookPayload, status: string | null) {
-  return status === "active" && isConfirmedPaymentEvent(event, payload);
-}
-
-function isPaymentFailureEvent(event: string, payload: AsaasWebhookPayload, status: string | null) {
-  return status === "overdue" && isPaymentOverdueEvent(event, payload);
-}
-
-function isCancellationEvent(status: string | null) {
-  return status === "canceled";
-}
-
-function currentPlanSlug(subscription: SubscriptionRow) {
-  return normalizeLower(subscription.plans?.slug) ?? "free";
-}
-
-async function getPlanBySlug(supabase: ReturnType<typeof createSupabaseAdminClient>, slug: string) {
-  const { data, error } = await supabase.from("plans").select("id, slug").eq("slug", slug).maybeSingle();
-  if (error) throw new Error(`Falha ao buscar plano ${slug}: ${error.message}`);
-  return data ?? null;
-}
-
-async function getPreviousPlanSlugFromCheckoutLog(
-  supabase: ReturnType<typeof createSupabaseAdminClient>,
-  subscriptionId: string | null,
-) {
-  if (!subscriptionId) return null;
-
-  const { data, error } = await supabase
-    .from("billing_events")
-    .select("payload")
-    .eq("provider", "asaas")
-    .eq("event_type", "checkout.asaas.started")
-    .eq("payload->>gateway_subscription_id", subscriptionId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error) console.error("[asaas.webhook] Falha ao buscar plano anterior no checkout", error);
-  return normalizeLower((data?.payload as Record<string, unknown> | undefined)?.previous_plan_slug);
-}
-
-async function getEffectivePreviousPlanSlug(
-  supabase: ReturnType<typeof createSupabaseAdminClient>,
-  subscription: SubscriptionRow,
-  payload: AsaasWebhookPayload,
-) {
-  const loggedPreviousPlan = await getPreviousPlanSlugFromCheckoutLog(supabase, gatewaySubscriptionId(payload));
-  if (loggedPreviousPlan) return loggedPreviousPlan;
-
-  const planSlug = currentPlanSlug(subscription);
-  const status = normalizeLower(subscription.status);
-  if (!["active", "trialing", "overdue"].includes(status ?? "") && planSlug !== "free") return "free";
-  return planSlug;
-}
-
-async function hasProcessedAsaasBillingEvent(
-  supabase: ReturnType<typeof createSupabaseAdminClient>,
-  payload: AsaasWebhookPayload,
-) {
+async function hasProcessedAsaasBillingEvent(supabase: ReturnType<typeof createSupabaseAdminClient>, payload: AsaasWebhookPayload) {
   const externalEventId = asaasExternalEventId(payload);
   if (!externalEventId || !payload.event) return false;
-
   const { data, error } = await supabase
     .from("billing_events")
     .select("id, processed")
@@ -326,72 +188,69 @@ async function hasProcessedAsaasBillingEvent(
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-
-  if (error) console.error("[asaas.webhook] Falha ao verificar idempotência do evento", error);
+  if (error) console.error("[asaas.webhook] Falha ao verificar idempotência", error);
   return Boolean(data?.processed);
 }
 
-async function hasDispatchedAsaasEvent(
-  supabase: ReturnType<typeof createSupabaseAdminClient>,
-  input: { eventName: WebhookEvent; externalEventId: string | null; paymentId: string | null; subscriptionId: string | null; userId: string; localSubscriptionId: string },
-) {
-  const identity = input.paymentId ?? input.externalEventId ?? input.subscriptionId;
-  if (!identity) return false;
+async function getPlanBySlug(supabase: ReturnType<typeof createSupabaseAdminClient>, slug: string) {
+  const { data, error } = await supabase.from("plans").select("id,slug").eq("slug", slug).maybeSingle();
+  if (error) throw new Error(`Falha ao buscar plano ${slug}: ${error.message}`);
+  return data ?? null;
+}
 
+async function getCheckoutPlan(supabase: ReturnType<typeof createSupabaseAdminClient>, subscriptionId: string | null) {
+  if (!subscriptionId) return null;
   const { data, error } = await supabase
     .from("billing_events")
-    .select("id")
+    .select("payload")
     .eq("provider", "asaas")
-    .eq("event_type", `webhook_dispatch:${input.eventName}`)
-    .eq("payload->>idempotency_key", `${input.eventName}:${identity}:${input.userId}:${input.localSubscriptionId}`)
+    .eq("event_type", "checkout.asaas.started")
+    .eq("payload->>gateway_subscription_id", subscriptionId)
+    .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-
-  if (error) console.error("[asaas.webhook] Falha ao verificar idempotência do dispatch", error);
-  return Boolean(data?.id);
+  if (error) console.error("[asaas.webhook] Falha ao buscar checkout Asaas", error);
+  const payload = data?.payload as Record<string, unknown> | undefined;
+  return {
+    planSlug: normalizeLower(payload?.plan_slug),
+    previousPlanSlug: normalizeLower(payload?.previous_plan_slug),
+    userId: String(payload?.user_id ?? "").trim() || null,
+  };
 }
 
-async function markAsaasEventDispatched(
-  supabase: ReturnType<typeof createSupabaseAdminClient>,
-  input: { eventName: WebhookEvent; externalEventId: string | null; paymentId: string | null; subscriptionId: string | null; userId: string; localSubscriptionId: string; payload: Record<string, unknown> },
-) {
-  const identity = input.paymentId ?? input.externalEventId ?? input.subscriptionId;
-  const { error } = await supabase.from("billing_events").insert({
-    provider: "asaas",
-    event_type: `webhook_dispatch:${input.eventName}`,
-    payload: {
-      ...input.payload,
-      idempotency_key: `${input.eventName}:${identity ?? "unknown"}:${input.userId}:${input.localSubscriptionId}`,
-      external_event_id: input.externalEventId,
-      payment_id: input.paymentId,
-      gateway_subscription_id: input.subscriptionId,
-      user_id: input.userId,
-      subscription_id: input.localSubscriptionId,
-    },
-    processed: true,
-    processed_at: new Date().toISOString(),
-  });
-
-  if (error && error.code !== "23505") console.error("[asaas.webhook] Falha ao registrar dispatch no billing_events", error);
+async function findExactSubscription(supabase: ReturnType<typeof createSupabaseAdminClient>, subscriptionId: string | null) {
+  if (!subscriptionId) return null;
+  const { data, error } = await supabase
+    .from("subscriptions")
+    .select("id,user_id,status,plan_id,gateway_subscription_id,gateway_customer_id,current_period_end,plans(slug)")
+    .eq("gateway", "asaas")
+    .eq("gateway_subscription_id", subscriptionId)
+    .maybeSingle();
+  if (error) throw new Error(`Falha ao localizar assinatura Asaas: ${error.message}`);
+  return data as SubscriptionRow | null;
 }
 
-async function dispatchAsaasWebhookEvents(input: {
-  supabase: ReturnType<typeof createSupabaseAdminClient>;
-  payload: AsaasWebhookPayload;
-  subscription: SubscriptionRow;
-  previousPlanSlug: string;
-  nextPlanSlug: string;
-  status: string;
-  events: WebhookEvent[];
-}) {
+async function findFallbackSubscription(supabase: ReturnType<typeof createSupabaseAdminClient>, payload: AsaasWebhookPayload, checkoutUserId: string | null) {
+  const userId = checkoutUserId ?? externalUserId(payload);
+  const customerId = gatewayCustomerId(payload);
+  let query = supabase
+    .from("subscriptions")
+    .select("id,user_id,status,plan_id,gateway_subscription_id,gateway_customer_id,current_period_end,plans(slug)")
+    .eq("gateway", "asaas")
+    .order("updated_at", { ascending: false })
+    .limit(1);
+  if (userId) query = query.eq("user_id", userId);
+  else if (customerId) query = query.eq("gateway_customer_id", customerId);
+  else return null;
+  const { data, error } = await query.maybeSingle();
+  if (error) throw new Error(`Falha ao localizar assinatura Asaas por fallback: ${error.message}`);
+  return data as SubscriptionRow | null;
+}
+
+async function dispatchCustomerEvents(input: { supabase: ReturnType<typeof createSupabaseAdminClient>; payload: AsaasWebhookPayload; subscription: SubscriptionRow; previousPlanSlug: string; nextPlanSlug: string; status: string; events: WebhookEvent[] }) {
   if (!input.events.length) return;
-
   const recipient = await resolveWebhookRecipientForUser(input.supabase, input.subscription.user_id, {});
-  const externalEventId = asaasExternalEventId(input.payload);
-  const paymentId = asaasPaymentId(input.payload);
-  const providerSubscriptionId = gatewaySubscriptionId(input.payload) ?? input.subscription.gateway_subscription_id ?? null;
-  const occurredAt = asaasOccurredAt(input.payload);
-  const dispatchPayload = {
+  const data = {
     userId: input.subscription.user_id,
     user_id: input.subscription.user_id,
     email: recipient.email,
@@ -403,279 +262,132 @@ async function dispatchAsaasWebhookEvents(input: {
     plan_slug: input.nextPlanSlug,
     previousPlanSlug: input.previousPlanSlug,
     previous_plan_slug: input.previousPlanSlug,
-    nextPlanSlug: input.nextPlanSlug,
-    next_plan_slug: input.nextPlanSlug,
     provider: "asaas",
-    paymentId,
-    payment_id: paymentId,
-    subscriptionId: providerSubscriptionId,
-    gateway_subscription_id: providerSubscriptionId,
+    paymentId: asaasPaymentId(input.payload),
+    payment_id: asaasPaymentId(input.payload),
+    gateway_subscription_id: gatewaySubscriptionId(input.payload),
     localSubscriptionId: input.subscription.id,
     value: input.payload.payment?.value,
-    amount: input.payload.payment?.value,
     status: input.status,
-    occurredAt,
-    occurred_at: occurredAt,
-    asaas_event_id: externalEventId,
+    asaas_event_id: asaasExternalEventId(input.payload),
     asaas_event_type: input.payload.event,
-    phone_source: recipient.phone_source,
   };
-
-  for (const eventName of Array.from(new Set(input.events))) {
-    const alreadyDispatched = await hasDispatchedAsaasEvent(input.supabase, {
-      eventName,
-      externalEventId,
-      paymentId,
-      subscriptionId: providerSubscriptionId,
-      userId: input.subscription.user_id,
-      localSubscriptionId: input.subscription.id,
-    });
-    if (alreadyDispatched) continue;
-
-    await dispatchWebhookEvent({ event: eventName, source: "asaas", recipient, data: dispatchPayload });
-    await markAsaasEventDispatched(input.supabase, {
-      eventName,
-      externalEventId,
-      paymentId,
-      subscriptionId: providerSubscriptionId,
-      userId: input.subscription.user_id,
-      localSubscriptionId: input.subscription.id,
-      payload: dispatchPayload,
-    });
-  }
+  for (const event of Array.from(new Set(input.events))) await dispatchWebhookEvent({ event, source: "asaas", recipient, data });
 }
 
-async function markEvent(
-  supabase: ReturnType<typeof createSupabaseAdminClient>,
-  payload: AsaasWebhookPayload,
-  processed: boolean,
-  errorMessage?: string,
-) {
-  const { error } = await supabase.from("billing_events").insert({
-    provider: "asaas",
-    event_type: payload.event ?? "unknown",
-    payload: { ...(payload as unknown as Record<string, unknown>), external_event_id: asaasExternalEventId(payload) },
-    processed,
-    processed_at: processed ? new Date().toISOString() : null,
-    error_message: errorMessage ?? null,
-  });
-
-  if (error && error.code !== "23505") console.error("[asaas.webhook] Falha ao registrar billing_event", error);
-}
-
-function getPrimaryCustomerEvent(previousPlanSlug: string, nextPlanSlug: string) {
-  return getSpecificPlanTransitionEvent(previousPlanSlug, nextPlanSlug) ?? getPlanActivatedEvent(nextPlanSlug);
-}
-
-async function trackAsaasCheckoutStarted(input: {
-  supabase: ReturnType<typeof createSupabaseAdminClient>;
-  payload: AsaasWebhookPayload;
-  subscription: SubscriptionRow;
-  planSlug: string;
-}) {
-  if (input.payload.event !== "PAYMENT_CREATED") return;
-
-  await trackMarketingEvent(input.supabase, {
-    userId: input.subscription.user_id,
-    eventKey: "checkout_started",
-    eventLabel: "Checkout iniciado",
-    channel: "billing",
-    source: "asaas",
-    metadata: {
-      provider: "asaas",
-      asaas_event_id: asaasExternalEventId(input.payload),
-      asaas_event_type: input.payload.event,
-      asaas_customer_id: gatewayCustomerId(input.payload),
-      asaas_payment_id: asaasPaymentId(input.payload),
-      asaas_subscription_id: gatewaySubscriptionId(input.payload) ?? input.subscription.gateway_subscription_id ?? null,
-      local_subscription_id: input.subscription.id,
-      plan_slug: input.planSlug,
-      amount: input.payload.payment?.value ?? null,
-      due_date: input.payload.payment?.dueDate ?? null,
-      occurred_at: asaasOccurredAt(input.payload),
-    },
-  });
-
-  await trackMarketingEvent(input.supabase, {
-    userId: input.subscription.user_id,
-    eventKey: "checkout_abandoned",
-    eventLabel: "Checkout abandonado",
-    channel: "billing",
-    source: "asaas",
-    metadata: {
-      provider: "asaas",
-      asaas_event_id: asaasExternalEventId(input.payload),
-      asaas_event_type: input.payload.event,
-      asaas_customer_id: gatewayCustomerId(input.payload),
-      asaas_payment_id: asaasPaymentId(input.payload),
-      asaas_subscription_id: gatewaySubscriptionId(input.payload) ?? input.subscription.gateway_subscription_id ?? null,
-      local_subscription_id: input.subscription.id,
-      plan_slug: input.planSlug,
-      amount: input.payload.payment?.value ?? null,
-      due_date: input.payload.payment?.dueDate ?? null,
-      occurred_at: asaasOccurredAt(input.payload),
-    },
-  });
-}
-
-async function trackAsaasPaymentConversion(input: {
-  supabase: ReturnType<typeof createSupabaseAdminClient>;
-  payload: AsaasWebhookPayload;
-  subscription: SubscriptionRow;
-  planSlug: string;
-}) {
-  if (!input.payload.event || !isConfirmedPaymentEvent(input.payload.event, input.payload)) return;
-
-  await trackMarketingEvent(input.supabase, {
-    userId: input.subscription.user_id,
-    eventKey: "payment_succeeded",
-    eventLabel: "Pagamento confirmado",
-    channel: "billing",
-    source: "asaas",
-    metadata: {
-      provider: "asaas",
-      asaas_event_id: asaasExternalEventId(input.payload),
-      asaas_event_type: input.payload.event,
-      asaas_customer_id: gatewayCustomerId(input.payload),
-      asaas_payment_id: asaasPaymentId(input.payload),
-      asaas_subscription_id: gatewaySubscriptionId(input.payload) ?? input.subscription.gateway_subscription_id ?? null,
-      local_subscription_id: input.subscription.id,
-      plan_slug: input.planSlug,
-      amount: input.payload.payment?.value ?? null,
-      payment_date: input.payload.payment?.paymentDate ?? input.payload.payment?.clientPaymentDate ?? null,
-      occurred_at: asaasOccurredAt(input.payload),
-    },
-  });
-}
-
-async function trackAsaasPaymentFailure(input: {
-  supabase: ReturnType<typeof createSupabaseAdminClient>;
-  payload: AsaasWebhookPayload;
-  subscription: SubscriptionRow;
-  planSlug: string;
-}) {
-  if (!input.payload.event || !isPaymentOverdueEvent(input.payload.event, input.payload)) return;
-
-  const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const { data: existingEvent, error } = await input.supabase
-    .from("marketing_events")
-    .select("id")
-    .eq("event_key", "payment_failed")
-    .eq("user_id", input.subscription.user_id)
-    .gte("created_at", twentyFourHoursAgo)
-    .limit(1)
-    .maybeSingle();
-
-  if (error) console.error("[asaas.webhook] Falha ao verificar marketing_event payment_failed duplicado", error);
-  if (existingEvent?.id) return;
-
-  await trackMarketingEvent(input.supabase, {
-    userId: input.subscription.user_id,
-    eventKey: "payment_failed",
-    eventLabel: "Pagamento falhou",
-    channel: "billing",
-    source: "asaas",
-    metadata: {
-      provider: "asaas",
-      asaas_event_id: asaasExternalEventId(input.payload),
-      asaas_event_type: input.payload.event,
-      asaas_customer_id: gatewayCustomerId(input.payload),
-      asaas_payment_id: asaasPaymentId(input.payload),
-      asaas_subscription_id: gatewaySubscriptionId(input.payload) ?? input.subscription.gateway_subscription_id ?? null,
-      local_subscription_id: input.subscription.id,
-      plan_slug: input.planSlug,
-      amount: input.payload.payment?.value ?? null,
-      due_date: input.payload.payment?.dueDate ?? null,
-      occurred_at: asaasOccurredAt(input.payload),
-    },
-  });
+function periodEndForPayment(payload: AsaasWebhookPayload) {
+  const due = parseAsaasDate(payload.payment?.dueDate ?? payload.subscription?.nextDueDate ?? null);
+  return due ? addMonths(due, 1) : null;
 }
 
 export async function POST(req: Request) {
   let payload: AsaasWebhookPayload | null = null;
   const supabase = createSupabaseAdminClient();
-
   try {
     if (!validateWebhookToken(req)) return NextResponse.json({ error: "Token inválido." }, { status: 401 });
-
-    const body = await req.json() as unknown;
+    const body = (await req.json()) as unknown;
     if (!isPayload(body)) return NextResponse.json({ error: "Payload inválido." }, { status: 400 });
     payload = body;
-
     const event = payload.event!;
-    const duplicateEvent = await hasProcessedAsaasBillingEvent(supabase, payload);
-    if (duplicateEvent) {
-      return NextResponse.json({ received: true, duplicate: true });
-    }
+    const providerSubscriptionId = gatewaySubscriptionId(payload);
 
+    if (await hasProcessedAsaasBillingEvent(supabase, payload)) return NextResponse.json({ received: true, duplicate: true });
     if (!HANDLED_EVENTS.has(event)) {
-      await markEvent(supabase, payload, true);
+      await markEvent(supabase, payload, true, undefined, { ignored: true, reason: "unhandled_event" });
       return NextResponse.json({ received: true, ignored: true });
     }
-
     if (!payload.payment && !payload.subscription) {
       await markEvent(supabase, payload, false, "Payload sem payment ou subscription.");
       return NextResponse.json({ error: "Payload sem assinatura ou cobrança." }, { status: 400 });
     }
 
-    const subscription = await findSubscription(supabase, payload);
-    if (!subscription?.id) {
+    const checkout = await getCheckoutPlan(supabase, providerSubscriptionId);
+    const exactSubscription = await findExactSubscription(supabase, providerSubscriptionId);
+    const isDeletionOfChargeOnly = event === "PAYMENT_DELETED";
+
+    if (isDeletionOfChargeOnly) {
+      await markEvent(supabase, payload, true, undefined, { ignored: true, reason: "payment_deleted_does_not_cancel_subscription", checkout_plan_slug: checkout?.planSlug ?? null });
+      return NextResponse.json({ received: true, synced: false, ignored: true, reason: "payment_deleted_does_not_cancel_subscription" });
+    }
+
+    if (isSubscriptionCancellationEvent(event, payload)) {
+      if (!exactSubscription?.id) {
+        await markEvent(supabase, payload, true, undefined, { ignored: true, reason: "stale_subscription_cancellation_without_exact_local_match" });
+        return NextResponse.json({ received: true, synced: false, ignored: true, reason: "stale_subscription_cancellation_without_exact_local_match" });
+      }
+      const previousPlanSlug = currentPlanSlug(exactSubscription);
+      const now = new Date().toISOString();
+      const { error } = await supabase.from("subscriptions").update({ status: "canceled", auto_renew: false, next_billing_at: null, canceled_at: now, last_webhook_event: event, updated_at: now }).eq("id", exactSubscription.id).eq("gateway", "asaas").eq("gateway_subscription_id", providerSubscriptionId);
+      if (error) throw new Error(`Falha ao cancelar assinatura Asaas: ${error.message}`);
+      const nextPlanSlug = "free";
+      await dispatchCustomerEvents({ supabase, payload, subscription: exactSubscription, previousPlanSlug, nextPlanSlug, status: "canceled", events: ["subscription.canceled", getSpecificPlanTransitionEvent(previousPlanSlug, nextPlanSlug)].filter(Boolean) as WebhookEvent[] });
+      await markEvent(supabase, payload, true, undefined, { synced_subscription_id: exactSubscription.id, status: "canceled" });
+      return NextResponse.json({ received: true, synced: true, dispatched: ["subscription.canceled"] });
+    }
+
+    const fallbackSubscription = exactSubscription ?? await findFallbackSubscription(supabase, payload, checkout?.userId ?? null);
+    if (!fallbackSubscription?.id) {
       await markEvent(supabase, payload, false, "Assinatura local Asaas não encontrada.");
       return NextResponse.json({ received: true, synced: false });
     }
 
-    const status = statusForEvent(event, payload);
-    const previousPlanSlug = await getEffectivePreviousPlanSlug(supabase, subscription, payload);
-    const currentSlug = currentPlanSlug(subscription);
-    const nextPlanSlug = isCancellationEvent(status) ? "free" : currentSlug;
-    const freePlan = nextPlanSlug === "free" ? await getPlanBySlug(supabase, "free") : null;
-    const updatePayload = buildUpdatePayload(event, payload, freePlan?.id ?? null);
-    const sanitizedPayload = Object.fromEntries(Object.entries(updatePayload).filter(([, value]) => value !== undefined));
-    const { error } = await supabase.from("subscriptions").update(sanitizedPayload).eq("id", subscription.id).eq("gateway", "asaas");
+    const currentSlug = currentPlanSlug(fallbackSubscription);
+    const checkoutPlanSlug = checkout?.planSlug ?? currentSlug;
+    const shouldActivate = isConfirmedPaymentEvent(event, payload);
+    const shouldMarkOverdue = isPaymentOverdueEvent(event, payload);
+    const isExactMatch = Boolean(exactSubscription?.id);
+    const isOlderLowerPlan = !isExactMatch && planRank(checkoutPlanSlug) < planRank(currentSlug);
+
+    if (shouldActivate && isOlderLowerPlan) {
+      await markEvent(supabase, payload, true, undefined, { ignored: true, reason: "older_lower_plan_activation_ignored", checkout_plan_slug: checkoutPlanSlug, current_plan_slug: currentSlug, current_subscription_id: fallbackSubscription.id });
+      return NextResponse.json({ received: true, synced: false, ignored: true, reason: "older_lower_plan_activation_ignored" });
+    }
+
+    const now = new Date().toISOString();
+    const plan = shouldActivate ? await getPlanBySlug(supabase, checkoutPlanSlug) : null;
+    const periodEnd = shouldActivate ? periodEndForPayment(payload) : parseAsaasDate(payload.payment?.dueDate ?? payload.subscription?.nextDueDate ?? null);
+    const nextPlanSlug = shouldActivate ? checkoutPlanSlug : currentSlug;
+    const updatePayload: Record<string, unknown> = {
+      gateway: "asaas",
+      gateway_customer_id: gatewayCustomerId(payload) ?? fallbackSubscription.gateway_customer_id,
+      last_webhook_event: event,
+      updated_at: now,
+    };
+    if (shouldActivate) {
+      updatePayload.status = "active";
+      updatePayload.plan_id = plan?.id ?? fallbackSubscription.plan_id;
+      updatePayload.current_period_end = periodEnd;
+      updatePayload.next_billing_at = periodEnd;
+      updatePayload.auto_renew = true;
+      updatePayload.cancel_at_period_end = false;
+      updatePayload.canceled_at = null;
+      updatePayload.starts_at = now;
+      if (providerSubscriptionId && (isExactMatch || planRank(checkoutPlanSlug) >= planRank(currentSlug))) updatePayload.gateway_subscription_id = providerSubscriptionId;
+    } else if (shouldMarkOverdue) {
+      updatePayload.status = "overdue";
+      updatePayload.current_period_end = periodEnd;
+      updatePayload.next_billing_at = periodEnd;
+    } else if (event === "PAYMENT_CREATED" || event === "SUBSCRIPTION_CREATED" || event === "SUBSCRIPTION_UPDATED") {
+      if (providerSubscriptionId && isExactMatch) updatePayload.gateway_subscription_id = providerSubscriptionId;
+      if (periodEnd) updatePayload.next_billing_at = periodEnd;
+    }
+
+    const { error } = await supabase.from("subscriptions").update(updatePayload).eq("id", fallbackSubscription.id).eq("gateway", "asaas");
     if (error) throw new Error(`Falha ao sincronizar assinatura Asaas: ${error.message}`);
 
-    if (isActivationEvent(event, payload, status)) {
+    if (shouldActivate) {
       try {
-        await ensureMinistryForSubscription({
-          userId: subscription.user_id,
-          planSlug: nextPlanSlug,
-          subscriptionId: subscription.id,
-          status: status ?? "active",
-          currentPeriodEnd: sanitizedPayload.current_period_end as string | null | undefined,
-        });
+        await ensureMinistryForSubscription({ userId: fallbackSubscription.user_id, planSlug: nextPlanSlug, subscriptionId: fallbackSubscription.id, status: "active", currentPeriodEnd: periodEnd ?? undefined });
       } catch (ministryError) {
         console.error("[asaas.webhook] Falha ao sincronizar central ministerial", ministryError);
       }
     }
 
-    await trackAsaasCheckoutStarted({ supabase, payload, subscription, planSlug: nextPlanSlug });
-    await trackAsaasPaymentConversion({ supabase, payload, subscription, planSlug: nextPlanSlug });
-    await trackAsaasPaymentFailure({ supabase, payload, subscription, planSlug: nextPlanSlug });
-
-    const activationEvent = isActivationEvent(event, payload, status)
-      ? getPrimaryCustomerEvent(previousPlanSlug, nextPlanSlug)
-      : null;
-    const paymentFailedEvent = isPaymentFailureEvent(event, payload, status) ? "subscription.payment_failed" : null;
-    const cancellationEvent = isCancellationEvent(status) ? "subscription.canceled" : null;
-    const cancellationTransitionEvent = isCancellationEvent(status) ? getSpecificPlanTransitionEvent(previousPlanSlug, nextPlanSlug) : null;
-    const dispatchEvents = [
-      activationEvent,
-      paymentFailedEvent,
-      cancellationEvent,
-      cancellationTransitionEvent,
-    ].filter(Boolean) as WebhookEvent[];
-
-    await dispatchAsaasWebhookEvents({
-      supabase,
-      payload,
-      subscription,
-      previousPlanSlug,
-      nextPlanSlug,
-      status: status ?? normalizeLower(payload.payment?.status) ?? normalizeLower(payload.subscription?.status) ?? event,
-      events: dispatchEvents,
-    });
-
-    await markEvent(supabase, payload, true);
+    const activationEvent = shouldActivate ? (getSpecificPlanTransitionEvent(checkout?.previousPlanSlug ?? currentSlug, nextPlanSlug) ?? getPlanActivatedEvent(nextPlanSlug)) : null;
+    const failedEvent = shouldMarkOverdue ? "subscription.payment_failed" as WebhookEvent : null;
+    const dispatchEvents = [activationEvent, failedEvent].filter(Boolean) as WebhookEvent[];
+    await dispatchCustomerEvents({ supabase, payload, subscription: fallbackSubscription, previousPlanSlug: checkout?.previousPlanSlug ?? currentSlug, nextPlanSlug, status: shouldActivate ? "active" : shouldMarkOverdue ? "overdue" : normalizeLower(payload.payment?.status) ?? normalizeLower(payload.subscription?.status) ?? event, events: dispatchEvents });
+    await markEvent(supabase, payload, true, undefined, { synced_subscription_id: fallbackSubscription.id, status: updatePayload.status ?? fallbackSubscription.status ?? null, checkout_plan_slug: checkoutPlanSlug });
     return NextResponse.json({ received: true, synced: true, dispatched: Array.from(new Set(dispatchEvents)) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro inesperado no webhook Asaas.";
