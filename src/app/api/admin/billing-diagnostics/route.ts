@@ -20,7 +20,7 @@ export async function GET(request: Request) {
   const admin = createSupabaseAdminClient() as any;
   const url = new URL(request.url);
   const email = normalizeEmail(url.searchParams.get("email"));
-  let userIds: string[] | null = null;
+  let userIds: string[] = [];
   let profile: any = null;
 
   if (email) {
@@ -33,8 +33,8 @@ export async function GET(request: Request) {
 
   const subscriptionQuery = admin.from("subscriptions").select("id,user_id,plan_id,status,gateway,stripe_customer_id,gateway_customer_id,stripe_subscription_id,gateway_subscription_id,stripe_price_id,current_period_end,next_billing_at,trial_ends_at,auto_renew,cancel_at_period_end,canceled_at,last_webhook_event,created_at,updated_at,plan:plans(slug,name)").order("updated_at", { ascending: false }).limit(email ? 10 : 20);
   const eventQuery = admin.from("billing_events").select("id,provider,event_type,processed,error_message,created_at,payload").order("created_at", { ascending: false }).limit(email ? 50 : 20);
-  const filteredSubscriptionQuery = userIds ? subscriptionQuery.in("user_id", userIds) : subscriptionQuery;
-  const filteredEventQuery = email ? eventQuery.or(`payload->>email.ilike.${email},payload->>user_id.in.(${(userIds ?? []).join(",")}),payload->>userId.in.(${(userIds ?? []).join(",")})`) : eventQuery;
+  const filteredSubscriptionQuery = email ? subscriptionQuery.in("user_id", userIds) : subscriptionQuery;
+  const filteredEventQuery = email ? eventQuery.or(`payload->>email.ilike.${email},payload->>user_id.in.(${userIds.join(",")}),payload->>userId.in.(${userIds.join(",")})`) : eventQuery;
 
   const [{ data: subscriptions, error: subscriptionsError }, { data: billingEvents, error: billingEventsError }] = await Promise.all([filteredSubscriptionQuery, filteredEventQuery]);
   if (subscriptionsError) return NextResponse.json({ error: subscriptionsError.message }, { status: 500 });
