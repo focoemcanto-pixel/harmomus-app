@@ -25,11 +25,13 @@ type CommunicationChannelRow = {
 type ProviderResult = { ok: boolean; provider: string; providerMessageId?: string | null; status?: number; response?: unknown; errorMessage?: string | null };
 type ProcessCommunicationQueueResult = { processed: number; sent: number; failed: number; skipped: number; canceled: number; eligibleNow: number; scheduledLater: number };
 
-const DEFAULT_PROCESS_LIMIT = 2;
-const MAX_PROCESS_LIMIT = 5;
-const MAX_WHATSAPP_PER_EXECUTION = 2;
+const DEFAULT_PROCESS_LIMIT = 1;
+const MAX_PROCESS_LIMIT = 1;
+const MAX_WHATSAPP_PER_EXECUTION = 1;
+const WHATSAPP_SAFE_WINDOW_LIMIT = 5;
+const WHATSAPP_SAFE_WINDOW_MINUTES = 30;
 const MAX_TEMPORARY_FAILURE_ATTEMPTS = 3;
-const TEMPORARY_RETRY_DELAYS_MINUTES = [5, 15, 30];
+const TEMPORARY_RETRY_DELAYS_MINUTES = [30, 60, 120];
 const CONVERSION_EVENTS = new Set(["checkout_completed", "checkout.completed", "checkout.session.completed", "subscription_created", "subscription.created", "invoice.paid", "payment_succeeded", "payment.approved", "payment_confirmed", "payment_received", "plan.plus_activated", "plan.premium_activated"]);
 const ACTIVE_SUBSCRIPTION_STATUSES = new Set(["active", "trialing"]);
 
@@ -82,6 +84,23 @@ async function writeCommunicationLog(admin: any, input: { job: CommunicationQueu
 async function getActiveChannel(admin: any, channel: Channel) { const table = channel === "whatsapp" ? "communication_whatsapp_integrations" : "communication_email_integrations"; const { data, error } = await admin.from(table).select("id,provider,config").eq("active", true).order("created_at", { ascending: false }).limit(1).maybeSingle(); if (error) return { data: null, error }; return { data: data ? ({ ...data, type: channel } as CommunicationChannelRow) : null, error: null }; }
 async function hasConversionAfterTrigger(admin: any, job: CommunicationQueueJob) { if (!job.user_id || !shouldCancelIfConversion(job)) return false; const since = triggerEventAt(job); const { data: events } = await admin.from("marketing_events").select("id,event_key,event_type,event_label,created_at").eq("user_id", job.user_id).gte("created_at", since).order("created_at", { ascending: false }).limit(20); if ((events ?? []).some((event: any) => CONVERSION_EVENTS.has(eventKey(event.event_key ?? event.event_type ?? event.event_label)))) return true; const { data: subscription } = await admin.from("subscriptions").select("status,updated_at,created_at").eq("user_id", job.user_id).in("status", Array.from(ACTIVE_SUBSCRIPTION_STATUSES)).order("updated_at", { ascending: false }).limit(1).maybeSingle(); if (!subscription?.status || !ACTIVE_SUBSCRIPTION_STATUSES.has(normalize(subscription.status))) return false; return happenedAtOrAfter(subscription.updated_at, since) || happenedAtOrAfter(subscription.created_at, since); }
 async function cancelJobAfterConversion(admin: any, job: CommunicationQueueJob) { const now = new Date().toISOString(); await admin.from("communication_queue").update({ status: "canceled", processed_at: now, updated_at: now, error_message: "Cancelado automaticamente: conversão detectada antes do envio." }).eq("id", job.id).in("status", ["pending", "processing"]); await writeCommunicationLog(admin, { job: { ...job, status: "canceled" }, event: "communication.queue.canceled", level: "info", message: "Mensagem automática cancelada porque o usuário converteu/regularizou antes do envio.", payload: { job_id: job.id, automation_id: job.payload?.automation_id ?? null, automation_intent: job.payload?.automation_intent ?? null, trigger_event_at: job.payload?.trigger_event_at ?? null } }); }
+
+async function hasWhatsappWindowCapacity(admin: any) {
+  const since = new Date(Date.now() - WHATSAPP_SAFE_WINDOW_MINUTES * 60 * 1000).toISOString();
+  const { count, error } = await admin
+    .from("communication_queue")
+    .select("id", { count: "exact", head: true })
+    .eq("channel", "whatsapp")
+    .eq("status", "sent")
+    .gte("processed_at", since);
+
+  if (error) {
+    console.warn("[communication_queue] falha ao verificar janela segura de WhatsApp", error.message);
+    return false;
+  }
+
+  return Number(count ?? 0) < WHATSAPP_SAFE_WINDOW_LIMIT;
+}
 
 async function sendViaWebhook(job: CommunicationQueueJob, channel: CommunicationChannelRow): Promise<ProviderResult> {
   const config = channel.config ?? {};
@@ -143,7 +162,10 @@ export async function processCommunicationQueue(limit = DEFAULT_PROCESS_LIMIT): 
   const channels = new Map<Channel, CommunicationChannelRow | null>();
 
   for (const job of jobs as CommunicationQueueJob[]) {
-    if (job.channel === "whatsapp" && whatsappProcessed >= MAX_WHATSAPP_PER_EXECUTION) { skipped += 1; continue; }
+    if (job.channel === "whatsapp") {
+      if (whatsappProcessed >= MAX_WHATSAPP_PER_EXECUTION) { skipped += 1; continue; }
+      if (!(await hasWhatsappWindowCapacity(admin))) { skipped += 1; continue; }
+    }
     const locked = await markJobProcessing(admin, job);
     if (!locked) { skipped += 1; continue; }
     if (await hasConversionAfterTrigger(admin, job)) { await cancelJobAfterConversion(admin, job); canceled += 1; continue; }
