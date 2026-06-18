@@ -259,7 +259,8 @@ function shouldDispatchPlanActivated(eventType: string, context: NonNullable<Syn
   const currentPlan = normalizePlanFamily(context.planSlug);
   const previousPlan = normalizePlanFamily(context.previousPlanSlug);
   if (!currentPlan || currentPlan === "free") return false;
-  if (["checkout.session.completed", "customer.subscription.created"].includes(eventType)) return true;
+  if (eventType === "checkout.session.completed") return true;
+if (eventType === "customer.subscription.created") return false;
   if (["invoice.paid", "invoice.payment_succeeded"].includes(eventType)) return previousPlan !== currentPlan;
   return eventType === "customer.subscription.updated" && previousPlan !== currentPlan;
 }
