@@ -106,12 +106,27 @@ function prepareCloneForExport(source: HTMLElement, width: number, height: numbe
   return { host, clone };
 }
 
+function proxiedImageUrl(src: string) {
+  if (!src || src.startsWith("data:") || src.startsWith("blob:")) return src;
+  const absolute = new URL(src, window.location.href);
+  if (absolute.origin === window.location.origin && !absolute.pathname.startsWith("/_next/image")) return absolute.toString();
+  return `/api/admin/image-proxy?url=${encodeURIComponent(absolute.toString())}`;
+}
+
 async function waitForImages(node: HTMLElement) {
   await Promise.all(
     Array.from(node.querySelectorAll("img")).map((img) => {
       const image = img as HTMLImageElement;
-      image.crossOrigin = "anonymous";
-      if (image.complete) return Promise.resolve();
+      const originalSrc = image.currentSrc || image.src || image.getAttribute("src") || "";
+      if (originalSrc) {
+        image.crossOrigin = "anonymous";
+        const proxiedSrc = proxiedImageUrl(originalSrc);
+        if (image.src !== proxiedSrc) image.src = proxiedSrc;
+        image.removeAttribute("srcset");
+        image.removeAttribute("sizes");
+      }
+
+      if (image.complete && image.naturalWidth > 0) return Promise.resolve();
       return new Promise<void>((resolve) => {
         image.onload = () => resolve();
         image.onerror = () => resolve();
@@ -151,6 +166,7 @@ export function TestimonialCardDownloadButton({ filename }: TestimonialCardDownl
           canvasWidth: width,
           canvasHeight: height,
           backgroundColor: "#030712",
+          imagePlaceholder: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==",
           style: {
             transform: "none",
             width: `${width}px`,
