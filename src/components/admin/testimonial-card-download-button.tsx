@@ -18,12 +18,6 @@ function isBlobUrl(src: string) {
   return src.startsWith("blob:");
 }
 
-function isIosSafari() {
-  const userAgent = window.navigator.userAgent;
-  const isIos = /iPad|iPhone|iPod/.test(userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-  return isIos && /Safari/i.test(userAgent) && !/CriOS|FxiOS|EdgiOS/i.test(userAgent);
-}
-
 function blobToDataUrl(blob: Blob) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -248,27 +242,20 @@ async function inlineAllImagesForExport(node: HTMLElement) {
   await inlineCssBackgroundImages(node);
 }
 
-async function triggerDownload(dataUrl: string, filename: string, preOpenedWindow?: Window | null) {
+async function triggerDownload(dataUrl: string, filename: string) {
   const blob = await (await fetch(dataUrl)).blob();
   const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
 
   try {
-    const link = document.createElement("a");
     link.download = filename;
     link.href = objectUrl;
     link.rel = "noopener";
+    link.style.display = "none";
     document.body.appendChild(link);
-
-    if (preOpenedWindow && !preOpenedWindow.closed) {
-      preOpenedWindow.location.href = objectUrl;
-    } else if (isIosSafari()) {
-      window.open(objectUrl, "_blank", "noopener,noreferrer");
-    } else {
-      link.click();
-    }
-
-    link.remove();
+    link.click();
   } finally {
+    link.remove();
     window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
   }
 }
@@ -280,8 +267,6 @@ export function TestimonialCardDownloadButton({ filename }: TestimonialCardDownl
   async function download() {
     setError(null);
     setLoading(true);
-
-    const preOpenedDownloadWindow = isIosSafari() ? window.open("", "_blank") : null;
 
     try {
       await loadScript("https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.min.js");
@@ -295,6 +280,7 @@ export function TestimonialCardDownloadButton({ filename }: TestimonialCardDownl
       const { host, clone } = prepareCloneForExport(node, width, height);
 
       try {
+        await document.fonts?.ready;
         await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
         await inlineAllImagesForExport(clone);
 
@@ -319,14 +305,13 @@ export function TestimonialCardDownloadButton({ filename }: TestimonialCardDownl
           },
         });
 
-        await triggerDownload(dataUrl, filename, preOpenedDownloadWindow);
+        await triggerDownload(dataUrl, filename);
       } finally {
         host.remove();
       }
     } catch (caughtError) {
       console.error("[testimonial-card] download failed", caughtError);
-      if (preOpenedDownloadWindow && !preOpenedDownloadWindow.closed) preOpenedDownloadWindow.close();
-      setError(null);
+      setError(caughtError instanceof Error ? caughtError.message : "Não foi possível baixar o card.");
     } finally {
       setLoading(false);
     }
