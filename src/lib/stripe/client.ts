@@ -38,6 +38,43 @@ function isStaleCustomerError(error: unknown) {
   return message.includes("No such customer") || message.includes("similar object exists in test mode") || message.includes("similar object exists in live mode");
 }
 
+function firstNumber(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+  }
+  return null;
+}
+
+function normalizeStripeSubscriptionPeriod(subscription: any) {
+  if (!subscription || typeof subscription !== "object") return subscription;
+
+  const firstItem = subscription.items?.data?.[0] ?? null;
+  const firstLine = subscription.latest_invoice?.lines?.data?.[0] ?? null;
+  const resolvedCurrentPeriodStart = firstNumber(
+    subscription.current_period_start,
+    firstItem?.current_period_start,
+    firstItem?.current_period?.start,
+    firstLine?.period?.start,
+  );
+  const resolvedCurrentPeriodEnd = firstNumber(
+    subscription.current_period_end,
+    firstItem?.current_period_end,
+    firstItem?.current_period?.end,
+    firstLine?.period?.end,
+    subscription.trial_end,
+  );
+
+  if (resolvedCurrentPeriodStart && !subscription.current_period_start) {
+    subscription.current_period_start = resolvedCurrentPeriodStart;
+  }
+
+  if (resolvedCurrentPeriodEnd && !subscription.current_period_end) {
+    subscription.current_period_end = resolvedCurrentPeriodEnd;
+  }
+
+  return subscription;
+}
+
 async function createCustomer(email: string, userId: string) {
   const form = new URLSearchParams({ email, "metadata[user_id]": userId });
   const customer = await stripe<{ id: string }>("/customers", form);
@@ -116,6 +153,9 @@ export async function getCheckoutSession(sessionId: string) {
 
   try {
     const session = await stripe<any>(`/checkout/sessions/${encodeURIComponent(sessionId)}?${query.toString()}`, undefined, "GET");
+    if (session?.subscription && typeof session.subscription === "object") {
+      session.subscription = normalizeStripeSubscriptionPeriod(session.subscription);
+    }
 
     console.log("[stripe.client.getCheckoutSession] sessão Stripe encontrada", {
       session_id: sessionId,
@@ -161,7 +201,8 @@ export async function cancelSubscriptionAtPeriodEnd(subscriptionId: string) {
 }
 
 export async function getSubscription(subscriptionId: string) {
-  return stripe<any>(`/subscriptions/${encodeURIComponent(subscriptionId)}`, undefined, "GET");
+  const subscription = await stripe<any>(`/subscriptions/${encodeURIComponent(subscriptionId)}`, undefined, "GET");
+  return normalizeStripeSubscriptionPeriod(subscription);
 }
 
 export async function listCustomerSubscriptions(customerId: string) {
@@ -176,7 +217,7 @@ export async function listCustomerSubscriptions(customerId: string) {
 
 export async function getBestCustomerSubscription(customerId: string) {
   const subscriptions = await listCustomerSubscriptions(customerId);
-  const data = Array.isArray(subscriptions?.data) ? subscriptions.data : [];
+  const data = Array.isArray(subscriptions?.data) ? subscriptions.data.map(normalizeStripeSubscriptionPeriod) : [];
   const preferredStatuses = ["active", "trialing", "past_due"];
 
   return data.find((subscription: any) => preferredStatuses.includes(String(subscription?.status ?? "")))
@@ -221,7 +262,7 @@ export async function getStripeSubscription(subscriptionId: string) {
   console.log("[stripe.client.getStripeSubscription] iniciando busca", { subscription_id: subscriptionId });
 
   try {
-    const subscription = await stripe<any>(`/subscriptions/${encodeURIComponent(subscriptionId)}`, undefined, "GET");
+    const subscription = normalizeStripeSubscriptionPeriod(await stripe<any>(`/subscriptions/${encodeURIComponent(subscriptionId)}`, undefined, "GET"));
 
     console.log("[stripe.client.getStripeSubscription] subscription encontrada no Stripe", {
       subscription_encontrada_no_stripe: Boolean(subscription?.id),
@@ -230,6 +271,7 @@ export async function getStripeSubscription(subscriptionId: string) {
       subscription_id: subscription?.id ?? subscriptionId,
       price_id: subscription?.items?.data?.[0]?.price?.id ?? null,
       current_period_end: subscription?.current_period_end ? new Date(subscription.current_period_end * 1000).toISOString() : null,
+      item_current_period_end: subscription?.items?.data?.[0]?.current_period_end ? new Date(subscription.items.data[0].current_period_end * 1000).toISOString() : null,
       metadata: subscription?.metadata ?? null,
       metadata_user_id: subscription?.metadata?.user_id ?? null,
       metadata_email: subscription?.metadata?.email ?? null,
