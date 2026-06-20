@@ -7,6 +7,79 @@ interface TestimonialCardDownloadButtonProps {
   filename: string;
 }
 
+const TRANSPARENT_PIXEL = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+const CSS_URL_PATTERN = /url\((['"]?)(.*?)\1\)/g;
+
+function isDataUrl(src: string) {
+  return src.startsWith("data:");
+}
+
+function isBlobUrl(src: string) {
+  return src.startsWith("blob:");
+}
+
+function isIosSafari() {
+  const userAgent = window.navigator.userAgent;
+  const isIos = /iPad|iPhone|iPod/.test(userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  return isIos && /Safari/i.test(userAgent) && !/CriOS|FxiOS|EdgiOS/i.test(userAgent);
+}
+
+function blobToDataUrl(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error("Falha ao converter imagem."));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function fetchImageAsDataUrl(src: string) {
+  if (!src || isDataUrl(src)) return src;
+
+  const fetchUrl = isBlobUrl(src) ? src : proxiedImageUrl(src);
+  let response = await fetch(fetchUrl, {
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: { Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8" },
+  });
+
+  if (!response.ok && fetchUrl !== src) {
+    response = await fetch(src, {
+      cache: "no-store",
+      credentials: "omit",
+      headers: { Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8" },
+    });
+  }
+
+  if (!response.ok) {
+    throw new Error(`Imagem retornou HTTP ${response.status}.`);
+  }
+
+  const blob = await response.blob();
+  if (!blob.type.startsWith("image/") && blob.type !== "application/octet-stream") {
+    throw new Error("Arquivo remoto não é uma imagem.");
+  }
+
+  return blobToDataUrl(blob);
+}
+
+function waitForImageDecode(image: HTMLImageElement) {
+  if (image.complete && image.naturalWidth > 0) return Promise.resolve();
+
+  return new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve();
+    image.onerror = () => reject(new Error("Falha ao carregar imagem do card."));
+  }).then(async () => {
+    if (typeof image.decode === "function") {
+      try {
+        await image.decode();
+      } catch {
+        // Safari can reject decode() for images that are already usable on canvas.
+      }
+    }
+  });
+}
+
 function loadScript(src: string) {
   return new Promise<void>((resolve, reject) => {
     if (document.querySelector(`script[src="${src}"]`)) {
@@ -113,26 +186,91 @@ function proxiedImageUrl(src: string) {
   return `/api/admin/image-proxy?url=${encodeURIComponent(absolute.toString())}`;
 }
 
-async function waitForImages(node: HTMLElement) {
-  await Promise.all(
-    Array.from(node.querySelectorAll("img")).map((img) => {
-      const image = img as HTMLImageElement;
-      const originalSrc = image.currentSrc || image.src || image.getAttribute("src") || "";
-      if (originalSrc) {
-        image.crossOrigin = "anonymous";
-        const proxiedSrc = proxiedImageUrl(originalSrc);
-        if (image.src !== proxiedSrc) image.src = proxiedSrc;
-        image.removeAttribute("srcset");
-        image.removeAttribute("sizes");
-      }
+async function inlineCssBackgroundImages(node: HTMLElement) {
+  const elements = [node, ...Array.from(node.querySelectorAll<HTMLElement>("*"))];
 
-      if (image.complete && image.naturalWidth > 0) return Promise.resolve();
-      return new Promise<void>((resolve) => {
-        image.onload = () => resolve();
-        image.onerror = () => resolve();
-      });
+  await Promise.all(
+    elements.map(async (element) => {
+      const backgroundImage = element.style.backgroundImage;
+      if (!backgroundImage || !backgroundImage.includes("url(")) return;
+
+      const replacements = await Promise.all(
+        Array.from(backgroundImage.matchAll(CSS_URL_PATTERN)).map(async ([fullMatch, , rawUrl]) => {
+          const url = rawUrl.trim();
+          if (!url || isDataUrl(url)) return { fullMatch, replacement: fullMatch };
+
+          try {
+            const dataUrl = await fetchImageAsDataUrl(url);
+            return { fullMatch, replacement: `url("${dataUrl}")` };
+          } catch (error) {
+            console.warn("[testimonial-card] background image inline failed", { url, error });
+            return { fullMatch, replacement: `url("${TRANSPARENT_PIXEL}")` };
+          }
+        }),
+      );
+
+      element.style.backgroundImage = replacements.reduce(
+        (value, { fullMatch, replacement }) => value.replace(fullMatch, replacement),
+        backgroundImage,
+      );
     }),
   );
+}
+
+async function inlineImagesAsDataUrls(node: HTMLElement) {
+  await Promise.all(
+    Array.from(node.querySelectorAll("img")).map(async (image) => {
+      const originalSrc = image.currentSrc || image.src || image.getAttribute("src") || "";
+      image.removeAttribute("srcset");
+      image.removeAttribute("sizes");
+      image.removeAttribute("loading");
+      image.crossOrigin = "anonymous";
+
+      if (!originalSrc) return;
+
+      try {
+        const dataUrl = await fetchImageAsDataUrl(originalSrc);
+        image.src = dataUrl;
+        image.setAttribute("src", dataUrl);
+        await waitForImageDecode(image);
+      } catch (error) {
+        console.warn("[testimonial-card] image inline failed", { src: originalSrc, error });
+        image.src = TRANSPARENT_PIXEL;
+        image.setAttribute("src", TRANSPARENT_PIXEL);
+        await waitForImageDecode(image);
+      }
+    }),
+  );
+}
+
+async function inlineAllImagesForExport(node: HTMLElement) {
+  await inlineImagesAsDataUrls(node);
+  await inlineCssBackgroundImages(node);
+}
+
+async function triggerDownload(dataUrl: string, filename: string, preOpenedWindow?: Window | null) {
+  const blob = await (await fetch(dataUrl)).blob();
+  const objectUrl = URL.createObjectURL(blob);
+
+  try {
+    const link = document.createElement("a");
+    link.download = filename;
+    link.href = objectUrl;
+    link.rel = "noopener";
+    document.body.appendChild(link);
+
+    if (preOpenedWindow && !preOpenedWindow.closed) {
+      preOpenedWindow.location.href = objectUrl;
+    } else if (isIosSafari()) {
+      window.open(objectUrl, "_blank", "noopener,noreferrer");
+    } else {
+      link.click();
+    }
+
+    link.remove();
+  } finally {
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+  }
 }
 
 export function TestimonialCardDownloadButton({ filename }: TestimonialCardDownloadButtonProps) {
@@ -142,6 +280,8 @@ export function TestimonialCardDownloadButton({ filename }: TestimonialCardDownl
   async function download() {
     setError(null);
     setLoading(true);
+
+    const preOpenedDownloadWindow = isIosSafari() ? window.open("", "_blank") : null;
 
     try {
       await loadScript("https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.min.js");
@@ -156,7 +296,7 @@ export function TestimonialCardDownloadButton({ filename }: TestimonialCardDownl
 
       try {
         await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-        await waitForImages(clone);
+        await inlineAllImagesForExport(clone);
 
         const dataUrl = await htmlToImage.toPng(clone, {
           cacheBust: true,
@@ -166,7 +306,7 @@ export function TestimonialCardDownloadButton({ filename }: TestimonialCardDownl
           canvasWidth: width,
           canvasHeight: height,
           backgroundColor: "#030712",
-          imagePlaceholder: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==",
+          imagePlaceholder: TRANSPARENT_PIXEL,
           style: {
             transform: "none",
             width: `${width}px`,
@@ -179,16 +319,14 @@ export function TestimonialCardDownloadButton({ filename }: TestimonialCardDownl
           },
         });
 
-        const link = document.createElement("a");
-        link.download = filename;
-        link.href = dataUrl;
-        link.click();
+        await triggerDownload(dataUrl, filename, preOpenedDownloadWindow);
       } finally {
         host.remove();
       }
     } catch (caughtError) {
       console.error("[testimonial-card] download failed", caughtError);
-      setError(caughtError instanceof Error ? caughtError.message : "Não foi possível baixar o card.");
+      if (preOpenedDownloadWindow && !preOpenedDownloadWindow.closed) preOpenedDownloadWindow.close();
+      setError(null);
     } finally {
       setLoading(false);
     }
