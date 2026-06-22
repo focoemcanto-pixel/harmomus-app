@@ -21,6 +21,9 @@ type PreviousSubscriptionContext = {
   planSlug: string | null;
   customerId: string | null;
   subscriptionId: string | null;
+  gateway: string | null;
+  status: string | null;
+  currentPeriodEnd: string | null;
 };
 
 type SyncedSubscriptionContext = {
@@ -57,6 +60,20 @@ const ACCEPTED_EVENTS = new Set([
 
 function isStripePaymentFailureEvent(eventType: string) {
   return ["invoice.payment_failed", "charge.failed", "payment_intent.payment_failed"].includes(eventType);
+}
+
+function shouldIgnoreStripeEventForCurrentNonStripeSubscription(eventType: string) {
+  return ["customer.subscription.deleted", "checkout.session.expired"].includes(eventType) || isStripePaymentFailureEvent(eventType);
+}
+
+function isCurrentActiveNonStripeSubscription(previous: PreviousSubscriptionContext) {
+  const gateway = normalizeLower(previous.gateway);
+  if (!gateway || gateway === "stripe") return false;
+  const status = normalizeLower(previous.status);
+  if (!["active", "trialing"].includes(status ?? "")) return false;
+  if (!previous.currentPeriodEnd) return true;
+  const currentPeriodEndTime = Date.parse(previous.currentPeriodEnd);
+  return Number.isNaN(currentPeriodEndTime) || currentPeriodEndTime > Date.now();
 }
 
 function verifySignature(payload: string, signature: string, secret: string) {
@@ -148,7 +165,7 @@ async function ensureUserIdByCustomerOrEmail(supabase: any, customerId: string |
 async function getCurrentSubscriptionForHistory(supabase: any, userId: string): Promise<PreviousSubscriptionContext> {
   const { data, error } = await supabase
     .from("subscriptions")
-    .select("id, plan_id, stripe_customer_id, gateway_customer_id, stripe_subscription_id, gateway_subscription_id, plans(slug)")
+    .select("id, plan_id, stripe_customer_id, gateway_customer_id, stripe_subscription_id, gateway_subscription_id, gateway, status, current_period_end, plans(slug)")
     .eq("user_id", userId)
     .order("updated_at", { ascending: false })
     .limit(1)
@@ -162,6 +179,9 @@ async function getCurrentSubscriptionForHistory(supabase: any, userId: string): 
     planSlug: data?.plans?.slug ?? null,
     customerId: data?.stripe_customer_id ?? data?.gateway_customer_id ?? null,
     subscriptionId: data?.stripe_subscription_id ?? data?.gateway_subscription_id ?? null,
+    gateway: data?.gateway ?? null,
+    status: data?.status ?? null,
+    currentPeriodEnd: data?.current_period_end ?? null,
   };
 }
 
@@ -260,7 +280,7 @@ function shouldDispatchPlanActivated(eventType: string, context: NonNullable<Syn
   const previousPlan = normalizePlanFamily(context.previousPlanSlug);
   if (!currentPlan || currentPlan === "free") return false;
   if (eventType === "checkout.session.completed") return true;
-if (eventType === "customer.subscription.created") return false;
+  if (eventType === "customer.subscription.created") return false;
   if (["invoice.paid", "invoice.payment_succeeded"].includes(eventType)) return previousPlan !== currentPlan;
   return eventType === "customer.subscription.updated" && previousPlan !== currentPlan;
 }
@@ -384,6 +404,17 @@ async function syncSubscriptionFromStripeEvent(supabase: any, event: StripeEvent
   const fullSubscriptionId = String(fullSubscription?.id ?? "").startsWith("sub_") ? normalize(fullSubscription.id) : null;
   const syncedSubscriptionId = fullSubscriptionId ?? subscriptionId;
   const previous = await getCurrentSubscriptionForHistory(supabase, userId);
+  if (shouldIgnoreStripeEventForCurrentNonStripeSubscription(event.type) && isCurrentActiveNonStripeSubscription(previous)) {
+    console.info("[stripe.webhook] Evento Stripe ignorado porque assinatura atual ativa usa outro gateway", {
+      eventId: event.id,
+      eventType: event.type,
+      userId,
+      currentGateway: previous.gateway,
+      currentStatus: previous.status,
+      currentPeriodEnd: previous.currentPeriodEnd,
+    });
+    return null;
+  }
   const preservedCustomerId = customerId ?? previous.customerId;
   const preservedSubscriptionId = syncedSubscriptionId ?? previous.subscriptionId;
 
@@ -589,6 +620,40 @@ async function trackPaymentFailedForAutomation(supabase: any, event: StripeEvent
   });
 }
 
+async function hasRecentSubscriptionPaymentFailedWebhook(supabase: any, context: NonNullable<SyncedSubscriptionContext>, email: string | null) {
+  const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+  if (context.userId) {
+    const { data: existingByUser, error } = await supabase
+      .from("webhook_logs")
+      .select("id")
+      .eq("event", "subscription.payment_failed")
+      .eq("request_body->data->>user_id", context.userId)
+      .gte("created_at", twentyFourHoursAgo)
+      .limit(1)
+      .maybeSingle();
+
+    if (error && error.code !== "42P01") console.error("[stripe.webhook] Falha ao verificar webhook payment_failed duplicado por usuário", error);
+    if (existingByUser?.id) return true;
+  }
+
+  if (email) {
+    const { data: existingByEmail, error } = await supabase
+      .from("webhook_logs")
+      .select("id")
+      .eq("event", "subscription.payment_failed")
+      .eq("request_body->data->>email", email)
+      .gte("created_at", twentyFourHoursAgo)
+      .limit(1)
+      .maybeSingle();
+
+    if (error && error.code !== "42P01") console.error("[stripe.webhook] Falha ao verificar webhook payment_failed duplicado por e-mail", error);
+    if (existingByEmail?.id) return true;
+  }
+
+  return false;
+}
+
 async function dispatchStripeWebhookEvent(supabase: any, event: StripeEvent, context: SyncedSubscriptionContext) {
   if (!context) return;
   const webhookEvent = mapStripeEventToWebhookEvent(event.type, context.status);
@@ -598,7 +663,16 @@ async function dispatchStripeWebhookEvent(supabase: any, event: StripeEvent, con
   if (missingPhoneDiagnostic) console.warn("[stripe.webhook] missing_phone_for_paid_webhook", { eventId: event.id, eventType: event.type, userId: context.userId });
   const data = { stripe_event_id: event.id, stripe_event_type: event.type, user_id: context.userId, plan: context.planSlug, previous_plan: context.previousPlanSlug, status: context.status, stripe_customer_id: context.customerId, stripe_subscription_id: context.subscriptionId, stripe_price_id: context.stripePriceId, current_period_end: context.currentPeriodEnd, trial_ends_at: context.trialEndsAt, email: recipient.email, phone: recipient.phone, phone_source: recipient.phone_source, diagnostic: missingPhoneDiagnostic };
   const extraEvents = [event.type === "checkout.session.completed" ? getCheckoutCompletedEvent(context.planSlug) : null, event.type === "checkout.session.expired" ? getCheckoutAbandonedEvent(context.planSlug) : null, getSpecificPlanTransitionEvent(context.previousPlanSlug, context.planSlug), shouldDispatchPlanActivated(event.type, context) ? getPlanActivatedEvent(context.planSlug) : null].filter(Boolean) as WebhookEvent[];
-  const events = Array.from(new Set([webhookEvent as WebhookEvent, ...extraEvents]));
+  let events = Array.from(new Set([webhookEvent as WebhookEvent, ...extraEvents]));
+
+  if (events.includes("subscription.payment_failed")) {
+    const hasRecentDuplicate = await hasRecentSubscriptionPaymentFailedWebhook(supabase, context, recipient.email ?? context.customerEmail);
+    if (hasRecentDuplicate) {
+      console.info("[stripe.webhook] subscription.payment_failed não disparado por duplicidade nas últimas 24h", { eventId: event.id, userId: context.userId, email: recipient.email ?? context.customerEmail });
+      events = events.filter((eventName) => eventName !== "subscription.payment_failed");
+    }
+  }
+
   await Promise.allSettled(events.map((eventName) => dispatchWebhookEvent({ event: eventName, source: "stripe", recipient, data })));
 }
 
