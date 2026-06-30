@@ -3,7 +3,8 @@ import { readFile, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { downloadFromR2, uploadVideoToR2 } from "./r2";
+import { downloadFromR2 } from "./r2";
+import { uploadVideoToR2 } from "./r2-video";
 
 export type DuetRenderJob = {
   id: string;
@@ -47,7 +48,6 @@ function buildFilter(job: DuetRenderJob) {
   const offsetMs = clamp(numberValue(job.reference_offset_ms, 0), -3000, 3000);
   const voiceDelay = Math.max(0, -offsetMs);
   const referenceDelay = Math.max(0, offsetMs);
-
   const voiceDelayFilter = voiceDelay ? `,adelay=${voiceDelay}:all=1` : "";
   const referenceDelayFilter = referenceDelay ? `,adelay=${referenceDelay}:all=1` : "";
 
