@@ -14,6 +14,23 @@ type DispatchWebhookInput = {
   mode?: "live" | "test";
 };
 
+const DEDUPED_SUBSCRIPTION_EVENTS = new Set<WebhookEvent>([
+  "checkout.completed",
+  "checkout.plus.completed",
+  "checkout.premium.completed",
+  "payment.approved",
+  "plan.plus_activated",
+  "plan.premium_activated",
+  "plan.ministry_activated",
+  "subscription.created",
+  "subscription.renewed",
+  "upgrade.free_to_plus",
+  "upgrade.free_to_premium",
+  "upgrade.plus_to_premium",
+]);
+
+const DEDUPE_WINDOW_MS = 5 * 60 * 1000;
+
 function normalizePhone(value?: string | null) {
   if (!value) return "";
   return value.replace(/[\s()\-*]/g, "").replace(/\D/g, "");
@@ -29,6 +46,67 @@ function formatBrazilPhone(value?: string | null) {
 
   if (!ddd || !first || !last) return digits.startsWith("55") ? `+${digits}` : `+55${digits}`;
   return `+55 (${ddd}) ${first}-${last}`;
+}
+
+function normalizeText(value: unknown) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function dedupeValuesFromPayload(payload: Record<string, any>) {
+  const data = (payload.data ?? {}) as Record<string, unknown>;
+  return [
+    data.user_id,
+    data.userId,
+    data.stripe_subscription_id,
+    data.gateway_subscription_id,
+    data.localSubscriptionId,
+    data.local_subscription_id,
+    data.payment_id,
+    data.paymentId,
+    payload.email,
+    payload.Email,
+    payload.to,
+    payload.phone,
+    payload.whatsapp,
+    payload.recipient?.email,
+    payload.recipient?.phone,
+    payload.customer?.email,
+    payload.customer?.phone,
+    payload.contact?.email,
+    payload.contact?.phone,
+  ]
+    .map((value) => normalizeText(value))
+    .filter(Boolean);
+}
+
+function hasMatchingDedupeIdentity(currentPayload: Record<string, any>, previousPayload: Record<string, any>) {
+  const currentValues = new Set(dedupeValuesFromPayload(currentPayload));
+  if (!currentValues.size) return false;
+  return dedupeValuesFromPayload(previousPayload).some((value) => currentValues.has(value));
+}
+
+async function hasRecentDuplicateDispatch(admin: any, input: { endpointId: string; event: WebhookEvent; payload: Record<string, unknown> }) {
+  if (!DEDUPED_SUBSCRIPTION_EVENTS.has(input.event)) return false;
+
+  const since = new Date(Date.now() - DEDUPE_WINDOW_MS).toISOString();
+  const { data, error } = await admin
+    .from("webhook_logs")
+    .select("id, request_body")
+    .eq("endpoint_id", input.endpointId)
+    .eq("event", input.event)
+    .eq("success", true)
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(25);
+
+  if (error) {
+    console.warn("[webhooks] Falha ao verificar deduplicação de webhook", { event: input.event, endpointId: input.endpointId, error });
+    return false;
+  }
+
+  return ((data ?? []) as Array<{ request_body?: Record<string, unknown> }>).some((row) =>
+    hasMatchingDedupeIdentity(input.payload as Record<string, any>, (row.request_body ?? {}) as Record<string, any>),
+  );
 }
 
 async function saveCommunicationLog(admin: any, input: {
@@ -154,6 +232,7 @@ async function dispatchWebhookEventUnsafe(input: DispatchWebhookInput) {
   if (!matchedEndpoints.length) return { dispatched: 0 };
 
   let dispatched = 0;
+  let skippedDuplicate = 0;
 
   for (const endpoint of matchedEndpoints) {
     const payload = buildLivePayload(input);
@@ -164,6 +243,13 @@ async function dispatchWebhookEventUnsafe(input: DispatchWebhookInput) {
       (payload.data as Record<string, unknown>).diagnostic = (payload.data as Record<string, unknown>).diagnostic ?? missingPaidPhoneDiagnostic;
       (payload as Record<string, unknown>).diagnostic = missingPaidPhoneDiagnostic;
     }
+
+    if (await hasRecentDuplicateDispatch(admin, { endpointId: endpoint.id, event: input.event, payload })) {
+      console.info("[webhooks] Disparo duplicado ignorado", { event: input.event, endpointId: endpoint.id, email: payload.email, phone: payload.to, data: payload.data });
+      skippedDuplicate += 1;
+      continue;
+    }
+
     const payloadString = JSON.stringify(payload);
     const timestamp = Math.floor(Date.now() / 1000);
     const signature = signWebhookPayload(payloadString, String(endpoint.secret), timestamp);
@@ -254,7 +340,7 @@ async function dispatchWebhookEventUnsafe(input: DispatchWebhookInput) {
     dispatched += 1;
   }
 
-  return { dispatched };
+  return { dispatched, skippedDuplicate };
 }
 
 export async function dispatchWebhookEvent(input: DispatchWebhookInput) {
