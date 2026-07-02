@@ -16,7 +16,7 @@ export interface AdminSettings {
   urls: { appUrl: string; socialLinks: string; courseLink: string };
   payments: { stripeConfigured: boolean; stripePlusPriceId: string; stripePremiumPriceId: string; mode: "test" | "production" };
   storage: { r2Bucket: string; r2PublicUrl: string; connectionStatus: string };
-  home: { headline: string; subheadline: string; primaryCta: string; secondaryCta: string };
+  home: { headline: string; subheadline: string; primaryCta: string; secondaryCta: string; featuredKitIds?: string[] };
   whatsapp: { supportPhone: string; webhook: string };
 }
 
@@ -51,17 +51,24 @@ const DEFAULT_SETTINGS: AdminSettings = {
     subheadline: "Kits vocais completos em todos os tons e vozes para preparar seu ministério com excelência, segurança e unidade vocal.",
     primaryCta: "Explorar kits",
     secondaryCta: "Experimentar grátis por 7 dias",
+    featuredKitIds: [],
   },
   whatsapp: { supportPhone: "", webhook: "" },
 };
 
+function normalizeFeaturedKitIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(value.map((id) => String(id ?? "").trim()).filter(Boolean))).slice(0, 5);
+}
+
 function mergeSettings(payload: Partial<AdminSettings> | null | undefined): AdminSettings {
+  const mergedHome = { ...DEFAULT_SETTINGS.home, ...(payload?.home ?? {}) };
   return {
     branding: { ...DEFAULT_SETTINGS.branding, ...(payload?.branding ?? {}) },
     urls: { ...DEFAULT_SETTINGS.urls, ...(payload?.urls ?? {}) },
     payments: { ...DEFAULT_SETTINGS.payments, ...(payload?.payments ?? {}) },
     storage: { ...DEFAULT_SETTINGS.storage, ...(payload?.storage ?? {}) },
-    home: { ...DEFAULT_SETTINGS.home, ...(payload?.home ?? {}) },
+    home: { ...mergedHome, featuredKitIds: normalizeFeaturedKitIds(mergedHome.featuredKitIds) },
     whatsapp: { ...DEFAULT_SETTINGS.whatsapp, ...(payload?.whatsapp ?? {}) },
   };
 }
