@@ -13,7 +13,6 @@ function kitLabel(kit: { name: string; artist: string | null }) {
 export default async function AdminHomeFeaturedKitsPage() {
   const [kits, featuredRows] = await Promise.all([getPublishedKits(), getAdminHomeFeaturedKits()]);
   const selectedIds = featuredRows.map((row) => row.kit_id).filter(Boolean).slice(0, 5);
-  const selectedSet = new Set(selectedIds);
   const selectedKits = selectedIds.map((id) => kits.find((kit) => kit.id === id)).filter(Boolean) as typeof kits;
 
   async function saveFeaturedKits(formData: FormData) {
