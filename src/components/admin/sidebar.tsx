@@ -45,6 +45,7 @@ const navGroups: AdminNavGroup[] = [
       { label: "Categorias", href: "/admin/categorias", icon: Tags },
       { label: "Banners Home", href: "/admin/banners", icon: PanelTop },
       { label: "Blocos Home", href: "/admin/home-sections", icon: Home },
+      { label: "Kits em Destaque", href: "/admin/home-featured-kits", icon: Sparkles },
       { label: "Enquetes", href: "/admin/enquetes", icon: MessageSquareText },
     ],
   },
