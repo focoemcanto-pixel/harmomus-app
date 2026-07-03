@@ -199,17 +199,30 @@ export async function getAdminSettings(): Promise<AdminSettings> {
 }
 
 export async function saveAdminSettings(payload: AdminSettings): Promise<void> {
+  const normalizedPayload = mergeSettings(payload);
+  let databaseSaved = false;
+  let databaseError: unknown = null;
+
   try {
-    await saveSettingsToDatabase(payload);
-    await saveSettingsToR2(payload);
-    return;
-  } catch (databaseError) {
-    if (!isMissingHomeSectionsError(databaseError)) {
-      console.error("Falha ao salvar configurações no banco. Usando fallback R2.", databaseError);
+    await saveSettingsToDatabase(normalizedPayload);
+    databaseSaved = true;
+  } catch (error) {
+    databaseError = error;
+    if (!isMissingHomeSectionsError(error)) {
+      console.error("Falha ao salvar configurações no banco. Tentando fallback R2.", error);
     }
   }
 
-  await saveSettingsToR2(payload);
+  try {
+    await saveSettingsToR2(normalizedPayload);
+  } catch (r2Error) {
+    if (databaseSaved) {
+      console.warn("Configurações salvas no banco, mas não foi possível sincronizar o R2.", r2Error);
+      return;
+    }
+
+    throw r2Error instanceof Error ? r2Error : databaseError instanceof Error ? databaseError : new Error("Não foi possível salvar as configurações.");
+  }
 }
 
 export async function updateBrandingSettings(branding: Partial<AdminSettings["branding"]>): Promise<AdminSettings> {
