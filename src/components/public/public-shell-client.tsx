@@ -124,7 +124,6 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
         {results.length > 0 ? <SearchResults results={results} onSelect={() => setQuery("")} /> : null}
       </div>
       <Link href="/todos-os-kits" className="hidden whitespace-nowrap rounded-lg border border-white/20 px-3 py-2 text-sm text-zinc-100 md:inline-flex">Todos os Kits</Link>
-      <Link href="/gerador-de-nipes" className="hidden whitespace-nowrap rounded-lg bg-cyan-300 px-3 py-2 text-sm font-bold text-slate-950 md:inline-flex">Gerador de Nipes</Link>
       <div className="relative" ref={menuRef}>
         <button onClick={() => setMenuOpen((v) => !v)} className={avatarClassName} title={isPremiumUser ? "Assinante Premium" : isPlusUser ? "Assinante Plus" : "Menu do usuário"}>
           {showAvatar ? <img src={liveAvatar!} alt="avatar" className="h-full w-full object-cover" /> : context.isGuest ? <UserSilhouetteIcon /> : fallbackInitial}
@@ -135,7 +134,6 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
               <>
                 <MenuLink href="/login">Login</MenuLink>
                 <MenuLink href="/cadastro">Cadastre-se</MenuLink>
-                <MenuLink href="/gerador-de-nipes" className="font-semibold text-cyan-100">Gerador de Nipes</MenuLink>
                 <MenuLink href="/instalar" className="text-cyan-100">📱 Instalar Aplicativo</MenuLink>
               </>
             ) : (
@@ -143,7 +141,6 @@ export function PublicShellClient({ context, searchItems }: { context: CurrentUs
                 {isPremiumUser ? <div className="mb-2 rounded-xl border border-yellow-300/25 bg-yellow-300/10 px-3 py-2 text-xs text-yellow-100"><p className="font-semibold">Premium ativo</p><p className="mt-1 text-yellow-100/70">Sua borda dourada aparece enquanto a assinatura estiver ativa.</p></div> : null}
                 {isMinistryUser ? <div className="mb-2 rounded-xl border border-cyan-300/20 bg-cyan-400/10 px-3 py-2 text-xs text-cyan-100"><p className="font-semibold">Premium via Ministério</p><p className="mt-1 text-cyan-100/70">{canOpenMinistryCentral ? "Responsável ministerial" : "Membro convidado"}</p></div> : null}
                 <MenuLink href="/perfil">Perfil</MenuLink>
-                <MenuLink href="/gerador-de-nipes" className="font-semibold text-cyan-100">Gerador de Nipes</MenuLink>
                 {canOpenMemberRepertoires ? <MenuLink href="/meus-repertorios" className="font-semibold text-cyan-100">Minha Escala</MenuLink> : null}
                 {canOpenMinistryCentral ? <MenuLink href="/ministerio" className="font-semibold text-cyan-100">Central Ministerial</MenuLink> : null}
                 <MenuLink href="/assinatura">Assinatura</MenuLink>
