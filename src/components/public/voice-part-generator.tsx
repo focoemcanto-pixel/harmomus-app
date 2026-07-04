@@ -17,13 +17,13 @@ type NoteEvent = { raw: string; midi: number; duration: number };
 type GeneratedNote = NoteEvent & { source: string; chord?: string };
 
 function parseNote(token: string): NoteEvent | null {
-  const match = token.trim().match(/^([A-Ga-g])([#bB]?)(-?\d)?(?::([\d.]+))?$/);
+  const match = token.trim().match(/^([A-Ga-g])([#bB]?)(-?\d)?(?:(\:)([\d.]+))?$/);
   if (!match) return null;
   const name = `${match[1].toUpperCase()}${match[2] || ""}`.toUpperCase();
   const pc = NOTE_TO_PC[name];
   if (pc === undefined) return null;
   const octave = Number(match[3] ?? 4);
-  const duration = Math.max(0.25, Number(match[4] ?? 1));
+  const duration = Math.max(0.25, Number(match[5] ?? 1));
   return { raw: `${PC_TO_NOTE[pc]}${octave}`, midi: (octave + 1) * 12 + pc, duration };
 }
 
@@ -85,7 +85,7 @@ function generatePart(melody: NoteEvent[], key: string, mode: "major" | "minor",
 
   return melody.map((event, index) => {
     const chordSymbol = chordSymbols.length ? chordSymbols[Math.min(index, chordSymbols.length - 1)] : undefined;
-    const chord = chordSymbol ? parseChordSymbol(chordSymbol) : undefined;
+    const chord = chordSymbol ? parseChordSymbol(chordSymbol) ?? undefined : undefined;
     const candidates: number[] = [];
 
     for (const interval of NIPES[nipe].intervals) {
