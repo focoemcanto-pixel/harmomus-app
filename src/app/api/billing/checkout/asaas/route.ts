@@ -2,13 +2,14 @@ import { NextResponse } from "next/server";
 
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { findCustomerByEmail, createCustomer, updateCustomer } from "@/lib/asaas/customers";
-import { createSubscription, listSubscriptionPayments, type AsaasBillingType } from "@/lib/asaas/subscriptions";
+import { createSubscription, cancelSubscription, listSubscriptionPayments, type AsaasBillingType, type AsaasPayment } from "@/lib/asaas/subscriptions";
 import { getPlans } from "@/lib/data/plans";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const ALLOWED_PLAN_SLUGS = new Set(["plus", "premium", "ministry_10", "ministry_20", "ministry_40"]);
 const ALLOWED_METHODS = new Set(["pix", "boleto"]);
 const ATTRIBUTION_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "fbclid", "gclid"] as const;
+const OVERDUE_REUSE_DAYS = 7;
 
 type ProfileRow = { id: string; email?: string | null; full_name?: string | null; phone?: string | null };
 type ExistingSubscriptionRow = {
@@ -61,13 +62,39 @@ function attributionFromUrl(url: URL) {
   }
   return attribution;
 }
-function findPaymentUrl(subscriptionUrl?: string | null, payments?: Awaited<ReturnType<typeof listSubscriptionPayments>>) {
-  const payablePayment = payments?.find((item) => {
-    const status = String(item.status ?? "").trim().toLowerCase();
-    return ["pending", "overdue", "open"].includes(status) && (item.invoiceUrl || item.bankSlipUrl);
-  });
-  const payment = payablePayment ?? payments?.find((item) => item.invoiceUrl || item.bankSlipUrl || item.transactionReceiptUrl) ?? payments?.[0];
+function normalizePaymentStatus(payment?: AsaasPayment | null) {
+  return String(payment?.status ?? "").trim().toLowerCase();
+}
+function paymentDueDate(payment?: AsaasPayment | null) {
+  if (!payment?.dueDate) return null;
+  const date = new Date(`${payment.dueDate}T12:00:00.000Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+function overdueDays(payment?: AsaasPayment | null) {
+  const due = paymentDueDate(payment);
+  if (!due) return 0;
+  return Math.floor((Date.now() - due.getTime()) / (24 * 60 * 60 * 1000));
+}
+function paymentUrl(payment?: AsaasPayment | null, subscriptionUrl?: string | null) {
   return payment?.invoiceUrl || payment?.bankSlipUrl || subscriptionUrl || payment?.transactionReceiptUrl || null;
+}
+function findReusablePayment(subscriptionUrl?: string | null, payments?: Awaited<ReturnType<typeof listSubscriptionPayments>>) {
+  const candidates = payments ?? [];
+  const pending = candidates.find((payment) => ["pending", "open"].includes(normalizePaymentStatus(payment)) && paymentUrl(payment, subscriptionUrl));
+  if (pending) return { payment: pending, url: paymentUrl(pending, subscriptionUrl), reusable: true, reason: "pending_payment" };
+
+  const overdue = candidates.find((payment) => normalizePaymentStatus(payment) === "overdue" && paymentUrl(payment, subscriptionUrl));
+  if (overdue) {
+    const days = overdueDays(overdue);
+    return { payment: overdue, url: paymentUrl(overdue, subscriptionUrl), reusable: days <= OVERDUE_REUSE_DAYS, reason: days <= OVERDUE_REUSE_DAYS ? "recent_overdue_payment" : "stale_overdue_payment" };
+  }
+
+  const fallback = candidates.find((payment) => paymentUrl(payment, subscriptionUrl));
+  return { payment: fallback ?? null, url: paymentUrl(fallback, subscriptionUrl), reusable: false, reason: "no_reusable_payment" };
+}
+function findPaymentUrl(subscriptionUrl?: string | null, payments?: Awaited<ReturnType<typeof listSubscriptionPayments>>) {
+  const reusable = findReusablePayment(subscriptionUrl, payments);
+  return reusable.reusable ? reusable.url : null;
 }
 function subscriptionTime(subscription: ExistingSubscriptionRow) {
   const value = subscription.updated_at ?? subscription.created_at ?? "";
@@ -176,8 +203,8 @@ export async function GET(req: Request) {
 
     if (reusableAsaas?.gateway_subscription_id) {
       const payments = await listSubscriptionPayments(reusableAsaas.gateway_subscription_id, 6).catch(() => []);
-      const paymentUrl = findPaymentUrl(null, payments);
-      if (paymentUrl) {
+      const reusablePayment = findReusablePayment(null, payments);
+      if (reusablePayment.reusable && reusablePayment.url) {
         await supabase.from("billing_events").insert({
           provider: "asaas",
           event_type: "checkout.asaas.reused",
@@ -189,13 +216,41 @@ export async function GET(req: Request) {
             reused_subscription_id: reusableAsaas.id,
             gateway_customer_id: reusableAsaas.gateway_customer_id ?? null,
             gateway_subscription_id: reusableAsaas.gateway_subscription_id,
+            payment_id: reusablePayment.payment?.id ?? null,
+            reuse_reason: reusablePayment.reason,
             method,
           },
           processed: true,
         }).then(({ error }) => {
           if (error) console.error("[asaas.checkout] Falha ao registrar reuso de checkout", error);
         });
-        return NextResponse.redirect(paymentUrl, { status: 303 });
+        return NextResponse.redirect(reusablePayment.url, { status: 303 });
+      }
+
+      if (reusablePayment.reason === "stale_overdue_payment") {
+        await cancelSubscription(reusableAsaas.gateway_subscription_id).catch((error) => {
+          console.warn("[asaas.checkout] Não foi possível cancelar assinatura Asaas vencida antes de recriar", error);
+        });
+        const now = new Date().toISOString();
+        await supabase.from("subscriptions").update({ status: "canceled", auto_renew: false, next_billing_at: null, canceled_at: now, updated_at: now }).eq("id", reusableAsaas.id);
+        await supabase.from("billing_events").insert({
+          provider: "asaas",
+          event_type: "checkout.asaas.stale_overdue_replaced",
+          payload: {
+            user_id: billingUserId,
+            auth_user_id: user.id,
+            email,
+            plan_slug: plan.slug,
+            canceled_subscription_id: reusableAsaas.id,
+            gateway_subscription_id: reusableAsaas.gateway_subscription_id,
+            payment_id: reusablePayment.payment?.id ?? null,
+            overdue_days: overdueDays(reusablePayment.payment),
+            method,
+          },
+          processed: true,
+        }).then(({ error }) => {
+          if (error) console.error("[asaas.checkout] Falha ao registrar substituição de cobrança vencida", error);
+        });
       }
     }
 
