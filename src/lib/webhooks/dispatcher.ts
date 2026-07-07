@@ -29,7 +29,7 @@ const DEDUPED_SUBSCRIPTION_EVENTS = new Set<WebhookEvent>([
   "upgrade.plus_to_premium",
 ]);
 
-const DEDUPE_WINDOW_MS = 5 * 60 * 1000;
+const DEDUPE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 function normalizePhone(value?: string | null) {
   if (!value) return "";
