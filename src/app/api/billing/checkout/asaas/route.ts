@@ -14,9 +14,13 @@ type ProfileRow = { id: string; email?: string | null; full_name?: string | null
 type ExistingSubscriptionRow = {
   id: string;
   user_id?: string | null;
+  plan_id?: string | null;
   gateway?: string | null;
   gateway_customer_id?: string | null;
+  gateway_subscription_id?: string | null;
   status?: string | null;
+  current_period_end?: string | null;
+  next_billing_at?: string | null;
   plans?: { slug?: string | null } | null;
   updated_at?: string | null;
   created_at?: string | null;
@@ -58,7 +62,11 @@ function attributionFromUrl(url: URL) {
   return attribution;
 }
 function findPaymentUrl(subscriptionUrl?: string | null, payments?: Awaited<ReturnType<typeof listSubscriptionPayments>>) {
-  const payment = payments?.find((item) => item.invoiceUrl || item.bankSlipUrl || item.transactionReceiptUrl) ?? payments?.[0];
+  const payablePayment = payments?.find((item) => {
+    const status = String(item.status ?? "").trim().toLowerCase();
+    return ["pending", "overdue", "open"].includes(status) && (item.invoiceUrl || item.bankSlipUrl);
+  });
+  const payment = payablePayment ?? payments?.find((item) => item.invoiceUrl || item.bankSlipUrl || item.transactionReceiptUrl) ?? payments?.[0];
   return payment?.invoiceUrl || payment?.bankSlipUrl || subscriptionUrl || payment?.transactionReceiptUrl || null;
 }
 function subscriptionTime(subscription: ExistingSubscriptionRow) {
@@ -66,14 +74,47 @@ function subscriptionTime(subscription: ExistingSubscriptionRow) {
   const time = new Date(value).getTime();
   return Number.isFinite(time) ? time : 0;
 }
+function normalizeStatus(subscription?: ExistingSubscriptionRow | null) {
+  return String(subscription?.status ?? "").trim().toLowerCase();
+}
+function normalizePlanSlug(subscription?: ExistingSubscriptionRow | null) {
+  return String(subscription?.plans?.slug ?? "free").trim().toLowerCase() || "free";
+}
 function isReusableSubscription(subscription: ExistingSubscriptionRow) {
-  const status = String(subscription.status ?? "").trim().toLowerCase();
+  const status = normalizeStatus(subscription);
   return !["canceled", "cancelled", "expired"].includes(status);
+}
+function isActiveSubscription(subscription?: ExistingSubscriptionRow | null) {
+  return ["active", "trialing"].includes(normalizeStatus(subscription));
+}
+function planRank(slug?: string | null) {
+  const normalized = String(slug ?? "").trim().toLowerCase();
+  if (normalized.startsWith("ministry")) return 3;
+  if (normalized === "premium") return 2;
+  if (normalized === "plus") return 1;
+  return 0;
+}
+function hasFutureAccess(subscription?: ExistingSubscriptionRow | null) {
+  if (!isActiveSubscription(subscription)) return false;
+  if (!subscription?.current_period_end) return true;
+  const time = Date.parse(subscription.current_period_end);
+  return Number.isNaN(time) || time > Date.now();
 }
 function pickSubscriptionToUpdate(rows: ExistingSubscriptionRow[]) {
   const reusable = rows.filter(isReusableSubscription).sort((a, b) => subscriptionTime(b) - subscriptionTime(a));
   if (!reusable.length) return null;
   return reusable.find((subscription) => String(subscription.gateway ?? "").toLowerCase() === "asaas") ?? reusable[0];
+}
+function pickReusableAsaasSubscription(rows: ExistingSubscriptionRow[], planSlug: string) {
+  const asaasRows = rows
+    .filter((subscription) => String(subscription.gateway ?? "").toLowerCase() === "asaas")
+    .filter(isReusableSubscription)
+    .sort((a, b) => subscriptionTime(b) - subscriptionTime(a));
+
+  const active = asaasRows.find((subscription) => hasFutureAccess(subscription));
+  if (active && planRank(normalizePlanSlug(active)) >= planRank(planSlug)) return active;
+
+  return asaasRows.find((subscription) => normalizePlanSlug(subscription) === planSlug && subscription.gateway_subscription_id) ?? null;
 }
 
 export async function GET(req: Request) {
@@ -115,7 +156,7 @@ export async function GET(req: Request) {
 
     const { data: existingSubscriptions, error: existingError } = await supabase
       .from("subscriptions")
-      .select("id,user_id,gateway,gateway_customer_id,status,updated_at,created_at,plans(slug)")
+      .select("id,user_id,plan_id,gateway,gateway_customer_id,gateway_subscription_id,status,current_period_end,next_billing_at,updated_at,created_at,plans(slug)")
       .in("user_id", userIds)
       .order("updated_at", { ascending: false })
       .order("created_at", { ascending: false })
@@ -126,14 +167,46 @@ export async function GET(req: Request) {
     const rows = (existingSubscriptions ?? []) as ExistingSubscriptionRow[];
     const subscriptionToUpdate = pickSubscriptionToUpdate(rows);
     const existingAsaas = rows.find((subscription) => String(subscription.gateway ?? "").toLowerCase() === "asaas") ?? null;
+    const reusableAsaas = pickReusableAsaasSubscription(rows, planSlug);
     const previousPlanSlug = String(subscriptionToUpdate?.plans?.slug ?? existingAsaas?.plans?.slug ?? "free").trim().toLowerCase() || "free";
 
+    if (reusableAsaas?.id && hasFutureAccess(reusableAsaas)) {
+      return NextResponse.redirect(appUrl(req, "/assinatura?message=Sua%20assinatura%20j%C3%A1%20est%C3%A1%20ativa."), { status: 303 });
+    }
+
+    if (reusableAsaas?.gateway_subscription_id) {
+      const payments = await listSubscriptionPayments(reusableAsaas.gateway_subscription_id, 6).catch(() => []);
+      const paymentUrl = findPaymentUrl(null, payments);
+      if (paymentUrl) {
+        await supabase.from("billing_events").insert({
+          provider: "asaas",
+          event_type: "checkout.asaas.reused",
+          payload: {
+            user_id: billingUserId,
+            auth_user_id: user.id,
+            email,
+            plan_slug: plan.slug,
+            reused_subscription_id: reusableAsaas.id,
+            gateway_customer_id: reusableAsaas.gateway_customer_id ?? null,
+            gateway_subscription_id: reusableAsaas.gateway_subscription_id,
+            method,
+          },
+          processed: true,
+        }).then(({ error }) => {
+          if (error) console.error("[asaas.checkout] Falha ao registrar reuso de checkout", error);
+        });
+        return NextResponse.redirect(paymentUrl, { status: 303 });
+      }
+    }
+
     const existingAsaasCustomerId = existingAsaas?.gateway_customer_id ?? null;
+    const foundCustomer = existingAsaasCustomerId ? null : await findCustomerByEmail(email);
+    const customerPayload = { name: customerName(email, typedProfile, billingName), email, externalReference: billingUserId, phone: billingPhone || cleanValue(typedProfile?.phone), cpfCnpj: billingDocument };
     const customer = existingAsaasCustomerId
-      ? await updateCustomer(existingAsaasCustomerId, { name: customerName(email, typedProfile, billingName), email, externalReference: billingUserId, phone: billingPhone || cleanValue(typedProfile?.phone), cpfCnpj: billingDocument })
-      : (await findCustomerByEmail(email))
-        ? await updateCustomer((await findCustomerByEmail(email))!.id, { name: customerName(email, typedProfile, billingName), email, externalReference: billingUserId, phone: billingPhone || cleanValue(typedProfile?.phone), cpfCnpj: billingDocument })
-        : await createCustomer({ name: customerName(email, typedProfile, billingName), email, externalReference: billingUserId, phone: billingPhone || cleanValue(typedProfile?.phone), cpfCnpj: billingDocument });
+      ? await updateCustomer(existingAsaasCustomerId, customerPayload)
+      : foundCustomer
+        ? await updateCustomer(foundCustomer.id, customerPayload)
+        : await createCustomer(customerPayload);
 
     const billingType = billingTypeFromMethod(method);
     if (!billingType) throw new Error("Método de pagamento inválido.");
