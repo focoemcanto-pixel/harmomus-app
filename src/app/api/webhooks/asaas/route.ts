@@ -157,6 +157,14 @@ function currentPlanSlug(subscription: SubscriptionRow) {
   return normalizeLower(subscription.plans?.slug) ?? "free";
 }
 
+function hasFutureActiveAccess(subscription: SubscriptionRow) {
+  const status = normalizeLower(subscription.status);
+  if (status !== "active" && status !== "trialing") return false;
+  if (!subscription.current_period_end) return true;
+  const periodEnd = Date.parse(subscription.current_period_end);
+  return Number.isNaN(periodEnd) || periodEnd > Date.now();
+}
+
 function getPlanActivatedEvent(planSlug?: string | null): WebhookEvent | null {
   const family = normalizePlanFamily(planSlug);
   if (family === "plus") return "plan.plus_activated";
@@ -218,7 +226,7 @@ async function getCheckoutPlan(supabase: ReturnType<typeof createSupabaseAdminCl
     .from("billing_events")
     .select("payload")
     .eq("provider", "asaas")
-    .eq("event_type", "checkout.asaas.started")
+    .in("event_type", ["checkout.asaas.started", "checkout.asaas.reused"])
     .eq("payload->>gateway_subscription_id", subscriptionId)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -359,6 +367,7 @@ export async function POST(req: Request) {
     const isExactMatch = Boolean(exactSubscription?.id);
     const isOlderLowerPlan = !isExactMatch && planRank(checkoutPlanSlug) < planRank(currentSlug);
     if (shouldActivate && isOlderLowerPlan) { await markEvent(supabase, payload, true, undefined, { ignored: true, reason: "older_lower_plan_activation_ignored", checkout_plan_slug: checkoutPlanSlug, current_plan_slug: currentSlug, current_subscription_id: fallbackSubscription.id }); return NextResponse.json({ received: true, synced: false, ignored: true, reason: "older_lower_plan_activation_ignored" }); }
+    if (shouldMarkOverdue && hasFutureActiveAccess(fallbackSubscription)) { await saveBillingInvoiceFromAsaasEvent({ supabase, payload, subscription: fallbackSubscription, event, periodEnd: parseAsaasDate(payload.payment?.dueDate ?? payload.subscription?.nextDueDate ?? null) }); await markEvent(supabase, payload, true, undefined, { ignored: true, reason: "stale_overdue_ignored_active_access", current_subscription_id: fallbackSubscription.id, current_status: fallbackSubscription.status, current_period_end: fallbackSubscription.current_period_end, provider_subscription_id: providerSubscriptionId }); return NextResponse.json({ received: true, synced: false, ignored: true, reason: "stale_overdue_ignored_active_access" }); }
 
     const now = new Date().toISOString();
     const plan = shouldActivate ? await getPlanBySlug(supabase, checkoutPlanSlug) : null;
