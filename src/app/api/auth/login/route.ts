@@ -25,6 +25,12 @@ function isEmailNotConfirmedError(error: unknown) {
   return message.includes("email not confirmed") || message.includes("email_not_confirmed") || code.includes("email_not_confirmed");
 }
 
+function hasStaleSignupState(profile: any) {
+  const status = String(profile?.onboarding_status ?? "").trim().toLowerCase();
+  const step = String(profile?.onboarding_step ?? "").trim().toLowerCase();
+  return status === "pending_email_confirmation" || step === "signup_started" || step === "email_confirmation_reminder";
+}
+
 async function unlockLoginForPendingEmail(email: string) {
   const admin = createSupabaseAdminClient() as any;
   const { data: profile } = await admin.from("profiles").select("id").ilike("email", email).maybeSingle();
@@ -57,7 +63,7 @@ export async function POST(request: Request) {
 
   if (signInError) {
     const url = new URL('/login', request.url);
-    url.searchParams.set('error', 'E-mail ou senha inválidos.');
+    url.searchParams.set('error', 'E-mail ou senha inválidos. Se você redefiniu a senha agora, solicite um novo link e tente novamente.');
     url.searchParams.set('redirect', redirectPath);
     return NextResponse.redirect(url, 303);
   }
@@ -69,11 +75,17 @@ export async function POST(request: Request) {
     await trackMarketingEvent(supabase as any, { userId: user.id, eventKey: 'login', eventLabel: 'Login' });
 
     const admin = createSupabaseAdminClient() as any;
-    const { data: profile } = await admin.from('profiles').select('full_name,email,phone,role,last_login_at').eq('id', user.id).maybeSingle();
+    const { data: profile } = await admin.from('profiles').select('full_name,email,phone,role,last_login_at,onboarding_status,onboarding_step').eq('id', user.id).maybeSingle();
 
     isFirstLogin = !profile?.last_login_at;
 
-    await admin.from('profiles').update({ last_login_at: new Date().toISOString() }).eq('id', user.id);
+    const profilePatch: Record<string, unknown> = { last_login_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+    if (hasStaleSignupState(profile)) {
+      profilePatch.onboarding_status = 'active';
+      profilePatch.onboarding_step = 'completed';
+    }
+
+    await admin.from('profiles').update(profilePatch).eq('id', user.id);
     await syncProfileOnboardingAfterAuth({ userId: user.id, successfulLogin: true, authUser: user as any });
 
     await dispatchWebhookEvent({
