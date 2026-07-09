@@ -1,6 +1,7 @@
 import { DeleteObjectsCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 
 import { r2BucketName, r2Client } from "@/lib/r2/client";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/database";
 import type { KitAudioToneGroup } from "@/types/kit-audio";
@@ -186,7 +187,7 @@ export async function updateKit(id: string, data: KitUpdate): Promise<Kit> {
 }
 
 export async function deleteKit(id: string): Promise<void> {
-  const supabase = (await createClient()) as any;
+  const supabase = createSupabaseAdminClient() as any;
 
   const { data: kit, error: kitError } = await supabase
     .from("kits")
