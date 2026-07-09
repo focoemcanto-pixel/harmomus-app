@@ -1,3 +1,6 @@
+import { DeleteObjectsCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+
+import { r2BucketName, r2Client } from "@/lib/r2/client";
 import { createClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/database";
 import type { KitAudioToneGroup } from "@/types/kit-audio";
@@ -40,6 +43,65 @@ function stripKitToneColumns<T extends Record<string, unknown>>(data: T): Omit<T
   const next = { ...data };
   for (const column of KIT_TONE_COLUMNS) delete next[column];
   return next;
+}
+
+function uniqueText(values: unknown[]) {
+  return Array.from(new Set(values.map((value) => String(value ?? "").trim()).filter(Boolean)));
+}
+
+function chunk<T>(items: T[], size: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) chunks.push(items.slice(index, index + size));
+  return chunks;
+}
+
+async function listR2KeysByPrefix(prefix: string) {
+  if (!r2BucketName || !prefix) return [];
+  const keys: string[] = [];
+  let continuationToken: string | undefined;
+
+  do {
+    const response = await r2Client.send(
+      new ListObjectsV2Command({
+        Bucket: r2BucketName,
+        Prefix: prefix,
+        ContinuationToken: continuationToken,
+      }),
+    );
+
+    for (const object of response.Contents ?? []) {
+      if (object.Key) keys.push(object.Key);
+    }
+
+    continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
+  } while (continuationToken);
+
+  return keys;
+}
+
+async function deleteR2Keys(keys: string[]) {
+  if (!r2BucketName || keys.length === 0) return;
+  for (const part of chunk(uniqueText(keys), 1000)) {
+    const response = await r2Client.send(
+      new DeleteObjectsCommand({
+        Bucket: r2BucketName,
+        Delete: {
+          Objects: part.map((Key) => ({ Key })),
+          Quiet: true,
+        },
+      }),
+    );
+
+    if (response.Errors?.length) {
+      const first = response.Errors[0];
+      throw new Error(`Falha ao excluir arquivos do R2: ${first.Key ?? "arquivo"} (${first.Message ?? first.Code ?? "erro desconhecido"}).`);
+    }
+  }
+}
+
+function kitAudioPrefix(kit: Pick<Kit, "slug" | "r2_folder"> | null | undefined) {
+  const folder = String(kit?.r2_folder || kit?.slug || "").trim().replace(/^\/+|\/+$/g, "").replace(/^audio\//, "");
+  return folder ? `audio/${folder}/` : "";
 }
 
 export async function getKits(): Promise<KitListItem[]> {
@@ -125,6 +187,39 @@ export async function updateKit(id: string, data: KitUpdate): Promise<Kit> {
 
 export async function deleteKit(id: string): Promise<void> {
   const supabase = (await createClient()) as any;
+
+  const { data: kit, error: kitError } = await supabase
+    .from("kits")
+    .select("id,slug,r2_folder,cover_url")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (kitError) throw new Error(`Falha ao localizar kit: ${kitError.message}`);
+  if (!kit?.id) return;
+
+  const [{ data: audioFiles, error: audioError }, { data: jobs, error: jobsError }] = await Promise.all([
+    supabase.from("kit_audio_files").select("r2_key").eq("kit_id", id),
+    supabase.from("audio_generation_jobs").select("source_r2_key,target_r2_key").eq("kit_id", id),
+  ]);
+
+  if (audioError) throw new Error(`Falha ao buscar áudios do kit: ${audioError.message}`);
+  if (jobsError) throw new Error(`Falha ao buscar jobs de áudio do kit: ${jobsError.message}`);
+
+  const prefix = kitAudioPrefix(kit as Kit);
+  const prefixKeys = prefix ? await listR2KeysByPrefix(prefix) : [];
+  const storedKeys = [
+    ...((audioFiles ?? []) as Array<{ r2_key?: string | null }>).map((file) => file.r2_key),
+    ...((jobs ?? []) as Array<{ source_r2_key?: string | null; target_r2_key?: string | null }>).flatMap((job) => [job.source_r2_key, job.target_r2_key]),
+  ];
+
+  await deleteR2Keys([...prefixKeys, ...storedKeys]);
+
+  const { error: jobsDeleteError } = await supabase.from("audio_generation_jobs").delete().eq("kit_id", id);
+  if (jobsDeleteError) throw new Error(`Falha ao excluir jobs do kit: ${jobsDeleteError.message}`);
+
+  const { error: audioDeleteError } = await supabase.from("kit_audio_files").delete().eq("kit_id", id);
+  if (audioDeleteError) throw new Error(`Falha ao excluir áudios do kit: ${audioDeleteError.message}`);
+
   const { error } = await supabase.from("kits").delete().eq("id", id);
   if (error) throw new Error(`Falha ao remover kit: ${error.message}`);
 }
