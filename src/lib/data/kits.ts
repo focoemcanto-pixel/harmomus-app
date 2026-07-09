@@ -207,10 +207,10 @@ export async function deleteKit(id: string): Promise<void> {
 
   const prefix = kitAudioPrefix(kit as Kit);
   const prefixKeys = prefix ? await listR2KeysByPrefix(prefix) : [];
-  const storedKeys = [
+  const storedKeys = uniqueText([
     ...((audioFiles ?? []) as Array<{ r2_key?: string | null }>).map((file) => file.r2_key),
     ...((jobs ?? []) as Array<{ source_r2_key?: string | null; target_r2_key?: string | null }>).flatMap((job) => [job.source_r2_key, job.target_r2_key]),
-  ];
+  ]);
 
   await deleteR2Keys([...prefixKeys, ...storedKeys]);
 
