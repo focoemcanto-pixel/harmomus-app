@@ -28,7 +28,7 @@ export interface KitListItem extends Kit {
   file_count: number;
 }
 
-const AUDIO_BASE_COLUMNS = "id,r2_key,source_type,generated_from_file_id";
+const AUDIO_BASE_COLUMNS = "id,r2_key,source_type";
 const AUDIO_TESSITURA_COLUMNS = `${AUDIO_BASE_COLUMNS},min_midi_note,max_midi_note,detected_min_midi_note,detected_max_midi_note,tessitura_confidence,tessitura_source`;
 const KIT_TONE_COLUMNS = ["original_tone", "default_tone", "allow_pitch_shift", "max_pitch_shift_semitones"] as const;
 
@@ -184,7 +184,6 @@ function buildAudioSyncRow({
   existing,
   hasTessituraColumns,
   sourceType,
-  generatedFromFileId,
 }: {
   kitId: string;
   tone: string;
@@ -192,7 +191,6 @@ function buildAudioSyncRow({
   existing: any;
   hasTessituraColumns: boolean;
   sourceType: "original" | "generated";
-  generatedFromFileId: string | null;
 }) {
   const baseRow = {
     id: existing?.id,
@@ -203,7 +201,6 @@ function buildAudioSyncRow({
     public_url: file.url,
     file_type: file.fileType,
     source_type: sourceType,
-    generated_from_file_id: generatedFromFileId,
   };
 
   if (!hasTessituraColumns) return baseRow;
@@ -226,7 +223,7 @@ export async function saveKitAudioSync(kitId: string, tones: KitAudioToneGroup[]
 
   const { data: completedJobs, error: completedJobsError } = await supabase
     .from("audio_generation_jobs")
-    .select("target_r2_key,source_audio_file_id")
+    .select("target_r2_key")
     .eq("kit_id", kitId)
     .eq("status", "completed");
 
@@ -234,10 +231,10 @@ export async function saveKitAudioSync(kitId: string, tones: KitAudioToneGroup[]
     throw new Error(`Falha ao buscar jobs de geração concluídos: ${completedJobsError.message}`);
   }
 
-  const generatedByKey = new Map(
+  const generatedKeys = new Set(
     ((completedJobs ?? []) as any[])
-      .filter((job) => typeof job.target_r2_key === "string" && job.target_r2_key.trim())
-      .map((job) => [job.target_r2_key, job.source_audio_file_id ?? null]),
+      .map((job) => String(job.target_r2_key ?? "").trim())
+      .filter(Boolean),
   );
 
   const existingMap = new Map(
@@ -245,18 +242,16 @@ export async function saveKitAudioSync(kitId: string, tones: KitAudioToneGroup[]
   );
 
   const rows = tones.flatMap((toneGroup) =>
-    toneGroup.files.map((file) => {
-      const generatedFromFileId = generatedByKey.get(file.key) ?? null;
-      return buildAudioSyncRow({
+    toneGroup.files.map((file) =>
+      buildAudioSyncRow({
         kitId,
         tone: toneGroup.tone,
         file,
         existing: existingMap.get(file.key),
         hasTessituraColumns,
-        sourceType: generatedByKey.has(file.key) ? "generated" : "original",
-        generatedFromFileId,
-      });
-    }),
+        sourceType: generatedKeys.has(file.key) ? "generated" : "original",
+      }),
+    ),
   );
 
   if (rows.length === 0) {
