@@ -422,7 +422,7 @@ export async function processBehaviorMarketingAutomations(options: { dryRun?: bo
   if (!activeAutomations.length) return result;
 
   const maxLookback = Math.max(...activeAutomations.map((automation) => Number(automation.lookback_hours || 168)));
-  const eventKeys = Array.from(new Set(activeAutomations.map((automation) => automation.trigger_event));
+  const eventKeys = Array.from(new Set(activeAutomations.map((automation) => automation.trigger_event)));
   const { data: events, error: eventsError } = await admin.from("marketing_events")
     .select("id,user_id,event_key,event_type,event_label,metadata,created_at")
     .not("user_id", "is", null)
