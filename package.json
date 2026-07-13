@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "prebuild": "node scripts/patch-transactional-automation-engine.mjs && node scripts/patch-stripe-business-events.mjs",
+    "prebuild": "node scripts/patch-transactional-automation-engine.mjs && node scripts/patch-stripe-business-events.mjs && node scripts/patch-cross-gateway-billing-arbitration.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
