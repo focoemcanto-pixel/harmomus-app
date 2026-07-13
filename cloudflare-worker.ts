@@ -5,7 +5,7 @@
 // @ts-expect-error .open-next/worker.js is generated during deployment.
 import openNextWorker from "./.open-next/worker.js";
 import { getMarketingEngineSettings, updateMarketingEngineSettings } from "./src/lib/communication/engine-settings";
-import { processBehaviorMarketingAutomations } from "./src/lib/communication/automation-engine";
+import { processBehaviorMarketingAutomations } from "./src/lib/communication/automation-engine-v2";
 import { processCommunicationQueue } from "./src/lib/communication/marketing-queue";
 
 async function processCommunicationEngineFromCron() {
