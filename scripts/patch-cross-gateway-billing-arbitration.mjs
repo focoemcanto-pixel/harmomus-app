@@ -20,14 +20,19 @@ patchFile(
   "src/lib/data/billing.ts",
   [
     {
-      name: "carregar período da assinatura Stripe",
-      from: `.select("id,status,gateway,original_gateway,migrated_from_pms,legacy_pms_subscription_id")`,
-      to: `.select("id,status,gateway,current_period_end,original_gateway,migrated_from_pms,legacy_pms_subscription_id")`,
+      name: "importar cancelamento Asaas",
+      from: `import { createCheckoutSession, createCustomerPortalSession, getOrCreateCustomer, updateSubscription } from "@/lib/stripe/client";`,
+      to: `import { createCheckoutSession, createCustomerPortalSession, getOrCreateCustomer, updateSubscription } from "@/lib/stripe/client";\nimport { cancelSubscription as cancelAsaasSubscription } from "@/lib/asaas/subscriptions";`,
     },
     {
-      name: "bloquear checkout Stripe com outro gateway ativo",
+      name: "carregar período e assinatura externa",
+      from: `.select("id,status,gateway,original_gateway,migrated_from_pms,legacy_pms_subscription_id")`,
+      to: `.select("id,status,gateway,gateway_subscription_id,current_period_end,original_gateway,migrated_from_pms,legacy_pms_subscription_id")`,
+    },
+    {
+      name: "bloquear checkout Stripe e cancelar Asaas pendente",
       from: `  if (isActiveMigratedSubscription(existing)) {\n    return;\n  }\n\n  const result = existing?.id`,
-      to: `  if (isActiveMigratedSubscription(existing)) {\n    return;\n  }\n\n  const existingGateway = normalizeSubscriptionValue(existing?.gateway);\n  const existingStatus = normalizeSubscriptionValue(existing?.status);\n  const periodEndTime = existing?.current_period_end ? Date.parse(existing.current_period_end) : NaN;\n  const hasFutureAccess = !existing?.current_period_end || Number.isNaN(periodEndTime) || periodEndTime > Date.now();\n  if (existingGateway && existingGateway !== "stripe" && ["active", "trialing"].includes(existingStatus) && hasFutureAccess) {\n    throw new Error("Já existe uma assinatura ativa em outro meio de pagamento. Cancele ou finalize a troca antes de iniciar um novo checkout.");\n  }\n\n  const result = existing?.id`,
+      to: `  if (isActiveMigratedSubscription(existing)) {\n    return;\n  }\n\n  const existingGateway = normalizeSubscriptionValue(existing?.gateway);\n  const existingStatus = normalizeSubscriptionValue(existing?.status);\n  const periodEndTime = existing?.current_period_end ? Date.parse(existing.current_period_end) : NaN;\n  const hasFutureAccess = !existing?.current_period_end || Number.isNaN(periodEndTime) || periodEndTime > Date.now();\n  if (existingGateway && existingGateway !== "stripe" && ["active", "trialing"].includes(existingStatus) && hasFutureAccess) {\n    throw new Error("Já existe uma assinatura ativa em outro meio de pagamento. Cancele ou finalize a troca antes de iniciar um novo checkout.");\n  }\n\n  if (existingGateway === "asaas" && ["pending", "overdue", "past_due"].includes(existingStatus) && existing?.gateway_subscription_id) {\n    await cancelAsaasSubscription(existing.gateway_subscription_id).catch((error) => {\n      console.warn("[billing] Não foi possível cancelar checkout Asaas pendente antes da troca para Stripe", error);\n    });\n  }\n\n  const result = existing?.id`,
     },
   ],
   "cross-gateway billing patch",
