@@ -2,6 +2,7 @@ begin;
 
 create table if not exists public.billing_gateway_conflicts (
   id uuid primary key default gen_random_uuid(),
+  dedupe_key text not null,
   user_id uuid not null references public.profiles(id) on delete cascade,
   active_gateway text not null,
   incoming_gateway text not null,
@@ -18,14 +19,8 @@ create table if not exists public.billing_gateway_conflicts (
   resolved_at timestamptz null
 );
 
-create unique index if not exists billing_gateway_conflicts_event_unique
-on public.billing_gateway_conflicts (
-  user_id,
-  incoming_gateway,
-  coalesce(incoming_event_id, ''),
-  coalesce(incoming_payment_id, ''),
-  coalesce(incoming_gateway_subscription_id, '')
-);
+create unique index if not exists billing_gateway_conflicts_dedupe_key_unique
+on public.billing_gateway_conflicts (dedupe_key);
 
 create index if not exists billing_gateway_conflicts_open_idx
 on public.billing_gateway_conflicts (status, created_at desc);
