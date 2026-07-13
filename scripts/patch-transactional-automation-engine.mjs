@@ -3,6 +3,12 @@ import path from "node:path";
 
 const filePath = path.join(process.cwd(), "src/lib/communication/automation-engine.ts");
 let source = fs.readFileSync(filePath, "utf8");
+const PATCH_MARKER = "const TRANSACTIONAL_EVENT_KEYS = new Set([";
+
+if (source.includes(PATCH_MARKER)) {
+  console.log("[automation patch] Motor transacional já está atualizado.");
+  process.exit(0);
+}
 
 function replaceExact(label, from, to) {
   if (!source.includes(from)) {
