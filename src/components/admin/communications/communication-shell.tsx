@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
 import Link from "next/link";
-import { BarChart3, Bot, FileImage, FileText, Mail, MessageCircle, Megaphone, ScrollText, Settings, Target, Users } from "lucide-react";
+import { BarChart3, Bot, FileImage, FileText, Mail, MessageCircle, Megaphone, MessagesSquare, ScrollText, Settings, Target, Users } from "lucide-react";
 
 const tabs = [
   { label: "Dashboard", href: "/admin/comunicacao/dashboard", icon: BarChart3, description: "Visão geral" },
@@ -10,6 +10,7 @@ const tabs = [
   { label: "Templates", href: "/admin/comunicacao/templates", icon: FileText, description: "Modelos de mensagem" },
   { label: "Biblioteca", href: "/admin/comunicacao/media", icon: FileImage, description: "Mídias de campanha" },
   { label: "Automações", href: "/admin/comunicacao/automations", icon: Bot, description: "Regras e gatilhos" },
+  { label: "Mensagens", href: "/admin/comunicacao/mensagens", icon: MessagesSquare, description: "Textos automáticos" },
   { label: "WhatsApp", href: "/admin/comunicacao/whatsapp", icon: MessageCircle, description: "Canal WhatsApp" },
   { label: "E-mails", href: "/admin/comunicacao/emails", icon: Mail, description: "Canal e-mail" },
   { label: "Configurações", href: "/admin/comunicacao/settings", icon: Settings, description: "APIs e limites" },
@@ -55,9 +56,7 @@ export function CommunicationShell({
                   </span>
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-white">{tab.label}</p>
-                    <p className="truncate text-xs text-slate-400">
-                      {tab.description}
-                    </p>
+                    <p className="truncate text-xs text-slate-400">{tab.description}</p>
                   </div>
                 </div>
               </Link>
