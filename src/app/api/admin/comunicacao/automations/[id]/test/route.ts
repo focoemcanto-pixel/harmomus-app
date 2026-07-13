@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { requireAdmin, sanitizeText } from "../../../../_lib/marketing-api";
+import { requireAdmin, sanitizeText } from "../../../_lib/marketing-api";
 
 function normalizePhone(value: unknown) {
   return String(value ?? "").replace(/\D/g, "");
