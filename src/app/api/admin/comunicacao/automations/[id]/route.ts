@@ -32,7 +32,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   const currentResult = await admin
     .from("marketing_automations")
-    .select("id,priority,score_weight,score_threshold,lookback_hours,cooldown_hours,status,channel")
+    .select("id,name,description,trigger_event,intent,priority,score_weight,score_threshold,lookback_hours,cooldown_hours,status,channel,message_template,cta_url,audience_rule,metadata")
     .eq("id", id)
     .maybeSingle();
 
@@ -51,10 +51,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
 
   const patch = {
-    name: sanitizeText(body.name).slice(0, 160),
-    description: sanitizeText(body.description).slice(0, 600) || null,
-    trigger_event: sanitizeText(body.trigger_event || body.triggerEvent).slice(0, 80),
-    intent: sanitizeText(body.intent).slice(0, 80),
+    name: sanitizeText(body.name).slice(0, 160) || current.name,
+    description: body.description === undefined ? current.description : sanitizeText(body.description).slice(0, 600) || null,
+    trigger_event: current.trigger_event,
+    intent: current.intent,
     priority: sanitizeNumber(body.priority, current.priority ?? 100, 1, 999),
     score_weight: sanitizeNumber(body.score_weight ?? body.scoreWeight, current.score_weight ?? 1, 1, 100),
     score_threshold: sanitizeNumber(body.score_threshold ?? body.scoreThreshold, current.score_threshold ?? 8, 1, 1000),
@@ -62,17 +62,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     cooldown_hours: sanitizeNumber(body.cooldown_hours ?? body.cooldownHours, current.cooldown_hours ?? 72, 0, 8760),
     channel,
     status,
-    message_template: sanitizeText(body.message_template ?? body.messageTemplate).slice(0, 3000),
-    cta_url: sanitizeText(body.cta_url ?? body.ctaUrl).slice(0, 1000) || null,
-    audience_rule: sanitizeJsonObject(body.audience_rule ?? body.audienceRule),
-    metadata: sanitizeJsonObject(body.metadata),
+    message_template: sanitizeText(body.message_template ?? body.messageTemplate).slice(0, 3000) || current.message_template,
+    cta_url: body.cta_url === undefined && body.ctaUrl === undefined ? current.cta_url : sanitizeText(body.cta_url ?? body.ctaUrl).slice(0, 1000) || null,
+    audience_rule: body.audience_rule === undefined && body.audienceRule === undefined ? current.audience_rule : sanitizeJsonObject(body.audience_rule ?? body.audienceRule),
+    metadata: body.metadata === undefined ? current.metadata : sanitizeJsonObject(body.metadata),
     updated_at: new Date().toISOString(),
   };
-
-  if (!patch.name) return NextResponse.json({ error: "Nome obrigatório." }, { status: 400 });
-  if (!patch.trigger_event) return NextResponse.json({ error: "Gatilho obrigatório." }, { status: 400 });
-  if (!patch.intent) return NextResponse.json({ error: "Intenção obrigatória." }, { status: 400 });
-  if (!patch.message_template) return NextResponse.json({ error: "Mensagem obrigatória." }, { status: 400 });
 
   const { data, error } = await admin
     .from("marketing_automations")
