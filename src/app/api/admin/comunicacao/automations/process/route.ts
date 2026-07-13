@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { processBehaviorMarketingAutomations } from "@/lib/communication/automation-engine";
+import { processBehaviorMarketingAutomations } from "@/lib/communication/automation-engine-v2";
 import { requireAdmin } from "../../_lib/marketing-api";
 
 export const runtime = "nodejs";
