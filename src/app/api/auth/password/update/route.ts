@@ -18,27 +18,61 @@ export async function POST(request: Request) {
   const formMigration = String(formData.get("migration") ?? "");
   const migration = formMigration === "1";
 
-  if (password.length < 6) return NextResponse.redirect(passwordErrorUrl(request, "A senha deve ter pelo menos 6 caracteres.", migration), 303);
-  if (password !== confirmPassword) return NextResponse.redirect(passwordErrorUrl(request, "As senhas não conferem.", migration), 303);
-
-  const supabase = await createClient();
-  const { data, error } = await supabase.auth.updateUser({ password });
-
-  if (error) {
-    console.error("[auth.password.update] updateUser failed", error);
-    const lower = String(error.message ?? "").toLowerCase();
-    const message = lower.includes("session") || lower.includes("auth")
-      ? "Sessão expirada. Abra novamente o link enviado por e-mail e tente definir a senha outra vez."
-      : `Não foi possível redefinir a senha. Detalhe: ${error.message}`;
-    return NextResponse.redirect(passwordErrorUrl(request, message, migration), 303);
+  if (password.length < 6) {
+    return NextResponse.redirect(
+      passwordErrorUrl(request, "A senha deve ter pelo menos 6 caracteres.", migration),
+      303,
+    );
   }
 
-  const userEmail = data.user?.email?.toLowerCase();
+  if (password !== confirmPassword) {
+    return NextResponse.redirect(passwordErrorUrl(request, "As senhas não conferem.", migration), 303);
+  }
+
+  const supabase = await createClient();
+  const { data: authData, error: authError } = await supabase.auth.getUser();
+  const authenticatedUser = authData.user;
+
+  if (authError || !authenticatedUser?.id) {
+    console.error("[auth.password.update] recovery session unavailable", authError);
+    return NextResponse.redirect(
+      passwordErrorUrl(
+        request,
+        "Sessão expirada. Abra novamente o link enviado por e-mail e tente definir a senha outra vez.",
+        migration,
+      ),
+      303,
+    );
+  }
+
+  const admin = createSupabaseAdminClient() as any;
+  const { data: updatedAuthData, error: updateError } = await admin.auth.admin.updateUserById(
+    authenticatedUser.id,
+    { password },
+  );
+
+  if (updateError) {
+    console.error("[auth.password.update] admin password update failed", {
+      userId: authenticatedUser.id,
+      error: updateError,
+    });
+
+    return NextResponse.redirect(
+      passwordErrorUrl(
+        request,
+        `Não foi possível redefinir a senha. Detalhe: ${updateError.message}`,
+        migration,
+      ),
+      303,
+    );
+  }
+
+  const updatedUser = updatedAuthData?.user ?? authenticatedUser;
+  const userEmail = updatedUser.email?.toLowerCase();
   let completedMigration = migration;
 
   if (userEmail) {
     const now = new Date().toISOString();
-    const admin = createSupabaseAdminClient() as any;
 
     const { data: profile } = await admin
       .from("profiles")
@@ -67,7 +101,11 @@ export async function POST(request: Request) {
       await dispatchWebhookEvent({
         event: "user.password_reset",
         source: completedMigration ? "migration.password_setup" : "auth.password_reset",
-        recipient: { name: profile?.full_name ?? null, email: profile?.email ?? userEmail, phone: profile?.phone ?? null },
+        recipient: {
+          name: profile?.full_name ?? null,
+          email: profile?.email ?? userEmail,
+          phone: profile?.phone ?? null,
+        },
         data: {
           nome: profile?.full_name ?? null,
           email: profile?.email ?? userEmail,
@@ -81,5 +119,13 @@ export async function POST(request: Request) {
     }
   }
 
-  return NextResponse.redirect(new URL(completedMigration ? "/login?migration=success" : "/login?reset=success", request.url), 303);
+  const { error: signOutError } = await supabase.auth.signOut({ scope: "local" });
+  if (signOutError) {
+    console.error("[auth.password.update] signOut after password reset failed", signOutError);
+  }
+
+  return NextResponse.redirect(
+    new URL(completedMigration ? "/login?migration=success" : "/login?reset=success", request.url),
+    303,
+  );
 }
