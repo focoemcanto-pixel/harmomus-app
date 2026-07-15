@@ -1,6 +1,10 @@
+import Link from "next/link";
+
 import { PublicAppShell } from "@/components/public/public-app-shell";
 
-type ResetPasswordSearchParams = Promise<{
+export const dynamic = "force-dynamic";
+
+ type ResetPasswordSearchParams = Promise<{
   error?: string;
   migration?: string;
   token_hash?: string;
@@ -15,8 +19,14 @@ export default async function RedefinirSenhaPage({
   const params = await searchParams;
   const error = params?.error ?? "";
   const migration = params?.migration === "1";
-  const tokenHash = params?.token_hash ?? "";
+  const tokenHash = String(params?.token_hash ?? "").trim();
   const hasRecoveryToken = Boolean(tokenHash && params?.type === "recovery");
+
+  const updateUrl = new URL("https://harmomus.local/api/auth/password/update");
+  if (tokenHash) updateUrl.searchParams.set("token_hash", tokenHash);
+  updateUrl.searchParams.set("type", "recovery");
+  if (migration) updateUrl.searchParams.set("migration", "1");
+  const formAction = `${updateUrl.pathname}${updateUrl.search}`;
 
   return (
     <PublicAppShell>
@@ -33,20 +43,25 @@ export default async function RedefinirSenhaPage({
             </p>
           ) : null}
 
-          {!hasRecoveryToken && !migration && !error ? (
-            <p className="mt-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
-              Este link não contém um token de recuperação válido. Solicite um novo link.
-            </p>
+          {!hasRecoveryToken && !migration ? (
+            <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-3 text-sm text-amber-100">
+              <p>Este link não contém um token de recuperação válido.</p>
+              <Link href="/recuperar-senha" className="mt-2 inline-block font-semibold text-cyan-200">
+                Solicitar um novo link
+              </Link>
+            </div>
           ) : null}
 
-          <form action="/api/auth/password/update" method="post" className="mt-5 space-y-4">
+          <form action={formAction} method="post" className="mt-5 space-y-4">
             <input type="hidden" name="migration" value={migration ? "1" : "0"} />
             <input type="hidden" name="token_hash" value={tokenHash} />
+            <input type="hidden" name="recovery_type" value="recovery" />
             <input
               name="password"
               type="password"
               required
               minLength={6}
+              autoComplete="new-password"
               className="h-11 w-full rounded-xl border border-white/20 bg-black/30 px-3 text-white"
               placeholder="Nova senha"
             />
@@ -55,6 +70,7 @@ export default async function RedefinirSenhaPage({
               type="password"
               required
               minLength={6}
+              autoComplete="new-password"
               className="h-11 w-full rounded-xl border border-white/20 bg-black/30 px-3 text-white"
               placeholder="Confirmar nova senha"
             />
