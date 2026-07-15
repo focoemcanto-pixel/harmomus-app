@@ -1,8 +1,8 @@
+import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
 
 import { ensureUserAccess } from "@/lib/auth/ensure-user-access";
 import { syncProfileOnboardingAfterAuth } from "@/lib/auth/onboarding";
-import { createClient } from "@/lib/supabase/server";
 
 // Supabase pode enviar type=recovery para redefinição de senha e type=signup para confirmação de cadastro.
 type OtpType = "signup" | "magiclink" | "recovery" | "invite" | "email" | "email_change";
@@ -49,20 +49,50 @@ function callbackErrorUrl(request: Request, type: OtpType, reason = "callback") 
   return new URL(`/login?error=${encodeURIComponent(reason)}`, request.url);
 }
 
+function copyCookies(source: NextResponse, target: NextResponse) {
+  source.cookies.getAll().forEach((cookie) => target.cookies.set(cookie));
+  return target;
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const tokenHash = url.searchParams.get("token_hash");
   const type = normalizeOtpType(url.searchParams.get("type"));
   const next = normalizeNext(url.searchParams.get("next"), type);
-  const supabase = await createClient();
+  const cookieResponse = NextResponse.next();
+
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          const cookieHeader = request.headers.get("cookie") ?? "";
+          return cookieHeader
+            .split(";")
+            .map((item) => item.trim())
+            .filter(Boolean)
+            .map((item) => {
+              const index = item.indexOf("=");
+              return index === -1
+                ? { name: item, value: "" }
+                : { name: item.slice(0, index), value: item.slice(index + 1) };
+            });
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => cookieResponse.cookies.set(name, value, options));
+        },
+      },
+    },
+  );
 
   if (code) {
     const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
     if (exchangeError) {
       console.error("[auth-callback] code exchange failed", exchangeError);
       const expired = String(exchangeError.message ?? "").toLowerCase().includes("expired");
-      return NextResponse.redirect(callbackErrorUrl(request, type, expired ? "expired" : "callback"), 303);
+      return copyCookies(cookieResponse, NextResponse.redirect(callbackErrorUrl(request, type, expired ? "expired" : "callback"), 303));
     }
   } else if (tokenHash) {
     const { error: verifyError } = await supabase.auth.verifyOtp({
@@ -73,10 +103,10 @@ export async function GET(request: Request) {
     if (verifyError) {
       console.error("[auth-callback] token hash verification failed", verifyError);
       const expired = String(verifyError.message ?? "").toLowerCase().includes("expired");
-      return NextResponse.redirect(callbackErrorUrl(request, type, expired ? "expired" : "callback"), 303);
+      return copyCookies(cookieResponse, NextResponse.redirect(callbackErrorUrl(request, type, expired ? "expired" : "callback"), 303));
     }
   } else {
-    return NextResponse.redirect(callbackErrorUrl(request, type), 303);
+    return copyCookies(cookieResponse, NextResponse.redirect(callbackErrorUrl(request, type), 303));
   }
 
   const { data: authUser } = await supabase.auth.getUser();
@@ -93,5 +123,5 @@ export async function GET(request: Request) {
     await syncProfileOnboardingAfterAuth({ userId: user.id, authUser: user as any });
   }
 
-  return NextResponse.redirect(new URL(next, request.url), 303);
+  return copyCookies(cookieResponse, NextResponse.redirect(new URL(next, request.url), 303));
 }
