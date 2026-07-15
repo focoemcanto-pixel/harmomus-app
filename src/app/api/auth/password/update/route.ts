@@ -4,10 +4,19 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
 
-function passwordErrorUrl(request: Request, message: string, migration: boolean) {
+function passwordErrorUrl(
+  request: Request,
+  message: string,
+  migration: boolean,
+  tokenHash?: string,
+) {
   const url = new URL("/redefinir-senha", request.url);
   url.searchParams.set("error", message);
   if (migration) url.searchParams.set("migration", "1");
+  if (tokenHash) {
+    url.searchParams.set("token_hash", tokenHash);
+    url.searchParams.set("type", "recovery");
+  }
   return url;
 }
 
@@ -15,37 +24,69 @@ export async function POST(request: Request) {
   const formData = await request.formData();
   const password = String(formData.get("password") ?? "");
   const confirmPassword = String(formData.get("confirm_password") ?? "");
+  const tokenHash = String(formData.get("token_hash") ?? "").trim();
   const formMigration = String(formData.get("migration") ?? "");
   const migration = formMigration === "1";
 
   if (password.length < 6) {
     return NextResponse.redirect(
-      passwordErrorUrl(request, "A senha deve ter pelo menos 6 caracteres.", migration),
-      303,
-    );
-  }
-
-  if (password !== confirmPassword) {
-    return NextResponse.redirect(passwordErrorUrl(request, "As senhas não conferem.", migration), 303);
-  }
-
-  const supabase = await createClient();
-  const { data: authData, error: authError } = await supabase.auth.getUser();
-  const authenticatedUser = authData.user;
-
-  if (authError || !authenticatedUser?.id) {
-    console.error("[auth.password.update] recovery session unavailable", authError);
-    return NextResponse.redirect(
       passwordErrorUrl(
         request,
-        "Sessão expirada. Abra novamente o link enviado por e-mail e tente definir a senha outra vez.",
+        "A senha deve ter pelo menos 6 caracteres.",
         migration,
+        tokenHash,
       ),
       303,
     );
   }
 
+  if (password !== confirmPassword) {
+    return NextResponse.redirect(
+      passwordErrorUrl(request, "As senhas não conferem.", migration, tokenHash),
+      303,
+    );
+  }
+
   const admin = createSupabaseAdminClient() as any;
+  const supabase = await createClient();
+  let authenticatedUser: any = null;
+
+  if (tokenHash) {
+    const { data: verificationData, error: verificationError } = await admin.auth.verifyOtp({
+      token_hash: tokenHash,
+      type: "recovery",
+    });
+
+    if (verificationError || !verificationData?.user?.id) {
+      console.error("[auth.password.update] recovery token verification failed", verificationError);
+      return NextResponse.redirect(
+        passwordErrorUrl(
+          request,
+          "Link inválido ou expirado. Solicite uma nova redefinição de senha.",
+          migration,
+        ),
+        303,
+      );
+    }
+
+    authenticatedUser = verificationData.user;
+  } else {
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    authenticatedUser = authData.user;
+
+    if (authError || !authenticatedUser?.id) {
+      console.error("[auth.password.update] recovery session unavailable", authError);
+      return NextResponse.redirect(
+        passwordErrorUrl(
+          request,
+          "Sessão expirada. Abra novamente o link enviado por e-mail e tente definir a senha outra vez.",
+          migration,
+        ),
+        303,
+      );
+    }
+  }
+
   const { data: updatedAuthData, error: updateError } = await admin.auth.admin.updateUserById(
     authenticatedUser.id,
     { password },
@@ -119,9 +160,11 @@ export async function POST(request: Request) {
     }
   }
 
-  const { error: signOutError } = await supabase.auth.signOut({ scope: "local" });
-  if (signOutError) {
-    console.error("[auth.password.update] signOut after password reset failed", signOutError);
+  if (!tokenHash) {
+    const { error: signOutError } = await supabase.auth.signOut({ scope: "local" });
+    if (signOutError) {
+      console.error("[auth.password.update] signOut after password reset failed", signOutError);
+    }
   }
 
   return NextResponse.redirect(
