@@ -4,6 +4,8 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
 
+export const dynamic = "force-dynamic";
+
 function passwordErrorUrl(
   request: Request,
   message: string,
@@ -21,21 +23,20 @@ function passwordErrorUrl(
 }
 
 export async function POST(request: Request) {
+  const requestUrl = new URL(request.url);
   const formData = await request.formData();
   const password = String(formData.get("password") ?? "");
   const confirmPassword = String(formData.get("confirm_password") ?? "");
-  const tokenHash = String(formData.get("token_hash") ?? "").trim();
+  const formTokenHash = String(formData.get("token_hash") ?? "").trim();
+  const queryTokenHash = String(requestUrl.searchParams.get("token_hash") ?? "").trim();
+  const tokenHash = formTokenHash || queryTokenHash;
   const formMigration = String(formData.get("migration") ?? "");
-  const migration = formMigration === "1";
+  const queryMigration = requestUrl.searchParams.get("migration") === "1";
+  const migration = formMigration === "1" || queryMigration;
 
   if (password.length < 6) {
     return NextResponse.redirect(
-      passwordErrorUrl(
-        request,
-        "A senha deve ter pelo menos 6 caracteres.",
-        migration,
-        tokenHash,
-      ),
+      passwordErrorUrl(request, "A senha deve ter pelo menos 6 caracteres.", migration, tokenHash),
       303,
     );
   }
@@ -58,7 +59,11 @@ export async function POST(request: Request) {
     });
 
     if (verificationError || !verificationData?.user?.id) {
-      console.error("[auth.password.update] recovery token verification failed", verificationError);
+      console.error("[auth.password.update] recovery token verification failed", {
+        hasFormToken: Boolean(formTokenHash),
+        hasQueryToken: Boolean(queryTokenHash),
+        error: verificationError,
+      });
       return NextResponse.redirect(
         passwordErrorUrl(
           request,
@@ -75,11 +80,11 @@ export async function POST(request: Request) {
     authenticatedUser = authData.user;
 
     if (authError || !authenticatedUser?.id) {
-      console.error("[auth.password.update] recovery session unavailable", authError);
+      console.error("[auth.password.update] recovery token and session unavailable", authError);
       return NextResponse.redirect(
         passwordErrorUrl(
           request,
-          "Sessão expirada. Abra novamente o link enviado por e-mail e tente definir a senha outra vez.",
+          "O link de recuperação não chegou completo. Solicite um novo link e abra o e-mail mais recente.",
           migration,
         ),
         303,
@@ -103,6 +108,7 @@ export async function POST(request: Request) {
         request,
         `Não foi possível redefinir a senha. Detalhe: ${updateError.message}`,
         migration,
+        tokenHash,
       ),
       303,
     );
