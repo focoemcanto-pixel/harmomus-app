@@ -49,6 +49,18 @@ patchFile(
 );
 
 patchFile(
+  "src/app/api/billing/checkout/asaas/route.ts",
+  [
+    {
+      name: "aguardar URL da cobrança Asaas sem abrir painel de assinatura",
+      from: `    const payments = await listSubscriptionPayments(asaasSubscription.id, 3).catch(() => []);\n    const paymentUrl = findPaymentUrl(asaasSubscription.paymentLink, payments);\n    if (paymentUrl) return NextResponse.redirect(paymentUrl, { status: 303 });\n    return NextResponse.redirect(appUrl(req, "/assinatura?message=Assinatura%20Asaas%20criada.%20Aguarde%20a%20cobran%C3%A7a."), { status: 303 });`,
+      to: `    let paymentUrl = findPaymentUrl(asaasSubscription.paymentLink, []);\n    for (let attempt = 0; !paymentUrl && attempt < 4; attempt += 1) {\n      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 500));\n      const payments = await listSubscriptionPayments(asaasSubscription.id, 3).catch(() => []);\n      paymentUrl = findPaymentUrl(asaasSubscription.paymentLink, payments);\n    }\n    if (paymentUrl) return NextResponse.redirect(paymentUrl, { status: 303 });\n    const pendingMessage = encodeURIComponent("Sua cobrança foi criada, mas o link ainda está sendo preparado. Aguarde alguns segundos e tente abrir o checkout novamente; a cobrança existente será reaproveitada.");\n    return NextResponse.redirect(appUrl(req, "/checkout?plan=" + encodeURIComponent(planSlug) + "&method=" + encodeURIComponent(method) + "&error=" + pendingMessage), { status: 303 });`,
+    },
+  ],
+  "upgrade safety asaas checkout",
+);
+
+patchFile(
   "src/app/api/webhooks/stripe/route.ts",
   [
     {
