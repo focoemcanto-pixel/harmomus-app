@@ -27,12 +27,12 @@ patchFile(
     {
       name: "migração Free não bloqueia checkout pago",
       from: `  return migrated && ["active", "trialing"].includes(status);`,
-      to: `  const planFamily = normalizePlanFamily(subscription?.plans?.slug ?? "free");\n  return migrated && planRank(planFamily) > 0 && ["active", "trialing"].includes(status);`,
+      to: `  const relatedPlanSlug = Array.isArray(subscription?.plans) ? subscription.plans[0]?.slug : (subscription?.plans as any)?.slug;\n  const planFamily = normalizePlanFamily(relatedPlanSlug ?? "free");\n  return migrated && planRank(planFamily) > 0 && ["active", "trialing"].includes(status);`,
     },
     {
       name: "Stripe bloqueia apenas outro plano pago ativo",
       from: `  if (existingGateway && existingGateway !== "stripe" && ["active", "trialing"].includes(existingStatus) && hasFutureAccess) {\n    throw new Error("Já existe uma assinatura ativa em outro meio de pagamento. Cancele ou finalize a troca antes de iniciar um novo checkout.");\n  }`,
-      to: `  const existingPlanFamily = normalizePlanFamily(existing?.plans?.slug ?? "free");\n  const existingPaidPlan = planRank(existingPlanFamily) > 0;\n  if (existingGateway && existingGateway !== "stripe" && existingPaidPlan && ["active", "trialing"].includes(existingStatus) && hasFutureAccess) {\n    throw new Error("Já existe uma assinatura paga ativa em outro meio de pagamento. Cancele ou finalize a troca antes de iniciar um novo checkout.");\n  }`,
+      to: `  const existingRelatedPlanSlug = Array.isArray(existing?.plans) ? existing.plans[0]?.slug : (existing?.plans as any)?.slug;\n  const existingPlanFamily = normalizePlanFamily(existingRelatedPlanSlug ?? "free");\n  const existingPaidPlan = planRank(existingPlanFamily) > 0;\n  if (existingGateway && existingGateway !== "stripe" && existingPaidPlan && ["active", "trialing"].includes(existingStatus) && hasFutureAccess) {\n    throw new Error("Já existe uma assinatura paga ativa em outro meio de pagamento. Cancele ou finalize a troca antes de iniciar um novo checkout.");\n  }`,
     },
     {
       name: "portal usa somente cliente Stripe",
@@ -83,7 +83,7 @@ patchFile(
     {
       name: "webhook Asaas ignora conflito com plano Free",
       from: `  if (!data) return null;\n  if (!data.current_period_end) return data;`,
-      to: `  if (!data) return null;\n  if (planRank(data?.plans?.slug ?? "free") <= 0) return null;\n  if (!data.current_period_end) return data;`,
+      to: `  if (!data) return null;\n  const relatedPlanSlug = Array.isArray(data.plans) ? data.plans[0]?.slug : (data.plans as any)?.slug;\n  if (planRank(relatedPlanSlug ?? "free") <= 0) return null;\n  if (!data.current_period_end) return data;`,
     },
   ],
   "upgrade safety asaas webhook",
