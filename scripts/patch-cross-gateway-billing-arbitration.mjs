@@ -42,9 +42,9 @@ patchFile(
   "src/app/api/billing/checkout/asaas/route.ts",
   [
     {
-      name: "bloquear checkout Asaas com Stripe ativo",
+      name: "bloquear checkout Asaas apenas com outro plano pago ativo",
       from: `    const rows = (existingSubscriptions ?? []) as ExistingSubscriptionRow[];\n    const subscriptionToUpdate = pickSubscriptionToUpdate(rows);`,
-      to: `    const rows = (existingSubscriptions ?? []) as ExistingSubscriptionRow[];\n    const activeOtherGateway = rows.find((subscription) => {\n      const gateway = String(subscription.gateway ?? "").trim().toLowerCase();\n      return gateway && gateway !== "asaas" && hasFutureAccess(subscription);\n    });\n    if (activeOtherGateway) {\n      return NextResponse.redirect(appUrl(req, "/assinatura?message=Sua%20assinatura%20j%C3%A1%20est%C3%A1%20ativa%20em%20outro%20meio%20de%20pagamento."), { status: 303 });\n    }\n\n    const subscriptionToUpdate = pickSubscriptionToUpdate(rows);`,
+      to: `    const rows = (existingSubscriptions ?? []) as ExistingSubscriptionRow[];\n    const activeOtherGateway = rows.find((subscription) => {\n      const gateway = String(subscription.gateway ?? "").trim().toLowerCase();\n      const paidPlan = planRank(normalizePlanSlug(subscription)) > 0;\n      return gateway && gateway !== "asaas" && paidPlan && hasFutureAccess(subscription);\n    });\n    if (activeOtherGateway) {\n      return NextResponse.redirect(appUrl(req, "/assinatura?message=Sua%20assinatura%20j%C3%A1%20est%C3%A1%20ativa%20em%20outro%20meio%20de%20pagamento."), { status: 303 });\n    }\n\n    const subscriptionToUpdate = pickSubscriptionToUpdate(rows);`,
     },
   ],
   "cross-gateway Asaas checkout patch",
