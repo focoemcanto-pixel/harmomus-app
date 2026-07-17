@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 
+import { finalizeLegacyMigration } from "@/lib/auth/finalize-legacy-migration";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { trustedAppUrl } from "@/lib/security/trusted-app-url";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatcher";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +14,7 @@ function passwordErrorUrl(
   migration: boolean,
   tokenHash?: string,
 ) {
-  const url = new URL("/redefinir-senha", request.url);
+  const url = trustedAppUrl("/redefinir-senha", request);
   url.searchParams.set("error", message);
   if (migration) url.searchParams.set("migration", "1");
   if (tokenHash) {
@@ -94,7 +96,7 @@ export async function POST(request: Request) {
 
   const { data: updatedAuthData, error: updateError } = await admin.auth.admin.updateUserById(
     authenticatedUser.id,
-    { password },
+    { password, email_confirm: true },
   );
 
   if (updateError) {
@@ -102,11 +104,10 @@ export async function POST(request: Request) {
       userId: authenticatedUser.id,
       error: updateError,
     });
-
     return NextResponse.redirect(
       passwordErrorUrl(
         request,
-        `Não foi possível redefinir a senha. Detalhe: ${updateError.message}`,
+        "Não foi possível redefinir a senha. Solicite um novo link e tente novamente.",
         migration,
         tokenHash,
       ),
@@ -118,9 +119,39 @@ export async function POST(request: Request) {
   const userEmail = updatedUser.email?.toLowerCase();
   let completedMigration = migration;
 
+  if (migration) {
+    if (!userEmail) {
+      return NextResponse.redirect(
+        passwordErrorUrl(request, "Não foi possível identificar o e-mail da migração.", true),
+        303,
+      );
+    }
+
+    try {
+      await finalizeLegacyMigration(admin, {
+        userId: authenticatedUser.id,
+        email: userEmail,
+      });
+      completedMigration = true;
+    } catch (error) {
+      console.error("[auth.password.update] falha ao finalizar migração validada", {
+        userId: authenticatedUser.id,
+        email: userEmail,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return NextResponse.redirect(
+        passwordErrorUrl(
+          request,
+          "Sua senha foi validada, mas não foi possível concluir a migração. Entre em contato com o suporte.",
+          true,
+        ),
+        303,
+      );
+    }
+  }
+
   if (userEmail) {
     const now = new Date().toISOString();
-
     const { data: profile } = await admin
       .from("profiles")
       .select("full_name,email,phone,migrated_from_pms,requires_password_setup")
@@ -128,7 +159,7 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     const isMigratedProfile = Boolean(profile?.migrated_from_pms);
-    completedMigration = migration || isMigratedProfile;
+    completedMigration = completedMigration || isMigratedProfile;
 
     if (profile?.requires_password_setup) {
       await admin
@@ -168,13 +199,9 @@ export async function POST(request: Request) {
 
   if (!tokenHash) {
     const { error: signOutError } = await supabase.auth.signOut({ scope: "local" });
-    if (signOutError) {
-      console.error("[auth.password.update] signOut after password reset failed", signOutError);
-    }
+    if (signOutError) console.error("[auth.password.update] signOut after password reset failed", signOutError);
   }
 
-  return NextResponse.redirect(
-    new URL(completedMigration ? "/login?migration=success" : "/login?reset=success", request.url),
-    303,
-  );
+  const destination = completedMigration ? "/login?migration=success" : "/login?reset=success";
+  return NextResponse.redirect(trustedAppUrl(destination, request), 303);
 }
