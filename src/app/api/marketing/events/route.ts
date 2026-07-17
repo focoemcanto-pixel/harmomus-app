@@ -40,6 +40,37 @@ function sanitizeUrl(value: unknown) {
   }
 }
 
+function allowedRedirectOrigins(request: Request) {
+  const origins = new Set<string>();
+  try {
+    origins.add(new URL(request.url).origin);
+  } catch {
+    // Request URL is expected to be valid, but a malformed value must not open redirects.
+  }
+
+  for (const candidate of [process.env.NEXT_PUBLIC_APP_URL, process.env.APP_URL]) {
+    if (!candidate) continue;
+    try {
+      origins.add(new URL(candidate).origin);
+    } catch {
+      // Ignore malformed optional configuration.
+    }
+  }
+
+  return origins;
+}
+
+function sanitizeRedirectUrl(request: Request, value: unknown) {
+  const sanitized = sanitizeUrl(value);
+  if (!sanitized) return null;
+  try {
+    const url = new URL(sanitized);
+    return allowedRedirectOrigins(request).has(url.origin) ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 function sanitizeMetadata(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   try {
@@ -116,7 +147,7 @@ async function recordEvent(request: Request, body?: Record<string, unknown> | nu
         job_id: sanitizeUuid(body?.job_id ?? url.searchParams.get("job_id")),
         campaign_id: sanitizeUuid(body?.campaign_id ?? url.searchParams.get("campaign_id")),
         provider_message_id: sanitizeText(body?.provider_message_id ?? url.searchParams.get("provider_message_id")) || null,
-        url: sanitizeUrl(body?.url ?? url.searchParams.get("url")),
+        url: sanitizeRedirectUrl(request, body?.url ?? url.searchParams.get("url")),
         user_agent: request.headers.get("user-agent"),
         ip: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
       }
@@ -127,6 +158,20 @@ async function recordEvent(request: Request, body?: Record<string, unknown> | nu
         device_type: resolveDeviceType(request),
         user_agent: request.headers.get("user-agent"),
       };
+
+  if (isPublicEvent) {
+    const hasDeliveryIdentifier = Boolean(
+      metadata.job_id ||
+      metadata.provider_message_id ||
+      (metadata.campaign_id && userId),
+    );
+    if (!hasDeliveryIdentifier) {
+      return { ok: false as const, error: "Identificador de rastreamento ausente." };
+    }
+    if (eventKey === "click" && !metadata.url) {
+      return { ok: false as const, error: "Destino de redirecionamento não permitido." };
+    }
+  }
 
   await trackMarketingEvent(supabase as any, {
     userId,
@@ -143,8 +188,7 @@ async function recordEvent(request: Request, body?: Record<string, unknown> | nu
 
 export async function GET(request: Request) {
   const result = await recordEvent(request);
-  const url = new URL(request.url);
-  const redirectTo = result.ok && result.eventKey === "click" ? sanitizeUrl(url.searchParams.get("url")) : null;
+  const redirectTo = result.ok && result.eventKey === "click" ? sanitizeRedirectUrl(request, result.metadata.url) : null;
 
   if (redirectTo) return NextResponse.redirect(redirectTo, { status: 302 });
 

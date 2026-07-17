@@ -2,18 +2,15 @@ import { randomUUID } from "node:crypto";
 
 import { NextResponse } from "next/server";
 
-import { createClient } from "@/lib/supabase/server";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { getCheckoutSession } from "@/lib/stripe/client";
-import { sendEmail } from "@/lib/email/send-email";
 import { getAdminSettings } from "@/lib/data/admin-settings";
+import { sendEmail } from "@/lib/email/send-email";
+import { getTrustedAppOrigin, trustedAppUrl } from "@/lib/security/trusted-app-url";
+import { getCheckoutSession } from "@/lib/stripe/client";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 
 function normalizeEmail(value: unknown) {
   return String(value ?? "").trim().toLowerCase();
-}
-
-function appBaseUrl(request: Request) {
-  return process.env.NEXT_PUBLIC_APP_URL?.trim()?.replace(/\/$/, "") || new URL(request.url).origin;
 }
 
 function isValidEmail(email: string) {
@@ -27,8 +24,14 @@ function escapeHtml(value: string) {
 function absoluteUrl(request: Request, value?: string | null) {
   const text = String(value ?? "").trim();
   if (!text) return "";
-  if (/^https?:\/\//i.test(text)) return text;
-  return `${appBaseUrl(request)}${text.startsWith("/") ? text : `/${text}`}`;
+
+  try {
+    const url = new URL(text, getTrustedAppOrigin(request));
+    if (!["http:", "https:"].includes(url.protocol)) return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
 }
 
 async function getEmailBranding(request: Request) {
@@ -54,7 +57,7 @@ async function getStripeContext(sessionId: string) {
 async function findPendingProfileByEmail(admin: any, email: string) {
   const { data, error } = await admin
     .from("profiles")
-    .select("id,email,onboarding_status,migrated_from_pms,requires_password_setup")
+    .select("id,email,pending_email,onboarding_status,migrated_from_pms,requires_password_setup")
     .ilike("email", email)
     .limit(1)
     .maybeSingle();
@@ -76,15 +79,16 @@ async function findPendingProfileById(admin: any, userId: string | null) {
   return data ?? null;
 }
 
-async function safeMarkProfilePending(admin: any, userId: string | null, email: string) {
+async function findCheckoutProfile(admin: any, userId: string | null, email: string) {
   const profile = (await findPendingProfileById(admin, userId)) ?? (await findPendingProfileByEmail(admin, email));
   if (!profile?.id) return null;
 
   if (String(profile.onboarding_status ?? "") !== "pending_email_confirmation") {
-    await admin
+    const { error } = await admin
       .from("profiles")
       .update({ onboarding_status: "pending_email_confirmation", onboarding_step: "waiting_email_confirmation" })
       .eq("id", profile.id);
+    if (error) throw new Error(error.message);
   }
 
   return profile;
@@ -108,11 +112,11 @@ function isMigratedPasswordSetupPending(profile: any, legacyMember: any) {
     String(legacyMember.legacy_status ?? "").toLowerCase() === "active" &&
     !legacyMember.password_created;
 
-  return legacyEligible || (profile?.migrated_from_pms && profile?.requires_password_setup);
+  return legacyEligible || Boolean(profile?.migrated_from_pms && profile?.requires_password_setup);
 }
 
 async function resendMigrationPasswordSetupEmail(supabase: any, request: Request, email: string) {
-  const callbackUrl = new URL("/auth/confirm/callback", appBaseUrl(request));
+  const callbackUrl = trustedAppUrl("/auth/confirm/callback", request);
   callbackUrl.searchParams.set("type", "recovery");
   callbackUrl.searchParams.set("next", "/redefinir-senha?migration=1");
 
@@ -167,7 +171,7 @@ async function sendCustomConfirmation(admin: any, request: Request, profile: any
 
   const code = randomUUID().replace(/-/g, "");
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-  const confirmationUrl = new URL("/confirmar-email", appBaseUrl(request));
+  const confirmationUrl = trustedAppUrl("/confirmar-email", request);
   confirmationUrl.searchParams.set("code", code);
   const branding = await getEmailBranding(request);
 
@@ -221,47 +225,55 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "E-mail não corresponde à sessão de checkout." }, { status: 403 });
       }
 
-      const profile = await safeMarkProfilePending(admin, stripeContext.userId, stripeContext.email);
+      if (newEmail && newEmail !== stripeContext.email) {
+        return NextResponse.json({ error: "A sessão de checkout não autoriza alterar o e-mail." }, { status: 403 });
+      }
+
+      const profile = await findCheckoutProfile(admin, stripeContext.userId, stripeContext.email);
       const sent = await sendCustomConfirmation(admin, request, profile, stripeContext.email);
       return NextResponse.json({ ok: true, email: sent.email });
     }
 
-    const { data: auth } = await supabase.auth.getUser();
-    const userId = auth.user?.id ?? null;
-    let email = requestedEmail || normalizeEmail(auth.user?.email);
-
-    if (!email) return NextResponse.json({ error: "E-mail não encontrado para reenviar confirmação." }, { status: 400 });
-
-    const profile = (await findPendingProfileById(admin, userId)) ?? (await findPendingProfileByEmail(admin, email));
-    const legacyMember = await findLegacyMember(admin, email);
-
-    if (migration || isMigratedPasswordSetupPending(profile, legacyMember)) {
-      if (!isMigratedPasswordSetupPending(profile, legacyMember)) {
-        return NextResponse.json({ error: "Conta migrada não encontrada ou já ativada." }, { status: 404 });
+    if (migration) {
+      if (!isValidEmail(requestedEmail)) {
+        return NextResponse.json({ error: "Informe um e-mail válido." }, { status: 400 });
       }
 
-      const { error } = await resendMigrationPasswordSetupEmail(supabase, request, email);
-      if (error) return NextResponse.json({ error: error.message || "Falha ao reenviar e-mail de criação de senha." }, { status: 400 });
+      const profile = await findPendingProfileByEmail(admin, requestedEmail);
+      const legacyMember = await findLegacyMember(admin, requestedEmail);
 
-      return NextResponse.json({ ok: true, email, mode: "migration_password_setup" });
+      if (isMigratedPasswordSetupPending(profile, legacyMember)) {
+        const { error } = await resendMigrationPasswordSetupEmail(supabase, request, requestedEmail);
+        if (error) console.error("[email-confirmation.resend] falha no reenvio de migração", error);
+      }
+
+      return NextResponse.json({ ok: true, email: requestedEmail, mode: "migration_password_setup" });
     }
 
-    if (!profile?.id) return NextResponse.json({ error: "Cadastro pendente não encontrado para este e-mail." }, { status: 404 });
+    const { data: auth, error: authError } = await supabase.auth.getUser();
+    const userId = auth.user?.id ?? null;
+    if (authError || !userId) {
+      return NextResponse.json({ error: "Você precisa estar autenticado para reenviar ou alterar o e-mail." }, { status: 401 });
+    }
 
-    email = newEmail || normalizeEmail(profile.pending_email) || normalizeEmail(profile.email) || email;
-    const sent = await sendCustomConfirmation(admin, request, profile, email);
+    const profile = await findPendingProfileById(admin, userId);
+    if (!profile?.id) {
+      return NextResponse.json({ error: "Perfil autenticado não encontrado." }, { status: 404 });
+    }
 
+    const authEmail = normalizeEmail(auth.user?.email);
+    const pendingEmail = normalizeEmail(profile.pending_email);
+    if (requestedEmail && requestedEmail !== authEmail && requestedEmail !== pendingEmail) {
+      return NextResponse.json({ error: "O e-mail informado não pertence à sessão autenticada." }, { status: 403 });
+    }
+
+    const targetEmail = newEmail || pendingEmail || authEmail;
+    const sent = await sendCustomConfirmation(admin, request, profile, targetEmail);
     return NextResponse.json({ ok: true, email: sent.email });
   } catch (error) {
     console.error("[email-confirmation.resend] erro inesperado", error);
-
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Erro inesperado ao reenviar confirmação.",
-      },
+      { error: error instanceof Error ? error.message : "Erro inesperado ao reenviar confirmação." },
       { status: 500 },
     );
   }
