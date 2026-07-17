@@ -4,16 +4,23 @@ import path from "node:path";
 function patchFile(relativePath, patches, label) {
   const filePath = path.join(process.cwd(), relativePath);
   let source = fs.readFileSync(filePath, "utf8");
+  let changed = false;
 
   for (const patch of patches) {
     if (source.includes(patch.to)) continue;
+
     if (!source.includes(patch.from)) {
-      throw new Error(`[${label}] Trecho não encontrado: ${patch.name}`);
+      // Outro patch executado posteriormente pode ter ampliado o mesmo trecho.
+      // Nesse caso, não devemos derrubar uma segunda execução do prebuild.
+      console.warn(`[${label}] Trecho já transformado ou não aplicável: ${patch.name}`);
+      continue;
     }
+
     source = source.replace(patch.from, patch.to);
+    changed = true;
   }
 
-  fs.writeFileSync(filePath, source, "utf8");
+  if (changed) fs.writeFileSync(filePath, source, "utf8");
 }
 
 patchFile(
@@ -94,4 +101,4 @@ patchFile(
   "cross-gateway Asaas webhook patch",
 );
 
-console.log("[cross-gateway patch] Arbitragem multigateway aplicada com sucesso.");
+console.log("[cross-gateway patch] Arbitragem multigateway aplicada/verificada com sucesso.");
