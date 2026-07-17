@@ -1,11 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { sendEmail } from "@/lib/email/send-email";
+import { trustedAppUrl } from "@/lib/security/trusted-app-url";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-
-function appBaseUrl(request: Request) {
-  return process.env.NEXT_PUBLIC_APP_URL?.trim()?.replace(/\/$/, "") || new URL(request.url).origin;
-}
 
 function recoveryEmailHtml(link: string) {
   return `
@@ -46,7 +43,7 @@ export async function POST(request: Request) {
         if (!tokenHash) {
           console.error("[auth.password.reset] generated link without hashed token", { email });
         } else {
-          const recoveryUrl = new URL("/redefinir-senha", appBaseUrl(request));
+          const recoveryUrl = trustedAppUrl("/redefinir-senha", request);
           recoveryUrl.searchParams.set("token_hash", tokenHash);
           recoveryUrl.searchParams.set("type", "recovery");
 
@@ -70,5 +67,5 @@ export async function POST(request: Request) {
     }
   }
 
-  return NextResponse.redirect(new URL("/recuperar-senha?success=1", request.url), 303);
+  return NextResponse.redirect(trustedAppUrl("/recuperar-senha?success=1", request), 303);
 }
