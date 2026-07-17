@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { trustedAppUrl } from "@/lib/security/trusted-app-url";
 import { createClient } from "@/lib/supabase/server";
-
-function appBaseUrl(request: Request) {
-  return process.env.NEXT_PUBLIC_APP_URL?.trim()?.replace(/\/$/, "") || new URL(request.url).origin;
-}
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -15,7 +12,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Você precisa estar logado para alterar a senha." }, { status: 401 });
   }
 
-  const callbackUrl = new URL("/auth/confirm/callback", appBaseUrl(request));
+  const callbackUrl = trustedAppUrl("/auth/confirm/callback", request);
   callbackUrl.searchParams.set("type", "recovery");
   callbackUrl.searchParams.set("next", "/redefinir-senha");
 
