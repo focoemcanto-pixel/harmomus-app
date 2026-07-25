@@ -23,7 +23,7 @@ export interface SubscriberJourneyData {
 }
 
 function makeProfileFromAuthUser(user: any, profile?: any): Profile {
-  const metadata = user.user_metadata ?? {};
+  const metadata = user?.user_metadata ?? {};
   return {
     ...(profile ?? {}),
     id: profile?.id ?? user.id,
@@ -47,102 +47,99 @@ function makeProfileFromAuthUser(user: any, profile?: any): Profile {
 
 async function listAllAuthUsers(supabase: any) {
   const allUsers: any[] = [];
-  let page = 1;
   const perPage = 1000;
 
-  while (page <= 10) {
-    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage });
-    if (error) throw new Error(`Falha ao listar usuários Auth: ${error.message}`);
-    const users = data?.users ?? [];
-    allUsers.push(...users);
-    if (users.length < perPage) break;
-    page += 1;
+  for (let page = 1; page <= 10; page += 1) {
+    try {
+      const { data, error } = await supabase.auth.admin.listUsers({ page, perPage });
+      if (error) break;
+      const users = data?.users ?? [];
+      allUsers.push(...users);
+      if (users.length < perPage) break;
+    } catch {
+      break;
+    }
   }
 
   return allUsers;
 }
 
-async function syncMissingProfiles(supabase: any, authUsers: any[], existingProfiles: any[]) {
-  const existingIds = new Set((existingProfiles ?? []).map((profile: any) => profile.id));
-  const missingProfiles = authUsers
-    .filter((user: any) => user.id && !existingIds.has(user.id))
-    .map((user: any) => {
-      const metadata = user.user_metadata ?? {};
-      return {
-        id: user.id,
-        email: user.email ?? null,
-        full_name: metadata.full_name ?? metadata.name ?? metadata.username ?? null,
-        role: metadata.role ?? "user",
-        updated_at: new Date().toISOString(),
-      };
-    });
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) chunks.push(items.slice(index, index + size));
+  return chunks;
+}
 
-  if (!missingProfiles.length) return existingProfiles ?? [];
+async function loadSubscriptionsByUserIds(supabase: any, userIds: string[]) {
+  if (!userIds.length) return [] as Subscription[];
 
-  const { error } = await supabase.from("profiles").upsert(missingProfiles, { onConflict: "id" });
-  if (error) return existingProfiles ?? [];
+  const results = await Promise.all(
+    chunk(userIds, 200).map(async (ids) => {
+      try {
+        const { data, error } = await supabase.from("subscriptions").select("*").in("user_id", ids);
+        if (error) return [];
+        return data ?? [];
+      } catch {
+        return [];
+      }
+    }),
+  );
 
-  const { data: refreshedProfiles, error: refreshError } = await supabase.from("profiles").select("*");
-  if (refreshError) return existingProfiles ?? [];
-  return refreshedProfiles ?? [];
+  return results.flat() as Subscription[];
 }
 
 export async function getMembers(filters?: { query?: string; planId?: string; status?: string }): Promise<MemberListItem[]> {
   const supabase = createSupabaseAdminClient() as any;
 
-  const [authUsers, { data: initialProfiles, error: profileError }, { data: plans, error: plansError }] = await Promise.all([
+  const [authUsers, profilesResult, plansResult] = await Promise.all([
     listAllAuthUsers(supabase),
     supabase.from("profiles").select("*"),
     supabase.from("plans").select("*"),
   ]);
 
-  if (profileError) throw new Error(`Falha ao listar perfis: ${profileError.message}`);
-  if (plansError) throw new Error(`Falha ao carregar planos: ${plansError.message}`);
+  const initialProfiles = profilesResult.data ?? [];
+  const plans = plansResult.data ?? [];
 
-  const profiles = await syncMissingProfiles(supabase, authUsers, initialProfiles ?? []);
-  const profileMap = new Map<string, Profile>((profiles ?? []).map((profile: any) => [String(profile.id), profile as Profile]));
+  if (profilesResult.error && !authUsers.length) {
+    throw new Error(`Falha ao listar membros: ${profilesResult.error.message}`);
+  }
+
+  const profileMap = new Map<string, Profile>(initialProfiles.map((profile: any) => [String(profile.id), profile as Profile]));
+  const authIds = new Set(authUsers.map((user: any) => String(user.id)));
   const seenIds = new Set<string>();
+
   const mergedProfiles: Profile[] = [
     ...authUsers.map((user: any) => makeProfileFromAuthUser(user, profileMap.get(String(user.id)))),
-    ...(profiles ?? []).filter((profile: any) => !authUsers.some((user: any) => user.id === profile.id)),
+    ...initialProfiles.filter((profile: any) => !authIds.has(String(profile.id))),
   ].filter((profile: any) => {
-    if (!profile?.id || seenIds.has(profile.id)) return false;
-    seenIds.add(profile.id);
+    const id = String(profile?.id ?? "");
+    if (!id || seenIds.has(id)) return false;
+    seenIds.add(id);
     return true;
   }) as Profile[];
 
-  const ids = mergedProfiles.map((p) => p.id).filter(Boolean);
-  const { data: subscriptions, error: subscriptionError } = await supabase
-    .from("subscriptions")
-    .select("*")
-    .in("user_id", ids.length ? ids : ["00000000-0000-0000-0000-000000000000"]);
-
-  if (subscriptionError) throw new Error(`Falha ao carregar assinaturas: ${subscriptionError.message}`);
+  const ids = mergedProfiles.map((profile) => String(profile.id)).filter(Boolean);
+  const subscriptions = await loadSubscriptionsByUserIds(supabase, ids);
 
   const latestSubByUser = new Map<string, Subscription>();
-  for (const sub of subscriptions ?? []) {
-    const typedSub = sub as Subscription;
-    const current = latestSubByUser.get(typedSub.user_id);
-    if (!current || new Date(typedSub.created_at) > new Date(current.created_at)) {
-      latestSubByUser.set(typedSub.user_id, typedSub);
+  for (const sub of subscriptions) {
+    const current = latestSubByUser.get(sub.user_id);
+    if (!current || new Date(sub.created_at).getTime() > new Date(current.created_at).getTime()) {
+      latestSubByUser.set(sub.user_id, sub);
     }
   }
 
-  const typedPlans = (plans ?? []) as Plan[];
+  const typedPlans = plans as Plan[];
   const planMap = new Map<string, Plan>(typedPlans.map((plan) => [plan.id, plan]));
   const query = filters?.query?.trim().toLowerCase() ?? "";
 
-  const members: MemberListItem[] = mergedProfiles.map((profile): MemberListItem => {
-    const subscription = latestSubByUser.get(profile.id) ?? null;
-    const plan: Plan | null = subscription?.plan_id ? planMap.get(subscription.plan_id) ?? null : null;
-    return { profile, subscription, plan };
-  });
-
-  return members
-    .filter((member) => {
-      if (!query) return true;
-      return `${member.profile.full_name ?? ""} ${member.profile.email ?? ""}`.toLowerCase().includes(query);
+  return mergedProfiles
+    .map((profile): MemberListItem => {
+      const subscription = latestSubByUser.get(profile.id) ?? null;
+      const plan = subscription?.plan_id ? planMap.get(subscription.plan_id) ?? null : null;
+      return { profile, subscription, plan };
     })
+    .filter((member) => !query || `${member.profile.full_name ?? ""} ${member.profile.email ?? ""}`.toLowerCase().includes(query))
     .filter((member) => (filters?.planId ? member.plan?.id === filters.planId : true))
     .filter((member) => (filters?.status ? member.subscription?.status === filters.status : true))
     .sort((a, b) => new Date(b.profile.created_at ?? 0).getTime() - new Date(a.profile.created_at ?? 0).getTime());
@@ -150,20 +147,21 @@ export async function getMembers(filters?: { query?: string; planId?: string; st
 
 export async function getMemberById(id: string): Promise<MemberListItem | null> {
   const supabase = createSupabaseAdminClient() as any;
-  const [{ data: profile }, authResult, { data: subscription }, { data: plans }] = await Promise.all([
+  const [profileResult, authResult, subscriptionResult, plansResult] = await Promise.all([
     supabase.from("profiles").select("*").eq("id", id).maybeSingle(),
-    supabase.auth.admin.getUserById(id),
+    supabase.auth.admin.getUserById(id).catch(() => ({ data: { user: null } })),
     supabase.from("subscriptions").select("*").eq("user_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
     supabase.from("plans").select("*"),
   ]);
 
+  const profile = profileResult.data ?? null;
   const authUser = authResult?.data?.user ?? null;
   if (!profile && !authUser) return null;
 
   const mergedProfile = authUser ? makeProfileFromAuthUser(authUser, profile) : (profile as Profile);
-  const typedPlans = (plans ?? []) as Plan[];
-  const typedSubscription = subscription ? (subscription as Subscription) : null;
-  const plan: Plan | null = typedSubscription?.plan_id ? typedPlans.find((item) => item.id === typedSubscription.plan_id) ?? null : null;
+  const typedSubscription = subscriptionResult.data ? (subscriptionResult.data as Subscription) : null;
+  const typedPlans = (plansResult.data ?? []) as Plan[];
+  const plan = typedSubscription?.plan_id ? typedPlans.find((item) => item.id === typedSubscription.plan_id) ?? null : null;
 
   return { profile: mergedProfile, subscription: typedSubscription, plan };
 }
@@ -202,18 +200,23 @@ async function safeTableQuery<T = any>(queryPromise: PromiseLike<{ data: T[] | n
 function getMemberIdentifiers(member: MemberListItem) {
   const profile = member.profile as any;
   const subscription = member.subscription as any;
-
-  return Array.from(new Set([
-    profile?.id,
-    profile?.email,
-    subscription?.stripe_customer_id,
-    subscription?.gateway_customer_id,
-    subscription?.stripe_subscription_id,
-    subscription?.gateway_subscription_id,
-    subscription?.stripe_price_id,
-    subscription?.legacy_pms_subscription_id,
-    profile?.legacy_pms_member_id,
-  ].filter(Boolean).map(String)));
+  return Array.from(
+    new Set(
+      [
+        profile?.id,
+        profile?.email,
+        subscription?.stripe_customer_id,
+        subscription?.gateway_customer_id,
+        subscription?.stripe_subscription_id,
+        subscription?.gateway_subscription_id,
+        subscription?.stripe_price_id,
+        subscription?.legacy_pms_subscription_id,
+        profile?.legacy_pms_member_id,
+      ]
+        .filter(Boolean)
+        .map(String),
+    ),
+  );
 }
 
 export async function getSubscriberJourneyData(member: MemberListItem): Promise<SubscriberJourneyData> {
@@ -225,52 +228,22 @@ export async function getSubscriberJourneyData(member: MemberListItem): Promise<
   const legacyMemberId = numericString(profile?.legacy_pms_member_id);
   const identifiers = getMemberIdentifiers(member);
 
-  const [
-    communicationByUser,
-    communicationRecent,
-    kitAccessLogs,
-    audioAccessLogs,
-    webhookLogsRaw,
-    webhookProcessedEventsRaw,
-    legacyPmsBySubscription,
-    legacyPmsByUser,
-    legacyPmsRecent,
-    legacyStripeRaw,
-    legacyStripeImportRaw,
-  ] = await Promise.all([
-    userId
-      ? safeTableQuery(supabase.from("communication_logs").select("*").eq("user_id", userId).order("created_at", { ascending: false }).limit(100))
-      : Promise.resolve([]),
-    safeTableQuery(supabase.from("communication_logs").select("*").order("created_at", { ascending: false }).limit(1000)),
-    userId
-      ? safeTableQuery(supabase.from("kit_access_logs").select("*").eq("user_id", userId).order("accessed_at", { ascending: false }).limit(100))
-      : Promise.resolve([]),
-    userId
-      ? safeTableQuery(supabase.from("audio_access_logs").select("*").eq("user_id", userId).order("accessed_at", { ascending: false }).limit(100))
-      : Promise.resolve([]),
-    safeTableQuery(supabase.from("webhook_logs").select("*").order("created_at", { ascending: false }).limit(1000)),
-    safeTableQuery(supabase.from("webhook_processed_events").select("*").order("processed_at", { ascending: false }).limit(1000)),
-    legacySubscriptionId
-      ? safeTableQuery(supabase.from("legacy_pms_subscriptions").select("*").eq("pms_subscription_id", legacySubscriptionId).limit(25))
-      : Promise.resolve([]),
-    legacyMemberId
-      ? safeTableQuery(supabase.from("legacy_pms_subscriptions").select("*").eq("pms_user_id", legacyMemberId).limit(25))
-      : Promise.resolve([]),
-    safeTableQuery(supabase.from("legacy_pms_subscriptions").select("*").limit(1000)),
-    safeTableQuery(supabase.from("legacy_stripe_customers").select("*").limit(1000)),
-    safeTableQuery(supabase.from("legacy_stripe_customer_import").select("*").limit(1000)),
+  const [communicationByUser, communicationRecent, kitAccessLogs, audioAccessLogs, webhookLogsRaw, webhookProcessedEventsRaw, legacyPmsBySubscription, legacyPmsByUser, legacyPmsRecent, legacyStripeRaw, legacyStripeImportRaw] = await Promise.all([
+    userId ? safeTableQuery(supabase.from("communication_logs").select("*").eq("user_id", userId).order("created_at", { ascending: false }).limit(100)) : Promise.resolve([]),
+    safeTableQuery(supabase.from("communication_logs").select("*").order("created_at", { ascending: false }).limit(500)),
+    userId ? safeTableQuery(supabase.from("kit_access_logs").select("*").eq("user_id", userId).order("accessed_at", { ascending: false }).limit(100)) : Promise.resolve([]),
+    userId ? safeTableQuery(supabase.from("audio_access_logs").select("*").eq("user_id", userId).order("accessed_at", { ascending: false }).limit(100)) : Promise.resolve([]),
+    safeTableQuery(supabase.from("webhook_logs").select("*").order("created_at", { ascending: false }).limit(500)),
+    safeTableQuery(supabase.from("webhook_processed_events").select("*").order("processed_at", { ascending: false }).limit(500)),
+    legacySubscriptionId ? safeTableQuery(supabase.from("legacy_pms_subscriptions").select("*").eq("pms_subscription_id", legacySubscriptionId).limit(25)) : Promise.resolve([]),
+    legacyMemberId ? safeTableQuery(supabase.from("legacy_pms_subscriptions").select("*").eq("pms_user_id", legacyMemberId).limit(25)) : Promise.resolve([]),
+    safeTableQuery(supabase.from("legacy_pms_subscriptions").select("*").limit(500)),
+    safeTableQuery(supabase.from("legacy_stripe_customers").select("*").limit(500)),
+    safeTableQuery(supabase.from("legacy_stripe_customer_import").select("*").limit(500)),
   ]);
 
-  const communicationLogs = uniqueRows([
-    ...communicationByUser,
-    ...communicationRecent.filter((row) => rowMatchesIdentifiers(row, identifiers)),
-  ]).slice(0, 100);
-
-  const legacyPmsSubscriptions = uniqueRows([
-    ...legacyPmsBySubscription,
-    ...legacyPmsByUser,
-    ...legacyPmsRecent.filter((row) => rowMatchesIdentifiers(row, identifiers)),
-  ]).slice(0, 50);
+  const communicationLogs = uniqueRows([...communicationByUser, ...communicationRecent.filter((row) => rowMatchesIdentifiers(row, identifiers))]).slice(0, 100);
+  const legacyPmsSubscriptions = uniqueRows([...legacyPmsBySubscription, ...legacyPmsByUser, ...legacyPmsRecent.filter((row) => rowMatchesIdentifiers(row, identifiers))]).slice(0, 50);
 
   return {
     communicationLogs,
@@ -284,72 +257,47 @@ export async function getSubscriberJourneyData(member: MemberListItem): Promise<
   };
 }
 
-export async function getMemberOperationalSummaries(
-  members: MemberListItem[],
-  options: { limit?: number } = {},
-): Promise<Map<string, Partial<SubscriberJourneyData>>> {
+export async function getMemberOperationalSummaries(members: MemberListItem[], options: { limit?: number } = {}): Promise<Map<string, Partial<SubscriberJourneyData>>> {
   const supabase = createSupabaseAdminClient() as any;
-  const limit = options.limit ?? 200;
-  const targetMembers = members.slice(0, limit);
+  const targetMembers = members.slice(0, Math.min(options.limit ?? 100, 100));
   const userIds = targetMembers.map((member) => member.profile.id).filter(Boolean);
-  const empty = new Map<string, Partial<SubscriberJourneyData>>();
+  const summaries = new Map<string, Partial<SubscriberJourneyData>>();
   const identifiersByUser = new Map<string, string[]>();
 
   for (const member of targetMembers) {
     const userId = member.profile.id;
     if (!userId) continue;
-    empty.set(userId, {
-      communicationLogs: [],
-      kitAccessLogs: [],
-      audioAccessLogs: [],
-      webhookLogs: [],
-      webhookProcessedEvents: [],
-      legacyPmsSubscriptions: [],
-      legacyStripeCustomers: [],
-      legacyStripeCustomerImports: [],
-    });
+    summaries.set(userId, { communicationLogs: [], kitAccessLogs: [], audioAccessLogs: [], webhookLogs: [], webhookProcessedEvents: [], legacyPmsSubscriptions: [], legacyStripeCustomers: [], legacyStripeCustomerImports: [] });
     identifiersByUser.set(userId, getMemberIdentifiers(member));
   }
 
-  if (!userIds.length) return empty;
+  if (!userIds.length) return summaries;
 
-  const lightweightLimit = Math.max(userIds.length * 5, 100);
-  const webhookLimit = Math.max(userIds.length * 20, 500);
-
+  const directLimit = Math.min(Math.max(userIds.length * 3, 100), 500);
   const [communicationLogs, kitAccessLogs, audioAccessLogs, webhookLogsRaw, webhookProcessedEventsRaw] = await Promise.all([
-    safeTableQuery(supabase.from("communication_logs").select("*").in("user_id", userIds).order("created_at", { ascending: false }).limit(lightweightLimit)),
-    safeTableQuery(supabase.from("kit_access_logs").select("*").in("user_id", userIds).order("accessed_at", { ascending: false }).limit(lightweightLimit)),
-    safeTableQuery(supabase.from("audio_access_logs").select("*").in("user_id", userIds).order("accessed_at", { ascending: false }).limit(lightweightLimit)),
-    safeTableQuery(supabase.from("webhook_logs").select("*").order("created_at", { ascending: false }).limit(webhookLimit)),
-    safeTableQuery(supabase.from("webhook_processed_events").select("*").order("processed_at", { ascending: false }).limit(webhookLimit)),
+    safeTableQuery(supabase.from("communication_logs").select("*").in("user_id", userIds).order("created_at", { ascending: false }).limit(directLimit)),
+    safeTableQuery(supabase.from("kit_access_logs").select("*").in("user_id", userIds).order("accessed_at", { ascending: false }).limit(directLimit)),
+    safeTableQuery(supabase.from("audio_access_logs").select("*").in("user_id", userIds).order("accessed_at", { ascending: false }).limit(directLimit)),
+    safeTableQuery(supabase.from("webhook_logs").select("*").order("created_at", { ascending: false }).limit(500)),
+    safeTableQuery(supabase.from("webhook_processed_events").select("*").order("processed_at", { ascending: false }).limit(500)),
   ]);
 
-  for (const log of communicationLogs) {
-    const userId = String((log as any)?.user_id ?? "");
-    const summary = empty.get(userId);
-    if (summary) summary.communicationLogs = [...(summary.communicationLogs ?? []), log];
-  }
-
-  for (const log of kitAccessLogs) {
-    const userId = String((log as any)?.user_id ?? "");
-    const summary = empty.get(userId);
-    if (summary) summary.kitAccessLogs = [...(summary.kitAccessLogs ?? []), log];
-  }
-
-  for (const log of audioAccessLogs) {
-    const userId = String((log as any)?.user_id ?? "");
-    const summary = empty.get(userId);
-    if (summary) summary.audioAccessLogs = [...(summary.audioAccessLogs ?? []), log];
+  for (const [key, logs] of [["communicationLogs", communicationLogs], ["kitAccessLogs", kitAccessLogs], ["audioAccessLogs", audioAccessLogs]] as const) {
+    for (const log of logs) {
+      const userId = String((log as any)?.user_id ?? "");
+      const summary = summaries.get(userId);
+      if (summary) (summary as any)[key] = [...((summary as any)[key] ?? []), log];
+    }
   }
 
   for (const [userId, identifiers] of identifiersByUser.entries()) {
-    const summary = empty.get(userId);
+    const summary = summaries.get(userId);
     if (!summary) continue;
     summary.webhookLogs = webhookLogsRaw.filter((row) => rowMatchesIdentifiers(row, identifiers)).slice(0, 20);
     summary.webhookProcessedEvents = webhookProcessedEventsRaw.filter((row) => rowMatchesIdentifiers(row, identifiers)).slice(0, 20);
   }
 
-  return empty;
+  return summaries;
 }
 
 export async function updateMemberSubscription(userId: string, payload: Database["public"]["Tables"]["subscriptions"]["Update"]): Promise<void> {
@@ -392,19 +340,13 @@ export async function deleteMember(userId: string): Promise<void> {
   ]);
 
   const email = normalizeEmail(profile?.email ?? authResult?.data?.user?.email);
-  const { data: duplicateProfiles } = email
-    ? await supabase.from("profiles").select("id,email").ilike("email", email)
-    : { data: [] };
+  const { data: duplicateProfiles } = email ? await supabase.from("profiles").select("id,email").ilike("email", email) : { data: [] };
   const userIds = Array.from(new Set([userId, ...((duplicateProfiles ?? []).map((item: any) => item.id).filter(Boolean))]));
 
-  const { data: playlists } = await supabase
-    .from("playlists")
-    .select("id")
-    .in("user_id", userIds.length ? userIds : [userId]);
+  const { data: playlists } = await supabase.from("playlists").select("id").in("user_id", userIds.length ? userIds : [userId]);
   const playlistIds = (playlists ?? []).map((playlist: any) => playlist.id).filter(Boolean);
 
   await deleteIfIds(supabase, "playlist_items", "playlist_id", playlistIds);
-
   await Promise.allSettled([
     deleteIfIds(supabase, "kit_access_logs", "user_id", userIds),
     deleteIfIds(supabase, "audio_access_logs", "user_id", userIds),
