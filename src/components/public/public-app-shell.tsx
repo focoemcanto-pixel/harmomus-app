@@ -3,6 +3,7 @@ import Link from "next/link";
 import { InstallAppBanner } from "@/components/public/install-app-banner";
 import { OnboardingChecklistSlot } from "@/components/public/onboarding-checklist-slot";
 import { PublicShellClient } from "@/components/public/public-shell-client";
+import { WhatsappSupportWidget } from "@/components/public/whatsapp-support-widget";
 import { getCurrentUserAccessContext, type CurrentUserAccessContext } from "@/lib/auth/current-user";
 import { getAdminSettings } from "@/lib/data/admin-settings";
 import { getBillingRecoveryNotice, type BillingRecoveryNotice } from "@/lib/data/billing-recovery-notices";
@@ -159,6 +160,8 @@ export async function PublicAppShell({ children }: { children: React.ReactNode }
         <OnboardingChecklistSlot />
         {children}
       </div>
+
+      <WhatsappSupportWidget kits={searchItems} isGuest={context.isGuest} viewerPlan={context.effectiveSlug} />
     </main>
   );
 }
