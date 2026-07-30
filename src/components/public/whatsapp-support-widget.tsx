@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { FormEvent, useMemo, useRef, useState } from "react";
 
 type KitSearchItem = {
@@ -64,6 +65,7 @@ function WhatsappIcon({ className = "h-6 w-6" }: { className?: string }) {
 }
 
 export function WhatsappSupportWidget({ kits, isGuest, viewerPlan }: { kits: KitSearchItem[]; isGuest: boolean; viewerPlan: string }) {
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const nextId = useRef(2);
@@ -147,7 +149,7 @@ export function WhatsappSupportWidget({ kits, isGuest, viewerPlan }: { kits: Kit
       .sort((a, b) => b.score - a.score)
       .slice(0, 3);
 
-    if (/kit|musica|musica|cancao|canção|onde encontro|procurando|tem a/.test(normalized) || ranked[0]?.score >= 24) {
+    if (/kit|musica|cancao|canção|onde encontro|procurando|tem a/.test(normalized) || ranked[0]?.score >= 24) {
       if (ranked.length) {
         addAssistant(ranked.length === 1 ? "Encontrei este kit para você:" : "Encontrei estes kits que parecem corresponder ao que você procura:", ranked.map(({ kit }) => ({
           label: `${kit.name}${kit.artist ? ` — ${kit.artist}` : ""}`,
@@ -173,6 +175,8 @@ export function WhatsappSupportWidget({ kits, isGuest, viewerPlan }: { kits: Kit
     event.preventDefault();
     answer(input);
   }
+
+  if (pathname !== "/") return null;
 
   return (
     <div className="fixed bottom-4 right-4 z-[70] flex flex-col items-end gap-3 md:bottom-6 md:right-6">
@@ -211,7 +215,7 @@ export function WhatsappSupportWidget({ kits, isGuest, viewerPlan }: { kits: Kit
         </section>
       ) : null}
 
-      <button type="button" onClick={() => setOpen((value) => !value)} aria-label="Abrir suporte Harmomus" className="group relative flex h-15 w-15 h-[60px] w-[60px] items-center justify-center rounded-full bg-emerald-500 text-white shadow-[0_14px_40px_rgba(34,197,94,0.45)] transition hover:scale-105 hover:bg-emerald-400">
+      <button type="button" onClick={() => setOpen((value) => !value)} aria-label="Abrir suporte Harmomus" className="group relative flex h-[60px] w-[60px] items-center justify-center rounded-full bg-emerald-500 text-white shadow-[0_14px_40px_rgba(34,197,94,0.45)] transition hover:scale-105 hover:bg-emerald-400">
         <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400/20" />
         <WhatsappIcon className="relative h-7 w-7" />
         <span className="pointer-events-none absolute right-[72px] hidden whitespace-nowrap rounded-xl border border-white/10 bg-[#0c1420]/95 px-3 py-2 text-xs font-semibold text-white shadow-xl backdrop-blur group-hover:block">Precisa de ajuda?</span>
