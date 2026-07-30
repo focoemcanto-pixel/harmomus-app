@@ -71,7 +71,7 @@ function retryDelayMinutes(attempts: number) { const index = Math.max(0, Math.mi
 async function writeCommunicationLog(admin: any, input: { job: CommunicationQueueJob; event: string; level: "info" | "warning" | "error"; message: string; payload?: unknown; response?: unknown }) {
   const response = safeJson(input.response);
   const rawPayload = safeJson(input.payload) ?? {};
-  const request = {
+  const request: Record<string, unknown> = {
     ...(rawPayload && typeof rawPayload === "object" ? rawPayload as Record<string, unknown> : {}),
     job_id: input.job.id,
     campaign_id: input.job.campaign_id,
