@@ -23,7 +23,7 @@ type ChatMessage = {
   actions?: ChatAction[];
 };
 
-const SUPPORT_NUMBER = "5571997178807";
+const SUPPORT_NUMBER = "5571996950264";
 
 const QUICK_QUESTIONS = [
   "Encontrar um kit",
