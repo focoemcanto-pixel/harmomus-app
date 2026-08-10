@@ -212,10 +212,29 @@ export function useKitAudioEngine() {
     updateMediaSessionMetadata(fastTrack);
 
     setMediaSessionActionHandlers({
-      play: () => { void playTrack(fastTrack); },
+      play: () => {
+        const currentAudio = audioRef.current;
+        if (!currentAudio) return;
+        void (async () => {
+          try {
+            setIsPreparing(true);
+            if (pitchControllerRef.current) await pitchControllerRef.current.play();
+            else await currentAudio.play();
+            setIsPreparing(false);
+            setIsPlaying(true);
+            syncAudioState(currentAudio);
+            startRafLoop(requestSerialRef.current);
+          } catch (error) {
+            setIsPreparing(false);
+            setIsPlaying(false);
+            setErrorMessage(normalizePlaybackError(error));
+          }
+        })();
+      },
       pause: () => {
         try { pitchControllerRef.current?.pause(); } catch {}
         stopAudioElement(audioRef.current, { resetTime: false });
+        cancelRaf();
         setIsPlaying(false);
         setIsPreparing(false);
       },
@@ -263,13 +282,27 @@ export function useKitAudioEngine() {
     if (isPlaying) {
       try { pitchControllerRef.current?.pause(); } catch {}
       stopAudioElement(audio, { resetTime: false });
+      cancelRaf();
       setIsPlaying(false);
       setIsPreparing(false);
       return;
     }
 
-    await playTrack(trackRef.current);
-  }, [isPlaying, playTrack]);
+    setIsPreparing(true);
+    setErrorMessage(null);
+    try {
+      if (pitchControllerRef.current) await pitchControllerRef.current.play();
+      else await audio.play();
+      setIsPreparing(false);
+      setIsPlaying(true);
+      syncAudioState(audio);
+      startRafLoop(requestSerialRef.current);
+    } catch (error) {
+      setIsPreparing(false);
+      setIsPlaying(false);
+      setErrorMessage(normalizePlaybackError(error));
+    }
+  }, [cancelRaf, isPlaying, startRafLoop, syncAudioState]);
 
   const seekTo = useCallback((seconds: number) => {
     const audio = audioRef.current;
