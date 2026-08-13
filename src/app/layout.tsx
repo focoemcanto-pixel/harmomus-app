@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import Script from "next/script";
 import { AttributionCapture } from "@/components/analytics/attribution-capture";
 import { MetaPixel } from "@/components/analytics/meta-pixel";
 import { FlashToastProvider } from "@/components/feedback/flash-toast-provider";
@@ -92,6 +93,37 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <AttributionCapture />
         <MetaPixel />
         {children}
+        <Script id="whatsapp-number-normalizer" strategy="afterInteractive">
+          {`
+            (function () {
+              var phone = '5571996125869';
+              function normalize(anchor) {
+                if (!anchor || !anchor.href) return;
+                try {
+                  var url = new URL(anchor.href, window.location.href);
+                  if (url.hostname === 'wa.me') {
+                    url.pathname = '/' + phone;
+                    anchor.href = url.toString();
+                    return;
+                  }
+                  if (url.hostname === 'api.whatsapp.com' && url.pathname.indexOf('/send') === 0) {
+                    url.searchParams.set('phone', phone);
+                    anchor.href = url.toString();
+                  }
+                } catch (_) {}
+              }
+              function normalizeAll() {
+                document.querySelectorAll('a[href*="wa.me/"],a[href*="api.whatsapp.com/send"]').forEach(normalize);
+              }
+              normalizeAll();
+              new MutationObserver(normalizeAll).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['href'] });
+              document.addEventListener('click', function (event) {
+                var target = event.target && event.target.closest ? event.target.closest('a') : null;
+                normalize(target);
+              }, true);
+            })();
+          `}
+        </Script>
         <PhoneRequiredModal />
         <FlashToastProvider />
       </body>
