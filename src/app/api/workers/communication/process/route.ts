@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { ensureFocoOsManualProvider } from "@/lib/communication/foco-os-provider";
 import { processCommunicationQueue } from "@/lib/communication/marketing-queue";
 
 function validateWorkerToken(request: Request) {
@@ -23,10 +24,12 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => ({}));
   const limit = Math.max(1, Math.min(Number(body?.limit ?? 2) || 2, 5));
+  const provider = await ensureFocoOsManualProvider();
   const result = await processCommunicationQueue(limit);
 
   return NextResponse.json({
     success: true,
+    provider,
     ...result,
   });
 }
