@@ -6,6 +6,7 @@
 import openNextWorker from "./.open-next/worker.js";
 import { getMarketingEngineSettings, updateMarketingEngineSettings } from "./src/lib/communication/engine-settings";
 import { processBehaviorMarketingAutomations } from "./src/lib/communication/automation-engine-v2";
+import { ensureFocoOsManualProvider } from "./src/lib/communication/foco-os-provider";
 import { processCommunicationQueue } from "./src/lib/communication/marketing-queue";
 
 async function processCommunicationEngineFromCron() {
@@ -33,9 +34,11 @@ async function processCommunicationEngineFromCron() {
   }
 
   try {
+    const provider = await ensureFocoOsManualProvider();
+    result.provider = provider;
     const queueResult = await processCommunicationQueue(settings.data.max_queue_messages_per_run || 2);
     result.queue = queueResult;
-    console.log("Communication queue cron processed.", JSON.stringify(queueResult));
+    console.log("Communication queue cron processed.", JSON.stringify({ provider, queueResult }));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     result.queue_error = message;
