@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { ensureFocoOsManualProvider } from "@/lib/communication/foco-os-provider";
 import { getFocoOsCommunicationToken, getFocoOsCommunicationTokenDiagnostics } from "@/lib/communication/foco-os-token";
 import { processCommunicationQueue } from "@/lib/communication/marketing-queue";
@@ -11,6 +12,55 @@ export const runtime = "nodejs";
 function bearerToken(request: Request) {
   const auth = request.headers.get("authorization") || "";
   return auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
+}
+
+function normalize(value: unknown) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+async function buildMatchingDiagnostics() {
+  const admin = createSupabaseAdminClient() as any;
+
+  const [{ data: recentEvents }, { data: activeAutomations }] = await Promise.all([
+    admin
+      .from("marketing_events")
+      .select("event_key,event_type,event_label,created_at")
+      .order("created_at", { ascending: false })
+      .limit(100),
+    admin
+      .from("marketing_automations")
+      .select("name,trigger_event,intent,status")
+      .eq("status", "active")
+      .order("priority", { ascending: true })
+      .limit(100),
+  ]);
+
+  const counts = new Map<string, number>();
+  for (const row of recentEvents ?? []) {
+    const key = normalize(row.event_key ?? row.event_type ?? row.event_label);
+    if (!key) continue;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  const eventKeysRecentes = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([eventKey, count]) => ({ eventKey, count }));
+
+  const gatilhosAtivos = (activeAutomations ?? []).map((row: any) => ({
+    name: String(row.name ?? ""),
+    triggerEvent: normalize(row.trigger_event),
+    intent: String(row.intent ?? ""),
+  }));
+
+  const triggerSet = new Set(gatilhosAtivos.map((item: any) => item.triggerEvent).filter(Boolean));
+  const eventSet = new Set(eventKeysRecentes.map((item) => item.eventKey));
+
+  return {
+    eventKeysRecentes,
+    gatilhosAtivos,
+    eventosSemGatilho: eventKeysRecentes.filter((item) => !triggerSet.has(item.eventKey)),
+    gatilhosSemEvento: gatilhosAtivos.filter((item: any) => !eventSet.has(item.triggerEvent)),
+  };
 }
 
 export async function POST(request: Request) {
@@ -33,6 +83,7 @@ export async function POST(request: Request) {
     }
 
     const automations = await processBehaviorMarketingAutomations({ limit: 100 });
+    const matching = await buildMatchingDiagnostics();
     const queue = await processCommunicationQueue(20);
 
     console.info("[foco-os-sync] success", {
@@ -41,10 +92,12 @@ export async function POST(request: Request) {
       queued: automations.queued,
       skipped: automations.skipped,
       failed: automations.failed,
+      recentEventKeys: matching.eventKeysRecentes,
+      activeTriggers: matching.gatilhosAtivos,
       queue,
     });
 
-    return NextResponse.json({ success: true, provider, automations, queue });
+    return NextResponse.json({ success: true, provider, automations, matching, queue });
   } catch (error) {
     console.error("[foco-os-sync] falha ao sincronizar Central Harmomus", error);
     return NextResponse.json({
