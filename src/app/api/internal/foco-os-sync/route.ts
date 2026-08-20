@@ -31,9 +31,10 @@ export async function POST(request: Request) {
     // preservando gatilhos, templates, cooldowns, delays e regras de conversão.
     const automations = await processBehaviorMarketingAutomations({ limit: 500 });
 
-    // 2) Em seguida, o processador original envia apenas o próximo job elegível
-    // ao provider Foco OS. Jobs com scheduled_at futuro continuam aguardando.
-    const queue = await processCommunicationQueue(1);
+    // 2) O Foco OS é um destino MANUAL: não há disparo de WhatsApp aqui.
+    // Podemos escoar vários jobs já elegíveis de uma vez; scheduled_at futuro
+    // continua sendo respeitado pelo processador original.
+    const queue = await processCommunicationQueue(20);
 
     return NextResponse.json({
       success: true,
