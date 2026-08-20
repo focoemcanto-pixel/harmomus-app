@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { getFocoOsCommunicationToken } from "@/lib/communication/foco-os-token";
 
 export const dynamic = "force-dynamic";
 
@@ -44,9 +45,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, error: "recipient_mismatch" }, { status: 409 });
   }
 
-  const token = text(process.env.FOCO_OS_COMMUNICATION_TOKEN);
+  const token = await getFocoOsCommunicationToken();
   if (!token) {
-    console.error("[foco-os-provider] FOCO_OS_COMMUNICATION_TOKEN não configurado");
+    console.error("[foco-os-provider] FOCO_OS_COMMUNICATION_TOKEN não configurado no runtime");
     return NextResponse.json({ success: false, error: "provider_not_configured" }, { status: 503 });
   }
 
