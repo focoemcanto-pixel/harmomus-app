@@ -2,8 +2,10 @@ import { NextResponse } from "next/server";
 
 import { ensureFocoOsManualProvider } from "@/lib/communication/foco-os-provider";
 import { processCommunicationQueue } from "@/lib/communication/marketing-queue";
+import { processBehaviorMarketingAutomations } from "@/lib/communication/automation-engine-v2";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 function bearerToken(request: Request) {
   const auth = request.headers.get("authorization") || "";
@@ -25,12 +27,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: provider.reason || "provider_not_ready", provider }, { status: 503 });
     }
 
-    // O processador original do Harmomus continua sendo a fonte da verdade:
-    // valida conversão, scheduled_at, telefone, mensagem e regras antes do handoff.
-    const result = await processCommunicationQueue(1);
-    return NextResponse.json({ success: true, provider, result });
+    // 1) A própria Central do Harmomus transforma eventos novos em jobs,
+    // preservando gatilhos, templates, cooldowns, delays e regras de conversão.
+    const automations = await processBehaviorMarketingAutomations({ limit: 500 });
+
+    // 2) Em seguida, o processador original envia apenas o próximo job elegível
+    // ao provider Foco OS. Jobs com scheduled_at futuro continuam aguardando.
+    const queue = await processCommunicationQueue(1);
+
+    return NextResponse.json({
+      success: true,
+      provider,
+      automations,
+      queue,
+    });
   } catch (error) {
-    console.error("[foco-os-sync] falha ao processar fila Harmomus", error);
+    console.error("[foco-os-sync] falha ao sincronizar Central Harmomus", error);
     return NextResponse.json({
       success: false,
       error: error instanceof Error ? error.message : "sync_failed",
