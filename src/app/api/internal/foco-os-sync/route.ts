@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { ensureFocoOsManualProvider } from "@/lib/communication/foco-os-provider";
-import { getFocoOsCommunicationToken } from "@/lib/communication/foco-os-token";
+import { getFocoOsCommunicationToken, getFocoOsCommunicationTokenDiagnostics } from "@/lib/communication/foco-os-token";
 import { processCommunicationQueue } from "@/lib/communication/marketing-queue";
 import { processBehaviorMarketingAutomations } from "@/lib/communication/automation-engine-v2";
 
@@ -16,7 +16,8 @@ function bearerToken(request: Request) {
 export async function POST(request: Request) {
   const expected = await getFocoOsCommunicationToken();
   if (!expected) {
-    return NextResponse.json({ success: false, error: "provider_not_configured" }, { status: 503 });
+    const diagnostics = await getFocoOsCommunicationTokenDiagnostics();
+    return NextResponse.json({ success: false, error: "provider_not_configured", diagnostics }, { status: 503 });
   }
   if (bearerToken(request) !== expected) {
     return NextResponse.json({ success: false, error: "unauthorized" }, { status: 401 });
