@@ -1,9 +1,10 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { getFocoOsCommunicationToken } from "@/lib/communication/foco-os-token";
 
 const INTERNAL_PROVIDER_URL = "https://harmomus.com/api/internal/foco-os-provider";
 
 export async function ensureFocoOsManualProvider() {
-  const token = String(process.env.FOCO_OS_COMMUNICATION_TOKEN || "").trim();
+  const token = await getFocoOsCommunicationToken();
   if (!token) {
     return { ready: false, changed: false, reason: "missing_token" as const };
   }
