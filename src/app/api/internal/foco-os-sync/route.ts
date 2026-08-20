@@ -27,21 +27,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: provider.reason || "provider_not_ready", provider }, { status: 503 });
     }
 
-    // 1) A própria Central do Harmomus transforma eventos novos em jobs,
-    // preservando gatilhos, templates, cooldowns, delays e regras de conversão.
-    const automations = await processBehaviorMarketingAutomations({ limit: 500 });
+    // Sync interativo: os eventos vêm em ordem decrescente, então 100 cobre os
+    // eventos recentes sem varrer centenas de usuários/consultas a cada refresh.
+    const automations = await processBehaviorMarketingAutomations({ limit: 100 });
 
-    // 2) O Foco OS é um destino MANUAL: não há disparo de WhatsApp aqui.
-    // Podemos escoar vários jobs já elegíveis de uma vez; scheduled_at futuro
-    // continua sendo respeitado pelo processador original.
+    // Foco OS apenas recebe cards para envio humano. Escoa os jobs elegíveis já
+    // preparados, preservando scheduled_at e cancelamento por conversão.
     const queue = await processCommunicationQueue(20);
 
-    return NextResponse.json({
-      success: true,
-      provider,
-      automations,
-      queue,
-    });
+    return NextResponse.json({ success: true, provider, automations, queue });
   } catch (error) {
     console.error("[foco-os-sync] falha ao sincronizar Central Harmomus", error);
     return NextResponse.json({
