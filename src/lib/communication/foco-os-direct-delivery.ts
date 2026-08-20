@@ -151,7 +151,7 @@ export async function deliverFocoOsCards(limit = 20) {
       source: "harmomus.direct_foco_os",
       user_id: event.user_id,
       recipient_name: cleanName(profile.full_name),
-      recipient_email: profile.email ?? String(metadata.email ?? "") || null,
+      recipient_email: profile.email ?? (String(metadata.email ?? "") || null),
       phone: recipientPhone,
       number: recipientPhone,
       whatsapp: recipientPhone,
