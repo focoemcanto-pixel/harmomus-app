@@ -93,7 +93,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: provider.reason || "provider_not_ready", provider }, { status: 503 });
     }
 
-    const automations = await processBehaviorMarketingAutomations({ limit: 100 });
+    const automations = await processBehaviorMarketingAutomations({ limit: 100, deliveryMode: "foco_os_manual" });
     const matching = await buildMatchingDiagnostics();
     const queue = await processCommunicationQueue(20);
 
