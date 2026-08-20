@@ -24,7 +24,7 @@ async function buildMatchingDiagnostics() {
   const [{ data: recentEvents }, { data: activeAutomations }] = await Promise.all([
     admin
       .from("marketing_events")
-      .select("event_key,event_type,event_label,created_at")
+      .select("id,user_id,event_key,event_type,event_label,source,metadata,created_at")
       .order("created_at", { ascending: false })
       .limit(100),
     admin
@@ -46,6 +46,16 @@ async function buildMatchingDiagnostics() {
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .map(([eventKey, count]) => ({ eventKey, count }));
 
+  const eventosRecentes = (recentEvents ?? []).slice(0, 20).map((row: any) => ({
+    id: String(row.id ?? ""),
+    userId: row.user_id ? String(row.user_id) : null,
+    eventKey: normalize(row.event_key ?? row.event_type ?? row.event_label),
+    eventLabel: String(row.event_label ?? ""),
+    source: String(row.source ?? ""),
+    plan: row.metadata && typeof row.metadata === "object" ? String(row.metadata.plan ?? "") : "",
+    createdAt: String(row.created_at ?? ""),
+  }));
+
   const gatilhosAtivos = (activeAutomations ?? []).map((row: any) => ({
     name: String(row.name ?? ""),
     triggerEvent: normalize(row.trigger_event),
@@ -56,6 +66,7 @@ async function buildMatchingDiagnostics() {
   const eventSet = new Set(eventKeysRecentes.map((item) => item.eventKey));
 
   return {
+    eventosRecentes,
     eventKeysRecentes,
     gatilhosAtivos,
     eventosSemGatilho: eventKeysRecentes.filter((item) => !triggerSet.has(item.eventKey)),
@@ -92,6 +103,7 @@ export async function POST(request: Request) {
       queued: automations.queued,
       skipped: automations.skipped,
       failed: automations.failed,
+      recentEvents: matching.eventosRecentes,
       recentEventKeys: matching.eventKeysRecentes,
       activeTriggers: matching.gatilhosAtivos,
       queue,
