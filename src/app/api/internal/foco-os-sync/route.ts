@@ -3,8 +3,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { ensureFocoOsManualProvider } from "@/lib/communication/foco-os-provider";
 import { getFocoOsCommunicationToken, getFocoOsCommunicationTokenDiagnostics } from "@/lib/communication/foco-os-token";
-import { processCommunicationQueue } from "@/lib/communication/marketing-queue";
-import { buildFocoOsManualJobs } from "@/lib/communication/foco-os-direct-queue";
+import { deliverFocoOsCards } from "@/lib/communication/foco-os-direct-delivery";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -93,11 +92,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: provider.reason || "provider_not_ready", provider }, { status: 503 });
     }
 
-    // O Foco OS usa uma fila operacional própria. Não dependemos mais do histórico
-    // do motor de marketing para decidir se o card manual deve nascer.
-    const automations = await buildFocoOsManualJobs(100);
+    // A Central do Foco OS é a fila operacional final. Entregamos os cards
+    // diretamente ao Hub e eliminamos a segunda fila intermediária do Harmomus.
+    const automations = await deliverFocoOsCards(20);
     const matching = await buildMatchingDiagnostics();
-    const queue = await processCommunicationQueue(20);
+    const queue = {
+      processed: automations.delivered,
+      sent: automations.delivered,
+      failed: automations.failed,
+      skipped: automations.skipped,
+      canceled: 0,
+      eligibleNow: automations.delivered,
+      scheduledLater: 0,
+    };
 
     console.info("[foco-os-sync] success", {
       scannedAutomations: automations.scannedAutomations,
@@ -105,7 +112,7 @@ export async function POST(request: Request) {
       queued: automations.queued,
       skipped: automations.skipped,
       failed: automations.failed,
-      convertedLegacy: automations.convertedLegacy,
+      delivered: automations.delivered,
       recentEvents: matching.eventosRecentes,
       recentEventKeys: matching.eventKeysRecentes,
       activeTriggers: matching.gatilhosAtivos,
