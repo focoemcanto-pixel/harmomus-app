@@ -17,20 +17,32 @@ export async function POST(request: Request) {
   const expected = await getFocoOsCommunicationToken();
   if (!expected) {
     const diagnostics = await getFocoOsCommunicationTokenDiagnostics();
+    console.warn("[foco-os-sync] provider_not_configured", diagnostics);
     return NextResponse.json({ success: false, error: "provider_not_configured", diagnostics }, { status: 503 });
   }
   if (bearerToken(request) !== expected) {
+    console.warn("[foco-os-sync] unauthorized request received; token is configured");
     return NextResponse.json({ success: false, error: "unauthorized" }, { status: 401 });
   }
 
   try {
     const provider = await ensureFocoOsManualProvider();
     if (!provider.ready) {
+      console.warn("[foco-os-sync] provider_not_ready", provider);
       return NextResponse.json({ success: false, error: provider.reason || "provider_not_ready", provider }, { status: 503 });
     }
 
     const automations = await processBehaviorMarketingAutomations({ limit: 100 });
     const queue = await processCommunicationQueue(20);
+
+    console.info("[foco-os-sync] success", {
+      scannedAutomations: automations.scannedAutomations,
+      scannedEvents: automations.scannedEvents,
+      queued: automations.queued,
+      skipped: automations.skipped,
+      failed: automations.failed,
+      queue,
+    });
 
     return NextResponse.json({ success: true, provider, automations, queue });
   } catch (error) {
