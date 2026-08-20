@@ -4,7 +4,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { ensureFocoOsManualProvider } from "@/lib/communication/foco-os-provider";
 import { getFocoOsCommunicationToken, getFocoOsCommunicationTokenDiagnostics } from "@/lib/communication/foco-os-token";
 import { processCommunicationQueue } from "@/lib/communication/marketing-queue";
-import { processBehaviorMarketingAutomations } from "@/lib/communication/automation-engine-v2";
+import { buildFocoOsManualJobs } from "@/lib/communication/foco-os-direct-queue";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -93,7 +93,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: provider.reason || "provider_not_ready", provider }, { status: 503 });
     }
 
-    const automations = await processBehaviorMarketingAutomations({ limit: 100, deliveryMode: "foco_os_manual" });
+    // O Foco OS usa uma fila operacional própria. Não dependemos mais do histórico
+    // do motor de marketing para decidir se o card manual deve nascer.
+    const automations = await buildFocoOsManualJobs(100);
     const matching = await buildMatchingDiagnostics();
     const queue = await processCommunicationQueue(20);
 
@@ -103,6 +105,7 @@ export async function POST(request: Request) {
       queued: automations.queued,
       skipped: automations.skipped,
       failed: automations.failed,
+      convertedLegacy: automations.convertedLegacy,
       recentEvents: matching.eventosRecentes,
       recentEventKeys: matching.eventKeysRecentes,
       activeTriggers: matching.gatilhosAtivos,
