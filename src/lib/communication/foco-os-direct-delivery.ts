@@ -30,6 +30,14 @@ type Profile = {
   phone?: string | null;
 };
 
+type SubscriptionState = {
+  user_id: string;
+  status?: string | null;
+  plan_id?: string | null;
+  updated_at?: string | null;
+  plans?: { slug?: string | null } | Array<{ slug?: string | null }> | null;
+};
+
 function normalize(value: unknown) {
   return String(value ?? "").trim().toLowerCase();
 }
@@ -48,6 +56,132 @@ function absoluteUrl(value: unknown) {
   if (!text) return "";
   if (/^https?:\/\//i.test(text)) return text;
   return text.startsWith("/") ? `https://harmomus.com${text}` : text;
+}
+
+function planFamily(value: unknown) {
+  const slug = normalize(value);
+  if (!slug) return "";
+  if (slug.startsWith("ministry")) return "ministry";
+  if (slug === "premium") return "premium";
+  if (slug === "plus") return "plus";
+  if (slug === "free") return "free";
+  return slug;
+}
+
+function subscriptionPlanSlug(subscription?: SubscriptionState | null) {
+  if (!subscription?.plans) return "";
+  if (Array.isArray(subscription.plans)) return String(subscription.plans[0]?.slug ?? "");
+  return String(subscription.plans.slug ?? "");
+}
+
+function metadataPlan(metadata: Record<string, unknown>) {
+  return String(
+    metadata.plan_slug ??
+    metadata.plan ??
+    metadata.to_plan_slug ??
+    metadata.target_plan_slug ??
+    "",
+  );
+}
+
+function metadataPreviousPlan(metadata: Record<string, unknown>) {
+  return String(metadata.previous_plan_slug ?? metadata.from_plan_slug ?? "");
+}
+
+function isPaidPlan(value: unknown) {
+  return ["plus", "premium", "ministry"].includes(planFamily(value));
+}
+
+function positiveAmount(metadata: Record<string, unknown>) {
+  const raw = metadata.amount_due_cents ?? metadata.amount_paid_cents;
+  if (raw === undefined || raw === null || raw === "") return true;
+  const amount = Number(raw);
+  return Number.isFinite(amount) && amount > 0;
+}
+
+function expectedPlanFromEvent(eventKey: string) {
+  const key = normalize(eventKey);
+  if (key.includes("premium")) return "premium";
+  if (key.includes("plus")) return "plus";
+  if (key.includes("ministry")) return "ministry";
+  if (key.includes("free")) return "free";
+  return "";
+}
+
+function eligibilityForFocoOs(event: EventRow, subscription?: SubscriptionState | null) {
+  const key = normalize(event.event_key);
+  const metadata = event.metadata ?? {};
+  const eventPlan = metadataPlan(metadata);
+  const previousPlan = metadataPreviousPlan(metadata);
+  const currentPlan = subscriptionPlanSlug(subscription);
+  const bestPlan = eventPlan || currentPlan || previousPlan;
+  const currentStatus = normalize(subscription?.status);
+
+  // Cadastro gratuito é exclusivamente onboarding Free. Se o usuário já virou pago
+  // antes da sincronização, a ativação do plano pago é a comunicação relevante.
+  if (key === "subscription.free.created" || key === "plan.free_activated") {
+    const family = planFamily(bestPlan);
+    if (family && family !== "free") return { ok: false, reason: `free_event_for_${family}` };
+    return { ok: true };
+  }
+
+  // Eventos financeiros só fazem sentido para uma assinatura paga real.
+  if ([
+    "subscription.payment_failed",
+    "subscription.first_payment",
+    "subscription.renewed",
+    "subscription.payment_recovered",
+    "subscription.trial_started",
+  ].includes(key)) {
+    if (!isPaidPlan(bestPlan)) return { ok: false, reason: "financial_event_without_paid_plan" };
+    if (!positiveAmount(metadata) && key !== "subscription.trial_started") {
+      return { ok: false, reason: "financial_event_without_positive_amount" };
+    }
+    if (key === "subscription.payment_failed" && ["active", "trialing"].includes(currentStatus) && !metadata.amount_due_cents) {
+      return { ok: false, reason: "payment_failure_not_confirmed_by_subscription_state" };
+    }
+    return { ok: true };
+  }
+
+  // Cancelamento precisa se referir a um plano pago. Uma conta Free não recebe
+  // mensagem de cancelamento de assinatura.
+  if (key === "subscription.canceled" || key === "subscription.cancelled") {
+    if (!isPaidPlan(eventPlan || previousPlan || currentPlan)) {
+      return { ok: false, reason: "cancellation_without_paid_plan" };
+    }
+    return { ok: true };
+  }
+
+  // Ativação de plano deve combinar com o plano realmente ativado.
+  if (/^plan\.(plus|premium|ministry)_activated$/.test(key)) {
+    const expected = expectedPlanFromEvent(key);
+    const actual = planFamily(eventPlan || currentPlan);
+    if (actual && actual !== expected) return { ok: false, reason: `plan_activation_mismatch:${expected}:${actual}` };
+    if (!actual) return { ok: false, reason: "plan_activation_without_plan" };
+    return { ok: true };
+  }
+
+  // Upgrade/downgrade é validado pelo destino quando disponível.
+  if (/^(upgrade|downgrade)\./.test(key)) {
+    const expected = expectedPlanFromEvent(key.split("_to_")[1] ?? "");
+    const actual = planFamily(eventPlan || currentPlan);
+    if (expected && actual && expected !== actual) {
+      return { ok: false, reason: `plan_transition_mismatch:${expected}:${actual}` };
+    }
+    return { ok: true };
+  }
+
+  // Abandono é diferente: o usuário pode continuar Free porque justamente abandonou
+  // o upgrade. Por isso usamos o plano pretendido no checkout, não o plano atual.
+  if (key === "checkout.abandoned" || /^checkout\.(plus|premium)\.abandoned$/.test(key)) {
+    const intended = planFamily(eventPlan || expectedPlanFromEvent(key));
+    if (!["plus", "premium"].includes(intended)) {
+      return { ok: false, reason: "checkout_abandoned_without_paid_target" };
+    }
+    return { ok: true };
+  }
+
+  return { ok: true };
 }
 
 function render(template: string | null | undefined, automation: Automation, event: EventRow, profile: Profile) {
@@ -121,16 +255,39 @@ export async function deliverFocoOsCards(limit = 20) {
   }
 
   const userIds = [...new Set([...latest.values()].map(({ event }) => event.user_id))];
-  const { data: profiles, error: profilesError } = await admin
-    .from("profiles")
-    .select("id,full_name,email,phone")
-    .in("id", userIds);
+  const [{ data: profiles, error: profilesError }, { data: subscriptions, error: subscriptionsError }] = await Promise.all([
+    admin.from("profiles").select("id,full_name,email,phone").in("id", userIds),
+    admin
+      .from("subscriptions")
+      .select("user_id,status,plan_id,updated_at,plans(slug)")
+      .in("user_id", userIds)
+      .order("updated_at", { ascending: false }),
+  ]);
   if (profilesError) console.warn("[foco-os-direct-delivery] profiles lookup failed", profilesError.message);
+  if (subscriptionsError) console.warn("[foco-os-direct-delivery] subscriptions lookup failed", subscriptionsError.message);
+
   const profileMap = new Map<string, Profile>((profiles ?? []).map((row: Profile) => [row.id, row]));
+  const subscriptionMap = new Map<string, SubscriptionState>();
+  for (const row of (subscriptions ?? []) as SubscriptionState[]) {
+    if (row.user_id && !subscriptionMap.has(row.user_id)) subscriptionMap.set(row.user_id, row);
+  }
 
   const candidates = [...latest.values()];
   const outcomes = await Promise.all(candidates.map(async ({ event, automation }) => {
     const metadata = event.metadata ?? {};
+    const eligibility = eligibilityForFocoOs(event, subscriptionMap.get(event.user_id));
+    if (!eligibility.ok) {
+      return {
+        kind: "skipped" as const,
+        detail: {
+          user_id: event.user_id,
+          event_id: event.id,
+          event_key: event.event_key,
+          reason: eligibility.reason,
+        },
+      };
+    }
+
     const profile = profileMap.get(event.user_id) ?? {
       id: event.user_id,
       full_name: String(metadata.full_name ?? metadata.name ?? "Aluno"),
@@ -167,7 +324,7 @@ export async function deliverFocoOsCards(limit = 20) {
       source_product: "harmomus",
       link,
       link_url: link,
-      plan: String(metadata.plan ?? metadata.plan_slug ?? ""),
+      plan: String(metadata.plan ?? metadata.plan_slug ?? subscriptionPlanSlug(subscriptionMap.get(event.user_id)) ?? ""),
     };
 
     try {
