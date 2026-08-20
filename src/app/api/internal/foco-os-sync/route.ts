@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { ensureFocoOsManualProvider } from "@/lib/communication/foco-os-provider";
+import { getFocoOsCommunicationToken } from "@/lib/communication/foco-os-token";
 import { processCommunicationQueue } from "@/lib/communication/marketing-queue";
 import { processBehaviorMarketingAutomations } from "@/lib/communication/automation-engine-v2";
 
@@ -13,7 +14,7 @@ function bearerToken(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const expected = String(process.env.FOCO_OS_COMMUNICATION_TOKEN || "").trim();
+  const expected = await getFocoOsCommunicationToken();
   if (!expected) {
     return NextResponse.json({ success: false, error: "provider_not_configured" }, { status: 503 });
   }
@@ -27,12 +28,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: provider.reason || "provider_not_ready", provider }, { status: 503 });
     }
 
-    // Sync interativo: os eventos vêm em ordem decrescente, então 100 cobre os
-    // eventos recentes sem varrer centenas de usuários/consultas a cada refresh.
     const automations = await processBehaviorMarketingAutomations({ limit: 100 });
-
-    // Foco OS apenas recebe cards para envio humano. Escoa os jobs elegíveis já
-    // preparados, preservando scheduled_at e cancelamento por conversão.
     const queue = await processCommunicationQueue(20);
 
     return NextResponse.json({ success: true, provider, automations, queue });
