@@ -17,11 +17,17 @@ replaceOnce(
   "persist marker",
 );
 
-replaceOnce(
-  '        required_plan: resolveLegacyRequiredPlan(allowedPlanSlugs),\n        allowed_plan_slugs: allowedPlanSlugs,',
-  '        required_plan: resolveLegacyRequiredPlan(allowedPlanSlugs),\n        allowed_plan_slugs: persistedAllowedPlanSlugs,',
-  "save persisted plans",
-);
+const legacySave = '        required_plan: resolveLegacyRequiredPlan(allowedPlanSlugs),\n        allowed_plan_slugs: allowedPlanSlugs,';
+const persistedSave = '        required_plan: resolveLegacyRequiredPlan(allowedPlanSlugs),\n        allowed_plan_slugs: persistedAllowedPlanSlugs,';
+const policySavePrefix = '        required_plan: resolveLegacyRequiredPlan(allowedPlanSlugs),\n        allowed_plan_slugs: applyFreeAccessOverrideMarkers(persistedAllowedPlanSlugs,';
+
+if (source.includes(policySavePrefix) || source.includes(persistedSave)) {
+  console.log(`[free-tone-editor] save persistence already patched: ${relPath}`);
+} else if (source.includes(legacySave)) {
+  source = source.replace(legacySave, persistedSave);
+} else {
+  throw new Error("[free-tone-editor] anchor not found: save persisted plans");
+}
 
 fs.writeFileSync(filePath, source, "utf8");
 console.log(`[free-tone-editor] persistence patched: ${relPath}`);
