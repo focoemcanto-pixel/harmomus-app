@@ -46,10 +46,81 @@ patch("src/components/admin/kit-form.tsx", (source) => {
   return next;
 });
 
-patch("src/app/api/admin/kits/[id]/route.ts", (source) => source);
-patch("src/app/admin/kits/novo/page.tsx", (source) => source);
-patch("src/lib/data/public-kits.ts", (source) => source);
-patch("src/lib/access/access-rules.ts", (source) => source);
+patch("src/app/api/admin/kits/[id]/route.ts", (source) => {
+  let next = source;
+  next = replaceOnce(
+    next,
+    '    const allowedPlanSlugs = parseAllowedPlanSlugs(body.allowed_plan_slugs);\n\n    if (!name || !slug || !artist) {',
+    '    const allowedPlanSlugs = parseAllowedPlanSlugs(body.allowed_plan_slugs);\n    const freeToneAccess = Boolean(body.free_tone_access) && allowedPlanSlugs.includes("free");\n    const persistedAllowedPlanSlugs = freeToneAccess\n      ? Array.from(new Set([...allowedPlanSlugs.filter((slug) => slug !== "free_tone_access"), "free_tone_access"]))\n      : allowedPlanSlugs.filter((slug) => slug !== "free_tone_access");\n\n    if (!name || !slug || !artist) {',
+    "admin kit free tone persistence",
+    "const persistedAllowedPlanSlugs = freeToneAccess",
+  );
+  next = replaceOnce(
+    next,
+    '      required_plan: resolveLegacyRequiredPlan(allowedPlanSlugs),\n      allowed_plan_slugs: allowedPlanSlugs,',
+    '      required_plan: resolveLegacyRequiredPlan(allowedPlanSlugs),\n      allowed_plan_slugs: persistedAllowedPlanSlugs,',
+    "admin kit persisted plans",
+    "applyFreeAccessOverrideMarkers(persistedAllowedPlanSlugs",
+  );
+  return next;
+});
+
+patch("src/app/admin/kits/novo/page.tsx", (source) => {
+  let next = source;
+  const anchor = '    const allowedPlanSlugs = parseAllowedPlanSlugs(formData, plans.map((plan) => plan.slug));\n\n    if (!name || !slug || !artist) throw new Error("Preencha nome, slug e artista para continuar.");';
+  const replacement = '    const allowedPlanSlugs = parseAllowedPlanSlugs(formData, plans.map((plan) => plan.slug));\n    const freeToneAccess = formData.has("free_tone_access") && allowedPlanSlugs.includes("free");\n    const persistedAllowedPlanSlugs = freeToneAccess ? Array.from(new Set([...allowedPlanSlugs, "free_tone_access"])) : allowedPlanSlugs.filter((slug) => slug !== "free_tone_access");\n\n    if (!name || !slug || !artist) throw new Error("Preencha nome, slug e artista para continuar.");';
+
+  while (next.includes(anchor)) next = next.replace(anchor, replacement);
+  if (!next.includes("const persistedAllowedPlanSlugs = freeToneAccess")) {
+    throw new Error("[free-tone-access] anchor not found: new kit free tone persistence");
+  }
+
+  next = next.replaceAll(
+    "      allowed_plan_slugs: allowedPlanSlugs,",
+    "      allowed_plan_slugs: persistedAllowedPlanSlugs,",
+  );
+  return next;
+});
+
+patch("src/lib/data/public-kits.ts", (source) => {
+  let next = source;
+  next = replaceOnce(
+    next,
+    '  allowPitchShift: boolean;\n  maxPitchShiftSemitones: number;',
+    '  allowPitchShift: boolean;\n  allowFreeToneChange?: boolean;\n  maxPitchShiftSemitones: number;',
+    "PublicKit free tone field",
+    "allowFreeToneChange?: boolean",
+  );
+
+  next = replaceOnce(
+    next,
+    '  const requiredPlan = resolveRequiredPlan(kit, plansMap);\n  const allowedPlanSlugs: string[] = Array.isArray((kit as any).allowed_plan_slugs) && (kit as any).allowed_plan_slugs.length\n    ? Array.from(new Set(((kit as any).allowed_plan_slugs as unknown[]).map((slug) => normalizePlan(slug))))',
+    '  const requiredPlan = resolveRequiredPlan(kit, plansMap);\n  const rawAllowedPlanSlugs = Array.isArray((kit as any).allowed_plan_slugs) ? ((kit as any).allowed_plan_slugs as unknown[]).map((slug) => String(slug).trim().toLowerCase()) : [];\n  const allowFreeToneChange = rawAllowedPlanSlugs.includes("free_tone_access") && rawAllowedPlanSlugs.includes("free");\n  const allowedPlanSlugs: string[] = rawAllowedPlanSlugs.length\n    ? Array.from(new Set(rawAllowedPlanSlugs.filter((slug) => slug !== "free_tone_access").map((slug) => normalizePlan(slug))))',
+    "public kit marker mapping",
+    "const rawAllowedPlanSlugs = Array.isArray",
+  );
+
+  next = replaceOnce(
+    next,
+    '    allowPitchShift: kit.allow_pitch_shift ?? true,\n    maxPitchShiftSemitones: kit.max_pitch_shift_semitones ?? 2,',
+    '    allowPitchShift: kit.allow_pitch_shift ?? true,\n    allowFreeToneChange,\n    maxPitchShiftSemitones: kit.max_pitch_shift_semitones ?? 2,',
+    "public kit return field",
+    "    allowFreeToneChange,",
+  );
+  return next;
+});
+
+patch("src/lib/access/access-rules.ts", (source) => {
+  let next = source;
+  next = replaceOnce(
+    next,
+    'export function canChangeTone(context: CurrentUserAccessContext, canPlay: boolean) {\n  if (!canPlay) return { allowed: false, reason: "cannot_play" as const };\n  if (canUsePitchShift(context.effectiveSlug)) return { allowed: true, reason: "ok" as const };\n  return { allowed: false, reason: "upgrade_required" as const };\n}\n\nexport async function resolveKitAccess(context: CurrentUserAccessContext, kit: PublicKit) {\n  const play = await canPlayAudio(context, kit);\n  const tone = canChangeTone(context, play.allowed);',
+    'export function canChangeTone(context: CurrentUserAccessContext, canPlay: boolean, kit?: PublicKit | null) {\n  if (!canPlay) return { allowed: false, reason: "cannot_play" as const };\n  if (canUsePitchShift(context.effectiveSlug)) return { allowed: true, reason: "ok" as const };\n  if (context.effectiveSlug === "free" && kit?.allowFreeToneChange) return { allowed: true, reason: "kit_free_tone_access" as const };\n  return { allowed: false, reason: "upgrade_required" as const };\n}\n\nexport async function resolveKitAccess(context: CurrentUserAccessContext, kit: PublicKit) {\n  const play = await canPlayAudio(context, kit);\n  const tone = canChangeTone(context, play.allowed, kit);',
+    "access rule free tone exception",
+    "kit?.allowFreeToneChange",
+  );
+  return next;
+});
 
 for (const relPath of [
   "src/app/api/audio/[id]/route.ts",
@@ -57,11 +128,20 @@ for (const relPath of [
   "src/app/api/audio/[id]/signed-url/route.ts",
 ]) {
   patch(relPath, (source) => {
-    const fieldAnchor = '    allowPitchShift: kit.allow_pitch_shift ?? true,\n    maxPitchShiftSemitones: kit.max_pitch_shift_semitones ?? 2;';
-    const fieldReplacement = '    allowPitchShift: kit.allow_pitch_shift ?? true,\n    allowFreeToneChange: Array.isArray(kit.allowed_plan_slugs) && kit.allowed_plan_slugs.includes("free") && kit.allowed_plan_slugs.includes("free_tone_access"),\n    maxPitchShiftSemitones: kit.max_pitch_shift_semitones ?? 2;';
     if (source.includes("allowFreeToneChange:")) return source;
-    if (source.includes(fieldAnchor)) return source.replace(fieldAnchor, fieldReplacement);
-    return source;
+    const patterns = [
+      '    allowPitchShift: kit.allow_pitch_shift ?? true,\n    maxPitchShiftSemitones: kit.max_pitch_shift_semitones ?? 2,',
+      '      allowPitchShift: kit.allow_pitch_shift ?? true,\n      maxPitchShiftSemitones: kit.max_pitch_shift_semitones ?? 2,',
+    ];
+    for (const fieldAnchor of patterns) {
+      if (!source.includes(fieldAnchor)) continue;
+      const indent = fieldAnchor.startsWith("      ") ? "      " : "    ";
+      return source.replace(
+        fieldAnchor,
+        `${indent}allowPitchShift: kit.allow_pitch_shift ?? true,\n${indent}allowFreeToneChange: Array.isArray(kit.allowed_plan_slugs) && kit.allowed_plan_slugs.includes("free") && kit.allowed_plan_slugs.includes("free_tone_access"),\n${indent}maxPitchShiftSemitones: kit.max_pitch_shift_semitones ?? 2,`,
+      );
+    }
+    throw new Error(`[free-tone-access] access kit fields not found: ${relPath}`);
   });
 }
 
