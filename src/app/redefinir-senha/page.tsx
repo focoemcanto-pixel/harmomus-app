@@ -4,7 +4,7 @@ import { PublicAppShell } from "@/components/public/public-app-shell";
 
 export const dynamic = "force-dynamic";
 
- type ResetPasswordSearchParams = Promise<{
+type ResetPasswordSearchParams = Promise<{
   error?: string;
   migration?: string;
   token_hash?: string;
@@ -21,6 +21,7 @@ export default async function RedefinirSenhaPage({
   const migration = params?.migration === "1";
   const tokenHash = String(params?.token_hash ?? "").trim();
   const hasRecoveryToken = Boolean(tokenHash && params?.type === "recovery");
+  const canSubmit = hasRecoveryToken || migration;
 
   const updateUrl = new URL("https://harmomus.local/api/auth/password/update");
   if (tokenHash) updateUrl.searchParams.set("token_hash", tokenHash);
@@ -43,44 +44,41 @@ export default async function RedefinirSenhaPage({
             </p>
           ) : null}
 
-          {!hasRecoveryToken && !migration ? (
+          {!canSubmit ? (
             <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-3 text-sm text-amber-100">
               <p>Este link não contém um token de recuperação válido.</p>
               <Link href="/recuperar-senha" className="mt-2 inline-block font-semibold text-cyan-200">
                 Solicitar um novo link
               </Link>
             </div>
-          ) : null}
-
-          <form action={formAction} method="post" className="mt-5 space-y-4">
-            <input type="hidden" name="migration" value={migration ? "1" : "0"} />
-            <input type="hidden" name="token_hash" value={tokenHash} />
-            <input type="hidden" name="recovery_type" value="recovery" />
-            <input
-              name="password"
-              type="password"
-              required
-              minLength={6}
-              autoComplete="new-password"
-              className="h-11 w-full rounded-xl border border-white/20 bg-black/30 px-3 text-white"
-              placeholder="Nova senha"
-            />
-            <input
-              name="confirm_password"
-              type="password"
-              required
-              minLength={6}
-              autoComplete="new-password"
-              className="h-11 w-full rounded-xl border border-white/20 bg-black/30 px-3 text-white"
-              placeholder="Confirmar nova senha"
-            />
-            <button
-              disabled={!hasRecoveryToken && !migration}
-              className="h-11 w-full rounded-xl border border-cyan-300/50 bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Salvar nova senha
-            </button>
-          </form>
+          ) : (
+            <form action={formAction} method="post" className="mt-5 space-y-4">
+              <input type="hidden" name="migration" value={migration ? "1" : "0"} />
+              <input type="hidden" name="token_hash" value={tokenHash} />
+              <input type="hidden" name="recovery_type" value="recovery" />
+              <input
+                name="password"
+                type="password"
+                required
+                minLength={6}
+                autoComplete="new-password"
+                className="h-11 w-full rounded-xl border border-white/20 bg-black/30 px-3 text-white"
+                placeholder="Nova senha"
+              />
+              <input
+                name="confirm_password"
+                type="password"
+                required
+                minLength={6}
+                autoComplete="new-password"
+                className="h-11 w-full rounded-xl border border-white/20 bg-black/30 px-3 text-white"
+                placeholder="Confirmar nova senha"
+              />
+              <button className="h-11 w-full rounded-xl border border-cyan-300/50 bg-cyan-500/20">
+                Salvar nova senha
+              </button>
+            </form>
+          )}
         </div>
       </section>
     </PublicAppShell>
