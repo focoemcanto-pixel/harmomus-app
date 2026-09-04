@@ -23,49 +23,78 @@ function recoveryEmailHtml(link: string) {
   `;
 }
 
+function recoveryResultUrl(request: Request, status: "success" | "error") {
+  const url = trustedAppUrl("/recuperar-senha", request);
+  if (status === "success") {
+    url.searchParams.set("success", "1");
+  } else {
+    url.searchParams.set("error", "Não foi possível enviar o e-mail de recuperação agora. Tente novamente em alguns instantes.");
+  }
+  return url;
+}
+
 export async function POST(request: Request) {
   const formData = await request.formData();
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
 
-  if (email && email.includes("@")) {
-    try {
-      const admin = createSupabaseAdminClient() as any;
-      const { data, error } = await admin.auth.admin.generateLink({
-        type: "recovery",
-        email,
-      });
-
-      if (error) {
-        console.error("[auth.password.reset] generateLink failed", { email, error });
-      } else {
-        const tokenHash = String(data?.properties?.hashed_token ?? "").trim();
-
-        if (!tokenHash) {
-          console.error("[auth.password.reset] generated link without hashed token", { email });
-        } else {
-          const recoveryUrl = trustedAppUrl("/redefinir-senha", request);
-          recoveryUrl.searchParams.set("token_hash", tokenHash);
-          recoveryUrl.searchParams.set("type", "recovery");
-
-          const sent = await sendEmail({
-            to: email,
-            subject: "Redefina sua senha no Harmomus",
-            html: recoveryEmailHtml(recoveryUrl.toString()),
-            text: `Redefina sua senha no Harmomus: ${recoveryUrl.toString()}`,
-          });
-
-          if (!sent.ok) {
-            console.error("[auth.password.reset] recovery email failed", {
-              email,
-              error: sent.error,
-            });
-          }
-        }
-      }
-    } catch (error) {
-      console.error("[auth.password.reset] unexpected failure", { email, error });
-    }
+  if (!email || !email.includes("@")) {
+    return NextResponse.redirect(recoveryResultUrl(request, "error"), 303);
   }
 
-  return NextResponse.redirect(trustedAppUrl("/recuperar-senha?success=1", request), 303);
+  try {
+    const admin = createSupabaseAdminClient() as any;
+    const { data, error } = await admin.auth.admin.generateLink({
+      type: "recovery",
+      email,
+    });
+
+    if (error) {
+      console.error("[auth.password.reset] generateLink failed", {
+        email,
+        message: error.message,
+        code: error.code,
+        status: error.status,
+      });
+      return NextResponse.redirect(recoveryResultUrl(request, "error"), 303);
+    }
+
+    const tokenHash = String(data?.properties?.hashed_token ?? "").trim();
+
+    if (!tokenHash) {
+      console.error("[auth.password.reset] generated link without hashed token", { email });
+      return NextResponse.redirect(recoveryResultUrl(request, "error"), 303);
+    }
+
+    const recoveryUrl = trustedAppUrl("/redefinir-senha", request);
+    recoveryUrl.searchParams.set("token_hash", tokenHash);
+    recoveryUrl.searchParams.set("type", "recovery");
+
+    const sent = await sendEmail({
+      to: email,
+      subject: "Redefina sua senha no Harmomus",
+      html: recoveryEmailHtml(recoveryUrl.toString()),
+      text: `Redefina sua senha no Harmomus: ${recoveryUrl.toString()}`,
+    });
+
+    if (!sent.ok) {
+      console.error("[auth.password.reset] recovery email failed", {
+        email,
+        error: sent.error,
+      });
+      return NextResponse.redirect(recoveryResultUrl(request, "error"), 303);
+    }
+
+    console.info("[auth.password.reset] recovery email sent", {
+      email,
+      deliveryId: sent.id ?? null,
+    });
+
+    return NextResponse.redirect(recoveryResultUrl(request, "success"), 303);
+  } catch (error) {
+    console.error("[auth.password.reset] unexpected failure", {
+      email,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return NextResponse.redirect(recoveryResultUrl(request, "error"), 303);
+  }
 }
