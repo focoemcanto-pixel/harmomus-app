@@ -64,7 +64,9 @@ export async function POST(request: Request) {
       console.error("[auth.password.update] recovery token verification failed", {
         hasFormToken: Boolean(formTokenHash),
         hasQueryToken: Boolean(queryTokenHash),
-        error: verificationError,
+        message: verificationError?.message,
+        code: verificationError?.code,
+        status: verificationError?.status,
       });
       return NextResponse.redirect(
         passwordErrorUrl(
@@ -82,7 +84,11 @@ export async function POST(request: Request) {
     authenticatedUser = authData.user;
 
     if (authError || !authenticatedUser?.id) {
-      console.error("[auth.password.update] recovery token and session unavailable", authError);
+      console.error("[auth.password.update] recovery token and session unavailable", {
+        message: authError?.message,
+        code: authError?.code,
+        status: authError?.status,
+      });
       return NextResponse.redirect(
         passwordErrorUrl(
           request,
@@ -102,7 +108,9 @@ export async function POST(request: Request) {
   if (updateError) {
     console.error("[auth.password.update] admin password update failed", {
       userId: authenticatedUser.id,
-      error: updateError,
+      message: updateError.message,
+      code: updateError.code,
+      status: updateError.status,
     });
     return NextResponse.redirect(
       passwordErrorUrl(
@@ -201,6 +209,12 @@ export async function POST(request: Request) {
     const { error: signOutError } = await supabase.auth.signOut({ scope: "local" });
     if (signOutError) console.error("[auth.password.update] signOut after password reset failed", signOutError);
   }
+
+  console.info("[auth.password.update] password updated", {
+    userId: authenticatedUser.id,
+    email: userEmail ?? null,
+    migrated: completedMigration,
+  });
 
   const destination = completedMigration ? "/login?migration=success" : "/login?reset=success";
   return NextResponse.redirect(trustedAppUrl(destination, request), 303);
