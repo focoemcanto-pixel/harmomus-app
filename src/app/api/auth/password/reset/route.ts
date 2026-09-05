@@ -36,6 +36,23 @@ function recoverySuccessUrl(request: Request, migration = false) {
   return url;
 }
 
+async function findAuthUserByEmail(admin: any, email: string) {
+  const perPage = 1000;
+  for (let page = 1; page <= 100; page += 1) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage });
+    if (error) throw error;
+
+    const users = Array.isArray(data?.users) ? data.users : [];
+    const found = users.find(
+      (user: any) => String(user?.email ?? "").trim().toLowerCase() === email,
+    );
+    if (found) return found;
+    if (users.length < perPage) return null;
+  }
+
+  throw new Error("AUTH_USER_SEARCH_LIMIT_REACHED");
+}
+
 async function ensureLegacyUser(admin: any, email: string) {
   const { data: legacyMember, error: legacyError } = await admin
     .from("legacy_members")
@@ -117,9 +134,6 @@ async function ensureLegacyUser(admin: any, email: string) {
     throw new Error("LEGACY_MEMBER_PREPARE_FAILED");
   }
 
-  // Pre-create the migrated subscription so access state is already consistent
-  // before the user completes password setup. finalizeLegacyMigration will
-  // re-validate and upsert the same state after password verification.
   try {
     await finalizeLegacyMigration(admin, { userId, email });
     await admin
@@ -156,17 +170,7 @@ export async function POST(request: Request) {
 
   try {
     const admin = createSupabaseAdminClient() as any;
-    const { data: usersPage, error: listError } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
-
-    if (listError) {
-      console.error("[auth.password.reset] listUsers failed", { email, error: listError });
-      return NextResponse.redirect(recoveryErrorUrl(request), 303);
-    }
-
-    const existingAuthUser = usersPage?.users?.find(
-      (user: any) => String(user?.email ?? "").trim().toLowerCase() === email,
-    );
-
+    const existingAuthUser = await findAuthUserByEmail(admin, email);
     let migration = false;
 
     if (!existingAuthUser) {
