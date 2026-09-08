@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BarChart3, CreditCard, Database, Home, Library, MessageSquareText, Settings, Sparkles, Tags, Users, Waves } from "lucide-react";
+import { BarChart3, CreditCard, Database, Home, Library, MessageSquareText, Search, Settings, Sparkles, Tags, Users, Waves } from "lucide-react";
 
 import { PageHeader } from "@/components/admin/page-header";
 import { createClient } from "@/lib/supabase/server";
@@ -32,6 +32,7 @@ const groups = [
     helper: "Acompanhe métricas e conduza comunicação com usuários.",
     items: [
       { label: "Analytics", helper: "Métricas de uso e performance.", href: "/admin/analytics", icon: BarChart3 },
+      { label: "Demanda de repertório", helper: "Veja buscas sem resultado e priorize novas músicas.", href: "/admin/demanda-repertorio", icon: Search },
       { label: "Central de Comunicação", helper: "Campanhas, audiência, templates e canais.", href: "/admin/comunicacao", icon: MessageSquareText },
     ],
   },
