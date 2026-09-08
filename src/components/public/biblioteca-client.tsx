@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { canAccessKit, normalizePlan } from "@/lib/access/access-engine";
+import { normalizeCatalogSearch, trackCatalogSearch } from "@/lib/analytics/catalog-search-tracking";
 
 import type { PublicKit } from "@/lib/data/public-kits";
 
@@ -45,6 +46,7 @@ export function BibliotecaClient({ kits, planSlug }: BibliotecaClientProps) {
   const [category, setCategory] = useState("");
   const [artist, setArtist] = useState("");
   const [plan, setPlan] = useState("");
+  const lastTrackedRef = useRef("");
   const viewerPlan = normalizePlan(planSlug);
 
   const categories = useMemo(
@@ -74,6 +76,32 @@ export function BibliotecaClient({ kits, planSlug }: BibliotecaClientProps) {
       return matchesQuery && matchesCategory && matchesArtist && matchesPlan;
     });
   }, [kits, query, category, artist, plan]);
+
+  useEffect(() => {
+    const normalizedQuery = normalizeCatalogSearch(query);
+    if (normalizedQuery.length < 2) {
+      if (!normalizedQuery) lastTrackedRef.current = "";
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      const fingerprint = [normalizedQuery, category, artist, plan, filtered.length].join("|");
+      if (lastTrackedRef.current === fingerprint) return;
+      lastTrackedRef.current = fingerprint;
+
+      void trackCatalogSearch({
+        query,
+        resultCount: filtered.length,
+        source: "biblioteca",
+        viewerPlan: planSlug,
+        category,
+        artist,
+        planFilter: plan,
+      });
+    }, 800);
+
+    return () => window.clearTimeout(timer);
+  }, [query, category, artist, plan, filtered.length, planSlug]);
 
   function clearFilters() {
     setQuery("");
