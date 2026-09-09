@@ -9,6 +9,7 @@ import {
   Library,
   MessageSquareText,
   PanelTop,
+  Search,
   Settings,
   Sparkles,
   Tags,
@@ -74,6 +75,7 @@ const navGroups: AdminNavGroup[] = [
     description: "Métricas e comunicação",
     items: [
       { label: "Analytics", href: "/admin/analytics", icon: BarChart3 },
+      { label: "Demanda de repertório", href: "/admin/demanda-repertorio", icon: Search },
       { label: "Campanhas Meta", href: "/admin/campanhas-meta", icon: Megaphone },
       { label: "Central de Comunicação", href: "/admin/comunicacao", icon: Send },
     ],
