@@ -1,18 +1,7 @@
+import { FEEDBACK_NEEDS, PRODUCT_FEEDBACK_SURVEY_KEY, type FeedbackNeed } from "@/lib/feedback-survey-config";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
-export const PRODUCT_FEEDBACK_SURVEY_KEY = "product_pulse_v1";
 export type FeedbackPeriod = "7" | "30" | "90";
-
-export const FEEDBACK_NEEDS = [
-  { value: "catalog", label: "Mais músicas no catálogo" },
-  { value: "tones", label: "Mais tonalidades" },
-  { value: "study_tools", label: "Mais recursos para estudar as vozes" },
-  { value: "organization", label: "Melhor organização e busca" },
-  { value: "learning", label: "Conteúdos para aprender divisão vocal" },
-  { value: "other", label: "Outro" },
-] as const;
-
-export type FeedbackNeed = (typeof FEEDBACK_NEEDS)[number]["value"];
 
 function sinceDate(period: FeedbackPeriod = "30") {
   const date = new Date();
