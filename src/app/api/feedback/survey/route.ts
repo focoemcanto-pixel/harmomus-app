@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentUserAccessContext } from "@/lib/auth/current-user";
-import { FEEDBACK_NEEDS, PRODUCT_FEEDBACK_SURVEY_KEY } from "@/lib/data/feedback-survey";
+import { FEEDBACK_NEEDS, PRODUCT_FEEDBACK_SURVEY_KEY } from "@/lib/feedback-survey-config";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const allowedNeeds = new Set(FEEDBACK_NEEDS.map((item) => item.value));
