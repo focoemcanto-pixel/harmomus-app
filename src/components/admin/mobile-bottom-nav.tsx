@@ -47,6 +47,7 @@ const moreGroups = [
       { label: "Planos", href: "/admin/planos", icon: Library },
       { label: "Analytics", href: "/admin/analytics", icon: BarChart3 },
       { label: "Demanda", href: "/admin/demanda-repertorio", icon: Search },
+      { label: "Feedback", href: "/admin/feedback", icon: MessageSquareText },
       { label: "Premium", href: "/admin/harmomus-premium", icon: Sparkles },
     ],
   },
