@@ -16,19 +16,31 @@ export async function getFeedbackSurveyEligibility(input: {
   isAdmin: boolean;
 }) {
   const { userId, isGuest, isAdmin } = input;
-  if (!userId || isGuest || isAdmin) return { eligible: false, surveyKey: PRODUCT_FEEDBACK_SURVEY_KEY };
+  if (!userId || isGuest) return { eligible: false, surveyKey: PRODUCT_FEEDBACK_SURVEY_KEY };
 
   const supabase = createSupabaseAdminClient() as any;
   const { data: state } = await supabase
     .from("feedback_survey_states")
-    .select("dismiss_count,next_eligible_at,answered_at,last_shown_at")
+    .select("dismiss_count,next_eligible_at,answered_at,last_shown_at,test_until")
     .eq("user_id", userId)
     .eq("survey_key", PRODUCT_FEEDBACK_SURVEY_KEY)
     .maybeSingle();
 
-  if (state?.answered_at) return { eligible: false, surveyKey: PRODUCT_FEEDBACK_SURVEY_KEY };
+  const testActive = Boolean(state?.test_until && new Date(state.test_until).getTime() > Date.now());
+  if (isAdmin && !testActive) return { eligible: false, surveyKey: PRODUCT_FEEDBACK_SURVEY_KEY };
+  if (!testActive && state?.answered_at) return { eligible: false, surveyKey: PRODUCT_FEEDBACK_SURVEY_KEY };
   if (state?.next_eligible_at && new Date(state.next_eligible_at).getTime() > Date.now()) {
     return { eligible: false, surveyKey: PRODUCT_FEEDBACK_SURVEY_KEY };
+  }
+
+  if (testActive) {
+    return {
+      eligible: true,
+      surveyKey: PRODUCT_FEEDBACK_SURVEY_KEY,
+      engagementCount: 0,
+      dismissCount: Number(state?.dismiss_count ?? 0),
+      testMode: true,
+    };
   }
 
   const [{ count: audioCount }, { count: searchCount }] = await Promise.all([
