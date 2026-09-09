@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { FeedbackSurveyModal } from "@/components/public/feedback-survey-modal";
 import { InstallAppBanner } from "@/components/public/install-app-banner";
 import { OnboardingChecklistSlot } from "@/components/public/onboarding-checklist-slot";
 import { PublicShellClient } from "@/components/public/public-shell-client";
@@ -7,6 +8,7 @@ import { WhatsappSupportWidget } from "@/components/public/whatsapp-support-widg
 import { getCurrentUserAccessContext, type CurrentUserAccessContext } from "@/lib/auth/current-user";
 import { getAdminSettings } from "@/lib/data/admin-settings";
 import { getBillingRecoveryNotice, type BillingRecoveryNotice } from "@/lib/data/billing-recovery-notices";
+import { getFeedbackSurveyEligibility } from "@/lib/data/feedback-survey";
 import { getPublishedKitSearchItems } from "@/lib/data/public-kits";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -128,8 +130,12 @@ export async function PublicAppShell({ children }: { children: React.ReactNode }
     getAdminSettings(),
   ]);
 
-  const billingRecoveryNotice = isBillingRecoveryEligible(context) ? await getBillingRecoveryNotice(context.profile?.id) : null;
-  const removedMinistryNotice = !context.isGuest && !context.ministry && context.effectiveSlug === "free" ? await getRemovedMinistryNotice(context.profile?.id) : null;
+  const [billingRecoveryNotice, removedMinistryNotice, feedbackSurvey] = await Promise.all([
+    isBillingRecoveryEligible(context) ? getBillingRecoveryNotice(context.profile?.id) : Promise.resolve(null),
+    !context.isGuest && !context.ministry && context.effectiveSlug === "free" ? getRemovedMinistryNotice(context.profile?.id) : Promise.resolve(null),
+    getFeedbackSurveyEligibility({ userId: context.profile?.id, isGuest: context.isGuest, isAdmin: context.isAdmin }).catch(() => ({ eligible: false, surveyKey: "product_pulse_v1" })),
+  ]);
+
   const paymentIssue = shouldShowPaymentIssueBanner(context, billingRecoveryNotice);
   const paymentIssueHref = recoveryCtaHref(context);
   const logoUrl = settings.branding.logoUrl;
@@ -161,6 +167,7 @@ export async function PublicAppShell({ children }: { children: React.ReactNode }
         {children}
       </div>
 
+      <FeedbackSurveyModal enabled={feedbackSurvey.eligible} surveyKey={feedbackSurvey.surveyKey} />
       <WhatsappSupportWidget kits={searchItems} isGuest={context.isGuest} viewerPlan={context.effectiveSlug} />
     </main>
   );
