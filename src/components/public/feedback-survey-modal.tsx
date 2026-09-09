@@ -3,7 +3,7 @@
 import { Check, MessageSquareText, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { FEEDBACK_NEEDS } from "@/lib/data/feedback-survey";
+import { FEEDBACK_NEEDS } from "@/lib/feedback-survey-config";
 
 type Props = {
   enabled: boolean;
