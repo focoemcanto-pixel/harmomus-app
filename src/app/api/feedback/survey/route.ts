@@ -13,24 +13,19 @@ function addDays(date: Date, days: number) {
 }
 
 async function recordEvent(supabase: any, userId: string, action: string, metadata: Record<string, unknown>) {
-  await supabase.from("usage_tracking").insert({
-    user_id: userId,
-    action,
-    metadata,
-  });
+  await supabase.from("usage_tracking").insert({ user_id: userId, action, metadata });
 }
 
 export async function POST(request: Request) {
   try {
     const context = await getCurrentUserAccessContext();
-    if (context.isGuest || !context.profile?.id || context.isAdmin) {
+    if (context.isGuest || !context.profile?.id) {
       return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
     }
 
     const body = await request.json().catch(() => null);
     const action = String(body?.action ?? "").trim();
     const surveyKey = String(body?.surveyKey ?? PRODUCT_FEEDBACK_SURVEY_KEY).trim();
-
     if (surveyKey !== PRODUCT_FEEDBACK_SURVEY_KEY) {
       return NextResponse.json({ error: "Pesquisa inválida" }, { status: 400 });
     }
@@ -38,50 +33,54 @@ export async function POST(request: Request) {
     const userId = context.profile.id;
     const supabase = createSupabaseAdminClient() as any;
     const now = new Date();
+    const { data: existingState } = await supabase
+      .from("feedback_survey_states")
+      .select("dismiss_count,answered_at,next_eligible_at,test_until")
+      .eq("user_id", userId)
+      .eq("survey_key", surveyKey)
+      .maybeSingle();
+
+    const testActive = Boolean(existingState?.test_until && new Date(existingState.test_until).getTime() > now.getTime());
+    if (context.isAdmin && !testActive) {
+      return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
+    }
 
     if (action === "impression") {
-      const { data: state } = await supabase
-        .from("feedback_survey_states")
-        .select("answered_at,next_eligible_at,dismiss_count")
-        .eq("user_id", userId)
-        .eq("survey_key", surveyKey)
-        .maybeSingle();
-
-      if (state?.answered_at) return NextResponse.json({ success: true, suppressed: true });
-      if (state?.next_eligible_at && new Date(state.next_eligible_at).getTime() > now.getTime()) {
+      if (!testActive && existingState?.answered_at) return NextResponse.json({ success: true, suppressed: true });
+      if (existingState?.next_eligible_at && new Date(existingState.next_eligible_at).getTime() > now.getTime()) {
         return NextResponse.json({ success: true, suppressed: true });
       }
 
       await supabase.from("feedback_survey_states").upsert({
         user_id: userId,
         survey_key: surveyKey,
-        dismiss_count: Number(state?.dismiss_count ?? 0),
+        dismiss_count: Number(existingState?.dismiss_count ?? 0),
         last_shown_at: now.toISOString(),
         next_eligible_at: addDays(now, 1),
         updated_at: now.toISOString(),
       }, { onConflict: "user_id,survey_key" });
 
-      await recordEvent(supabase, userId, "feedback_survey_shown", {
-        surveyKey,
-        plan: context.effectiveSlug,
-      });
-
+      await recordEvent(supabase, userId, "feedback_survey_shown", { surveyKey, plan: context.effectiveSlug, testMode: testActive });
       return NextResponse.json({ success: true });
     }
 
     if (action === "dismiss") {
-      const { data: state } = await supabase
-        .from("feedback_survey_states")
-        .select("dismiss_count,answered_at")
-        .eq("user_id", userId)
-        .eq("survey_key", surveyKey)
-        .maybeSingle();
+      if (!testActive && existingState?.answered_at) return NextResponse.json({ success: true });
 
-      if (state?.answered_at) return NextResponse.json({ success: true });
+      if (testActive) {
+        await supabase.from("feedback_survey_states").upsert({
+          user_id: userId,
+          survey_key: surveyKey,
+          test_until: null,
+          next_eligible_at: addDays(now, 60),
+          updated_at: now.toISOString(),
+        }, { onConflict: "user_id,survey_key" });
+        await recordEvent(supabase, userId, "feedback_survey_dismissed", { surveyKey, plan: context.effectiveSlug, testMode: true });
+        return NextResponse.json({ success: true, testMode: true });
+      }
 
-      const dismissCount = Number(state?.dismiss_count ?? 0) + 1;
+      const dismissCount = Number(existingState?.dismiss_count ?? 0) + 1;
       const waitDays = dismissCount === 1 ? 7 : dismissCount === 2 ? 14 : 60;
-
       await supabase.from("feedback_survey_states").upsert({
         user_id: userId,
         survey_key: surveyKey,
@@ -90,14 +89,7 @@ export async function POST(request: Request) {
         next_eligible_at: addDays(now, waitDays),
         updated_at: now.toISOString(),
       }, { onConflict: "user_id,survey_key" });
-
-      await recordEvent(supabase, userId, "feedback_survey_dismissed", {
-        surveyKey,
-        dismissCount,
-        waitDays,
-        plan: context.effectiveSlug,
-      });
-
+      await recordEvent(supabase, userId, "feedback_survey_dismissed", { surveyKey, dismissCount, waitDays, plan: context.effectiveSlug });
       return NextResponse.json({ success: true, dismissCount, waitDays });
     }
 
@@ -124,7 +116,6 @@ export async function POST(request: Request) {
         plan_slug: context.effectiveSlug,
         updated_at: now.toISOString(),
       }, { onConflict: "user_id,survey_key" });
-
       if (responseError) throw responseError;
 
       await supabase.from("feedback_survey_states").upsert({
@@ -132,6 +123,7 @@ export async function POST(request: Request) {
         survey_key: surveyKey,
         answered_at: now.toISOString(),
         next_eligible_at: null,
+        test_until: null,
         updated_at: now.toISOString(),
       }, { onConflict: "user_id,survey_key" });
 
@@ -142,6 +134,7 @@ export async function POST(request: Request) {
         hasSongRequest: Boolean(songRequest),
         hasComment: Boolean(comment),
         plan: context.effectiveSlug,
+        testMode: testActive,
       });
 
       return NextResponse.json({ success: true });
