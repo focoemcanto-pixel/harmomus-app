@@ -76,6 +76,7 @@ const navGroups: AdminNavGroup[] = [
     items: [
       { label: "Analytics", href: "/admin/analytics", icon: BarChart3 },
       { label: "Demanda de repertório", href: "/admin/demanda-repertorio", icon: Search },
+      { label: "Feedback dos usuários", href: "/admin/feedback", icon: MessageSquareText },
       { label: "Campanhas Meta", href: "/admin/campanhas-meta", icon: Megaphone },
       { label: "Central de Comunicação", href: "/admin/comunicacao", icon: Send },
     ],
