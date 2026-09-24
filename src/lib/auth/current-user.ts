@@ -46,22 +46,15 @@ function isPlatformAdminRole(role: unknown) {
 
 async function findProfileForUser(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  user: { id: string; email?: string | null },
+  user: { id: string },
 ) {
   const { data: profileById } = await (supabase as any)
     .from("profiles")
     .select("*")
     .eq("id", user.id)
     .maybeSingle();
-  if (profileById) return profileById as Profile;
-  const email = user.email?.trim().toLowerCase();
-  if (!email) return null;
-  const { data: profileByEmail } = await (supabase as any)
-    .from("profiles")
-    .select("*")
-    .ilike("email", email)
-    .maybeSingle();
-  return (profileByEmail as Profile | null) ?? null;
+
+  return (profileById as Profile | null) ?? null;
 }
 
 export async function getCurrentUser() {
