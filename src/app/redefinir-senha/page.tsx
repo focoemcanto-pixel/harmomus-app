@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { PublicAppShell } from "@/components/public/public-app-shell";
+import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,15 @@ export default async function RedefinirSenhaPage({
   const migration = params?.migration === "1";
   const tokenHash = String(params?.token_hash ?? "").trim();
   const hasRecoveryToken = Boolean(tokenHash && params?.type === "recovery");
-  const canSubmit = hasRecoveryToken || migration;
+
+  // Recovery can arrive through either supported path:
+  // 1. the canonical server-generated token_hash link; or
+  // 2. the Supabase callback, which exchanges the recovery code/token for a session.
+  // `migration=1` is context only and must never authorize a password change by itself.
+  const supabase = await createClient();
+  const { data: authData } = await supabase.auth.getUser();
+  const hasRecoverySession = Boolean(authData.user?.id);
+  const canSubmit = hasRecoveryToken || hasRecoverySession;
 
   const updateUrl = new URL("https://harmomus.local/api/auth/password/update");
   if (tokenHash) updateUrl.searchParams.set("token_hash", tokenHash);
@@ -46,7 +55,7 @@ export default async function RedefinirSenhaPage({
 
           {!canSubmit ? (
             <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-3 text-sm text-amber-100">
-              <p>Este link não contém um token de recuperação válido.</p>
+              <p>Este link não contém uma credencial de recuperação válida ou já expirou.</p>
               <Link href="/recuperar-senha" className="mt-2 inline-block font-semibold text-cyan-200">
                 Solicitar um novo link
               </Link>

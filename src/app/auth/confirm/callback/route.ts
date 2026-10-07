@@ -13,7 +13,17 @@ function confirmationErrorUrl(request: Request, reason = "callback") {
 }
 
 function normalizeNext(raw: string | null, type?: string) {
-  if (type === "recovery") return "/redefinir-senha";
+  if (type === "recovery") {
+    // Recovery always lands on the password form, but keep the migration marker
+    // when it was explicitly requested by the trusted server-side flow.
+    if (raw?.startsWith("/") && !raw.startsWith("//") && !/^\/https?:/i.test(raw)) {
+      const requested = new URL(raw, "https://harmomus.local");
+      return requested.searchParams.get("migration") === "1"
+        ? "/redefinir-senha?migration=1"
+        : "/redefinir-senha";
+    }
+    return "/redefinir-senha";
+  }
   if (!raw || !raw.startsWith("/")) return "/login?confirmed=1";
   if (raw.startsWith("//")) return "/login?confirmed=1";
   if (/^\/https?:/i.test(raw)) return "/login?confirmed=1";
