@@ -52,6 +52,15 @@ async function findAuthUserId(admin: any, email: string) {
   return null;
 }
 
+// Fast path: profile by e-mail (indexed table, no Auth scan).
+async function findProfileAccount(admin: any, email: string) {
+  const pattern = email.replace(/[\\%_]/g, (c) => `\\${c}`);
+  const { data: profile, error } = await admin.from("profiles").select("id,email").ilike("email", pattern).limit(2);
+  if (error) throw new Error("profile_lookup_failed");
+  if ((profile ?? []).length > 1) throw new Error("duplicate_profiles_for_email");
+  return profile?.[0]?.id ? { userId: String(profile[0].id), hasProfile: true } : null;
+}
+
 async function findAccount(admin: any, email: string) {
   const pattern = email.replace(/[\\%_]/g, (c) => `\\${c}`);
   const { data: profile, error } = await admin.from("profiles").select("id,email").ilike("email", pattern).limit(2);
@@ -88,7 +97,8 @@ export async function POST(request: Request) {
     if (!/^[a-z0-9_]{3,40}$/.test(source) || !sourceRef || sourceRef.length > 120) return json({ ok: false, error: "invalid_source" }, 400);
 
     if (action === "revoke") {
-      const account = await findAccount(admin, email);
+      // HUB grants always belong to a profiled account, so no Auth scan is needed here.
+      const account = await findProfileAccount(admin, email);
       if (!account) return json({ ok: true, revoked: 0 });
       const { data, error } = await admin.from("hub_entitlement_grants").update({ status: "revoked", updated_at: new Date().toISOString() }).eq("user_id", account.userId).eq("source", source).eq("source_ref", sourceRef).select("id");
       if (error) throw new Error("revoke_failed");
@@ -102,9 +112,11 @@ export async function POST(request: Request) {
     if (!startsAt || (body?.expires_at !== null && !expiresAt) || body?.plan !== "premium") return json({ ok: false, error: "invalid_grant" }, 400);
     const qa = body?.qa === true;
     if (qa && !email.endsWith(QA_DOMAIN)) return json({ ok: false, error: "qa_only" }, 403);
-    let account = await findAccount(admin, email);
+    // Profile first; Auth is scanned only if createUser reports the e-mail already exists.
+    let account = await findProfileAccount(admin, email);
 
     if (body?.dry_run === true) {
+      if (!account) { const authId = await findAuthUserId(admin, email); if (authId) account = { userId: authId, hasProfile: false }; }
       const subs = account ? (await admin.from("subscriptions").select("gateway,status").eq("user_id", account.userId).limit(10)).data ?? [] : [];
       return json({ ok: true, dry_run: true, existing_user: Boolean(account), would_create_user: !account, would_send_access_email: !account, other_origins: subs.map((s: any) => ({ gateway: s.gateway, status: s.status })) });
     }
