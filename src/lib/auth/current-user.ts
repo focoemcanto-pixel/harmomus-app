@@ -8,6 +8,7 @@ import {
   isMinistryPlanSlug,
 } from "@/lib/data/ministry";
 import { resolveEffectivePlan, isActiveSubscriptionStatus } from "@/lib/access/subscription-plan";
+import { activeHubPremiumGrant } from "@/lib/access/hub-grants";
 import type { Database } from "@/types/database";
 
 export type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -291,16 +292,20 @@ async function loadCurrentUserAccessContext(): Promise<CurrentUserAccessContext>
     );
   }
 
-  const effectiveSlug: EffectivePlanSlug = isAdmin || ministryContext
+  const subscriptionSlug: EffectivePlanSlug = isAdmin || ministryContext
     ? "premium"
     : usableSubscription
       ? paidPlanSlug
       : "free";
+  // HUB-originated Premium (e.g. BLACK FOCO 2026) is an independent origin: any active source wins.
+  const hubGrant = subscriptionSlug === "premium" ? null : await activeHubPremiumGrant(admin, billingProfileId);
+  const effectiveSlug: EffectivePlanSlug = hubGrant ? "premium" : subscriptionSlug;
+  const effectivePlan = hubGrant ? ((plans ?? []).find((p: Plan) => p.slug === "premium") ?? plan) : plan;
 
   return {
     effectiveSlug,
     profile,
-    plan,
+    plan: effectivePlan,
     subscription: typedSubscription,
     hierarchyLevel:
       effectiveSlug === "premium" ? 3 : effectiveSlug === "plus" ? 2 : 1,

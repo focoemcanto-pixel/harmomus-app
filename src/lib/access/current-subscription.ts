@@ -1,5 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { resolveEffectivePlan } from "@/lib/access/subscription-plan";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { activeHubPremiumGrant } from "@/lib/access/hub-grants";
 
 function resolveEffectiveSubscriptionPlan(subscription: any) {
   const planSlug = resolveEffectivePlan({ subscription, plan: subscription?.plan });
@@ -25,7 +27,10 @@ export async function getCurrentSubscription() {
     .limit(1)
     .maybeSingle();
 
-  const { planSlug, hierarchyLevel } = resolveEffectiveSubscriptionPlan(subscription);
+  const resolved = resolveEffectiveSubscriptionPlan(subscription);
+  // HUB-originated Premium (independent origin) also counts here.
+  const hubGrant = resolved.planSlug === "premium" ? null : await activeHubPremiumGrant(createSupabaseAdminClient() as any, user.id);
+  const { planSlug, hierarchyLevel } = hubGrant ? { planSlug: "premium" as const, hierarchyLevel: 3 } : resolved;
 
   return {
     isLoggedIn: true,
